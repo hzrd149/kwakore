@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Verdana probe</title>
+<style>
+  body { font: 13px/1.4 monospace; margin: 12px; }
+  button { margin: 0 6px 8px 0; }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 0; }
+  .pass { color: #2a7d2a; }
+  .fail { color: #b3261e; }
+  img { max-width: 160px; display: block; margin-top: 8px; }
+</style>
+</head>
+<body>
+<!--
+  Phase 1 smoke probe (D-13). Load this folder from the dev tab of a dev
+  build (just run). Every check writes one line below: PASS/FAIL for the
+  checks that have an expected answer, plain lines for events. The napplet
+  CSP allows inline script and style only, so nothing here is fetched.
+-->
+<div>
+  <button id="ping">emit ping</button>
+  <button id="notify">notify</button>
+  <button id="resource">fetch resource</button>
+</div>
+<pre id="log"></pre>
+<script>
+;(() => {
+  const out = document.getElementById("log")
+  const line = (text, cls) => {
+    const span = document.createElement("span")
+    if (cls) span.className = cls
+    span.textContent = new Date().toISOString().slice(11, 23) + " " + text + "\n"
+    out.appendChild(span)
+  }
+  const pass = text => line("PASS " + text, "pass")
+  const fail = text => line("FAIL " + text, "fail")
+  const show = v => {
+    try { return JSON.stringify(v) } catch (e) { return String(v) }
+  }
+  const errText = e => (e && e.message) || String(e)
+  const guard = (what, fn) => {
+    try {
+      const r = fn()
+      if (r && typeof r.catch === "function") r.catch(e => fail(what + ": " + errText(e)))
+    } catch (e) {
+      fail(what + ": " + errText(e))
+    }
+  }
+
+  // ── frame scope (SHIM-04): only window.napplet survives injection ──
+  guard("frame scope", () => {
+    if (typeof NappletShimPrelude === "undefined") pass("NappletShimPrelude is undefined")
+    else fail("NappletShimPrelude is reachable from napplet code (" + typeof NappletShimPrelude + ")")
+  })
+
+  // ── domains (NIP-5D presence detection): exactly the launcher's 14 ──
+  const expected = [
+    "relay", "identity", "storage", "resource", "common", "theme", "inc",
+    "intent", "link", "upload", "outbox", "media", "config", "notify",
+  ].sort()
+  guard("domains", () => {
+    const keys = Object.keys(window.napplet || {}).sort()
+    const same = keys.length === expected.length && keys.every((k, i) => k === expected[i])
+    if (same) pass("domains (" + keys.length + "): " + keys.join(", "))
+    else fail("domains (" + keys.length + "): " + keys.join(", ") + " / expected " + expected.join(", "))
+  })
+
+  const napplet = window.napplet || {}
+
+  // ── notify.controls: pushed once per session on frame load ──
+  let controlsSeen = false
+  guard("notify.onControls", () => {
+    napplet.notify.onControls(controls => {
+      controlsSeen = true
+      line("controls " + show(controls))
+    })
+  })
+  setTimeout(() => {
+    if (!controlsSeen) fail("no notify.controls within 3 s")
+  }, 3000)
+
+  // ── intent delivery: the launcher's napplet:profile/open as inc.event ──
+  guard("intent handler", () => {
+    napplet.inc.on("napplet:profile/open", ev => {
+      line("intent from " + ev.sender + " payload " + show(ev.payload))
+    })
+  })
+
+  // ── INC topic events from another window ──
+  guard("inc.on ping", () => {
+    napplet.inc.on("verdana-probe/ping", ev => {
+      line("ping from " + ev.sender + " payload " + show(ev.payload))
+    })
+  })
+
+  // ── config: register a schema, then read and subscribe ──
+  guard("config.onSchemaError", () => {
+    napplet.config.onSchemaError(err => fail("config.schemaError " + show(err)))
+  })
+  guard("config", () => napplet.config.registerSchema({
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "greeting": { "type": "string", "title": "Greeting", "default": "hi" },
+    },
+  }).then(() => {
+    line("config schema registered")
+    guard("config.get", () => napplet.config.get().then(values => {
+      if (values && values.greeting !== undefined) pass("config.get " + show(values))
+      else fail("config.get without greeting: " + show(values))
+    }))
+    guard("config.subscribe", () => {
+      napplet.config.subscribe(values => line("config values " + show(values)))
+    })
+  }))
+
+  // ── buttons ──
+  document.getElementById("ping").addEventListener("click", () => {
+    guard("inc.emit", () => {
+      napplet.inc.emit("verdana-probe/ping", { at: Date.now() })
+      line("ping sent")
+    })
+  })
+
+  document.getElementById("notify").addEventListener("click", () => {
+    guard("notify", () => napplet.notify.requestPermission().then(res => {
+      line("notify permission " + show(res))
+      return napplet.notify.send({ title: "Verdana probe", body: "Phase 1 smoke test" })
+    }).then(res => line("notify.send " + show(res))))
+  })
+
+  // a stable public https image; the launcher fetches it, not the frame
+  const RESOURCE_URL = "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png"
+  document.getElementById("resource").addEventListener("click", () => {
+    guard("resource.bytes", () => napplet.resource.bytes(RESOURCE_URL).then(blob => {
+      pass("resource.bytes " + blob.type + " " + blob.size + " bytes")
+      const img = document.createElement("img")
+      img.src = URL.createObjectURL(blob)
+      img.alt = "fetched resource"
+      document.body.appendChild(img)
+    }, err => fail("resource.bytes " + (err && (err.code || err.message) || String(err)))))
+  })
+
+  line("probe loaded")
+})()
+</script>
+</body>
+</html>

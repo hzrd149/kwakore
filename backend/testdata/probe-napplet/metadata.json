@@ -1,0 +1,7 @@
+{
+  "id": "verdana-probe",
+  "title": "Verdana probe",
+  "format": "napplet",
+  "roles": ["profile"],
+  "description": "Phase 1 smoke probe: frame scope, config, notify, INC, intent handler, resource"
+}
