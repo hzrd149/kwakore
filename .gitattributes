@@ -1,0 +1,4 @@
+# The vendored @napplet/shim prelude must stay byte-identical to the npm release
+# (TestShimPreludeIsPristineUpstream pins its sha256), so git never converts its
+# line endings or touches its missing final newline.
+backend/webview/shim/prelude.global.js -text

@@ -1,10 +1,5 @@
 "use strict";
 var NappletShimPrelude = (() => {
-  // verdana: the shell answers every request, even when that waits on the
-  // user's approval or a remote signer, so the shim sets no deadline of its
-  // own. A timeoutMs the napplet passes itself is still honored. The
-  // REQUEST_TIMEOUT_MS* defaults below are void 0 for the same reason.
-  var napRequestTimer = (fn, ms) => ms === void 0 ? void 0 : setTimeout(fn, ms);
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -283,11 +278,11 @@ var NappletShimPrelude = (() => {
         action
       };
       postToShell(msg);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingRegistrations.delete(id)) {
           reject(new Error("keys.registerAction timed out"));
         }
-      }, void 0);
+      }, 3e4);
     });
   }
   function unregisterAction(actionId) {
@@ -400,11 +395,11 @@ var NappletShimPrelude = (() => {
   function createSession(options) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingCreates.delete(id)) {
           reject(new Error("media.session.create timed out"));
         }
-      }, void 0);
+      }, 3e4);
       pendingCreates.set(id, { resolve, reject, timeout });
       const msg = {
         type: "media.session.create",
@@ -537,14 +532,13 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-2THSWWB3.js
-  var REQUEST_TIMEOUT_MS = void 0;
+  var REQUEST_TIMEOUT_MS = 3e4;
   var pendingSends = /* @__PURE__ */ new Map();
   var pendingPermissions = /* @__PURE__ */ new Map();
   var actionHandlers2 = /* @__PURE__ */ new Set();
   var clickedHandlers = /* @__PURE__ */ new Set();
   var dismissedHandlers = /* @__PURE__ */ new Set();
   var controlsHandlers2 = /* @__PURE__ */ new Set();
-  var lastNotifyControls;
   var installed3 = false;
   function isMessageType3(msg, type) {
     return msg.type === type;
@@ -585,7 +579,6 @@ var NappletShimPrelude = (() => {
     }
   }
   function handleControls2(msg) {
-    lastNotifyControls = msg.controls;
     for (const cb of controlsHandlers2) {
       cb(msg.controls);
     }
@@ -615,7 +608,7 @@ var NappletShimPrelude = (() => {
         ...notification
       };
       postToShell(msg);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingSends.delete(id)) {
           reject(new Error("notify.send timed out"));
         }
@@ -653,7 +646,7 @@ var NappletShimPrelude = (() => {
         channel: channel2
       };
       postToShell(msg);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingPermissions.delete(id)) {
           reject(new Error("notify.permission.request timed out"));
         }
@@ -686,9 +679,6 @@ var NappletShimPrelude = (() => {
   }
   function onControls2(callback) {
     controlsHandlers2.add(callback);
-    if (lastNotifyControls !== void 0) {
-      callback(lastNotifyControls);
-    }
     return {
       close() {
         controlsHandlers2.delete(callback);
@@ -707,14 +697,13 @@ var NappletShimPrelude = (() => {
       clickedHandlers.clear();
       dismissedHandlers.clear();
       controlsHandlers2.clear();
-      lastNotifyControls = void 0;
       installed3 = false;
     };
   }
 
   // ../nap/dist/chunk-Q2OL6E2V.js
   var pendingResponses = /* @__PURE__ */ new Map();
-  var REQUEST_TIMEOUT_MS2 = void 0;
+  var REQUEST_TIMEOUT_MS2 = 5e3;
   function handleStateResponse(event) {
     if (event.source !== window.parent) return;
     const msg = event.data;
@@ -735,7 +724,7 @@ var NappletShimPrelude = (() => {
     return new Promise((resolve, reject) => {
       pendingResponses.set(message.id, { resolve, reject });
       postToShell(message);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingResponses.delete(message.id)) {
           reject(new Error("State request timed out"));
         }
@@ -862,7 +851,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-DMVIO3SO.js
-  var REQUEST_TIMEOUT_MS3 = void 0;
+  var REQUEST_TIMEOUT_MS3 = 3e4;
   var pendingRequests = /* @__PURE__ */ new Map();
   var changeHandlers = /* @__PURE__ */ new Set();
   var installed4 = false;
@@ -965,7 +954,7 @@ var NappletShimPrelude = (() => {
   }
   function sendRequest(msg) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRequests.delete(msg.id)) {
           reject(new Error(`${msg.type} timed out`));
         }
@@ -1071,7 +1060,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-K4GHL555.js
-  var REQUEST_TIMEOUT_MS4 = void 0;
+  var REQUEST_TIMEOUT_MS4 = 3e4;
   var pendingRequests2 = /* @__PURE__ */ new Map();
   var changeHandlers2 = /* @__PURE__ */ new Set();
   var installed5 = false;
@@ -1117,7 +1106,7 @@ var NappletShimPrelude = (() => {
   }
   function sendRequest2(msg) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRequests2.delete(msg.id)) {
           reject(new Error(`${msg.type} timed out`));
         }
@@ -1193,13 +1182,10 @@ var NappletShimPrelude = (() => {
     const names = /* @__PURE__ */ new Set();
     const entries = [];
     const query4 = uri.slice(queryIndex + 1);
-    if (!query4) {
-      throw new Error("Convention URI query must not be empty");
-    }
     if (query4) {
       for (const pair of query4.split("&")) {
         const separator = pair.indexOf("=");
-        if (separator <= 0) {
+        if (separator < 0) {
           throw new Error("Convention URI query parameters must use name=value form");
         }
         const name = decodeURIComponent(pair.slice(0, separator));
@@ -1213,7 +1199,7 @@ var NappletShimPrelude = (() => {
     }
     return { archetype, action, convention, payload: Object.fromEntries(entries) };
   }
-  var REQUEST_TIMEOUT_MS5 = void 0;
+  var REQUEST_TIMEOUT_MS5 = 3e4;
   var MAX_RETAINED_OPENED = 100;
   var MAX_RETAINED_EVENTS = 100;
   var topicHandlers = /* @__PURE__ */ new Map();
@@ -1356,7 +1342,7 @@ var NappletShimPrelude = (() => {
   function open(target) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingOpen.delete(id)) reject(new Error("inc.channel.open timed out"));
       }, REQUEST_TIMEOUT_MS5);
       pendingOpen.set(id, { target, resolve, reject, timeout });
@@ -1383,7 +1369,7 @@ var NappletShimPrelude = (() => {
   function list() {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingList.delete(id)) reject(new Error("inc.channel.list timed out"));
       }, REQUEST_TIMEOUT_MS5);
       pendingList.set(id, { resolve, reject, timeout });
@@ -1546,7 +1532,7 @@ var NappletShimPrelude = (() => {
   function isMessageType4(msg, type) {
     return msg.type === type;
   }
-  var REQUEST_TIMEOUT_MS6 = void 0;
+  var REQUEST_TIMEOUT_MS6 = 3e4;
   var currentSchema = null;
   var lastValues = null;
   var subscribers = /* @__PURE__ */ new Set();
@@ -1594,12 +1580,6 @@ var NappletShimPrelude = (() => {
   }
   function handleSchemaError(msg) {
     const payload = { code: msg.code, error: msg.error };
-    // verdana: a schemaError carrying a config.get's id answers that get
-    if (typeof msg.id === "string" && pendingGets.has(msg.id)) {
-      const pending4 = pendingGets.get(msg.id);
-      pendingGets.delete(msg.id);
-      pending4.reject(new Error(msg.error ?? msg.code ?? "config.get failed"));
-    }
     for (const cb of schemaErrorHandlers) {
       try {
         cb(payload);
@@ -1613,7 +1593,7 @@ var NappletShimPrelude = (() => {
       pendingRegistrations2.set(id, { resolve, reject, schema });
       const msg = version === void 0 ? { type: "config.registerSchema", id, schema } : { type: "config.registerSchema", id, schema, version };
       postToShell(msg);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingRegistrations2.delete(id)) {
           reject(new Error("config.registerSchema timed out"));
         }
@@ -1626,7 +1606,7 @@ var NappletShimPrelude = (() => {
       pendingGets.set(id, { resolve, reject });
       const msg = { type: "config.get", id };
       postToShell(msg);
-      napRequestTimer(() => {
+      setTimeout(() => {
         if (pendingGets.delete(id)) {
           reject(new Error("config.get timed out"));
         }
@@ -1703,8 +1683,8 @@ var NappletShimPrelude = (() => {
     };
   }
 
-  // ../nap/dist/chunk-U4MBOGHQ.js
-  var REQUEST_TIMEOUT_MS7 = void 0;
+  // ../nap/dist/chunk-6RQMV3K3.js
+  var REQUEST_TIMEOUT_MS7 = 3e4;
   var inflight = /* @__PURE__ */ new Map();
   var pendingBytes = /* @__PURE__ */ new Map();
   var pendingInfo = /* @__PURE__ */ new Map();
@@ -1760,7 +1740,7 @@ var NappletShimPrelude = (() => {
   }
   function sendInfoRequest(id) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingInfo.delete(id)) {
           reject(new Error("resource.info timed out"));
         }
@@ -1775,7 +1755,7 @@ var NappletShimPrelude = (() => {
   }
   function sendBytesRequest(url, id, servers) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingBytes.delete(id)) {
           reject(new Error(`resource.bytes timed out for ${url}`));
         }
@@ -1792,7 +1772,7 @@ var NappletShimPrelude = (() => {
   }
   function sendBytesManyRequest(requests, id) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingMany.delete(id)) {
           reject(new Error(`resource.bytesMany timed out for ${requests.length} requests`));
         }
@@ -1996,9 +1976,8 @@ var NappletShimPrelude = (() => {
     if (opts?.signal?.aborted) {
       return Promise.reject(new DOMException("Aborted", "AbortError"));
     }
-    const normalizedRequests = requests.map((request) => typeof request === "string" ? { url: request } : request);
     const id = crypto.randomUUID();
-    const work = sendBytesManyRequest(normalizedRequests, id);
+    const work = sendBytesManyRequest(requests, id);
     return wireManySignal(work, opts?.signal, id);
   }
   function bytesAsObjectURL(url) {
@@ -2035,7 +2014,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-BFHWB3MF.js
-  var REQUEST_TIMEOUT_MS8 = void 0;
+  var REQUEST_TIMEOUT_MS8 = 3e4;
   var pendingDiscover = /* @__PURE__ */ new Map();
   var pendingRequest = /* @__PURE__ */ new Map();
   var pendingClose = /* @__PURE__ */ new Map();
@@ -2168,7 +2147,7 @@ var NappletShimPrelude = (() => {
   function discover(query4) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingDiscover.delete(id)) reject(new Error("cvm.discover timed out"));
       }, REQUEST_TIMEOUT_MS8);
       pendingDiscover.set(id, { resolve, reject, timeout });
@@ -2184,7 +2163,7 @@ var NappletShimPrelude = (() => {
     const id = crypto.randomUUID();
     const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS8;
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRequest.delete(id)) reject(new Error("cvm.request timed out"));
       }, timeoutMs);
       pendingRequest.set(id, { resolve, reject, timeout });
@@ -2245,7 +2224,7 @@ var NappletShimPrelude = (() => {
   function close(server) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingClose.delete(id)) reject(new Error("cvm.close timed out"));
       }, REQUEST_TIMEOUT_MS8);
       pendingClose.set(id, { resolve, reject, timeout });
@@ -2268,7 +2247,7 @@ var NappletShimPrelude = (() => {
   function registryList(query4) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRegistryList.delete(id)) reject(new Error("cvm.registry.list timed out"));
       }, REQUEST_TIMEOUT_MS8);
       pendingRegistryList.set(id, { resolve, reject, timeout });
@@ -2283,7 +2262,7 @@ var NappletShimPrelude = (() => {
   function registryHas(family, options) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRegistryHas.delete(id)) reject(new Error("cvm.registry.has timed out"));
       }, REQUEST_TIMEOUT_MS8);
       pendingRegistryHas.set(id, { resolve, reject, timeout });
@@ -2299,7 +2278,7 @@ var NappletShimPrelude = (() => {
   function registryDescribe(family, options) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRegistryDescribe.delete(id)) reject(new Error("cvm.registry.describe timed out"));
       }, REQUEST_TIMEOUT_MS8);
       pendingRegistryDescribe.set(id, { resolve, reject, timeout });
@@ -2316,7 +2295,7 @@ var NappletShimPrelude = (() => {
     const id = crypto.randomUUID();
     const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS8;
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingRegistryCall.delete(id)) reject(new Error("cvm.registry.call timed out"));
       }, timeoutMs);
       pendingRegistryCall.set(id, { resolve, reject, timeout });
@@ -2356,8 +2335,8 @@ var NappletShimPrelude = (() => {
     };
   }
 
-  // ../nap/dist/chunk-HNZ6MTKU.js
-  var REQUEST_TIMEOUT_MS9 = void 0;
+  // ../nap/dist/chunk-5XY2AH5L.js
+  var REQUEST_TIMEOUT_MS9 = 3e4;
   var pendingGetEvent = /* @__PURE__ */ new Map();
   var pendingQuery = /* @__PURE__ */ new Map();
   var pendingPublish = /* @__PURE__ */ new Map();
@@ -2453,7 +2432,7 @@ var NappletShimPrelude = (() => {
     const id = crypto.randomUUID();
     const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS9;
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingGetEvent.delete(id)) reject(new Error("outbox.getEvent timed out"));
       }, timeoutMs);
       pendingGetEvent.set(id, { resolve, reject, timeout });
@@ -2470,7 +2449,7 @@ var NappletShimPrelude = (() => {
     const id = crypto.randomUUID();
     const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS9;
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingQuery.delete(id)) reject(new Error("outbox.query timed out"));
       }, timeoutMs);
       pendingQuery.set(id, { resolve, reject, timeout });
@@ -2519,7 +2498,7 @@ var NappletShimPrelude = (() => {
   function publish(template, options) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingPublish.delete(id)) reject(new Error("outbox.publish timed out"));
       }, REQUEST_TIMEOUT_MS9);
       pendingPublish.set(id, { resolve, reject, timeout });
@@ -2535,7 +2514,7 @@ var NappletShimPrelude = (() => {
   function resolveRelays(target) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingResolve.delete(id)) reject(new Error("outbox.resolveRelays timed out"));
       }, REQUEST_TIMEOUT_MS9);
       pendingResolve.set(id, { resolve, reject, timeout });
@@ -2567,7 +2546,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-QCYYTDDB.js
-  var REQUEST_TIMEOUT_MS10 = void 0;
+  var REQUEST_TIMEOUT_MS10 = 3e4;
   var pendingInfo2 = /* @__PURE__ */ new Map();
   var pendingUpload = /* @__PURE__ */ new Map();
   var pendingStatus = /* @__PURE__ */ new Map();
@@ -2627,7 +2606,7 @@ var NappletShimPrelude = (() => {
   function info2() {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingInfo2.delete(id)) reject(new Error("upload.info timed out"));
       }, REQUEST_TIMEOUT_MS10);
       pendingInfo2.set(id, { resolve, reject, timeout });
@@ -2641,7 +2620,7 @@ var NappletShimPrelude = (() => {
   function upload(request7) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingUpload.delete(id)) reject(new Error("upload.upload timed out"));
       }, REQUEST_TIMEOUT_MS10);
       pendingUpload.set(id, { resolve, reject, timeout });
@@ -2656,7 +2635,7 @@ var NappletShimPrelude = (() => {
   function status(uploadId) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingStatus.delete(id)) reject(new Error("upload.status timed out"));
       }, REQUEST_TIMEOUT_MS10);
       pendingStatus.set(id, { resolve, reject, timeout });
@@ -2694,13 +2673,11 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-V2NIFD4E.js
-  var REQUEST_TIMEOUT_MS11 = void 0;
+  var REQUEST_TIMEOUT_MS11 = 3e4;
   var pendingInvoke = /* @__PURE__ */ new Map();
   var pendingAvailable = /* @__PURE__ */ new Map();
   var pendingHandlers = /* @__PURE__ */ new Map();
   var changedHandlers = /* @__PURE__ */ new Set();
-  var deliveryHandlers = /* @__PURE__ */ new Set();
-  var pendingDeliveries = [];
   var installed11 = false;
   function isMessageType9(msg, type) {
     return msg.type === type;
@@ -2708,9 +2685,7 @@ var NappletShimPrelude = (() => {
   function isIntentResult(value) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const result = value;
-    if (typeof result.ok !== "boolean") return false;
-    if (!result.ok) return typeof result.error === "string";
-    return typeof result.archetype === "string" && typeof result.action === "string" && typeof result.convention === "string" && typeof result.handler === "string";
+    return typeof result.ok === "boolean" && typeof result.archetype === "string" && typeof result.action === "string" && typeof result.handled === "boolean";
   }
   function handleInvokeResult(msg) {
     const pending4 = pendingInvoke.get(msg.id);
@@ -2749,14 +2724,6 @@ var NappletShimPrelude = (() => {
     if (!msg.availability) return;
     for (const callback of changedHandlers) callback(msg.availability);
   }
-  function handleDelivery(msg) {
-    if (!msg.delivery) return;
-    if (deliveryHandlers.size === 0) {
-      pendingDeliveries.push(msg.delivery);
-      return;
-    }
-    for (const callback of deliveryHandlers) callback(msg.delivery);
-  }
   function handleIntentMessage(msg) {
     if (isMessageType9(msg, "intent.invoke.result")) {
       handleInvokeResult(msg);
@@ -2766,22 +2733,12 @@ var NappletShimPrelude = (() => {
       handleHandlersResult(msg);
     } else if (isMessageType9(msg, "intent.changed")) {
       handleChanged(msg);
-    } else if (isMessageType9(msg, "intent.deliver")) {
-      handleDelivery(msg);
     }
   }
-  function invoke(request, options = {}) {
-    let request7;
-    if (typeof request === "string") {
-      const { payload, ...hints } = options;
-      request7 = { ...normalizeConventionUri(request, payload), ...hints };
-    } else {
-      request7 = { ...request };
-      if (!request7.action) request7.action = "open";
-    }
+  function invoke(request7) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingInvoke.delete(id)) reject(new Error("intent.invoke timed out"));
       }, REQUEST_TIMEOUT_MS11);
       pendingInvoke.set(id, { resolve, reject, timeout });
@@ -2793,16 +2750,13 @@ var NappletShimPrelude = (() => {
       postToShell(msg);
     });
   }
-  function open2(archetype, payload, options = {}) {
-    if (archetype.startsWith("napplet:")) {
-      return invoke(archetype, payload ?? {});
-    }
-    return invoke({ archetype, action: "open", payload, ...options });
+  function open2(archetype, payload, opts) {
+    return invoke({ archetype, action: "open", payload, ...opts });
   }
   function available(archetype) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingAvailable.delete(id)) reject(new Error("intent.available timed out"));
       }, REQUEST_TIMEOUT_MS11);
       pendingAvailable.set(id, { resolve, reject, timeout });
@@ -2817,7 +2771,7 @@ var NappletShimPrelude = (() => {
   function handlers() {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingHandlers.delete(id)) reject(new Error("intent.handlers timed out"));
       }, REQUEST_TIMEOUT_MS11);
       pendingHandlers.set(id, { resolve, reject, timeout });
@@ -2836,19 +2790,6 @@ var NappletShimPrelude = (() => {
       }
     };
   }
-  function onDelivery(handler) {
-    deliveryHandlers.add(handler);
-    if (pendingDeliveries.length > 0) {
-      const deliveries = pendingDeliveries;
-      pendingDeliveries = [];
-      for (const delivery of deliveries) handler(delivery);
-    }
-    return {
-      close() {
-        deliveryHandlers.delete(handler);
-      }
-    };
-  }
   function installIntentShim() {
     if (installed11) return () => void 0;
     installed11 = true;
@@ -2860,14 +2801,12 @@ var NappletShimPrelude = (() => {
       pendingAvailable.clear();
       pendingHandlers.clear();
       changedHandlers.clear();
-      deliveryHandlers.clear();
-      pendingDeliveries = [];
       installed11 = false;
     };
   }
 
   // ../nap/dist/chunk-5QWBBZC6.js
-  var REQUEST_TIMEOUT_MS12 = void 0;
+  var REQUEST_TIMEOUT_MS12 = 3e4;
   var pending = /* @__PURE__ */ new Map();
   var eventHandlers2 = /* @__PURE__ */ new Set();
   var installed12 = false;
@@ -2885,7 +2824,7 @@ var NappletShimPrelude = (() => {
   }
   function request2(msg, resultType, project) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pending.delete(msg.id)) reject(new Error(`${msg.type} timed out`));
       }, REQUEST_TIMEOUT_MS12);
       pending.set(msg.id, {
@@ -2972,7 +2911,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-23C42MT6.js
-  var REQUEST_TIMEOUT_MS13 = void 0;
+  var REQUEST_TIMEOUT_MS13 = 3e4;
   var pending2 = /* @__PURE__ */ new Map();
   var eventHandlers3 = /* @__PURE__ */ new Set();
   var installed13 = false;
@@ -2998,7 +2937,7 @@ var NappletShimPrelude = (() => {
   }
   function request3(msg, resultType, project) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pending2.delete(msg.id)) reject(new Error(`${msg.type} timed out`));
       }, REQUEST_TIMEOUT_MS13);
       pending2.set(msg.id, {
@@ -3125,7 +3064,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-A6WF7BXA.js
-  var REQUEST_TIMEOUT_MS14 = void 0;
+  var REQUEST_TIMEOUT_MS14 = 3e4;
   var pendingOpen2 = /* @__PURE__ */ new Map();
   var installed14 = false;
   function isMessageType10(msg, type) {
@@ -3150,7 +3089,7 @@ var NappletShimPrelude = (() => {
   function open5(url, options) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingOpen2.delete(id)) reject(new Error("link.open timed out"));
       }, REQUEST_TIMEOUT_MS14);
       pendingOpen2.set(id, { resolve, reject, timeout });
@@ -3179,7 +3118,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-HNGITPFS.js
-  var REQUEST_TIMEOUT_MS15 = void 0;
+  var REQUEST_TIMEOUT_MS15 = 3e4;
   var pendingQuery2 = /* @__PURE__ */ new Map();
   var installed15 = false;
   function isMessageType11(msg, type) {
@@ -3215,7 +3154,7 @@ var NappletShimPrelude = (() => {
     }
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingQuery2.delete(id)) reject(new Error("count.query timed out"));
       }, REQUEST_TIMEOUT_MS15);
       pendingQuery2.set(id, { resolve, reject, timeout });
@@ -3241,7 +3180,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-ESEMRW4T.js
-  var REQUEST_TIMEOUT_MS16 = void 0;
+  var REQUEST_TIMEOUT_MS16 = 3e4;
   var pendingSupported = /* @__PURE__ */ new Map();
   var pendingAdd = /* @__PURE__ */ new Map();
   var pendingRemove = /* @__PURE__ */ new Map();
@@ -3307,7 +3246,7 @@ var NappletShimPrelude = (() => {
   function request4(type, pending4, payload) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pending4.delete(id)) reject(new Error(`${type} timed out`));
       }, REQUEST_TIMEOUT_MS16);
       pending4.set(id, { resolve, reject, timeout });
@@ -3361,7 +3300,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-EALGKE7J.js
-  var REQUEST_TIMEOUT_MS17 = void 0;
+  var REQUEST_TIMEOUT_MS17 = 3e4;
   var pendingEncode = /* @__PURE__ */ new Map();
   var pendingDecode = /* @__PURE__ */ new Map();
   var pendingProfile = /* @__PURE__ */ new Map();
@@ -3392,10 +3331,7 @@ var NappletShimPrelude = (() => {
   function request5(pending4, timeoutMessage, message) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      // verdana: a null timeoutMessage means no timeout. Writes wait on the
-      // user's approval prompt, which can take longer than 30s (as
-      // relay.publish does); the session teardown still rejects them.
-      const timeout = timeoutMessage === null ? void 0 : napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pending4.delete(id)) reject(new Error(timeoutMessage));
       }, REQUEST_TIMEOUT_MS17);
       pending4.set(id, { resolve, reject, timeout });
@@ -3449,21 +3385,21 @@ var NappletShimPrelude = (() => {
     }));
   }
   function follow(...pubkeys) {
-    return request5(pendingFollow, null, (id) => ({
+    return request5(pendingFollow, "common.follow timed out", (id) => ({
       type: "common.follow",
       id,
       pubkeys
     }));
   }
   function unfollow(...pubkeys) {
-    return request5(pendingUnfollow, null, (id) => ({
+    return request5(pendingUnfollow, "common.unfollow timed out", (id) => ({
       type: "common.unfollow",
       id,
       pubkeys
     }));
   }
   function react(targetEventId, reaction, customEmojiHref) {
-    return request5(pendingReact, null, (id) => ({
+    return request5(pendingReact, "common.react timed out", (id) => ({
       type: "common.react",
       id,
       targetEventId,
@@ -3472,7 +3408,7 @@ var NappletShimPrelude = (() => {
     }));
   }
   function report(target, reason, text) {
-    return request5(pendingReport, null, (id) => ({
+    return request5(pendingReport, "common.report timed out", (id) => ({
       type: "common.report",
       id,
       target,
@@ -3504,7 +3440,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-6GWPHINR.js
-  var REQUEST_TIMEOUT_MS18 = void 0;
+  var REQUEST_TIMEOUT_MS18 = 3e4;
   var pendingOpen3 = /* @__PURE__ */ new Map();
   var pendingWrite = /* @__PURE__ */ new Map();
   var pendingClose2 = /* @__PURE__ */ new Map();
@@ -3564,7 +3500,7 @@ var NappletShimPrelude = (() => {
   function open6(request7) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingOpen3.delete(id)) reject(new Error("serial.open timed out"));
       }, REQUEST_TIMEOUT_MS18);
       pendingOpen3.set(id, { resolve, reject, timeout });
@@ -3579,7 +3515,7 @@ var NappletShimPrelude = (() => {
   function write2(sessionId, data) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingWrite.delete(id)) reject(new Error("serial.write timed out"));
       }, REQUEST_TIMEOUT_MS18);
       pendingWrite.set(id, { resolve, reject, timeout });
@@ -3595,7 +3531,7 @@ var NappletShimPrelude = (() => {
   function close4(sessionId, reason) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pendingClose2.delete(id)) reject(new Error("serial.close timed out"));
       }, REQUEST_TIMEOUT_MS18);
       pendingClose2.set(id, { resolve, reject, timeout });
@@ -3634,7 +3570,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-PONXETIR.js
-  var REQUEST_TIMEOUT_MS19 = void 0;
+  var REQUEST_TIMEOUT_MS19 = 3e4;
   var pending3 = /* @__PURE__ */ new Map();
   var changeHandlers3 = /* @__PURE__ */ new Set();
   var installed19 = false;
@@ -3657,7 +3593,7 @@ var NappletShimPrelude = (() => {
   function request6(type, payload = {}) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (pending3.delete(id)) reject(new Error(`${type} timed out`));
       }, REQUEST_TIMEOUT_MS19);
       pending3.set(id, { resolve, reject, timeout });
@@ -3774,7 +3710,7 @@ var NappletShimPrelude = (() => {
   }
 
   // ../nap/dist/chunk-DNUVIJ5U.js
-  var REQUEST_TIMEOUT_MS20 = void 0;
+  var REQUEST_TIMEOUT_MS20 = 3e4;
   var pendingStatus2 = /* @__PURE__ */ new Map();
   var pendingConversations = /* @__PURE__ */ new Map();
   var pendingMessages = /* @__PURE__ */ new Map();
@@ -3788,7 +3724,7 @@ var NappletShimPrelude = (() => {
   }
   function createPending(map, id, action) {
     return new Promise((resolve, reject) => {
-      const timeout = napRequestTimer(() => {
+      const timeout = setTimeout(() => {
         if (map.delete(id)) reject(new Error(`${action} timed out`));
       }, REQUEST_TIMEOUT_MS20);
       map.set(id, { resolve, reject, timeout });
@@ -4009,7 +3945,7 @@ var NappletShimPrelude = (() => {
     };
   }
 
-  // ../nap/dist/chunk-GCEEMD7Y.js
+  // ../nap/dist/chunk-XKRW6Q4Q.js
   function subscribe5(filters, onEvent5, onEose, options) {
     const normalizedFilters = Array.isArray(filters) ? filters : [filters];
     const subId = crypto.randomUUID();
@@ -4298,8 +4234,7 @@ var NappletShimPrelude = (() => {
         open: open2,
         available,
         handlers,
-        onChanged: onChanged3,
-        onDelivery
+        onChanged: onChanged3
       };
     }
     if (domains.has("webrtc")) {
@@ -4395,64 +4330,9 @@ var NappletShimPrelude = (() => {
     }
   }
 
-  // NAP-SHELL is mandatory and is installed independently of the optional
-  // domains. Keep the environment private so a napplet cannot forge support.
-  var shellEnvironment = null;
-  var shellReadyWaiters = /* @__PURE__ */ new Set();
-  var shellReadyHandlers = /* @__PURE__ */ new Set();
-  function handleShellMessage(msg) {
-    if (msg.type !== "shell.init" || shellEnvironment) return;
-    const domains2 = msg.capabilities && Array.isArray(msg.capabilities.domains) ? msg.capabilities.domains.filter((domain) => typeof domain === "string") : [];
-    const services = Array.isArray(msg.services) ? msg.services.filter((service) => typeof service === "string") : [];
-    shellEnvironment = Object.freeze({
-      capabilities: Object.freeze({ domains: Object.freeze(domains2.slice()) }),
-      services: Object.freeze(services.slice())
-    });
-    for (const resolve of shellReadyWaiters) resolve(shellEnvironment);
-    shellReadyWaiters.clear();
-    for (const handler of shellReadyHandlers) handler(shellEnvironment);
-    shellReadyHandlers.clear();
-  }
-  function createShellGlobal() {
-    const shell = {
-      supports(domain) {
-        return !!shellEnvironment && typeof domain === "string" && shellEnvironment.capabilities.domains.includes(domain);
-      },
-      ready() {
-        if (shellEnvironment) return Promise.resolve(shellEnvironment);
-        return new Promise((resolve) => shellReadyWaiters.add(resolve));
-      },
-      onReady(handler) {
-        if (typeof handler !== "function") throw new TypeError("shell.onReady requires a function");
-        let closed = false;
-        if (shellEnvironment) {
-          queueMicrotask(() => {
-            if (!closed) handler(shellEnvironment);
-          });
-        } else {
-          shellReadyHandlers.add(handler);
-        }
-        return {
-          close() {
-            if (closed) return;
-            closed = true;
-            shellReadyHandlers.delete(handler);
-          }
-        };
-      }
-    };
-    Object.defineProperty(shell, "services", {
-      enumerable: true,
-      get() {
-        return shellEnvironment ? shellEnvironment.services : Object.freeze([]);
-      }
-    });
-    return shell;
-  }
-
   // src/runtime-globals.ts
   function createNappletGlobal(domains) {
-    const napplet = { shell: createShellGlobal() };
+    const napplet = {};
     installCoreDomains(domains, napplet);
     installServiceDomains(domains, napplet);
     return napplet;
@@ -4463,7 +4343,6 @@ var NappletShimPrelude = (() => {
   var installedDomainShims = /* @__PURE__ */ new Set();
   var messageListenerInstalled = false;
   var DOMAIN_ROUTERS = [
-    ["shell.", handleShellMessage],
     ["keys.", handleKeysMessage],
     ["media.", handleMediaMessage],
     ["notify.", handleNotifyMessage],

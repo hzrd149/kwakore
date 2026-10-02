@@ -1,46 +1,32 @@
 package webview
 
 import (
-	"os/exec"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"strings"
 	"testing"
 )
 
-func TestShimProvidesShellCapabilityDiscovery(t *testing.T) {
-	for _, want := range []string{
-		`const napplet = { shell: createShellGlobal() };`,
-		`["shell.", handleShellMessage]`,
-		`supports(domain)`,
-	} {
-		if !strings.Contains(shimPrelude, want) {
-			t.Fatalf("shim is missing %q", want)
-		}
+// the vendored prelude is npm @napplet/shim byte for byte: no patches, no
+// reformatting, no added newline. The README states the same version and hash
+// so a reader never has to trust a stale note.
+func TestShimPreludeIsPristineUpstream(t *testing.T) {
+	sum := sha256.Sum256([]byte(shimPrelude))
+	if got := hex.EncodeToString(sum[:]); got != ShimSHA256 {
+		t.Fatalf("prelude.global.js sha256 = %s, want npm @napplet/shim@%s %s", got, ShimVersion, ShimSHA256)
 	}
-
-	node, err := exec.LookPath("node")
+	if strings.Contains(ShimVersion, "+") {
+		t.Fatalf("ShimVersion %q carries a local build suffix; the shim must be an unmodified upstream release", ShimVersion)
+	}
+	readme, err := os.ReadFile("shim/README.md")
 	if err != nil {
-		t.Skip("node is not installed; static shell API checks passed")
+		t.Fatal(err)
 	}
-	script := shimPrelude + `
-globalThis.window = globalThis;
-window.parent = {};
-const listeners = {};
-window.addEventListener = (type, handler) => { listeners[type] = handler; };
-const napplet = NappletShimPrelude.install({domains:["theme"]});
-if (!napplet.shell || napplet.shell.supports("theme")) throw new Error("bad pre-init state");
-if (!napplet.theme || !napplet.theme.get) throw new Error("theme API missing");
-let observed = null;
-napplet.shell.onReady(env => { observed = env; });
-const ready = napplet.shell.ready();
-listeners.message({source:window.parent,data:{type:"shell.init",capabilities:{domains:["theme"]},services:["proxy"]}});
-ready.then(env => {
-  if (!napplet.shell.supports("theme") || napplet.shell.supports("unknown")) throw new Error("supports is wrong");
-  if (napplet.shell.services[0] !== "proxy" || observed !== env) throw new Error("environment not delivered");
-}).catch(err => { console.error(err); process.exitCode = 1; });
-`
-	cmd := exec.Command(node, "-")
-	cmd.Stdin = strings.NewReader(script)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("shell shim failed: %v\n%s", err, out)
+	for _, want := range []string{"**" + ShimVersion + "**", ShimSHA256} {
+		if !bytes.Contains(readme, []byte(want)) {
+			t.Errorf("shim/README.md does not state %q", want)
+		}
 	}
 }

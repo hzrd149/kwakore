@@ -38,13 +38,21 @@ var settingsHTML string
 var settingsJS string
 
 // The @napplet/shim browser prelude (see shim/README.md): what makes
-// window.napplet exist inside a napplet's sandboxed frame.
+// window.napplet exist inside a napplet's sandboxed frame. The file is
+// upstream's, unmodified; Verdana-specific behavior lives in Go and in
+// napplet-host.js, never in these bytes.
 //
 //go:embed shim/prelude.global.js
 var shimPrelude string
 
-// ShimVersion is the @napplet/shim release the prelude was copied from.
-const ShimVersion = "0.30.0+verdana.2"
+// ShimVersion is the @napplet/shim release prelude.global.js is, byte for
+// byte (no Verdana patches).
+const ShimVersion = "0.30.0"
+
+// ShimSHA256 is the sha256 of npm @napplet/shim@0.30.0 dist/prelude.global.js.
+// TestShimPreludeIsPristineUpstream pins the embedded bytes to it, so any
+// change to the vendored file, down to a trailing newline, fails the build.
+const ShimSHA256 = "25d6bb0e737e698e0c499e35c1ccd590ef6f87f7a025554d3af41bc6d5890753"
 
 //go:embed napp-ui.js
 var uiJS string
