@@ -92,6 +92,9 @@ type Prompt struct {
 	// Permission prompts leave them empty and use Allow/Deny.
 	AcceptLabel string `json:"acceptLabel,omitempty"`
 	RejectLabel string `json:"rejectLabel,omitempty"`
+	// CloseOnReject asks a launcher-hosted prompt window to close after the
+	// negative answer instead of revealing the launcher's normal screen.
+	CloseOnReject bool `json:"closeOnReject,omitempty"`
 
 	// Napp is the napp that asked, for a GUI that wants to show it.
 	Napp string `json:"napp"`

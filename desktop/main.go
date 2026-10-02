@@ -15,6 +15,7 @@ import (
 	"fiatjaf.com/verdana/desktop/internal/windowchrome"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
+	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
@@ -372,6 +373,9 @@ func gioMain() {
 					} {
 						if c.btn.Clicked(gtx) {
 							backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope})
+							if !c.ok && activePrompt.CloseOnReject {
+								w.Perform(system.ActionClose)
+							}
 						}
 					}
 					for i := range activePrompt.Options {

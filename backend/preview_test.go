@@ -154,6 +154,9 @@ func TestClosingNappletTrialOffersInstallAndDiscardsDeclinedData(t *testing.T) {
 	if p.AcceptLabel != "Install" || p.RejectLabel != "Not now" {
 		t.Fatalf("trial prompt labels: %q / %q", p.AcceptLabel, p.RejectLabel)
 	}
+	if !p.CloseOnReject {
+		t.Fatal("declined trial prompt does not close its launcher window")
+	}
 	AnswerPrompt(p.ID, Answer{OK: false, Scope: ScopeOnce})
 	select {
 	case <-done:

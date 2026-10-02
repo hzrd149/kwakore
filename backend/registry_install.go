@@ -175,6 +175,7 @@ func finishNappletTrial(ci *Instance) {
 	)
 	p.AcceptLabel = "Install"
 	p.RejectLabel = "Not now"
+	p.CloseOnReject = true
 	enqueuePrompt(p)
 	if !p.wait().OK {
 		windows.Delete(ci.instance)
