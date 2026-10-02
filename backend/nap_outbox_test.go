@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -277,15 +278,19 @@ func TestNapOutboxResolveRelaysNeedsAuthors(t *testing.T) {
 	}
 }
 
+// The domain set reaches the napplet only through the activation's
+// install({domains}): window.napplet is what it can detect (NIP-5D presence
+// detection), never a handshake.
 func TestNapDomainsAdvertiseOutbox(t *testing.T) {
-	setupNapTest(t)
-	ci, rec := openNapplet(t, "caps")
-	ready(t, ci, rec, 1)
-	init := rec.wait(t, "shell.init", 1)
-	caps, _ := init["capabilities"].(map[string]any)
-	domains, _ := caps["domains"].([]any)
-	if !slices.Contains(domains, any("outbox")) {
-		t.Errorf("shell.init domains: %v", domains)
+	if !slices.Contains(napDomains, "outbox") {
+		t.Fatalf("napDomains lacks outbox: %v", napDomains)
+	}
+	doc, err := buildSrcdoc([]byte("<p>x</p>"), napDomains)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(doc, `"outbox"`) {
+		t.Error("the srcdoc's install call does not grant outbox")
 	}
 }
 

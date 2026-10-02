@@ -24,6 +24,11 @@ import (
 // identity changes) go back the same way: a __nap_push eval, which the host
 // page re-posts into the frame.
 //
+// A session starts only when the host page says so (the nap.start rpc, made
+// before the napplet's frame exists); nothing the frame posts can start, reset
+// or replay one. The napplet learns its domains from window.napplet itself
+// (NIP-5D presence detection): there is no handshake.
+//
 // Envelopes are handled one at a time, in the order the napplet sent them
 // (a subscribe is never overtaken by its own close). A handler that has to
 // wait — on the network, on the user — does so in its own goroutine, tied to
@@ -43,13 +48,18 @@ var napDomains = []string{
 type napSession struct {
 	mu sync.Mutex
 
-	// established flips on shell.ready. Before it, every envelope is dropped
-	// (NAP-SHELL): the activation script sends it ahead of any napplet code.
+	// established flips when the trusted host page starts a session
+	// (nap.start), before it creates the napplet's frame. Every envelope
+	// before it is dropped, and the frame has no way to set it: it can only
+	// post envelopes, which reach Go as nap.msg.
 	established bool
-	ready       chan struct{}
+	// controlsSent is notify.controls having gone out for this session
+	// (nap.loaded); it resets with the session.
+	controlsSent bool
 
-	// gen counts sessions in this window. nap.reset starts a new one, and a
-	// late answer for the old one must not reach the new document.
+	// gen counts sessions in this window. nap.start (and nap.reset) starts a
+	// new one, and a late answer for the old one must not reach the new
+	// document.
 	gen    int
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -102,9 +112,6 @@ func newNapSession() *napSession {
 // resetLocked tears the session's state down and starts a fresh generation.
 // The caller holds s.mu (or owns s exclusively).
 func (s *napSession) resetLocked() {
-	if s.ready != nil && !s.established {
-		close(s.ready)
-	}
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -139,8 +146,8 @@ func (s *napSession) resetLocked() {
 	}
 	s.media = make(map[string]*mediaSession)
 	s.configSubscribed = false
+	s.controlsSent = false
 	s.established = false
-	s.ready = make(chan struct{})
 }
 
 // napCall is one envelope from the napplet.
@@ -197,10 +204,10 @@ func (c *napCall) replyAs(typ string, fields map[string]any) {
 	c.ci.napPushGen(c.gen, c.envelope(typ, fields))
 }
 
-// fail answers a request whose handler broke. The shim sets no deadline of
-// its own, so a request nobody answers would leave the napplet waiting for
-// good. A second answer after a real one is harmless: the shim has already
-// settled that id.
+// fail answers a request whose handler broke. The shim gives up on its own
+// after its per-request timeout (30 s, 5 s for storage); answering a broken
+// request at once keeps the napplet from waiting that out. A second answer
+// after a real one is harmless: the shim has already settled that id.
 func (c *napCall) fail() {
 	if len(c.ID) == 0 {
 		return
@@ -270,11 +277,19 @@ func (ci *Instance) napPushGen(gen int, envs ...any) {
 // ─── the rpcs the host page makes ────────────────────────────────
 
 // napRPC answers the host page. Nothing else is reachable from a napplet
-// window: see bridgeRPC.
+// window: see bridgeRPC. The lifecycle rpcs (nap.boot, nap.start, nap.loaded,
+// nap.reset) come only from the host page's own binding, never from the
+// napplet's frame, which can reach Go only through the host page, and only as
+// nap.msg.
 func napRPC(ci *Instance, method, params string) (any, error) {
 	switch method {
 	case "nap.boot":
 		return nappletBoot(ci)
+	case "nap.start":
+		return nil, ci.napStart()
+	case "nap.loaded":
+		ci.napLoaded()
+		return nil, nil
 	case "nap.msg":
 		ci.napEnqueue(params)
 		return nil, nil
@@ -339,13 +354,12 @@ func (ci *Instance) napWorker() {
 	}
 }
 
+// napDispatch handles one envelope. There is no lifecycle type: a session
+// starts only through nap.start, so a frame-sent shell.ready (or anything
+// else the shim does not define) is an unknown type like any other, dropped
+// silently (NIP-5D).
 func (ci *Instance) napDispatch(c napCall) {
 	s := ci.nap
-	if c.Type == "shell.ready" {
-		ci.napReady()
-		return
-	}
-
 	s.mu.Lock()
 	ok := s.established
 	// the call was read under an older session: let it go
@@ -371,30 +385,49 @@ func (ci *Instance) napDispatch(c napCall) {
 	h(&c)
 }
 
-// napReady handles shell.ready: the session starts and the napplet learns
-// which domains it has. shell.ready is idempotent; a document reload must
-// first arrive as nap.reset, which tears down the preceding session.
-func (ci *Instance) napReady() {
+// napStart answers nap.start: the host page is about to create a fresh frame
+// for the napplet's document, and this opens the session that document talks
+// to. Whatever the window had before is torn down first. The generation bump
+// is what keeps the outgoing document out (D-07): an envelope it queued
+// before the restart carries the old gen and napDispatch drops it, and a late
+// answer for the old session is dropped by napPushGen.
+func (ci *Instance) napStart() error {
 	s := ci.nap
+	if s == nil {
+		return errors.New("not a napplet window")
+	}
 	s.mu.Lock()
-	if s.established {
+	ci.napTeardownLocked("napplet reset")
+	s.established = true
+	gen := s.gen
+	s.mu.Unlock()
+	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Int("gen", gen).Msg("napplet session started")
+	return nil
+}
+
+// napLoaded answers nap.loaded, which the host page sends on the frame's load
+// event, and pushes notify.controls once per session. The trigger is the load
+// event because the upstream notify shim keeps no last value: a push before
+// the napplet's top-level scripts registered onControls would be lost, and
+// load fires after them. It is only that trigger, never a session start.
+func (ci *Instance) napLoaded() {
+	s := ci.nap
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if !s.established || s.controlsSent {
 		s.mu.Unlock()
 		return
 	}
-	s.established = true
-	close(s.ready)
+	s.controlsSent = true
 	gen := s.gen
 	s.mu.Unlock()
-
-	ci.napPushGen(gen, map[string]any{
-		"type":         "shell.init",
-		"capabilities": map[string]any{"domains": napDomains},
-		"services":     []any{},
-	}, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
-	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Msg("napplet session started")
+	ci.napPushGen(gen, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
 }
 
-// napReset drops the session (a dev reload: new bytes are coming).
+// napReset drops the session (a dev reload: new bytes are coming). The host
+// page's next nap.start opens the new one.
 func (ci *Instance) napReset() {
 	if ci.nap == nil {
 		return

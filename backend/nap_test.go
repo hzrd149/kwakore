@@ -160,10 +160,22 @@ func post(t *testing.T, ci *Instance, env map[string]any) {
 	}
 }
 
+// ready is the host page starting a session (nap.start), as it does before it
+// creates the napplet's frame. rec and n are unused: there is no handshake to
+// wait for any more, and the signature stays for the many callers.
 func ready(t *testing.T, ci *Instance, rec *recTransport, n int) {
 	t.Helper()
-	post(t, ci, map[string]any{"type": "shell.ready"})
-	rec.wait(t, "shell.init", n)
+	if _, err := napRPC(ci, "nap.start", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// loaded is the host page reporting the frame's load event (nap.loaded).
+func loaded(t *testing.T, ci *Instance) {
+	t.Helper()
+	if _, err := napRPC(ci, "nap.loaded", ""); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // ─── srcdoc ──────────────────────────────────────────────────────
@@ -220,39 +232,39 @@ func TestBuildSrcdoc(t *testing.T) {
 
 // ─── session ─────────────────────────────────────────────────────
 
-func TestNapSessionHandshake(t *testing.T) {
+func TestNapSessionStartsFromHostPage(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "alpha")
 
-	// nothing is answered before shell.ready
+	// nothing is answered before the host page starts the session
 	post(t, ci, map[string]any{"type": "storage.keys", "id": "early"})
+	time.Sleep(50 * time.Millisecond)
+	if got := rec.types(); len(got) != 0 {
+		t.Fatalf("pushed before nap.start: %v", got)
+	}
 	ready(t, ci, rec, 1)
-	if got := rec.find("storage.keys.result"); len(got) != 0 {
-		t.Fatalf("answered before shell.ready: %v", got)
-	}
-
-	init := rec.find("shell.init")[0]
-	domains, _ := init["capabilities"].(map[string]any)["domains"].([]any)
-	// Supported APIs are a shell capability, not a least-privilege grant. The
-	// shell injects all of them even though this test napplet advertises no
-	// requirements.
-	if len(ci.napp.Requires) != 0 {
-		t.Fatalf("test napplet unexpectedly has requirements: %v", ci.napp.Requires)
-	}
-	for _, want := range napDomains {
-		if !slices.Contains(domains, any(want)) {
-			t.Errorf("shell.init lacks %s: %v", want, domains)
-		}
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "k1"})
+	res := rec.wait(t, "storage.keys.result", 1)
+	if res["id"] != "k1" {
+		t.Fatalf("answered the pre-start envelope: %v", res)
 	}
 
 	// unknown types: silence, and the session keeps working
 	post(t, ci, map[string]any{"type": "nope.whatever", "id": "x"})
-	post(t, ci, map[string]any{"type": "storage.keys", "id": "k1"})
-	rec.wait(t, "storage.keys.result", 1)
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "k2"})
+	rec.wait(t, "storage.keys.result", 2)
 	for _, typ := range rec.types() {
 		if strings.HasPrefix(typ, "nope") {
 			t.Fatalf("unknown type was answered: %v", rec.types())
 		}
+	}
+	// presence detection: the napplet learns its domains from window.napplet,
+	// never from a handshake
+	if got := rec.find("shell.init"); len(got) != 0 {
+		t.Fatalf("shell.init pushed: %v", got)
+	}
+	if got := rec.find("storage.keys.result"); len(got) != 2 || got[0]["id"] != "k1" || got[1]["id"] != "k2" {
+		t.Fatalf("storage.keys answers: %v", got)
 	}
 }
 
@@ -646,36 +658,159 @@ func TestNapReloadIsANewSession(t *testing.T) {
 	}
 }
 
-func TestNapDuplicateReadyIsIdempotent(t *testing.T) {
+func TestNapFrameShellReadyIsIgnored(t *testing.T) {
 	setupNapTest(t)
-	ci, rec := openNapplet(t, "duplicate-ready")
+
+	t.Run("before nap.start", func(t *testing.T) {
+		ci, rec := openNapplet(t, "forged-start")
+		ci.nap.mu.Lock()
+		gen0 := ci.nap.gen
+		ci.nap.mu.Unlock()
+
+		// the frame cannot start a session: shell.ready is an unknown type
+		post(t, ci, map[string]any{"type": "shell.ready"})
+		post(t, ci, map[string]any{"type": "storage.keys", "id": "pre"})
+		time.Sleep(50 * time.Millisecond)
+		ci.nap.mu.Lock()
+		established := ci.nap.established
+		ci.nap.mu.Unlock()
+		if established {
+			t.Fatal("a frame-sent shell.ready started the session")
+		}
+		if got := rec.types(); len(got) != 0 {
+			t.Fatalf("pushed before nap.start: %v", got)
+		}
+
+		ready(t, ci, rec, 1)
+		post(t, ci, map[string]any{"type": "storage.keys", "id": "post"})
+		rec.wait(t, "storage.keys.result", 1)
+		time.Sleep(50 * time.Millisecond)
+		if got := rec.find("storage.keys.result"); len(got) != 1 || got[0]["id"] != "post" {
+			t.Fatalf("storage.keys answers: %v", got)
+		}
+		ci.nap.mu.Lock()
+		gen := ci.nap.gen
+		ci.nap.mu.Unlock()
+		if gen != gen0+1 {
+			t.Fatalf("gen = %d, want %d (advanced by nap.start only)", gen, gen0+1)
+		}
+	})
+
+	t.Run("after nap.start", func(t *testing.T) {
+		ci, rec := openNapplet(t, "forged-restart")
+		ready(t, ci, rec, 1)
+
+		post(t, ci, map[string]any{"type": "inc.subscribe", "id": "topic", "topic": "keep"})
+		rec.wait(t, "inc.subscribe.result", 1)
+
+		ci.nap.mu.Lock()
+		gen := ci.nap.gen
+		ctx := ci.nap.ctx
+		ci.nap.grants[PermFetch] = true
+		ci.nap.mu.Unlock()
+
+		post(t, ci, map[string]any{"type": "shell.ready"})
+		// confirms the shell.ready has been dispatched without depending on an
+		// output that an ignored message must not produce
+		post(t, ci, map[string]any{"type": "storage.keys", "id": "sync"})
+		rec.wait(t, "storage.keys.result", 1)
+
+		for _, typ := range []string{"shell.init", "shell.ready.result"} {
+			if got := rec.find(typ); len(got) != 0 {
+				t.Fatalf("%s pushed: %v", typ, got)
+			}
+		}
+		ci.nap.mu.Lock()
+		defer ci.nap.mu.Unlock()
+		if ci.nap.gen != gen || ci.nap.ctx != ctx || !ci.nap.established {
+			t.Fatalf("frame shell.ready changed the session: gen=%d (want %d), established=%v", ci.nap.gen, gen, ci.nap.established)
+		}
+		if !ci.nap.topics["keep"] || !ci.nap.grants[PermFetch] {
+			t.Fatalf("frame shell.ready cleared session state: topics=%v grants=%v", ci.nap.topics, ci.nap.grants)
+		}
+	})
+}
+
+func TestNapStartDropsEnvelopesFromThePreviousDocument(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "restarted")
 	ready(t, ci, rec, 1)
 
-	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "topic", "topic": "keep"})
-	rec.wait(t, "inc.subscribe.result", 1)
-
 	ci.nap.mu.Lock()
-	gen := ci.nap.gen
-	ctx := ci.nap.ctx
+	oldGen, oldCtx := ci.nap.gen, ci.nap.ctx
+	ci.nap.mu.Unlock()
+	ready(t, ci, rec, 2)
+
+	// an envelope the outgoing document queued before the restart
+	ci.napDispatch(napCall{
+		ci: ci, gen: oldGen, ctx: oldCtx, Type: "storage.keys",
+		ID: json.RawMessage(`"old"`), raw: json.RawMessage(`{"type":"storage.keys","id":"old"}`),
+	})
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "new"})
+	rec.wait(t, "storage.keys.result", 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := rec.find("storage.keys.result"); len(got) != 1 || got[0]["id"] != "new" {
+		t.Fatalf("storage.keys answers: %v", got)
+	}
+	if oldCtx.Err() == nil {
+		t.Error("the previous session's context survived nap.start")
+	}
+}
+
+func TestNapStartTearsDownThePreviousSession(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "torn-down")
+	ready(t, ci, rec, 1)
+	subscribeTopic(t, ci, rec, "t", 1)
+	ci.nap.mu.Lock()
 	ci.nap.grants[PermFetch] = true
 	ci.nap.mu.Unlock()
 
-	post(t, ci, map[string]any{"type": "shell.ready"})
-	// This call confirms the duplicate ready has been dispatched without
-	// depending on an output that an idempotent ready must not produce.
-	post(t, ci, map[string]any{"type": "storage.keys", "id": "after-ready"})
-	rec.wait(t, "storage.keys.result", 1)
+	ready(t, ci, rec, 2)
 
-	if got := rec.find("shell.init"); len(got) != 1 {
-		t.Fatalf("shell.init sent %d times: %v", len(got), got)
+	if _, ok := ci.handlerFor("t"); ok {
+		t.Error("the previous session's inc topic still routes to this window")
 	}
 	ci.nap.mu.Lock()
 	defer ci.nap.mu.Unlock()
-	if ci.nap.gen != gen || ci.nap.ctx != ctx || !ci.nap.established {
-		t.Fatalf("duplicate ready changed session: gen=%d (want %d), established=%v", ci.nap.gen, gen, ci.nap.established)
+	if len(ci.nap.topics) != 0 || len(ci.nap.grants) != 0 {
+		t.Fatalf("session state survived nap.start: topics=%v grants=%v", ci.nap.topics, ci.nap.grants)
 	}
-	if !ci.nap.topics["keep"] || !ci.nap.grants[PermFetch] {
-		t.Fatalf("duplicate ready cleared session state: topics=%v grants=%v", ci.nap.topics, ci.nap.grants)
+	if !ci.nap.established {
+		t.Fatal("nap.start left the session unestablished")
+	}
+}
+
+func TestNapLoadedPushesControlsOncePerSession(t *testing.T) {
+	setupNapTest(t)
+	host = &notifyTestHost{}
+	ci, rec := openNapplet(t, "controls")
+
+	// a load before any session pushes nothing
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 0 {
+		t.Fatalf("controls pushed before nap.start: %v", got)
+	}
+
+	ready(t, ci, rec, 1)
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 1 {
+		t.Fatalf("controls after the first load: %v", got)
+	}
+	if c, _ := rec.find("notify.controls")[0]["controls"].([]any); len(c) != 1 || c[0] != "system" {
+		t.Fatalf("controls = %v", rec.find("notify.controls")[0])
+	}
+
+	// the napplet reloading its own frame: once per session
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 1 {
+		t.Fatalf("controls pushed twice in one session: %v", got)
+	}
+
+	ready(t, ci, rec, 2)
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 2 {
+		t.Fatalf("controls after the second session: %v", got)
 	}
 }
 

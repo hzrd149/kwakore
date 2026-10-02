@@ -164,7 +164,24 @@
   }
 
   // ── napplet -> Go ───────────────────────────────────────────────
+  // One ordered lane to Go, bounded so a napplet cannot queue without limit.
+  // MAX_PENDING matches the 256-slot per-session queue in Go's napEnqueue;
+  // past it every envelope that carries an id is refused at once.
+  const MAX_PENDING = 256
   let outbound = Promise.resolve()
+  let pending = 0
+  const enqueue = task => {
+    if (pending >= MAX_PENDING) return Promise.reject(new Error("too many pending NAP envelopes"))
+    pending++
+    const run = outbound.then(task)
+    outbound = run
+      .catch(() => {})
+      .finally(() => {
+        pending--
+      })
+    return run
+  }
+
   window.addEventListener("message", event => {
     // sender binding: only this window's own napplet frame, never anyone else
     if (!frame || event.source !== frame.contentWindow) return
@@ -172,25 +189,24 @@
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
     // one at a time: the desktop binding runs every call on its own thread,
     // so two calls in flight can reach Go in either order, and NAP needs the
-    // napplet's order kept (shell.ready first, a subscribe before its close).
-    // Go only queues the envelope before answering, so the wait is short.
-    outbound = outbound
-      .then(async () => {
-        const encoded = await dehydrate(data)
-        const json = JSON.stringify(encoded)
-        const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
-        if (!json || json.length > limit) throw new Error("NAP envelope is too large")
-        return rpc("nap.msg", json)
-      })
-      .then(deliver, err => {
-        console.error("[napplet-host]", err)
-        refuse(data, err)
-      })
+    // order kept: nap.start goes ahead of a new document's first envelope,
+    // and a subscribe goes ahead of its close. Go only queues the envelope
+    // before answering, so the wait is short.
+    enqueue(async () => {
+      const encoded = await dehydrate(data)
+      const json = JSON.stringify(encoded)
+      const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
+      if (!json || json.length > limit) throw new Error("NAP envelope is too large")
+      return rpc("nap.msg", json)
+    }).then(deliver, err => {
+      console.error("[napplet-host]", err)
+      refuse(data, err)
+    })
   })
 
   // refuse answers a request that never reached Go (too large, unencodable,
-  // or the rpc failed). The shim sets no deadline of its own, so without an
-  // answer the napplet would wait for good. Mirrors napCall.fail in nap.go.
+  // too many pending, or the rpc failed). Without an answer the napplet would
+  // wait out the shim's own request timeout. Mirrors napCall.fail in nap.go.
   const refuse = (data, err) => {
     if (typeof data.id !== "string" && typeof data.id !== "number") return
     const error = (err && err.message) || "request failed"
@@ -245,31 +261,58 @@
 
   // ── the chrome ──────────────────────────────────────────────────
   // ── the frame ───────────────────────────────────────────────────
-  // The frame goes in only once Go has handed over the verified document, so
-  // its first load is the napplet itself. A napplet that reloads itself starts
-  // over with a new shell.ready, which Go takes as a new session.
+  // A session starts here, in this trusted page, never in the frame: nothing
+  // the napplet posts can start, reset or replay one. nap.start rides the same
+  // ordered lane as the envelopes, and the frame is created only once Go has
+  // acknowledged it, so the napplet's first envelope lands in the new session.
+  // Every session gets a fresh iframe element, and the previous one is
+  // dropped first: whatever its document still posts fails the sender check
+  // instead of reaching the new session. bootSerial makes an older boot that
+  // is still in flight give up, so overlapping boots leave one frame.
+  //
+  // The frame's load event only triggers the notify.controls push
+  // (nap.loaded); it starts nothing. A napplet that reloads its own frame
+  // keeps its session; unexpected loads are handled on this same hook later.
+  const showBootError = err => {
+    document.body.textContent = "This napplet could not be started: " + ((err && err.message) || err)
+  }
+
+  let bootSerial = 0
   const boot = async () => {
+    const serial = ++bootSerial
     let doc
     try {
       doc = await rpc("nap.boot")
     } catch (err) {
-      document.body.textContent = "This napplet could not be started: " + ((err && err.message) || err)
+      if (serial === bootSerial) showBootError(err)
       return
     }
+    if (serial !== bootSerial) return
     if (!doc || typeof doc.srcdoc !== "string") return
-    if (!frame) {
-      frame = document.createElement("iframe")
-      // allow-scripts and nothing else: never allow-same-origin
-      frame.setAttribute("sandbox", "allow-scripts")
-      frame.setAttribute("referrerpolicy", "no-referrer")
-      frame.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
-      frame.style.cssText =
-        "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
-      frame.srcdoc = doc.srcdoc
-      document.body.appendChild(frame)
+
+    if (frame) frame.remove()
+    frame = null
+
+    try {
+      await enqueue(() => rpc("nap.start"))
+    } catch (err) {
+      if (serial === bootSerial) showBootError(err)
       return
     }
-    frame.srcdoc = doc.srcdoc
+    if (serial !== bootSerial) return
+
+    const f = document.createElement("iframe")
+    // allow-scripts and nothing else: never allow-same-origin
+    f.setAttribute("sandbox", "allow-scripts")
+    f.setAttribute("referrerpolicy", "no-referrer")
+    f.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
+    f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
+    f.addEventListener("load", () => {
+      if (frame === f) enqueue(() => rpc("nap.loaded")).catch(() => {})
+    })
+    f.srcdoc = doc.srcdoc
+    frame = f
+    document.body.appendChild(f)
   }
 
   const start = () => {

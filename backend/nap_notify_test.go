@@ -57,6 +57,7 @@ func TestNotifySendDismissAndSessionCleanup(t *testing.T) {
 	host = nh
 	ci, rec := openNapplet(t, "notify")
 	ready(t, ci, rec, 1)
+	loaded(t, ci)
 
 	controls := rec.wait(t, "notify.controls", 1)
 	gotControls, _ := controls["controls"].([]any)
