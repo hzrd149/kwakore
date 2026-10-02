@@ -361,7 +361,7 @@
   }
 
   const permissionsView = () => {
-    const box = el("section", { "data-section": "__permissions" }, el("h2", {}, "Permissions"))
+    const box = el("section", { "data-section": "__permissions" })
     if (!data.permissions.length) {
       box.append(el("p", { class: "muted" }, "Nothing remembered for this napp."))
       return box
@@ -736,10 +736,7 @@
       el("div", { class: "muted page-description" }, current.description),
       ...body,
     )
-    app.replaceChildren(
-      el("header", { class: "settings-header" }, el("h1", {}, "Settings"), el("div", { class: "muted" }, data.napp ? data.name || "Napp" : "Verdana")),
-      el("div", { class: "settings-shell" }, nav, content),
-    )
+    app.replaceChildren(el("div", { class: "settings-shell" }, nav, content))
 
     const sec = pendingSection || data.section
     pendingSection = ""
