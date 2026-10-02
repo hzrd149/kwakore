@@ -46,6 +46,10 @@ follow, plus installed napplets. Search terms are matched locally and are not
 sent to Nostr relays. GNOME may require signing out and back in before a newly
 registered provider first appears.
 
+For troubleshooting, start Verdana with `VERDANA_SEARCH_DEBUG=1` to log the
+terms GNOME sends, the result IDs Verdana returns, metadata requests and result
+activation. Search tracing is opt-in because system searches may be private.
+
 To uninstall on Linux or macOS while keeping installed apps and settings:
 
 ```sh

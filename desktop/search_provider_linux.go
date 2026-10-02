@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -58,11 +59,15 @@ func startSearchProvider() func() {
 }
 
 func (p *searchProvider) GetInitialResultSet(terms []string) ([]string, *dbus.Error) {
-	return searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors()), nil
+	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
+	logSearchQuery("initial", terms, nil, ids)
+	return ids, nil
 }
 
-func (p *searchProvider) GetSubsearchResultSet(_ []string, terms []string) ([]string, *dbus.Error) {
-	return searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors()), nil
+func (p *searchProvider) GetSubsearchResultSet(previous []string, terms []string) ([]string, *dbus.Error) {
+	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
+	logSearchQuery("subsearch", terms, previous, ids)
+	return ids, nil
 }
 
 func (searchProvider) GetResultMetas(ids []string) ([]map[string]dbus.Variant, *dbus.Error) {
@@ -87,15 +92,25 @@ func (searchProvider) GetResultMetas(ids []string) ([]map[string]dbus.Variant, *
 			"gicon":       dbus.MakeVariant("application-x-executable"),
 		})
 	}
+	if searchDebugEnabled() {
+		log.Info().Str("search_method", "metas").Strs("requested", ids).
+			Int("returned", len(metas)).Msg("GNOME search request")
+	}
 	return metas, nil
 }
 
 func (searchProvider) ActivateResult(id string, _ []string, _ uint32) *dbus.Error {
+	if searchDebugEnabled() {
+		log.Info().Str("search_method", "activate").Str("result", id).Msg("GNOME search request")
+	}
 	backend.TryNappletFromDiscovery(id)
 	return nil
 }
 
 func (searchProvider) LaunchSearch(terms []string, _ uint32) *dbus.Error {
+	if searchDebugEnabled() {
+		log.Info().Str("search_method", "launch").Strs("terms", terms).Msg("GNOME search request")
+	}
 	showDiscoverySearch(strings.Join(terms, " "))
 	return nil
 }
@@ -112,6 +127,9 @@ func (p *searchProvider) refreshAuthors(ctx context.Context) {
 		p.mu.Lock()
 		p.authors = next
 		p.mu.Unlock()
+		if searchDebugEnabled() {
+			log.Info().Int("authors", len(next)).Msg("GNOME search contact index refreshed")
+		}
 	}
 	refresh()
 	ticker := time.NewTicker(5 * time.Minute)
@@ -124,6 +142,24 @@ func (p *searchProvider) refreshAuthors(ctx context.Context) {
 			refresh()
 		}
 	}
+}
+
+func searchDebugEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VERDANA_SEARCH_DEBUG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func logSearchQuery(method string, terms, previous, results []string) {
+	if !searchDebugEnabled() {
+		return
+	}
+	log.Info().Str("search_method", method).Strs("terms", terms).
+		Strs("previous", previous).Strs("results", results).
+		Msg("GNOME search request")
 }
 
 func (p *searchProvider) allowedAuthors() map[string]bool {

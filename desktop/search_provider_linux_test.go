@@ -60,3 +60,14 @@ func TestSearchNappletIDsExcludesUnfollowedRemoteAuthors(t *testing.T) {
 		t.Fatalf("search results = %v, want [friend]", got)
 	}
 }
+
+func TestSearchDebugEnabled(t *testing.T) {
+	t.Setenv("VERDANA_SEARCH_DEBUG", "true")
+	if !searchDebugEnabled() {
+		t.Fatal("VERDANA_SEARCH_DEBUG=true did not enable tracing")
+	}
+	t.Setenv("VERDANA_SEARCH_DEBUG", "0")
+	if searchDebugEnabled() {
+		t.Fatal("VERDANA_SEARCH_DEBUG=0 enabled tracing")
+	}
+}
