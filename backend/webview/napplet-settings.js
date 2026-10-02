@@ -557,6 +557,30 @@
     return [section]
   }
 
+  const aboutPage = () => {
+    const a = data.about || {}
+    const commit = a.commit ? a.commit.slice(0, 12) + (a.modified ? " (modified)" : "") : ""
+    const rows = [
+      ["Version", a.version || "Development build"],
+      ["Commit", commit],
+      ["Platform", a.platform],
+      ["Go", a.go],
+    ].filter(([, v]) => v)
+    const link = (label, path) =>
+      el("button", { type: "button", onclick: () => rpc("settings.openSource", { path }).catch(err => status((err && err.message) || String(err), true)) }, label)
+    return [
+      el(
+        "section",
+        {},
+        el("div", { class: "about-head" }, el("div", { class: "about-mark" }, "V"), el("div", {}, el("strong", {}, "Verdana"), el("div", { class: "muted" }, "A launcher for Nostr apps."))),
+        el("dl", { class: "about-facts" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+        el("div", { class: "row about-links" }, link("Source code", ""), link("Releases", "/releases"), link("Report an issue", "/issues")),
+        el("div", { class: "hint" }, a.source || ""),
+        el("div", { class: "actions" }, el("span", { id: "status", class: "status" })),
+      ),
+    ]
+  }
+
   // Verdana's settings are separate pages. Each page sends only the fields it
   // owns; settings.saveLauncher treats omitted fields as unchanged.
   const verdanaPage = page => {
@@ -692,6 +716,7 @@
     { id: "general", group: "Verdana", label: "General", title: "General", description: "Appearance and operating system integration." },
     { id: "discovery", group: "Verdana", label: "Discovery", title: "Discovery", description: "Choose where Verdana discovers napps and napplets." },
     { id: "downloads", group: "Verdana", label: "Downloads", title: "Downloads", description: "Choose where Verdana fetches app files." },
+    { id: "about", group: "Verdana", label: "About", title: "About", description: "Version and source." },
   ]
 
   const render = () => {
@@ -701,6 +726,8 @@
     queuedSave = null
     const app = document.getElementById("app")
     fields = []
+    // in the launcher's window a section names one of its pages
+    if (!data.napp && (pendingSection || data.section)) tab = pendingSection || data.section
     if (!data.napp && (!tab || tab === "napp" || tab === "permissions")) tab = "general"
     else if (!tab) tab = "napp"
     document.title = (data.name || "Napp") + " — Settings"
@@ -728,7 +755,7 @@
         ),
       )
     }
-    const body = tab === "napp" ? nappPage() : tab === "permissions" ? [permissionsView()] : tab === "account" ? accountPage() : verdanaPage(tab)
+    const body = tab === "napp" ? nappPage() : tab === "permissions" ? [permissionsView()] : tab === "account" ? accountPage() : tab === "about" ? aboutPage() : verdanaPage(tab)
     const content = el(
       "div",
       { class: "settings-content", role: "tabpanel" },
@@ -793,7 +820,11 @@
       pendingSection = name
       return
     }
-    if (data.napp && tab !== "napp") {
+    if (!data.napp) {
+      selectTab(name)
+      return
+    }
+    if (tab !== "napp") {
       tab = "napp"
       pendingSection = name
       render()

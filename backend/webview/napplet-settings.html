@@ -277,6 +277,39 @@
         color: var(--text-muted);
         overflow-wrap: anywhere;
       }
+      .about-head {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        font-size: 16px;
+      }
+      .about-mark {
+        width: 48px;
+        height: 48px;
+        flex: 0 0 auto;
+        border-radius: 10px;
+        background: #24805c;
+        color: #ffffff;
+        font: bold 26px/48px Verdana, system-ui, sans-serif;
+        text-align: center;
+      }
+      .about-facts {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 6px 16px;
+        margin: 20px 0;
+      }
+      .about-facts dt {
+        color: var(--text-muted);
+      }
+      .about-facts dd {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      .about-links {
+        flex-wrap: wrap;
+      }
       @media (max-width: 700px) {
         main {
           padding: 16px;

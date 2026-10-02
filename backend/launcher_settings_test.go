@@ -153,3 +153,42 @@ func TestBlossomServersEmptySurvivesRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestAboutOpensLauncherSettingsOnAbout(t *testing.T) {
+	h := setupConfigTest(t)
+	resetLauncherState(t)
+
+	if err := OpenAbout(); err != nil {
+		t.Fatal(err)
+	}
+	if h.count() != 1 || h.opened[0].NappID != "" || h.opened[0].Section != "about" {
+		t.Fatalf("opened: %+v", h.opened)
+	}
+	win := h.opened[0].Window
+	srec := h.wins[win]
+
+	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 1, Method: "settings.load"})
+	var load settingsLoad
+	if err := json.Unmarshal(srec.resp(t, 1).Result, &load); err != nil {
+		t.Fatal(err)
+	}
+	if load.Napp || load.Section != "about" || load.About.Source != SourceURL || load.About.Platform == "" {
+		t.Fatalf("load: %+v", load)
+	}
+	// the section is only for the first load
+	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 2, Method: "settings.load"})
+	load = settingsLoad{}
+	_ = json.Unmarshal(srec.resp(t, 2).Result, &load)
+	if load.Section != "" {
+		t.Fatalf("section again: %q", load.Section)
+	}
+
+	// the page can only open the launcher's own links
+	for i, path := range []string{"/../evil", "https://evil.example", "/pulls"} {
+		params, _ := json.Marshal(map[string]string{"path": path})
+		HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 10 + i, Method: "settings.openSource", Params: string(params)})
+		if r := srec.resp(t, 10+i); r.Error == "" {
+			t.Fatalf("opened %q", path)
+		}
+	}
+}

@@ -92,6 +92,9 @@ func OpenSettings(nappID string) error { return openSettings(nappID, "") }
 // own page in it (relays, Blossom servers).
 func OpenLauncherSettings() error { return openSettings(launcherSettingsID, "") }
 
+// OpenAbout opens the launcher's settings window on its About page.
+func OpenAbout() error { return openSettings(launcherSettingsID, "about") }
+
 // launcherSettingsID stands for the launcher among the napp ids settings
 // windows are kept by; no napp id is empty.
 const launcherSettingsID = ""
@@ -234,6 +237,7 @@ type settingsLoad struct {
 	// Launcher is the launcher's own settings, on every window's Verdana
 	// page.
 	Launcher launcherSettings `json:"launcher"`
+	About    aboutInfo        `json:"about"`
 }
 
 type launcherSettings struct {
@@ -391,6 +395,20 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 	case "settings.logout":
 		Logout()
 		return settingsLoadFor(w), nil
+	case "settings.openSource":
+		// only the launcher's own links: the page never names a url
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(params), &req); err != nil {
+			return nil, errors.New("invalid request")
+		}
+		switch req.Path {
+		case "", "/releases", "/issues":
+		default:
+			return nil, errors.New("unknown link")
+		}
+		return nil, openExternalLink(SourceURL + req.Path)
 	}
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }
@@ -399,6 +417,7 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	state := Snapshot()
 	out := settingsLoad{
 		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
+		About: aboutVersion(),
 		Launcher: launcherSettings{
 			Relays:                Relays(),
 			BlossomServers:        BlossomServers(),
@@ -424,7 +443,11 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 		out.Launcher.UserRelays = userRelayViews(l)
 		out.Launcher.UserRelaysLoadedAt = l.LoadedAt.Unix()
 	}
+	w.mu.Lock()
+	out.Section, w.section = w.section, ""
+	w.mu.Unlock()
 	if w.nappID == launcherSettingsID {
+		// the launcher's window has no napp sections: a section names a page
 		out.Name = "Verdana"
 		return out
 	}
@@ -432,9 +455,6 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	if napp, ok := settingsNapp(w.nappID); ok {
 		out.Name = napp.Label()
 	}
-	w.mu.Lock()
-	out.Section, w.section = w.section, ""
-	w.mu.Unlock()
 	if s, stored := configSnapshot(w.nappID); s != nil {
 		out.Schema = s.Raw
 		// what the napplet would be delivered, minus the secrets, which

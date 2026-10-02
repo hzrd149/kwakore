@@ -145,7 +145,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
-        run: go build -o ${{ matrix.binary }} -tags novulkan -ldflags "-s -w" .
+        run: go build -o ${{ matrix.binary }} -tags novulkan -ldflags "-s -w -X verdana/backend.Version=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}" .
 
       - name: package
         shell: bash

@@ -69,6 +69,11 @@ func newTray() *systray.SystemTray {
 		autostartItem.SetChecked(enabled)
 	})
 	menu.AddSeparator()
+	menu.Add("About Verdana", func() {
+		if err := backend.OpenAbout(); err != nil {
+			log.Warn().Err(err).Msg("could not open about from tray")
+		}
+	})
 	menu.Add("Quit Verdana", quitDesktop)
 
 	tray := systray.New().
