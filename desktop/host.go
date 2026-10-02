@@ -27,6 +27,7 @@ func (gioHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error
 }
 
 func (gioHost) StateChanged() {
+	trayStateChanged()
 	if w := managerWindow(); w != nil {
 		w.Invalidate()
 	}

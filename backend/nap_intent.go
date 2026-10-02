@@ -125,6 +125,27 @@ func napIntentInvoke(c *napCall) {
 	})
 }
 
+// OpenUserProfile fires napplet:profile/open for the logged-in user, from the
+// launcher itself (the tray). It is routed as a napplet's intent.invoke is,
+// sharing the profile archetype's default handler; with no handler installed,
+// Discovery opens on profile napplets.
+func OpenUserProfile(ctx context.Context) error {
+	pk, ok := currentUser()
+	if !ok {
+		return errors.New("not logged in")
+	}
+	payload, _ := json.Marshal(map[string]string{"pubkey": pk.Hex()})
+	_, err := runNappAction(ctx, nil, "napplet:profile/open", payload, actionOptions{
+		DefaultKey: intentDefaultKey("profile"),
+		Focus:      true,
+	})
+	if errors.Is(err, errNoHandler) {
+		host.OpenDiscovery("profile")
+		return nil
+	}
+	return err
+}
+
 func conventionParts(convention string) (string, string, bool) {
 	rest, ok := strings.CutPrefix(convention, "napplet:")
 	archetype, action, found := strings.Cut(rest, "/")

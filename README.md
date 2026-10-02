@@ -152,7 +152,9 @@ The launcher window has three tabs:
 
 Verdana stays in the **system tray** when you close its window. Apps keep
 running, and you reopen the launcher from the tray icon. The tray menu also
-has **Settings** and a **Launch at login** toggle.
+has **Settings** and a **Launch at login** toggle. At the top it shows who is
+logged in: click your name to open your profile in a profile napplet. If none
+is installed, Discovery opens on the ones available.
 
 You can open an app by address from the command line:
 

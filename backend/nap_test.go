@@ -1019,6 +1019,68 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	}
 }
 
+func TestOpenUserProfileDeliversToHandler(t *testing.T) {
+	setupNapTest(t)
+	sk := nostr.Generate()
+	asUser(t, sk)
+	handler, rec := openNapplet(t, "profile-handler")
+	handler.napp.Conventions = []NappletConvention{{ID: "napplet:profile/open"}}
+	handler.napp.Actions = []string{"napplet:profile/open"}
+
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[handler.napp.ID] = handler.napp
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		delete(state.InstalledNapps, handler.napp.ID)
+		stateMu.Unlock()
+	})
+	key := intentDefaultKey("profile")
+	setSessionRule(key, Rule{Decision: DecisionAllow, Target: handler.napp.ID})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	ready(t, handler, rec, 1)
+	done := make(chan error, 1)
+	go func() { done <- OpenUserProfile(context.Background()) }()
+	delivery := rec.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
+	if delivery["sender"] != "launcher" || delivery["convention"] != "napplet:profile/open" ||
+		delivery["payload"].(map[string]any)["pubkey"] != sk.Public().Hex() {
+		t.Errorf("delivery: %v", delivery)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("OpenUserProfile: %v", err)
+	}
+}
+
+func TestOpenUserProfileWithoutHandlerOpensDiscovery(t *testing.T) {
+	setupNapTest(t)
+	asUser(t, nostr.Generate())
+	discovery := &intentDiscoveryHost{opened: make(chan string, 1)}
+	host = discovery
+
+	if err := OpenUserProfile(context.Background()); err != nil {
+		t.Fatalf("OpenUserProfile: %v", err)
+	}
+	select {
+	case archetype := <-discovery.opened:
+		if archetype != "profile" {
+			t.Fatalf("opened discovery for %q", archetype)
+		}
+	default:
+		t.Fatal("no handler did not open discovery")
+	}
+}
+
+func TestOpenUserProfileLoggedOut(t *testing.T) {
+	setupNapTest(t)
+	if err := OpenUserProfile(context.Background()); err == nil {
+		t.Fatal("opened a profile with no one logged in")
+	}
+}
+
 // ─── link ────────────────────────────────────────────────────────
 
 func TestNapLinkRejectsSchemes(t *testing.T) {
