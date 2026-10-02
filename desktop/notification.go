@@ -9,7 +9,7 @@ import (
 // The desktop tracer deliberately advertises only system delivery. beeep uses
 // each desktop's native notification service, but does not expose portable
 // action, channel, badge, or dismissal callbacks.
-func (gioHost) NotificationControls() []string { return []string{"system"} }
+func (gioHost) NotificationControls() []string      { return []string{"system"} }
 func (gioHost) RequestNotificationPermission() bool { return true }
 
 func (gioHost) SendNotification(req backend.NotificationRequest) (backend.NotificationHandle, error) {

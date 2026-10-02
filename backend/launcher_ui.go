@@ -179,8 +179,6 @@ func setUpdateAvailable(apps map[string]Napp) {
 // Snapshot is the current launcher state, safe to hold on to and read from a
 // render loop.
 func Snapshot() State {
-	name, _ := Theme()
-
 	ls.mu.Lock()
 	s := State{
 		Phase:          ls.phase,
@@ -190,7 +188,7 @@ func Snapshot() State {
 		Pubkey:         ls.pubkey,
 		FetchErr:       ls.fetchErr,
 		Fetching:       ls.fetching,
-		Theme:          name,
+		Theme:          ThemeName(),
 		ThemeMode:      ThemeMode(),
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),

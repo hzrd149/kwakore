@@ -104,8 +104,9 @@ func napRelaysFor(ctx context.Context, f nostr.Filter) []string {
 		}
 	}
 	if pk, ok := currentUser(); ok {
-		_, read, _ := nip65Lists(ctx, pk)
-		add(read...)
+		if _, read, found := nip65Lists(ctx, pk); found {
+			add(read...)
+		}
 	}
 	if len(urls) == 0 {
 		add(outboxFallback()...)

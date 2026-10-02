@@ -65,9 +65,12 @@ func configLocked(nappID string) *configEntry {
 			e.rec = configRecord{}
 		}
 		if len(e.rec.Schema) > 0 {
-			// stored schemas were checked when registered; a failure here
-			// is a stricter launcher, and the napplet registers again anyway
-			e.schema, _ = checkConfigSchema(e.rec.Schema)
+			var schemaErr *SchemaError
+			e.schema, schemaErr = checkConfigSchema(e.rec.Schema)
+			if schemaErr != nil {
+				log.Warn().Str("napp", nappID).Str("code", schemaErr.Code).Msg("stored napplet schema is no longer valid")
+				e.schema = nil
+			}
 		}
 	}
 	configs[nappID] = e

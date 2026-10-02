@@ -30,8 +30,9 @@ func Theme() (string, string) {
 
 // ThemeName is the current theme name on its own.
 func ThemeName() string {
-	name, _ := Theme()
-	return name
+	themeMu.RLock()
+	defer themeMu.RUnlock()
+	return themeName
 }
 
 // ThemeMode is the user's persisted preference. It is separate from Theme,

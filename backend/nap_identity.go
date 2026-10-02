@@ -238,11 +238,15 @@ func zapReceipt(evt nostr.Event, provider, recipient nostr.PubKey) (map[string]a
 
 	var amount int64
 	if b := evt.Tags.Find("bolt11"); b != nil && len(b) >= 2 {
-		amount, _ = bolt11Msats(b[1])
+		if parsed, ok := bolt11Msats(b[1]); ok {
+			amount = parsed
+		}
 	}
 	if amount == 0 {
 		if amt := req.Tags.Find("amount"); amt != nil && len(amt) >= 2 {
-			amount, _ = strconv.ParseInt(amt[1], 10, 64)
+			if parsed, err := strconv.ParseInt(amt[1], 10, 64); err == nil {
+				amount = parsed
+			}
 		}
 	}
 
