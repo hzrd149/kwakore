@@ -42,8 +42,12 @@ func setGNOMESearchIntegration(enabled bool, exe string) error {
 	desktopPath, providerPath, servicePath := gnomeSearchIntegrationPaths()
 	if !enabled {
 		for _, path := range []string{desktopPath, providerPath, servicePath} {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			err := os.Remove(path)
+			if err != nil && !os.IsNotExist(err) {
 				return err
+			}
+			if err == nil && searchDebugEnabled() {
+				log.Info().Str("path", path).Msg("removed GNOME search integration file")
 			}
 		}
 		refreshShortcutParent(filepath.Dir(desktopPath))
@@ -72,15 +76,20 @@ Name=com.verdana.Verdana.SearchProvider
 Exec=%s --background
 `, quoteExecField(exe))
 	for _, file := range []struct {
+		kind string
 		path string
 		data string
 	}{
-		{desktopPath, desktop},
-		{providerPath, provider},
-		{servicePath, service},
+		{"desktop entry", desktopPath, desktop},
+		{"search provider", providerPath, provider},
+		{"D-Bus service", servicePath, service},
 	} {
 		if err := writeAtomic(file.path, []byte(file.data), 0644); err != nil {
 			return err
+		}
+		if searchDebugEnabled() {
+			log.Info().Str("kind", file.kind).Str("path", file.path).Str("executable", exe).
+				Msg("installed GNOME search integration file")
 		}
 	}
 	refreshShortcutParent(filepath.Dir(desktopPath))
