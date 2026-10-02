@@ -35,8 +35,12 @@ func Discover() {
 	setFetching(true)
 	discoverMu.Unlock()
 
-	urls := Relays()
-	log.Info().Strs("relays", urls).Msg("fetching napps from relays")
+	// a first login's relay list is still on its way: give it a moment, so
+	// this run asks the user's relays too instead of a second run redoing it
+	waitUserRelays(userRelayWait)
+	urls := discoveryRelays()
+	log.Info().Strs("relays", urls).Strs("settings", Relays()).Strs("user", UserWriteRelays()).
+		Bool("userRelays", DiscoverOnUserRelays()).Msg("fetching napps from relays")
 
 	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
 		nostr.Filter{

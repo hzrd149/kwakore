@@ -184,6 +184,12 @@ Open **Settings** from the launcher or the tray. The **Verdana** page sets:
   installed app to your desktop's app menu, Start menu or Launchpad, so each
   one can be started directly.
 - **Relays**: where napps and napplets are discovered.
+- **Also discover on my relays**: after you log in, Verdana loads your relay
+  list (NIP-65) in the background and keeps it up to date. With this on (the
+  default), Discovery also asks your write (outbox) relays, so apps published
+  there show up too. Your relays are listed below it, marked read or write.
+  They are only shown here; change them in your Nostr client. Apps that use
+  the outbox API fall back to these relays when nothing better is known.
 - **Blossom servers**: where app files are fetched from first. Files are
   always checked against their hash, wherever they come from.
 

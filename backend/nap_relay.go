@@ -103,14 +103,11 @@ func napRelaysFor(ctx context.Context, f nostr.Filter) []string {
 		}
 	}
 	if pk, ok := currentUser(); ok {
-		for _, r := range sys.FetchRelayList(ctx, pk).Items {
-			if r.Inbox {
-				add(r.URL)
-			}
-		}
+		_, read, _ := nip65Lists(ctx, pk)
+		add(read...)
 	}
 	if len(urls) == 0 {
-		add(Relays()...)
+		add(outboxFallback()...)
 	}
 	return urls
 }

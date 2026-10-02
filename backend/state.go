@@ -56,6 +56,13 @@ type AppState struct {
 	// NostrConnectRelay is the relay the login screen's nostrconnect QR
 	// code sends signers to (see nostrconnect.go).
 	NostrConnectRelay string `json:"nostrconnect_relay"`
+
+	// UserRelays is the logged-in user's NIP-65 relay list as last seen
+	// (see user_relays.go), so the next start has it before the relays
+	// answer. DiscoverOnUserRelays turns asking its write relays during
+	// discovery off; nil means on.
+	UserRelays           *userRelayList `json:"user_relays,omitempty"`
+	DiscoverOnUserRelays *bool          `json:"discover_on_user_relays,omitempty"`
 }
 
 var (

@@ -192,7 +192,8 @@ func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, r
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
-// profile metadata, put it on the launcher state and go discover napps.
+// profile metadata, put it on the launcher state, start following the user's
+// relay list and go discover napps.
 func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 	pm := sys.FetchProfileMetadata(ctx, pk)
 	name := pm.Name
@@ -203,6 +204,7 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 		name = pk.Hex()
 	}
 	setProfile(pk.Hex(), name, pm.Picture)
+	startUserRelays(pk)
 
 	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
 	go Discover()
@@ -220,6 +222,7 @@ func Logout() {
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
 	pushIdentityChanged()
+	stopUserRelays()
 
 	stateMu.Lock()
 	state.Login = ""

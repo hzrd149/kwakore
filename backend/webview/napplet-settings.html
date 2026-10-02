@@ -96,6 +96,32 @@
         margin-top: 4px;
         white-space: pre-wrap;
       }
+      section h3 {
+        font-size: 14px;
+        margin: 16px 0 0;
+      }
+      .user-relays {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .user-relays li {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 4px 0;
+        overflow-wrap: anywhere;
+      }
+      .user-relays li > span:first-child {
+        flex: 1;
+      }
+      .relay-tag {
+        background: var(--chip);
+        color: var(--text-muted);
+        border-radius: 5px;
+        padding: 1px 6px;
+        font-size: 11px;
+      }
       .deprecated {
         background: var(--dev);
         color: var(--dev-text);

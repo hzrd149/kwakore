@@ -61,3 +61,25 @@ func SetBlossomServers(servers []string) {
 	stateMu.Unlock()
 	notifyState()
 }
+
+// DiscoverOnUserRelays says whether discovery also asks the user's own
+// NIP-65 write relays (see user_relays.go). On unless turned off.
+func DiscoverOnUserRelays() bool {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return state.DiscoverOnUserRelays == nil || *state.DiscoverOnUserRelays
+}
+
+// SetDiscoverOnUserRelays turns discovery on the user's relays on or off,
+// and reruns discovery when that changes where it looks.
+func SetDiscoverOnUserRelays(on bool) {
+	stateMu.Lock()
+	changed := (state.DiscoverOnUserRelays == nil || *state.DiscoverOnUserRelays) != on
+	state.DiscoverOnUserRelays = &on
+	saveState()
+	stateMu.Unlock()
+	notifyState()
+	if changed && LoggedIn() {
+		rediscover()
+	}
+}

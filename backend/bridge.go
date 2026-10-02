@@ -861,6 +861,8 @@ func publishSigned(ctx context.Context, evt nostr.Event, targets []string) map[s
 	}
 	// and let the load* caches know they're stale for this kind+author
 	invalidateList(evt.Kind, evt.PubKey)
+	// the user's own new relay list takes effect at once
+	applyUserRelayEvent(evt)
 
 	log.Info().Uint16("kind", uint16(evt.Kind)).Strs("relays", targets).Msg("publishing event")
 

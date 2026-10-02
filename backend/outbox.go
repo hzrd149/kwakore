@@ -33,8 +33,11 @@ const (
 type relayListFunc func(ctx context.Context, pk nostr.PubKey) (write, read []string, found bool)
 
 // nip65Lists reads relay lists through the sdk (local store, cache, then the
-// relay-list relays).
+// relay-list relays). The user's own comes from memory once it is loaded.
 func nip65Lists(ctx context.Context, pk nostr.PubKey) (write, read []string, found bool) {
+	if l, ok := userRelays(); ok && l.Pubkey == pk {
+		return l.Write, l.Read, len(l.Write)+len(l.Read) > 0
+	}
 	rl := sys.FetchRelayList(ctx, pk)
 	for _, r := range rl.Items {
 		u := nostr.NormalizeURL(r.URL)
@@ -171,6 +174,7 @@ func directFilter(f nostr.Filter, outboxes map[nostr.PubKey][]string, full, fall
 // outboxDirected is where a napplet's filter is asked: its authors on their
 // own relays, the tagged people and hinted authors on theirs, the user's
 // inbox when nobody is named, and the napplet's validated relay hints.
+// Whatever none of that covers goes to the user's own relays.
 func outboxDirected(ctx context.Context, f nostr.Filter, hintAuthors []nostr.PubKey, hintRelays []string) []nostr.DirectedFilter {
 	authors := f.Authors
 	if len(authors) > outboxMaxAuthors {
@@ -210,7 +214,7 @@ func outboxDirected(ctx context.Context, f nostr.Filter, hintAuthors []nostr.Pub
 			full = append(full, read...)
 		}
 	}
-	return directFilter(f, outboxes, full, Relays())
+	return directFilter(f, outboxes, full, outboxFallback())
 }
 
 // lookupAll runs a relay lookup for many people at once (the sdk batches the

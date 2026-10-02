@@ -127,15 +127,15 @@ func napOutboxGetEvent(c *napCall) {
 			}
 		}
 
-		// the author's outbox when known, the napplet's hints and the
-		// launcher's relays: never a search across everything
+		// the author's outbox when known, the napplet's hints, the user's
+		// own relays and the launcher's: never a search across everything
 		relays := r.Options.hintRelays(ctx)
 		for _, pk := range r.Options.hintAuthors() {
 			for _, u := range sys.FetchOutboxRelays(ctx, pk, outboxRelaysPerAuthor) {
 				relays = nostr.AppendUnique(relays, u)
 			}
 		}
-		for _, u := range Relays() {
+		for _, u := range append(outboxFallback(), Relays()...) {
 			relays = nostr.AppendUnique(relays, nostr.NormalizeURL(u))
 		}
 		if len(relays) > 0 {

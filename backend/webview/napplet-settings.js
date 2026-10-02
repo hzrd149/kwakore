@@ -505,9 +505,45 @@
     }
     const relays = listEditor(
       "Relays",
-      "Napps and napplets are discovered on these relays.",
+      "Napps and napplets are discovered on these relays, and on your own when enabled below.",
       l.relays,
       "wss://relay.example.com",
+    )
+    // the user's NIP-65 list: shown, not edited here (it belongs to their
+    // Nostr account, so their Nostr client edits it)
+    const discoverOnUserRelays = el("input", { type: "checkbox", name: "discoverOnUserRelays" })
+    discoverOnUserRelays.checked = !!l.discoverOnUserRelays
+    const userRelays = l.userRelays || []
+    let userStatus = "Log in to load your relays."
+    if (l.loggedIn && !l.userRelaysLoadedAt) userStatus = "Loading your relay list…"
+    else if (l.loggedIn && !userRelays.length) userStatus = "No relay list (NIP-65) found for your account."
+    else if (l.loggedIn) userStatus = "From your relay list (NIP-65), loaded " + new Date(l.userRelaysLoadedAt * 1000).toLocaleString() + "."
+    relays.box.append(
+      el(
+        "div",
+        { class: "field check" },
+        el(
+          "label",
+          {},
+          discoverOnUserRelays,
+          el("span", {}, "Also discover on my relays", el("span", { class: "hint" }, "Ask the write (outbox) relays from your relay list too.")),
+        ),
+      ),
+      el("h3", {}, "Your relays"),
+      el("div", { class: "hint" }, userStatus),
+      el(
+        "ul",
+        { class: "user-relays" },
+        ...userRelays.map(r =>
+          el(
+            "li",
+            {},
+            el("span", {}, r.url),
+            ...(r.read ? [el("span", { class: "relay-tag" }, "read")] : []),
+            ...(r.write ? [el("span", { class: "relay-tag" }, "write")] : []),
+          ),
+        ),
+      ),
     )
     const servers = listEditor(
       "Blossom servers",
@@ -525,6 +561,7 @@
             {
               themeMode: themeMode.value,
               relays: relays.read(),
+              discoverOnUserRelays: discoverOnUserRelays.checked,
               blossomServers: servers.read(),
               ...(autostart ? { autostart: autostart.checked } : {}),
               ...(l.appShortcutsSupported

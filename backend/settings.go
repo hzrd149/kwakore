@@ -245,6 +245,38 @@ type launcherSettings struct {
 	AppShortcutsSupported bool     `json:"appShortcutsSupported"`
 	AppShortcuts          bool     `json:"appShortcuts"`
 	AppShortcutNaming     string   `json:"appShortcutNaming"`
+
+	// the user's NIP-65 relays, shown read-only; UserRelaysLoadedAt is unix
+	// seconds, 0 while not loaded yet
+	DiscoverOnUserRelays bool            `json:"discoverOnUserRelays"`
+	UserRelays           []userRelayView `json:"userRelays"`
+	UserRelaysLoadedAt   int64           `json:"userRelaysLoadedAt"`
+	LoggedIn             bool            `json:"loggedIn"`
+}
+
+// userRelayView is one relay of the user's list, as the settings page shows it.
+type userRelayView struct {
+	URL   string `json:"url"`
+	Read  bool   `json:"read"`
+	Write bool   `json:"write"`
+}
+
+// userRelayViews merges a list's read and write relays, write ones first.
+func userRelayViews(l userRelayList) []userRelayView {
+	out := []userRelayView{}
+	idx := map[string]int{}
+	for _, u := range l.Write {
+		idx[u] = len(out)
+		out = append(out, userRelayView{URL: u, Write: true})
+	}
+	for _, u := range l.Read {
+		if i, ok := idx[u]; ok {
+			out[i].Read = true
+			continue
+		}
+		out = append(out, userRelayView{URL: u, Read: true})
+	}
+	return out
 }
 
 func settingsRPC(w *settingsWindow, method, params string) (any, error) {
@@ -277,6 +309,7 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 			Autostart      *bool    `json:"autostart"`
 			AppShortcuts   *bool    `json:"appShortcuts"`
 			ShortcutNaming string   `json:"appShortcutNaming"`
+			DiscoverOnUser *bool    `json:"discoverOnUserRelays"`
 		}
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
@@ -288,6 +321,9 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 				// what is discoverable depends on them
 				go Discover()
 			}
+		}
+		if req.DiscoverOnUser != nil {
+			SetDiscoverOnUserRelays(*req.DiscoverOnUser)
 		}
 		if req.BlossomServers != nil {
 			SetBlossomServers(req.BlossomServers)
@@ -343,7 +379,14 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 			AppShortcutsSupported: host.AppShortcutsSupported(),
 			AppShortcuts:          AppShortcutsEnabled(),
 			AppShortcutNaming:     AppShortcutNaming(),
+			DiscoverOnUserRelays:  DiscoverOnUserRelays(),
+			UserRelays:            []userRelayView{},
+			LoggedIn:              LoggedIn(),
 		},
+	}
+	if l, ok := userRelays(); ok {
+		out.Launcher.UserRelays = userRelayViews(l)
+		out.Launcher.UserRelaysLoadedAt = l.LoadedAt.Unix()
 	}
 	if w.nappID == launcherSettingsID {
 		out.Name = "Verdana"
