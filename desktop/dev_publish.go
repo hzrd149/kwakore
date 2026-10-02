@@ -56,7 +56,11 @@ func (s *devPublishState) snapshot() (bool, []string) {
 
 func runDevPublishWindow(info backend.DevPublishInfo, servers, relays []string) {
 	w := new(app.Window)
-	w.Option(app.Title("Publish "+info.Napp.Name), app.Size(unit.Dp(660), unit.Dp(780)))
+	w.Option(
+		app.Title("Publish "+info.Napp.Name),
+		app.Size(unit.Dp(660), unit.Dp(780)),
+		app.Decorated(true),
+	)
 
 	var serverEd, relayEd widget.Editor
 	serverEd.SingleLine = false

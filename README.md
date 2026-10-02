@@ -81,7 +81,11 @@ sha256sum --check SHA256SUMS --ignore-missing
 
 - **Linux** needs GTK 3 and WebKitGTK 4.1. On Debian or Ubuntu, that is
   `sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0`. Most desktops already
-  have them.
+  have them. In a Wayland session, Verdana uses XWayland when available so
+  the desktop window manager can draw the title bar and window controls.
+  Set `VERDANA_NATIVE_WAYLAND=1` to use Gio's native Wayland backend instead;
+  compositors without server-side decorations will then use Gio's fallback
+  title bar.
 - **Windows** needs the Microsoft Edge WebView2 runtime. Windows 10 and 11
   include it.
 - **macOS** uses the system WebKit, so it needs nothing else. The binary is

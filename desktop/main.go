@@ -119,6 +119,9 @@ func main() {
 		Timestamp().
 		Logger()
 	log.Info().Msg("starting verdana")
+	if backend := configureNativeWindowChrome(); backend != "" {
+		log.Info().Str("window_backend", backend).Msg("configured native window chrome")
+	}
 
 	dataDir, err := app.DataDir()
 	if err != nil {
@@ -335,7 +338,11 @@ func gioMain() {
 	th.Face = "vFont"
 
 	w := new(app.Window)
-	w.Option(app.Title(APP_TITLE), app.Size(unit.Dp(560), unit.Dp(640)))
+	w.Option(
+		app.Title(APP_TITLE),
+		app.Size(unit.Dp(560), unit.Dp(640)),
+		app.Decorated(true),
+	)
 	setManagerWindow(w)
 	defer setManagerWindow(nil)
 
