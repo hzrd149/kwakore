@@ -1,0 +1,1 @@
+{"content":"CSP connect-src does not govern WebRTC (RTCPeerConnection/data channels, ICE/STUN); proposed CSP webrtc directive is unshipped; skimmers used WebRTC to bypass connect-src.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-10-02T21:03:31.864Z","ttl":86400000,"kind":"web"}

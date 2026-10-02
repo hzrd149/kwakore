@@ -1,0 +1,1 @@
+{"content":"CSP navigate-to removed from CSP3 in 2022, never shipped. Parent frame-src applies to iframe navigations including self-initiated; about:srcdoc not fetched so not subject to frame-src.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-10-02T21:03:31.965Z","ttl":86400000,"kind":"web"}

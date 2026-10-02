@@ -1,0 +1,1 @@
+{"content":"zalando/go-keyring macOS shells out to /usr/bin/security; ACL trusts the security tool; unsigned rebuilds cause prompts; Linux Secret Service over D-Bus; Flatpak needs talk-name or libsecret file backend.","source":"web","provider":"websearch","confidence":"LOW","fetched_at":"2026-10-02T21:03:32.379Z","ttl":86400000,"kind":"web"}

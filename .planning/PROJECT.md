@@ -30,25 +30,30 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 <!-- This milestone: hardening + strict spec conformance, desktop first. -->
 
 **Conformance**
-- [ ] Upgrade the vendored `@napplet/shim` to the version matching the pinned `napplet/naps` head, before auditing the launcher
+- [ ] Make the vendored shim reproducible before auditing: pristine `@napplet/shim` 0.30.0 plus a committed Verdana patch, with a hash test (today the file is a hand-patched 0.29.2 build labelled `0.30.0+verdana.2`, and the README sha256 doesn't match it)
 - [ ] Audit checklist covering every MUST and SHOULD in the pinned specs, each marked conforming, fixed, or N/A with reason, with spec commit SHAs recorded
 - [ ] All implemented NAP domains (including `notify` and `config`) conform strictly to their specs
 - [ ] NIP-5D runtime contract (sandbox, CSP, boot, envelope handling) conforms strictly
 - [ ] Both manifest shapes conform to their own specs: NIP-5D and WEB-NAPPLET (the future event schema)
-- [ ] NAP-STORAGE keyed by artifact hash as specified, with a one-time notice to users that existing napplet data resets on upgrade
+- [ ] Finish NAP-STORAGE artifact-hash keying (started in `18f8f81`): no address-only fallback when the hash is empty, storage cleaned up on update and uninstall, legacy v0.0.0 address-keyed data migrated aside with a one-time reset notice
 - [ ] `NAPPLETS.md` domain table reflects what is actually implemented
+
+**Critical (fix first)**
+- [ ] A napp/napplet `d` tag can never escape the data directory: `nappBaseDir` (`backend/backend.go`) joins the raw `d` from `nappletID`/`nappFromNappEvent` into a path, so `d = "../../.."` is an arbitrary file write on install and an arbitrary `RemoveAll` on failed install. Encode `d` only where filesystem paths are built (WEB-NAPPLET forbids normalizing `d` itself)
 
 **Napplet sandbox hardening**
 - [ ] Permission gating enforced centrally in the NAP dispatcher, so a handler cannot be registered without declaring its permission
 - [ ] Every napplet-facing input has explicit size/count/rate bounds and regression tests
+- [ ] A napplet that reloads or navigates its own frame cannot escape the CSP or keep a live session: the host page resets the session on unexpected frame loads, and its CSP replaces the ineffective `navigate-to 'self'` (`desktop/child/main.go`, `desktop/child/napplet.go`) with directives engines enforce
 
 **Desktop process hardening**
-- [ ] Child webview binary extraction cannot be hijacked by a pre-existing file in a shared temp dir
+- [ ] Child webview binary extraction cannot be hijacked by a pre-existing file in a shared temp dir, and prod builds never fall back to a working-directory `./child/child`; the `go-webview/embedded` import (extracts `libwebview` into a shared 0777 `/tmp/webview-*` dir) is removed or made safe
 - [ ] Single-instance listener replaced with a user-only Unix socket (named pipe on Windows); legacy token-only TCP path removed
 - [ ] `OpenLink` validates the URL scheme inside the desktop host, not only in callers
 
 **Secrets at rest**
-- [ ] Desktop login secrets stored in the OS keyring; when no keyring is available, fall back to the existing `0600` file and warn the user
+- [ ] Desktop login secrets stored in the OS keyring; when no keyring is available, fall back to the existing `0600` file and warn the user. A locked or unavailable keyring never causes the NIP-46 client key to be regenerated
+- [ ] `state.json` is written atomically and a corrupt file is preserved instead of silently resetting state
 
 **Robustness**
 - [ ] No runtime panics reachable from napplet input or filesystem errors (e.g. `backend/cache.go`)
@@ -67,10 +72,12 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 - **Specs and pinned refs:**
   - NIP-5D: `nostr-protocol/nips` PR #2303 head
-  - NAP domains: `napplet/naps` master, plus draft PR heads for NAP-MEDIA (#10) and NAP-OUTBOX (#32)
+  - NAP domains: `napplet/naps` master has only SHELL, IDENTITY, INC, THEME and INTENT. Every other implemented domain is an open draft PR, pinned by head SHA: RELAY #2, STORAGE #3, MEDIA #10, NOTIFY #11, CONFIG #14, OUTBOX #32, UPLOAD #33, LINK #53, COMMON #67, RESOURCE #80, plus INTENT #91 (lifecycle-independent delivery)
+  - Reference implementation: `napplet/web` main (`@napplet/shim` 0.30.0, `@napplet/nap` 0.32.0, `@napplet/conformance` 0.17.0)
+  - All pins are listed in `.planning/research/SPEC-PINS.md`
   - WEB-NAPPLET event schema: `hzrd149/naps` branch `web-napplet-event` (currently `7ae5b19`); this is the upcoming napplet event schema, so support must be ready for it
   - Every ref is recorded by commit SHA in the audit checklist. Local checkouts live at `~/Projects/naps` and `~/Projects/nips`.
-- **Known deviations today:** storage keyed by napplet address; `NAPPLETS.md` lists `notify` and `config` as unimplemented although `backend/nap_notify.go` and `backend/nap_config.go` exist.
+- **Known deviations today:** storage keying is half-migrated to artifact hash (`18f8f81`, after the only release tag `v0.0.0`) while `NAPPLETS.md` still describes address keying; the vendored shim is labelled 0.30.0 but is a patched 0.29.2 build; `NAPPLETS.md` lists `notify` and `config` as unimplemented although `backend/nap_notify.go` and `backend/nap_config.go` exist.
 - **Codebase map:** `.planning/codebase/` (2026-10-02). `CONCERNS.md` lists the desktop security issues this milestone addresses: child binary extraction (`desktop/embed_prod.go`), the instance listener (`desktop/singleinstance.go`), plaintext state (`backend/launcher_state.go`), per-handler permission checks (`backend/nap_*.go`), and OpenLink scheme handling (`desktop/host.go`).
 - **Test gaps:** `desktop/singleinstance.go`, `desktop/embed_prod.go`, `desktop/child`, `eventdb`, `mobile`, and Android have little or no coverage.
 

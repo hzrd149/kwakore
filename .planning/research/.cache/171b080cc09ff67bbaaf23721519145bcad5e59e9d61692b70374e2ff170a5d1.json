@@ -1,0 +1,1 @@
+{"content":"WebView2 iframes can call chrome.webview.postMessage; delivered via CoreWebView2Frame.WebMessageReceived; init scripts run in child frames.","source":"web","provider":"websearch","confidence":"LOW","fetched_at":"2026-10-02T21:03:32.177Z","ttl":86400000,"kind":"web"}
