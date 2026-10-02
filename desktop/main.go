@@ -35,6 +35,9 @@ type gioState struct {
 	// discoveryArchetype is set by an intent dispatch off the UI thread and
 	// consumed by the next frame.
 	discoveryArchetype string
+	// discoveryQuery is the equivalent handoff from GNOME Shell's search
+	// provider when the user asks Verdana to show every matching result.
+	discoveryQuery string
 
 	// confirmLogout parks the "log out?" dialog over the main screen until
 	// the user answers it: logging out closes every napp.
@@ -183,6 +186,8 @@ func main() {
 		log.Fatal().Err(err).Msg("could not start the backend")
 	}
 	defer closeStores()
+	stopSearchProvider := startSearchProvider()
+	defer stopSearchProvider()
 
 	// the backend is up: the token this launcher was started with opens its
 	// napps, and the ones forwarded in while it was starting stop waiting.
@@ -431,11 +436,17 @@ func gioMain() {
 			tab := ui.tab
 			discoveryArchetype := ui.discoveryArchetype
 			ui.discoveryArchetype = ""
+			discoveryQuery := ui.discoveryQuery
+			ui.discoveryQuery = ""
 			pendingCopies := ui.clipboard
 			ui.clipboard = nil
 			ui.mu.Unlock()
 			if discoveryArchetype != "" {
 				filterEd.SetText("archetype:" + discoveryArchetype)
+				discoKind = discoKindNapplets
+			}
+			if discoveryQuery != "" {
+				filterEd.SetText(discoveryQuery)
 				discoKind = discoKindNapplets
 			}
 

@@ -40,6 +40,14 @@ func (gioHost) OpenDiscovery(archetype string) {
 	showManager()
 }
 
+func showDiscoverySearch(query string) {
+	ui.mu.Lock()
+	ui.tab = tabDiscovery
+	ui.discoveryQuery = strings.TrimSpace(query)
+	ui.mu.Unlock()
+	showManager()
+}
+
 func (gioHost) PromptsChanged() {
 	if w := managerWindow(); w != nil {
 		w.Invalidate()

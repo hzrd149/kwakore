@@ -65,7 +65,12 @@ remove_path_line() {
 remove_integrations() {
   if [[ "$os" == linux ]]; then
     rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/verdana.desktop"
-    local applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    local data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+    local applications="$data_home/applications"
+    rm -f -- \
+      "$applications/com.verdana.Verdana.desktop" \
+      "$data_home/gnome-shell/search-providers/com.verdana.Verdana.search-provider.ini" \
+      "$data_home/dbus-1/services/com.verdana.Verdana.SearchProvider.service"
     if [[ -d "$applications" ]]; then
       find "$applications" -maxdepth 1 -type f \
         \( -name 'verdana-*.desktop' -o -name 'com.verdana.napp.*.desktop' \) \
@@ -133,6 +138,47 @@ fi
 tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
 mkdir -p -- "$install_dir"
 install -m 0755 "$tmp_dir/verdana" "$install_dir/verdana"
+
+if [[ "$os" == linux ]]; then
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  applications="$data_home/applications"
+  providers="$data_home/gnome-shell/search-providers"
+  services="$data_home/dbus-1/services"
+  mkdir -p -- "$applications" "$providers" "$services"
+
+  binary="$install_dir/verdana"
+  escaped_binary="${binary//\\/\\\\}"
+  escaped_binary="${escaped_binary//\"/\\\"}"
+  escaped_binary="${escaped_binary//\$/\\$}"
+  escaped_binary="${escaped_binary//\`/\\\`}"
+
+  cat > "$applications/com.verdana.Verdana.desktop" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Verdana
+Comment=Discover and run Nostr applications
+Exec="$escaped_binary"
+Icon=applications-internet
+Terminal=false
+Categories=Network;
+Keywords=Nostr;Napp;Napplet;
+EOF
+
+  cat > "$providers/com.verdana.Verdana.search-provider.ini" <<'EOF'
+[Shell Search Provider]
+DesktopId=com.verdana.Verdana.desktop
+BusName=com.verdana.Verdana.SearchProvider
+ObjectPath=/com/verdana/Verdana/SearchProvider
+Version=2
+EOF
+
+  cat > "$services/com.verdana.Verdana.SearchProvider.service" <<EOF
+[D-BUS Service]
+Name=com.verdana.Verdana.SearchProvider
+Exec="$escaped_binary" --background
+EOF
+fi
 
 if [[ "$install_dir" == "$HOME/.local/bin" && ":$PATH:" != *":$install_dir:"* ]]; then
   profile="$(shell_profile 2>/dev/null || true)"
