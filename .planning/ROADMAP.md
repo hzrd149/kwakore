@@ -33,7 +33,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Inside a running napplet, `window.napplet` holds only the domain objects the launcher granted, and `NappletShimPrelude` (or any other injection global) is unreachable and cannot install extra domains. Existing napplets that use intent, config, notify, resource and INC keep working without a `shell.ready`/`shell.init` handshake, and every dropped former-patch behavior has a checklist row
   4. A test built from the offline `@napplet/conformance` 0.17.0 envelope fixture fails when the vendored shim can send a request type that has neither a handler nor an explicit N/A entry
   5. Every pinned spec text is committed at its SHA. The checklist's Conflicts section records the chosen reading for NAP-SHELL vs NIP-5D presence detection, WEB-NAPPLET legacy 35129 vs NIP-5D, NAP-RELAY decrypt vs NIP-5D cleartext, and the NAP-OUTBOX kind-1059 example. A pull request that breaks the Android AAR build fails CI
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — CRIT-01: hashed, contained napp directories through one choke point, plus the hostile-`d` regression matrix (wave 1)
+- [ ] 01-02-PLAN.md — Pristine `@napplet/shim` 0.30.0 with hash test, intents delivered as INC topic events, conformance-fixture coverage test (wave 2)
+- [ ] 01-03-PLAN.md — Pinned spec snapshots under `spec/pinned/` with hash test, Android AAR bind on pull requests (wave 2)
+- [ ] 01-04-PLAN.md — Host-page `nap.start` session start (no handshake), function-scoped prelude, host-page regression tests (wave 3)
+- [ ] 01-05-PLAN.md — `spec/CONFORMANCE.md` skeleton (Conflicts A1-A22, dropped patches P1-P7, decisions), probe napplet and end-of-phase smoke (wave 4)
 
 ### Phase 2: Gated NAP Dispatcher
 **Goal**: Every napplet request goes through one dispatcher that enforces the handler's declared permission, bounds size and rate, and always answers in the spec-defined shape, so a hostile napplet cannot skip consent, flood prompts, or hang or crash a window
@@ -131,7 +138,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Containment Fix and Canonical Shim Baseline | 0/TBD | Not started | - |
+| 1. Containment Fix and Canonical Shim Baseline | 0/5 | Planned | - |
 | 2. Gated NAP Dispatcher | 0/TBD | Not started | - |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
