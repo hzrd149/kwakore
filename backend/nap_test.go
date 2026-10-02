@@ -831,9 +831,19 @@ func TestNapIncChannelOpsRequireMembership(t *testing.T) {
 	}
 }
 
+// subscribeTopic is the napplet's shim calling napplet.inc.on(topic): it
+// posts inc.subscribe and the launcher acknowledges it (the n-th ack).
+func subscribeTopic(t *testing.T, ci *Instance, rec *recTransport, topic string, n int) {
+	t.Helper()
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "sub-" + topic, "topic": topic})
+	rec.wait(t, "inc.subscribe.result", n)
+}
+
 func TestIntentDeliveryToNapplet(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "handler")
+	ready(t, ci, rec, 1)
+	before := len(rec.types())
 
 	done := make(chan error, 1)
 	go func() {
@@ -842,20 +852,77 @@ func TestIntentDeliveryToNapplet(t *testing.T) {
 		done <- err
 	}()
 
-	// A cold-start delivery waits for shell.ready, not an INC subscription.
+	// a started napplet is not yet a handler: delivery waits for its own
+	// inc.subscribe on the convention topic (NAP-INTENT: only once ready)
 	time.Sleep(50 * time.Millisecond)
-	if len(rec.find("intent.deliver")) != 0 {
-		t.Fatal("delivered before the napplet was ready")
+	if got := rec.types(); len(got) != before {
+		t.Fatalf("pushed before the napplet subscribed: %v", got[before:])
 	}
-	ready(t, ci, rec, 1)
-	ev := rec.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
-	if ev["convention"] != "napplet:profile/open" || ev["archetype"] != "profile" ||
-		ev["action"] != "open" || ev["sender"] != "caller" ||
+	subscribeTopic(t, ci, rec, "napplet:profile/open", 1)
+	ev := rec.wait(t, "inc.event", 1)
+	if ev["topic"] != "napplet:profile/open" || ev["sender"] != "caller" ||
 		ev["payload"].(map[string]any)["pubkey"] != "abc" {
 		t.Errorf("intent event: %v", ev)
 	}
 	if err := <-done; err != nil {
 		t.Errorf("dispatch: %v", err)
+	}
+	if got := rec.find("inc.event"); len(got) != 1 {
+		t.Errorf("inc.event pushes = %d, want 1: %v", len(got), got)
+	}
+	// the pristine shim drops intent.deliver; it must never be sent
+	if got := rec.find("intent.deliver"); len(got) != 0 {
+		t.Errorf("intent.deliver pushed: %v", got)
+	}
+}
+
+func TestIntentDeliveryTimesOutWithoutSubscriber(t *testing.T) {
+	setupNapTest(t)
+	saved := intentHandlerWait
+	intentHandlerWait = 100 * time.Millisecond
+	t.Cleanup(func() { intentHandlerWait = saved })
+
+	ci, rec := openNapplet(t, "deaf")
+	ready(t, ci, rec, 1)
+	_, err := dispatchToNapplet(context.Background(), ci,
+		&actionRequest{name: "napplet:profile/open", sender: "caller"}, json.RawMessage(`{"pubkey":"abc"}`))
+	if !errors.Is(err, errNoHandler) {
+		t.Fatalf("dispatch to a napplet that never listens: err = %v, want errNoHandler", err)
+	}
+	if got := rec.find("inc.event"); len(got) != 0 {
+		t.Errorf("delivered without a subscriber: %v", got)
+	}
+}
+
+func TestIntentDeliveryReachesOnlyTheHandler(t *testing.T) {
+	setupNapTest(t)
+	target, recTarget := openNapplet(t, "resolved-handler")
+	other, recOther := openNapplet(t, "other-listener")
+	for _, w := range []struct {
+		ci  *Instance
+		rec *recTransport
+	}{{target, recTarget}, {other, recOther}} {
+		ready(t, w.ci, w.rec, 1)
+		subscribeTopic(t, w.ci, w.rec, "napplet:profile/open", 1)
+	}
+
+	_, err := dispatchToNapplet(context.Background(), target,
+		&actionRequest{name: "napplet:profile/open", sender: "caller"}, json.RawMessage(`{"pubkey":"abc"}`))
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	ev := recTarget.wait(t, "inc.event", 1)
+	if ev["topic"] != "napplet:profile/open" || ev["sender"] != "caller" {
+		t.Errorf("intent event: %v", ev)
+	}
+	// the payload belongs to the resolved handler alone, never to every
+	// listener of the convention topic
+	time.Sleep(50 * time.Millisecond)
+	if got := recTarget.find("inc.event"); len(got) != 1 {
+		t.Errorf("handler inc.event pushes = %d, want 1: %v", len(got), got)
+	}
+	if got := recOther.find("inc.event"); len(got) != 0 {
+		t.Errorf("another listener received the intent: %v", got)
 	}
 }
 
@@ -1012,8 +1079,9 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	// belongs to the runtime and must still reach the target afterward.
 	caller.napReset()
 	ready(t, handler, recHandler, 1)
-	delivery := recHandler.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
-	if delivery["sender"] != caller.napp.D || delivery["convention"] != "napplet:profile/open" ||
+	subscribeTopic(t, handler, recHandler, "napplet:profile/open", 1)
+	delivery := recHandler.wait(t, "inc.event", 1)
+	if delivery["sender"] != caller.napp.D || delivery["topic"] != "napplet:profile/open" ||
 		delivery["payload"].(map[string]any)["pubkey"] != "abc" {
 		t.Errorf("delivery: %v", delivery)
 	}
@@ -1045,8 +1113,9 @@ func TestOpenUserProfileDeliversToHandler(t *testing.T) {
 	ready(t, handler, rec, 1)
 	done := make(chan error, 1)
 	go func() { done <- OpenUserProfile(context.Background()) }()
-	delivery := rec.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
-	if delivery["sender"] != "launcher" || delivery["convention"] != "napplet:profile/open" ||
+	subscribeTopic(t, handler, rec, "napplet:profile/open", 1)
+	delivery := rec.wait(t, "inc.event", 1)
+	if delivery["sender"] != "launcher" || delivery["topic"] != "napplet:profile/open" ||
 		delivery["payload"].(map[string]any)["pubkey"] != sk.Public().Hex() {
 		t.Errorf("delivery: %v", delivery)
 	}
