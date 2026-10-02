@@ -107,13 +107,12 @@ To play media for apps that ask for it (NAP-MEDIA), install
 
 ### Android
 
-Android 8.0 (API 26) or newer is required. Debug APKs are built by CI on every
-push (the `verdana-apk` artifact of the
-[android workflow](.github/workflows/android.yml)) and
-`verdana-android-debug.apk` is attached to tagged releases. Because it is a
-debug build, Android may warn about installing an app from outside its app
-store. You can also
-[build one yourself](#building-from-source).
+Android 8.0 (API 26) or newer is required. Android builds are paused for now
+while work focuses on the desktop: CI no longer builds an APK on every push or
+attaches one to releases. The
+[android workflow](.github/workflows/android.yml) can still be started by hand,
+and you can [build one yourself](#building-from-source). It is a debug build,
+so Android may warn about installing an app from outside its app store.
 
 To keep your key on your phone instead of in Verdana, install a signer app
 such as [Amber](https://github.com/greenart7c3/Amber).

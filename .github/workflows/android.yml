@@ -1,10 +1,8 @@
 name: android
 
+# Disabled while the focus is on desktop builds: it only runs when started by
+# hand. Restore the push, tag and pull_request triggers to bring it back.
 on:
-  push:
-    branches: [master, main]
-    tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 env:
