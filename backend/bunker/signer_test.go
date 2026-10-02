@@ -1,4 +1,4 @@
-package backend
+package bunker
 
 import (
 	"context"
@@ -54,14 +54,14 @@ func TestBunkerSignerToleratesSignerClockBehind(t *testing.T) {
 	signerKey := nostr.Generate()
 	runTestSigner(t, ctx, relay, signerKey, -30*time.Second)
 
-	b, err := newBunkerSigner(ctx, nostr.NewPool(), nostr.Generate(), signerKey.Public(), []string{relay}, nil)
+	b, err := NewSigner(ctx, nostr.NewPool(), nostr.Generate(), signerKey.Public(), []string{relay}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
 	defer rcancel()
-	if err := b.connect(rctx, ""); err != nil {
+	if err := b.Connect(rctx, ""); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	pk, err := b.GetPublicKey(rctx)
@@ -89,7 +89,7 @@ func TestBunkerSignerFailsWithoutSigner(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	b, err := newBunkerSigner(ctx, nostr.NewPool(), nostr.Generate(), nostr.Generate().Public(), []string{relay}, nil)
+	b, err := NewSigner(ctx, nostr.NewPool(), nostr.Generate(), nostr.Generate().Public(), []string{relay}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

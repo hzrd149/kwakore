@@ -18,6 +18,7 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
+	"verdana/backend/bunker"
 	"verdana/backend/napconfig"
 )
 
@@ -62,6 +63,7 @@ func Start(opts Options) (func(), error) {
 	}
 
 	napconfig.Init(filepath.Join(dataDir, "config"), log)
+	bunker.SetLogger(log)
 
 	closeStores, err := initSystem(dataDir)
 	if err != nil {

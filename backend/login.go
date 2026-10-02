@@ -10,6 +10,7 @@ import (
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip05"
 	"fiatjaf.com/nostr/nip46"
+	"verdana/backend/bunker"
 )
 
 var (
@@ -179,12 +180,12 @@ func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, r
 	if err != nil {
 		return nil, err
 	}
-	b, err := newBunkerSigner(ctx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
+	b, err := bunker.NewSigner(ctx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
 	if err != nil {
 		return nil, err
 	}
 	if !resume {
-		if err := b.connect(ctx, parsed.Secret); err != nil {
+		if err := b.Connect(ctx, parsed.Secret); err != nil {
 			return nil, err
 		}
 	}

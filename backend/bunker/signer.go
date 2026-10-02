@@ -1,4 +1,5 @@
-package backend
+// Package bunker is the NIP-46 remote signer client.
+package bunker
 
 import (
 	"context"
@@ -15,9 +16,10 @@ import (
 	"fiatjaf.com/nostr/nip04"
 	"fiatjaf.com/nostr/nip44"
 	"fiatjaf.com/nostr/nip46"
+	"github.com/rs/zerolog"
 )
 
-// bunkerSigner is a NIP-46 client: a nostr.Keyer whose key lives in a
+// Signer is a NIP-46 client: a nostr.Keyer whose key lives in a
 // remote signer reached over relays.
 //
 // It stands in for nip46.BunkerClient, which listens for responses with
@@ -28,7 +30,7 @@ import (
 // since to now as well. With "limit": 0 the relay sends nothing stored
 // anyway, so this client subscribes with no since at all and manages its
 // relay subscriptions itself.
-type bunkerSigner struct {
+type Signer struct {
 	pool      *nostr.Pool
 	clientKey nostr.SecretKey
 	clientPub nostr.PubKey
@@ -47,16 +49,21 @@ type bunkerSigner struct {
 	pubkey    nostr.PubKey
 }
 
-var _ nostr.Keyer = (*bunkerSigner)(nil)
+var _ nostr.Keyer = (*Signer)(nil)
 
-// bunkerReadyTimeout is how long a new client waits for one of the signer's
+var log = zerolog.Nop()
+
+// SetLogger sets where the client logs relay trouble.
+func SetLogger(l zerolog.Logger) { log = l }
+
+// readyTimeout is how long a new client waits for one of the signer's
 // relays to confirm its subscription before sending anything anyway.
-const bunkerReadyTimeout = 5 * time.Second
+const readyTimeout = 5 * time.Second
 
-// newBunkerSigner starts listening for the signer's responses on its
+// NewSigner starts listening for the signer's responses on its
 // relays and returns once one of them has the subscription open (or
-// bunkerReadyTimeout passed). The subscriptions live as long as ctx.
-func newBunkerSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.SecretKey, target nostr.PubKey, relays []string, onAuth func(string)) (*bunkerSigner, error) {
+// readyTimeout passed). The subscriptions live as long as ctx.
+func NewSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.SecretKey, target nostr.PubKey, relays []string, onAuth func(string)) (*Signer, error) {
 	if len(relays) == 0 {
 		return nil, errors.New("the bunker url names no relays")
 	}
@@ -72,7 +79,7 @@ func newBunkerSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.Secr
 		onAuth = func(string) {}
 	}
 
-	b := &bunkerSigner{
+	b := &Signer{
 		pool:      pool,
 		clientKey: clientKey,
 		clientPub: clientKey.Public(),
@@ -88,22 +95,22 @@ func newBunkerSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.Secr
 	ready := make(chan struct{})
 	readyOnce := sync.OnceFunc(func() { close(ready) })
 	for _, url := range relays {
-		go listenNostrConnect(ctx, pool, nostr.NormalizeURL(url), b.clientPub, b.handle, readyOnce)
+		go Listen(ctx, pool, nostr.NormalizeURL(url), b.clientPub, b.handle, readyOnce)
 	}
 
 	select {
 	case <-ready:
-	case <-time.After(bunkerReadyTimeout):
+	case <-time.After(readyTimeout):
 	case <-ctx.Done():
 		return nil, context.Cause(ctx)
 	}
 	return b, nil
 }
 
-// listenNostrConnect keeps a subscription for the NIP-46 events addressed to
+// Listen keeps a subscription for the NIP-46 events addressed to
 // clientPub open on one relay until ctx ends, reconnecting with backoff when
 // the relay drops it. ready is called on every EOSE.
-func listenNostrConnect(ctx context.Context, pool *nostr.Pool, url string, clientPub nostr.PubKey, onEvent func(nostr.Event), ready func()) {
+func Listen(ctx context.Context, pool *nostr.Pool, url string, clientPub nostr.PubKey, onEvent func(nostr.Event), ready func()) {
 	filter := nostr.Filter{
 		Kinds:     []nostr.Kind{nostr.KindNostrConnect},
 		Tags:      nostr.TagMap{"p": []string{clientPub.Hex()}},
@@ -155,7 +162,7 @@ func readNostrConnect(ctx context.Context, sub *nostr.Subscription, onEvent func
 }
 
 // handle routes a response to the request waiting for it.
-func (b *bunkerSigner) handle(evt nostr.Event) {
+func (b *Signer) handle(evt nostr.Event) {
 	if evt.Kind != nostr.KindNostrConnect || evt.PubKey != b.target {
 		return
 	}
@@ -186,7 +193,7 @@ func (b *bunkerSigner) handle(evt nostr.Event) {
 
 // rpc sends one request to the signer on all its relays and waits for the
 // answer.
-func (b *bunkerSigner) rpc(ctx context.Context, method string, params ...string) (string, error) {
+func (b *Signer) rpc(ctx context.Context, method string, params ...string) (string, error) {
 	if params == nil {
 		params = []string{}
 	}
@@ -254,14 +261,14 @@ func (b *bunkerSigner) rpc(ctx context.Context, method string, params ...string)
 	}
 }
 
-// connect introduces our client key to the signer with the bunker url's
+// Connect introduces our client key to the signer with the bunker url's
 // secret. Only needed once: the signer remembers the client key.
-func (b *bunkerSigner) connect(ctx context.Context, secret string) error {
+func (b *Signer) Connect(ctx context.Context, secret string) error {
 	_, err := b.rpc(ctx, "connect", b.target.Hex(), secret)
 	return err
 }
 
-func (b *bunkerSigner) GetPublicKey(ctx context.Context) (nostr.PubKey, error) {
+func (b *Signer) GetPublicKey(ctx context.Context) (nostr.PubKey, error) {
 	b.mu.Lock()
 	pk := b.pubkey
 	b.mu.Unlock()
@@ -282,7 +289,7 @@ func (b *bunkerSigner) GetPublicKey(ctx context.Context) (nostr.PubKey, error) {
 	return pk, nil
 }
 
-func (b *bunkerSigner) SignEvent(ctx context.Context, evt *nostr.Event) error {
+func (b *Signer) SignEvent(ctx context.Context, evt *nostr.Event) error {
 	res, err := b.rpc(ctx, "sign_event", evt.String())
 	if err != nil {
 		return err
@@ -298,18 +305,18 @@ func (b *bunkerSigner) SignEvent(ctx context.Context, evt *nostr.Event) error {
 	return nil
 }
 
-func (b *bunkerSigner) Encrypt(ctx context.Context, plaintext string, recipient nostr.PubKey) (string, error) {
+func (b *Signer) Encrypt(ctx context.Context, plaintext string, recipient nostr.PubKey) (string, error) {
 	return b.rpc(ctx, "nip44_encrypt", recipient.Hex(), plaintext)
 }
 
-func (b *bunkerSigner) Decrypt(ctx context.Context, ciphertext string, sender nostr.PubKey) (string, error) {
+func (b *Signer) Decrypt(ctx context.Context, ciphertext string, sender nostr.PubKey) (string, error) {
 	return b.rpc(ctx, "nip44_decrypt", sender.Hex(), ciphertext)
 }
 
-func (b *bunkerSigner) Nip04Encrypt(ctx context.Context, plaintext string, recipient nostr.PubKey) (string, error) {
+func (b *Signer) Nip04Encrypt(ctx context.Context, plaintext string, recipient nostr.PubKey) (string, error) {
 	return b.rpc(ctx, "nip04_encrypt", recipient.Hex(), plaintext)
 }
 
-func (b *bunkerSigner) Nip04Decrypt(ctx context.Context, ciphertext string, sender nostr.PubKey) (string, error) {
+func (b *Signer) Nip04Decrypt(ctx context.Context, ciphertext string, sender nostr.PubKey) (string, error) {
 	return b.rpc(ctx, "nip04_decrypt", sender.Hex(), ciphertext)
 }

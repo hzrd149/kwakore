@@ -14,6 +14,7 @@ import (
 	"fiatjaf.com/nostr/nip04"
 	"fiatjaf.com/nostr/nip44"
 	"fiatjaf.com/nostr/nip46"
+	"verdana/backend/bunker"
 )
 
 // The client-initiated half of NIP-46: while the login screen is up the
@@ -24,8 +25,8 @@ import (
 //
 // fiatjaf.com/nostr has helpers for this (nip46.NewBunkerFromNostrConnect),
 // but they hide the secret and the signer's pubkey — so the session can't be
-// stored — and listen with "since": now, which bunkerSigner explains the
-// trouble with. The waiting here reuses bunkerSigner's listener instead.
+// stored — and listen with "since": now, which bunker.Signer explains the
+// trouble with. The waiting here reuses bunker.Signer's listener instead.
 
 // defaultNostrConnectRelay is where the QR code points until the user picks
 // another relay.
@@ -60,7 +61,7 @@ func isNostrConnectAnswer(clientKey nostr.SecretKey, evt nostr.Event, secret str
 	if evt.Kind != nostr.KindNostrConnect || evt.PubKey == clientKey.Public() {
 		return false
 	}
-	// as with bunkerSigner, some signers still answer in NIP-04
+	// as with bunker.Signer, some signers still answer in NIP-04
 	plain := ""
 	if conv44, err := nip44.GenerateConversationKey(evt.PubKey, clientKey); err == nil {
 		plain, err = nip44.Decrypt(evt.Content, conv44)
@@ -100,7 +101,7 @@ func waitNostrConnect(ctx context.Context, pool *nostr.Pool, clientKey nostr.Sec
 		}
 	}
 	for _, r := range relays {
-		go listenNostrConnect(ctx, pool, nostr.NormalizeURL(r), clientKey.Public(), onEvent, func() {})
+		go bunker.Listen(ctx, pool, nostr.NormalizeURL(r), clientKey.Public(), onEvent, func() {})
 	}
 
 	select {
