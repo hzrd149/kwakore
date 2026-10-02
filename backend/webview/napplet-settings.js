@@ -117,6 +117,43 @@
   let data = null // the last settings.load
   let fields = [] // { path, read(), touched() }
   let pendingSection = ""
+  let saveTimer = 0
+  let saveInFlight = false
+  let queuedSave = null
+  let renderVersion = 0
+
+  // Save without rerendering so the active control keeps its focus. If a
+  // value changes while a save is in flight, the newest state is saved next.
+  const queueSave = (request, delay = 350) => {
+    queuedSave = request
+    clearTimeout(saveTimer)
+    status("Saving…")
+    saveTimer = setTimeout(flushSave, delay)
+  }
+
+  const flushSave = async () => {
+    clearTimeout(saveTimer)
+    saveTimer = 0
+    if (saveInFlight || !queuedSave) return
+    const request = queuedSave
+    const version = renderVersion
+    queuedSave = null
+    saveInFlight = true
+    try {
+      const next = await rpc(request.method, request.params())
+      if (version === renderVersion) data = next
+      status("Saved")
+    } catch (err) {
+      const message = (err && err.message) || String(err)
+      status(message, true)
+      markInvalid(message)
+    } finally {
+      saveInFlight = false
+      if (queuedSave) flushSave()
+    }
+  }
+
+  const saveNapp = (delay = 350) => queueSave({ method: "settings.save", params: () => ({ values: collect() }) }, delay)
 
   const describe = (schema, wrap) => {
     const text = str(schema.description) || str(schema.markdownDescription)
@@ -135,6 +172,7 @@
     const touch = () => {
       touched = true
       wrap.classList.remove("invalid")
+      saveNapp()
     }
     let read
 
@@ -379,7 +417,7 @@
         if (!groups.has(sec)) groups.set(sec, [])
         groups.get(sec).push(key)
       }
-      const form = el("form", { onsubmit: e => (e.preventDefault(), save()) })
+      const form = el("form", { onsubmit: e => (e.preventDefault(), flushSave()) })
       for (const [sec, keys] of groups) {
         if (!keys.length) continue
         const box = el("section", { "data-section": sec })
@@ -395,7 +433,6 @@
           { class: "actions" },
           el("span", { id: "status", class: "status" }),
           el("button", { type: "button", onclick: () => run("settings.reset", undefined, "Defaults restored") }, "Reset to defaults"),
-          el("button", { type: "submit", class: "primary" }, "Save"),
         ),
       )
       out.push(form)
@@ -405,11 +442,11 @@
   }
 
   // listEditor edits a list of urls; read() is what it holds now
-  const listEditor = (title, hint, values, placeholder) => {
+  const listEditor = (title, hint, values, placeholder, changed) => {
     const list = el("div")
     const inputs = []
     const add = v => {
-      const input = el("input", { type: "text", inputmode: "url", placeholder, spellcheck: "false" })
+      const input = el("input", { type: "text", inputmode: "url", placeholder, spellcheck: "false", oninput: changed })
       if (v) input.value = v
       const row = el("div", { class: "row" }, input)
       row.append(
@@ -420,6 +457,7 @@
             onclick: () => {
               inputs.splice(inputs.indexOf(input), 1)
               row.remove()
+              changed(0)
             },
           },
           "Remove",
@@ -435,7 +473,7 @@
       el("h2", {}, title),
       el("div", { class: "hint" }, hint),
       el("div", { style: "margin-top:8px" }, list),
-      el("button", { type: "button", onclick: () => add("") }, "Add"),
+      el("button", { type: "button", onclick: () => (add(""), changed(0)) }, "Add"),
     )
     return { box, read: () => inputs.map(i => i.value.trim()).filter(Boolean) }
   }
@@ -443,9 +481,12 @@
   // the launcher's own page: where napps are found and fetched from
   const verdanaPage = () => {
     const l = data.launcher || {}
+    let readLauncher = () => ({})
+    const changed = delay =>
+      queueSave({ method: "settings.saveLauncher", params: () => readLauncher() }, typeof delay === "number" ? delay : 350)
     const themeMode = el(
       "select",
-      { name: "themeMode" },
+      { name: "themeMode", onchange: () => changed(0) },
       el("option", { value: "system" }, "System"),
       el("option", { value: "light" }, "Light"),
       el("option", { value: "dark" }, "Dark"),
@@ -460,7 +501,7 @@
     )
     let autostart = null
     if (l.autostartSupported) {
-      autostart = el("input", { type: "checkbox", name: "autostart" })
+      autostart = el("input", { type: "checkbox", name: "autostart", onchange: () => changed(0) })
       autostart.checked = !!l.autostart
       appearance.append(
         el(
@@ -479,7 +520,7 @@
     appShortcuts.checked = !!l.appShortcuts
     const shortcutNaming = el(
       "select",
-      { name: "appShortcutNaming" },
+      { name: "appShortcutNaming", onchange: () => changed(0) },
       el("option", { value: "plain" }, "App name"),
       el("option", { value: "hosted" }, "App name — Verdana"),
     )
@@ -487,6 +528,7 @@
     shortcutNaming.disabled = !appShortcuts.checked
     appShortcuts.onchange = () => {
       shortcutNaming.disabled = !appShortcuts.checked
+      changed(0)
     }
     if (l.appShortcutsSupported) {
       appearance.append(
@@ -508,10 +550,11 @@
       "Napps and napplets are discovered on these relays, and on your own when enabled below.",
       l.relays,
       "wss://relay.example.com",
+      changed,
     )
     // the user's NIP-65 list: shown, not edited here (it belongs to their
     // Nostr account, so their Nostr client edits it)
-    const discoverOnUserRelays = el("input", { type: "checkbox", name: "discoverOnUserRelays" })
+    const discoverOnUserRelays = el("input", { type: "checkbox", name: "discoverOnUserRelays", onchange: () => changed(0) })
     discoverOnUserRelays.checked = !!l.discoverOnUserRelays
     const userRelays = l.userRelays || []
     let userStatus = "Log in to load your relays."
@@ -550,28 +593,19 @@
       "Napp and napplet files are fetched from these servers first, before the ones a napp or its author names. Every file is checked against its hash, wherever it comes from.",
       l.blossomServers,
       "https://blossom.example.com",
+      changed,
     )
+    readLauncher = () => ({
+      themeMode: themeMode.value,
+      relays: relays.read(),
+      discoverOnUserRelays: discoverOnUserRelays.checked,
+      blossomServers: servers.read(),
+      ...(autostart ? { autostart: autostart.checked } : {}),
+      ...(l.appShortcutsSupported ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value } : {}),
+    })
     const form = el(
       "form",
-      {
-        onsubmit: e => {
-          e.preventDefault()
-          run(
-            "settings.saveLauncher",
-            {
-              themeMode: themeMode.value,
-              relays: relays.read(),
-              discoverOnUserRelays: discoverOnUserRelays.checked,
-              blossomServers: servers.read(),
-              ...(autostart ? { autostart: autostart.checked } : {}),
-              ...(l.appShortcutsSupported
-                ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value }
-                : {}),
-            },
-            "Saved",
-          )
-        },
-      },
+      { onsubmit: e => (e.preventDefault(), flushSave()) },
       appearance,
       relays.box,
       servers.box,
@@ -579,7 +613,6 @@
         "div",
         { class: "actions" },
         el("span", { id: "status", class: "status" }),
-        el("button", { type: "submit", class: "primary" }, "Save"),
       ),
     )
     return [form]
@@ -587,6 +620,10 @@
 
   let tab = ""
   const render = () => {
+    renderVersion++
+    clearTimeout(saveTimer)
+    saveTimer = 0
+    queuedSave = null
     const app = document.getElementById("app")
     fields = []
     if (!data.napp) tab = "verdana"
@@ -633,6 +670,13 @@
   let busy = false
   const run = async (method, params, done) => {
     if (busy) return
+    clearTimeout(saveTimer)
+    saveTimer = 0
+    queuedSave = null
+    if (saveInFlight) {
+      setTimeout(() => run(method, params, done), 25)
+      return
+    }
     busy = true
     try {
       data = await rpc(method, params)
@@ -645,8 +689,6 @@
       busy = false
     }
   }
-
-  const save = () => run("settings.save", { values: collect() }, "Saved")
 
   const load = async () => {
     try {
