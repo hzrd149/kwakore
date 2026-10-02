@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 	"verdana/backend"
+	"verdana/backend/qrcode"
 	"verdana/backend/webview"
 )
 
@@ -320,7 +321,7 @@ func SetNostrConnectRelay(relay string) { go backend.SetNostrConnectRelay(relay)
 // NostrConnectQR is the QR code for a nostrconnect uri as a PNG, or nil when
 // the uri doesn't fit in one.
 func NostrConnectQR(uri string) []byte {
-	png, err := backend.QRCodePNG(uri, 8)
+	png, err := qrcode.PNG(uri, 8)
 	if err != nil {
 		return nil
 	}

@@ -1,4 +1,5 @@
-package backend
+// Package qrcode renders the QR codes the login screens show.
+package qrcode
 
 import (
 	"bytes"
@@ -12,12 +13,12 @@ import (
 // qrQuietZone is the blank border, in modules, a scanner needs around a code.
 const qrQuietZone = 4
 
-// QRCode renders text as a QR code, one pixel per module with a white quiet
+// Image renders text as a QR code, one pixel per module with a white quiet
 // zone around it: scale it up with nearest-neighbour filtering to draw it.
 //
 // (qr.Code.Image would do, but it draws the code unscaled in a corner of an
 // image sized for the scaled code and its quiet zone.)
-func QRCode(text string) (*image.Gray, error) {
+func Image(text string) (*image.Gray, error) {
 	code, err := qr.Encode(text, qr.M)
 	if err != nil {
 		return nil, err
@@ -37,10 +38,10 @@ func QRCode(text string) (*image.Gray, error) {
 	return img, nil
 }
 
-// QRCodePNG is QRCode as a PNG with every module scale pixels wide, for a UI
+// PNG is Image as a PNG with every module scale pixels wide, for a UI
 // that wants an image file.
-func QRCodePNG(text string, scale int) ([]byte, error) {
-	small, err := QRCode(text)
+func PNG(text string, scale int) ([]byte, error) {
+	small, err := Image(text)
 	if err != nil {
 		return nil, err
 	}

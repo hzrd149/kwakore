@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"verdana/backend"
+	"verdana/backend/qrcode"
 
 	"gioui.org/font"
 	"gioui.org/io/clipboard"
@@ -91,7 +92,7 @@ func (s *loginScreen) update(gtx layout.Context, st backend.State) {
 	if st.NostrConnectURI != s.qrURI {
 		s.qrURI = st.NostrConnectURI
 		s.qr = paint.ImageOp{}
-		if img, err := backend.QRCode(s.qrURI); err == nil && s.qrURI != "" {
+		if img, err := qrcode.Image(s.qrURI); err == nil && s.qrURI != "" {
 			s.qr = paint.NewImageOp(img)
 			s.qr.Filter = paint.FilterNearest
 		}
