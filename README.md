@@ -23,8 +23,45 @@ Verdana runs on **Linux, macOS, Windows and Android**.
 
 ### Desktop
 
+The quickest installation uses the release installer. On Linux or macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.sh | bash
+```
+
+On Windows, from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.ps1 | iex
+```
+
+These install for the current user and add Verdana to `PATH`; administrator
+access is not required. The downloaded archive is verified against the
+release's SHA-256 checksum before it is installed. You can rerun the same
+command later to update to the newest release.
+
+To uninstall on Linux or macOS while keeping installed apps and settings:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.sh | bash -s -- uninstall
+```
+
+On Windows:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.ps1))) uninstall
+```
+
+Both scripts also have an optional purge mode when run from a downloaded copy:
+`./install.sh uninstall --purge` or `./install.ps1 uninstall -Purge`. Purging
+also deletes installed apps, login information, settings, and app storage.
+Normal uninstall removes launch-at-login configuration and generated system
+shortcuts but keeps that user data for a future reinstall.
+
+### Manual desktop install
+
 Download the archive for your system from the
-[releases page](https://github.com/fiatjaf/verdana/releases). Each archive
+[releases page](https://github.com/hzrd149/verdana/releases). Each archive
 holds a single `verdana` binary (`verdana.exe` on Windows):
 
 | System | Archive |
@@ -201,7 +238,7 @@ The desktop launcher uses native GUI libraries, so install the prerequisites
 listed above first. Then clone the repository and use `go install`:
 
 ```sh
-git clone https://github.com/fiatjaf/verdana.git
+git clone https://github.com/hzrd149/verdana.git
 cd verdana
 just go-install
 ```
@@ -219,8 +256,8 @@ is unset. Make sure that directory is on your `PATH`.
 
 The preliminary child build is required because the production launcher
 embeds its webview host into the installed executable. For that reason,
-`go install fiatjaf.com/verdana/desktop@latest` is not currently a supported
-one-line installation; use the release archive for the simplest install.
+a remote `go install` with an `@latest` version is not currently supported;
+use the release archive for the simplest install.
 
 To run the tests:
 
