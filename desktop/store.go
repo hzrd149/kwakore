@@ -238,6 +238,7 @@ func runStoreWindow() {
 		backBtn               widget.Clickable
 		viewBtns              [2]widget.Clickable
 		managerBtn            widget.Clickable
+		launcherSettingsBtn   widget.Clickable
 		fetchBtn              widget.Clickable
 		checkUpdBtn           widget.Clickable
 		installedList         widget.List
@@ -333,6 +334,13 @@ func runStoreWindow() {
 
 			if fetchBtn.Clicked(gtx) {
 				go backend.Discover()
+			}
+			if launcherSettingsBtn.Clicked(gtx) {
+				go func() {
+					if err := backend.OpenLauncherSettings(); err != nil {
+						log.Warn().Err(err).Msg("could not open settings from store")
+					}
+				}()
 			}
 			for k := range discoKindBtns {
 				if discoKindBtns[k].Clicked(gtx) {
@@ -525,7 +533,7 @@ func runStoreWindow() {
 
 			layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layoutStoreHeader(gtx, th, &backBtn, &viewBtns, page, view, len(st.Installed))
+					return layoutStoreHeader(gtx, th, &backBtn, &viewBtns, &launcherSettingsBtn, page, view, len(st.Installed), trayUserLabel(st.ProfileName, st.Pubkey), st.ProfilePicture)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Left: unit.Dp(24), Right: unit.Dp(24), Bottom: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

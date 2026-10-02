@@ -132,7 +132,7 @@ func runInstanceCommand(msg instanceCommand) {
 	<-launcherReady
 	switch msg.Command {
 	case commandOpenManager:
-		showManager()
+		showPrimary()
 	case commandRunShortcut:
 		runBundleTokenReady(msg.Token)
 	case commandEnsureRunning:

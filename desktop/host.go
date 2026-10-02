@@ -34,6 +34,7 @@ func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaSta
 
 func (gioHost) StateChanged() {
 	trayStateChanged()
+	showPendingPrimary()
 	invalidateAll()
 }
 

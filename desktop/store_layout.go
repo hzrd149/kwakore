@@ -24,15 +24,19 @@ var storeViewLabels = [2]string{"Installed", "Discover"}
 const readableWidth = unit.Dp(760)
 
 // layoutStoreHeader is the store's top bar: Back and the page's name on the
-// left while a page is open, the switch between the lists in the middle.
+// left while a page is open, the switch between the lists in the middle, and
+// the signed-in user's profile and launcher settings on the right.
 func layoutStoreHeader(
 	gtx layout.Context,
 	th *material.Theme,
 	backBtn *widget.Clickable,
 	viewBtns *[2]widget.Clickable,
+	settingsBtn *widget.Clickable,
 	page *storePage,
 	view,
 	nInstalled int,
+	profileName,
+	profilePicture string,
 ) layout.Dimensions {
 	p := currentTheme()
 	return layout.Inset{Top: unit.Dp(16), Bottom: unit.Dp(16), Left: unit.Dp(24), Right: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -88,7 +92,30 @@ func layoutStoreHeader(
 				)
 			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Dimensions{Size: image.Point{X: gtx.Constraints.Min.X}}
+				return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return avatar(gtx, profilePicture, 32)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							l := material.Body2(th, profileName)
+							l.Font.Weight = font.Bold
+							l.MaxLines = 1
+							return l.Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							b := material.Button(th, settingsBtn, "⚙ Settings")
+							b.Background = p.chipBg
+							b.Color = p.chipFg
+							b.TextSize = unit.Sp(13)
+							b.Inset = layout.UniformInset(unit.Dp(8))
+							return b.Layout(gtx)
+						}),
+					)
+				})
 			}),
 		)
 	})

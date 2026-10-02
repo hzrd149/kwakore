@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"verdana/backend"
 
 	"gioui.org/app"
 	"gioui.org/io/system"
@@ -13,11 +14,12 @@ var desktopLifecycle = struct {
 	// store is the store window while it is open; storeStarting covers the
 	// moment between asking for one and it existing, so two clicks don't
 	// make two.
-	store         *app.Window
-	storeStarting bool
-	show          chan struct{}
-	quit          chan struct{}
-	once          sync.Once
+	store          *app.Window
+	storeStarting  bool
+	primaryPending bool
+	show           chan struct{}
+	quit           chan struct{}
+	once           sync.Once
 }{
 	show: make(chan struct{}, 1),
 	quit: make(chan struct{}),
@@ -46,6 +48,36 @@ func showManager() {
 	select {
 	case desktopLifecycle.show <- struct{}{}:
 	default:
+	}
+}
+
+// showPrimary opens the window that represents Verdana's normal entry point:
+// login while signed out, and the store once a session has been restored. A
+// restored login completes asynchronously, so a request made during loading is
+// remembered and fulfilled by the next backend state change.
+func showPrimary() {
+	desktopLifecycle.Lock()
+	desktopLifecycle.primaryPending = true
+	desktopLifecycle.Unlock()
+	showPendingPrimary()
+}
+
+func showPendingPrimary() {
+	phase := backend.Phase()
+	if phase == backend.PhaseLoading {
+		return
+	}
+	desktopLifecycle.Lock()
+	if !desktopLifecycle.primaryPending {
+		desktopLifecycle.Unlock()
+		return
+	}
+	desktopLifecycle.primaryPending = false
+	desktopLifecycle.Unlock()
+	if phase == backend.PhaseMain {
+		showStore()
+	} else {
+		showManager()
 	}
 }
 
@@ -101,7 +133,7 @@ func quitDesktop() {
 
 func desktopLoop(background bool) {
 	if !background {
-		showManager()
+		showPrimary()
 	}
 	for {
 		select {
