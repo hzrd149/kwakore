@@ -12,8 +12,13 @@
 package backend
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr/sdk"
@@ -103,9 +108,58 @@ func DataDir() string { return dataDir }
 // Logger is the backend's logger, so a GUI can log into the same stream.
 func Logger() zerolog.Logger { return log }
 
-func nappBaseDir(id string) string {
-	return filepath.Join(dataDir, "napps", id)
+// nappBaseDir is the one place a napp's install directory is named, and every
+// filesystem operation on a napp's files (install, the failed-install cleanup,
+// update, launch, the napplet document and icon reads, uninstall) starts here.
+//
+// The id, and the author's d tag inside it, is opaque: it is never a path
+// segment. A d of "../../.." used to turn {dataDir}/napps/{id} into {dataDir}
+// itself, so a failed install or an uninstall removed the whole data
+// directory; "/../x" landed in another napp's namespace and "a/b" nested under
+// napp "a". The directory is instead the hex sha256 of today's id string
+// ({pk16}~{d} for napps, napplet~{pk16}~{d} for napplets), a fixed-width name
+// directly under {dataDir}/napps, and the result is still checked to sit
+// there. The id itself, in state, storage keys and wire messages, keeps the
+// raw d byte for byte.
+//
+// What goes into the hash may change later (the full address and artifact
+// hash are candidates); nothing is migrated, and directories under the old
+// raw-id layout are left alone rather than swept, since deleting unknown
+// directories automatically is the riskier act.
+//
+// A caller that gets an error must not touch the filesystem at all.
+func nappBaseDir(id string) (string, error) {
+	if !filepath.IsAbs(dataDir) {
+		return "", errors.New("data directory is not set")
+	}
+	root := filepath.Join(dataDir, "napps")
+	sum := sha256.Sum256([]byte(id))
+	name := hex.EncodeToString(sum[:])
+	dir := filepath.Join(root, name)
+	if rel, err := filepath.Rel(root, dir); err != nil || rel != name || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("napp directory escapes %s", root)
+	}
+	return dir, nil
 }
 
-// NappBaseDir is where a napp's files are unpacked.
-func NappBaseDir(id string) string { return nappBaseDir(id) }
+// nappAssetPath places a manifest path (author input, like "/assets/app.js")
+// under a napp's directory. It is the one rule for both the install writer and
+// the icon reader: nothing may land outside base, so "../" segments, absolute
+// paths and "//" are refused. "/" and an empty path mean index.html, since
+// NIP-5D lets a napplet name its index "/".
+func nappAssetPath(base, manifestPath string) (string, error) {
+	rel := strings.TrimPrefix(manifestPath, "/")
+	if rel == "" {
+		rel = "index.html"
+	}
+	rel = filepath.FromSlash(rel)
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("%s: path escapes the napp directory", manifestPath)
+	}
+	dest := filepath.Join(base, rel)
+	// "." is local too, but names the directory itself, not a file in it
+	if r, err := filepath.Rel(base, dest); err != nil || r == "." || !filepath.IsLocal(r) {
+		return "", fmt.Errorf("%s: path escapes the napp directory", manifestPath)
+	}
+	return dest, nil
+}

@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -187,9 +186,14 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 	if !ok {
 		return nil, errNotFound("this napp has no icon")
 	}
-	local := filepath.Join(nappBaseDir(n.ID), filepath.FromSlash(strings.TrimPrefix(asset.Path, "/")))
-	if data, err := os.ReadFile(local); err == nil {
-		return data, nil
+	// the local copy only through the same containment rule the installer
+	// wrote it with; anything else falls back to the hash-checked download
+	if base, err := nappBaseDir(n.ID); err == nil {
+		if local, err := nappAssetPath(base, asset.Path); err == nil {
+			if data, err := os.ReadFile(local); err == nil {
+				return data, nil
+			}
+		}
 	}
 	return downloadBlob(ctx, n.BlossomServers(ctx), asset.Sha256)
 }

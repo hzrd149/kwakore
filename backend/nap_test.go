@@ -1320,10 +1320,14 @@ func TestNappletDocumentChecksTheHash(t *testing.T) {
 	sum := sha256.Sum256(html)
 	n := Napp{ID: "napplet~0123456789abcdef~doc", D: "doc", Format: FormatNapplet,
 		Paths: []NappPath{{Path: "/index.html", Sha256: hex.EncodeToString(sum[:])}}}
-	if err := os.MkdirAll(nappBaseDir(n.ID), 0o755); err != nil {
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(nappBaseDir(n.ID), "index.html")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(base, "index.html")
 	if err := os.WriteFile(path, html, 0o644); err != nil {
 		t.Fatal(err)
 	}

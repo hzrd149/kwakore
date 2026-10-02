@@ -455,7 +455,11 @@ func nappletDocument(n Napp) ([]byte, error) {
 		}
 		return os.ReadFile(filepath.Join(d.dir, "index.html"))
 	}
-	data, err := os.ReadFile(filepath.Join(nappBaseDir(n.ID), "index.html"))
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		return nil, fmt.Errorf("napplet %s: %w", n.ID, err)
+	}
+	data, err := os.ReadFile(filepath.Join(base, "index.html"))
 	if err != nil {
 		return nil, fmt.Errorf("napplet %s is not installed", n.ID)
 	}

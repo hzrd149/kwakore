@@ -74,7 +74,11 @@ func TestTryNappletLaunchesVerifiedDocumentWithoutInstalling(t *testing.T) {
 	if _, ok := InstalledNapp(n.ID); ok {
 		t.Fatal("preview was recorded as installed")
 	}
-	if _, err := os.Stat(nappBaseDir(n.ID)); !os.IsNotExist(err) {
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote an install directory: %v", err)
 	}
 	if h.spec.Format != FormatNapplet || h.spec.NappID != n.ID {

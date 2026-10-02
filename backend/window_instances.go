@@ -499,7 +499,10 @@ func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string
 	if id == "" {
 		return nil, errors.New("napp has no id")
 	}
-	appDir := nappBaseDir(id)
+	appDir, err := nappBaseDir(id)
+	if err != nil {
+		return nil, fmt.Errorf("napp %s: %w", id, err)
+	}
 	pageURL := ""
 	if napp.IsNapplet() {
 		// a napplet window never navigates anywhere: the shell loads the

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -45,7 +44,11 @@ func InstallNapp(n Napp) error {
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
 
-	base := nappBaseDir(n.ID)
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -76,7 +79,13 @@ func Uninstall(id string) {
 	setBusy(id, true)
 	defer setBusy(id, false)
 
-	os.RemoveAll(nappBaseDir(id))
+	// a napp whose directory cannot be named safely gets nothing removed,
+	// but is still forgotten below
+	if base, err := nappBaseDir(id); err != nil {
+		log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
+	} else {
+		os.RemoveAll(base)
+	}
 
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
@@ -248,22 +257,17 @@ func fetchNappAssets(ctx context.Context, n Napp, base string, servers []string)
 
 // fetchNappAsset downloads one file and writes it where the napp expects it.
 func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPath) error {
+	// manifest paths are author input: the destination is settled (and an
+	// escaping one refused) before anything is downloaded
+	dest, err := nappAssetPath(base, p.Path)
+	if err != nil {
+		return err
+	}
 	data, err := downloadBlob(ctx, servers, p.Sha256)
 	if err != nil {
 		// the file, not the hash: an install or update that failed has to
 		// say which of the napp's files nobody could serve
 		return fmt.Errorf("%s: %w", p.Path, err)
-	}
-	rel := strings.TrimPrefix(p.Path, "/")
-	if rel == "" {
-		// NIP-5D lets a napplet name its index "/"
-		rel = "index.html"
-	}
-	dest := filepath.Join(base, filepath.FromSlash(rel))
-	// manifest paths are author input: nothing may land outside the napp's
-	// own directory ("../" segments, absolute paths)
-	if r, err := filepath.Rel(base, dest); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("%s: path escapes the napp directory", p.Path)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)

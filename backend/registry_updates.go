@@ -140,7 +140,12 @@ func Update(id string) {
 // setBusy held. newer needs the full event shape; Paths and Servers are the
 // parts that matter for the download itself.
 func applyUpdate(current, newer Napp) {
-	base := nappBaseDir(current.ID)
+	base, err := nappBaseDir(current.ID)
+	if err != nil {
+		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
+		SetFetchErr("update failed: " + err.Error())
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
