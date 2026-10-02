@@ -572,15 +572,19 @@ The current file has only `workflow_dispatch`, and its comment says to restore t
 | A4 | Real napplets in the wild register intent handlers with `inc.on("napplet:<archetype>/<action>")` (master model), not `intent.onDelivery` | Pattern 4 | No `onDelivery` usage exists in `~/Projects/napplet-soy` or `~/Projects/napplet-portal` [VERIFIED: grep]. Napplets written against Verdana's patched API would lose delivery either way, since the pristine shim has no `onDelivery` |
 | A5 | No PR to master is currently required to pass a status check named for the android workflow | Pitfall 9 | If one is, path filtering will block unrelated PRs |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Which real napplets go on the D-13 smoke list for config and notify?**
    - What we know: `backend/testdata/nip5d-napplets.jsonl` has `noris` (identity, inc, outbox, relay, resource, theme; author `bbb5dda0e1556797…`) and `hosted-nowhere-opener` (intent caller; author `42d617d410c079de…`). napplet-soy's fixture `tests/fixtures/interoperability/foreign.html` uses `config.registerSchema`/`subscribe`, and its asset helper uses `napplet.resource.bytes('blossom:sha256:…')`. No local napplet uses notify or acts as an intent handler.
    - Recommendation: smoke `noris`, `hosted-nowhere-opener` plus any installed profile/note handler napplet. Add a throwaway dev-folder probe napplet (loaded with `DevLoadFolder`) that exercises `config.registerSchema/get/subscribe`, `notify.onControls/send`, `inc.on("napplet:profile/open")` as an intent handler, and `resource.bytes`. Ask the user for real config/notify napplets if they want those instead.
+   - RESOLVED: committed probe napplet in `backend/testdata/probe-napplet/` plus a human smoke list (plan 01-05 Task 2).
 2. **Should INC-topic intent delivery count as "Phase 1 fixes immediately visible breakage" (D-12)?**
    - Recommendation: yes. Without it every handler napplet silently breaks, and it is the pinned NAP-INTENT master behavior. Flag it in the plan so the user sees it.
+   - RESOLVED: yes, Phase 1 task (plan 01-02 Task 2).
 3. **Snapshot the NAP-RESOURCE `9511232` tolerance text too?** Recommendation: yes (row 18 above). CF-6 cites it.
+   - RESOLVED: yes, snapshotted as a tolerance (plan 01-03 Task 1).
 4. **Keep or delete exported `NappBaseDir`?** It has no callers outside `backend`, and gomobile binds only `backend/mobile`. Recommendation: delete it, or change it to `(string, error)`. D-03's "used by GUIs" note is inaccurate today.
+   - RESOLVED: deleted (plan 01-01 Task 1).
 
 ## Environment Availability
 
