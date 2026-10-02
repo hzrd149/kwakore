@@ -17,7 +17,8 @@ var (
 
 // NAP-INTENT uses the launcher's handler selection and window routing, while
 // keeping acceptance and delivery separate. The stable convention identity is
-// the routed action; napplet targets receive an intent.deliver push.
+// the routed action; napplet targets receive the payload as an inc.event on
+// the convention topic once they subscribe to it (dispatchToNapplet).
 
 func init() {
 	handleNap(map[string]napHandler{

@@ -1089,40 +1089,39 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	}
 }
 
-// dispatchToNapplet delivers an accepted convention through NAP-INTENT's
-// carrier-neutral intent.deliver event. The shim buffers the event until the
-// napplet registers onDelivery; the runtime only waits for shell.ready.
+// intentHandlerWait is how long an accepted intent waits for its target
+// napplet to start listening on the convention topic. Tests shorten it.
+var intentHandlerWait = 20 * time.Second
+
+// dispatchToNapplet delivers an accepted intent the way NAP-INTENT (naps
+// master) describes: through the convention's ordinary delivery mechanism, an
+// INC topic event named after the convention, and only once the handler is
+// ready to receive it. The pristine shim has no intent delivery API of its own
+// (SHIM-02 row P2), so readiness is the handler's own inc.subscribe on that
+// topic: napIncSubscribe registers the topic as an action, and a session reset
+// clears it through incForget, so a reloaded handler must subscribe again.
+//
+// The event goes to the resolved handler alone, never through incPublish,
+// which would hand the payload to every napplet listening on the topic.
 func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, payload json.RawMessage) (any, error) {
-	for {
-		ci.nap.mu.Lock()
-		ready := ci.nap.ready
-		established := ci.nap.established
-		ci.nap.mu.Unlock()
-		if established {
-			break
-		}
-		select {
-		case <-ready:
-		case <-ci.gone:
-			return nil, errors.New("target closed before intent delivery")
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	if _, _, ok := conventionParts(req.name); !ok {
+		return nil, fmt.Errorf("invalid intent convention %q", req.name)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, intentHandlerWait)
+	_, ok := ci.waitForHandler(waitCtx, req.name)
+	cancel()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s is not listening for %q", errNoHandler, ci.napp.Label(), req.name)
 	}
 	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
 	notifyState()
 
-	archetype, action, ok := conventionParts(req.name)
-	if !ok {
-		return nil, fmt.Errorf("invalid intent convention %q", req.name)
-	}
-	delivery := map[string]any{
-		"sender": req.sender, "archetype": archetype, "action": action, "convention": req.name,
-	}
+	ev := map[string]any{"type": "inc.event", "topic": req.name, "sender": req.sender}
 	if len(payload) > 0 && string(payload) != "null" {
-		delivery["payload"] = payload
+		ev["payload"] = payload
 	}
-	ci.napPush(map[string]any{"type": "intent.deliver", "delivery": delivery})
+	ci.napPush(ev)
 	return nil, nil
 }
 
