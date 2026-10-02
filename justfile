@@ -1,5 +1,5 @@
 run:
-    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
+    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true VERDANA_SEARCH_DEBUG=1 ./verdana
 
 prod:
     cd desktop && go build -o child/child ./child && go build -o verdana -tags 'novulkan' .
