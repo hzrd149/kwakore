@@ -140,10 +140,48 @@ func resolvedPalette(mode string, appearance themesystem.Appearance) themePalett
 		}
 	}
 	p := paletteByName(name)
+	if mode == backend.ThemeSystem && len(appearance.Colors) > 0 {
+		p = omarchyPalette(p, appearance.Colors)
+	}
 	if mode == backend.ThemeSystem && appearance.HasAccent {
 		p.contrastBg = appearance.Accent
 		p.contrastFg = readableText(appearance.Accent)
 	}
+	return p
+}
+
+// omarchyPalette maps Omarchy's colors.toml onto the semantic roles used by
+// Verdana and passed through to napps. Missing optional colors retain the
+// normal light/dark defaults, allowing both old and new Omarchy themes.
+func omarchyPalette(p themePalette, colors map[string]color.NRGBA) themePalette {
+	use := func(target *color.NRGBA, names ...string) {
+		for _, name := range names {
+			if value, ok := colors[name]; ok {
+				*target = value
+				return
+			}
+		}
+	}
+	use(&p.bg, "background")
+	use(&p.fg, "bright_foreground", "foreground")
+	use(&p.contrastBg, "accent", "selection_background")
+	use(&p.contrastFg, "selection_foreground", "background")
+	use(&p.card, "lighter_background", "color0")
+	use(&p.chipBg, "darker_background", "color0")
+	use(&p.chipFg, "foreground", "color7")
+	use(&p.border, "color8", "dark_foreground")
+	use(&p.codeBg, "darker_background", "color0")
+	use(&p.codeFg, "foreground", "color7")
+	use(&p.subtle, "dark_foreground", "color7")
+	use(&p.muted, "color8", "dark_foreground")
+	use(&p.danger, "red", "color1")
+	use(&p.imageBg, "darker_background", "color0")
+	use(&p.inputHnt, "color8", "dark_foreground")
+	use(&p.suggestBg, "green", "color2")
+	use(&p.devBg, "yellow", "color3")
+	p.contrastFg = readableText(p.contrastBg)
+	p.suggestFg = readableText(p.suggestBg)
+	p.devFg = readableText(p.devBg)
 	return p
 }
 

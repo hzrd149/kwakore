@@ -3,6 +3,9 @@
 package themesystem
 
 import (
+	"image/color"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -25,6 +28,37 @@ func TestPortalAccentRejectsInvalidComponents(t *testing.T) {
 	if _, ok := accentValue([]interface{}{0.0, 1.1, 0.0}); ok {
 		t.Fatal("out-of-range accent accepted")
 	}
+}
+
+func TestReadOmarchyAppearance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "colors.toml")
+	data := `# current Omarchy palette
+mode = "light"
+background = "#faf4ed"
+foreground = '#575279'
+accent = "#d7827e" # trailing comments are allowed
+red = "#b4637a"
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	appearance, stamp, ok := readOmarchyAppearance(path)
+	if !ok || stamp == "" {
+		t.Fatalf("appearance rejected: ok=%v stamp=%q", ok, stamp)
+	}
+	if appearance.Dark {
+		t.Fatal("light mode was parsed as dark")
+	}
+	if !appearance.HasAccent || appearance.Accent != colorValue(0xd7, 0x82, 0x7e) {
+		t.Fatalf("accent = %#v", appearance.Accent)
+	}
+	if appearance.Colors["red"] != colorValue(0xb4, 0x63, 0x7a) {
+		t.Fatalf("red = %#v", appearance.Colors["red"])
+	}
+}
+
+func colorValue(r, g, b uint8) color.NRGBA {
+	return color.NRGBA{R: r, G: g, B: b, A: 0xff}
 }
 
 func TestDesktopPortalAppearanceWhenAvailable(t *testing.T) {

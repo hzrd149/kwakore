@@ -3,9 +3,14 @@
 package themesystem
 
 import (
+	"bufio"
 	"image/color"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -21,11 +26,11 @@ func Watch() (Appearance, <-chan Appearance, func()) {
 	changes := make(chan Appearance, 1)
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
-		close(changes)
-		return Appearance{}, changes, func() {}
+		return watchOmarchyWithoutPortal(changes, Appearance{})
 	}
 	obj := conn.Object(portalBus, portalPath)
-	current := readPortalAppearance(obj)
+	portalAppearance := readPortalAppearance(obj)
+	current, omarchyPath, omarchyStamp := preferredAppearance(portalAppearance)
 
 	signals := make(chan *dbus.Signal, 8)
 	conn.Signal(signals)
@@ -37,16 +42,25 @@ func Watch() (Appearance, <-chan Appearance, func()) {
 	if err != nil {
 		conn.RemoveSignal(signals)
 		conn.Close()
-		close(changes)
-		return current, changes, func() {}
+		return watchOmarchyWithoutPortal(changes, portalAppearance)
 	}
 	stopped := make(chan struct{})
 	go func() {
 		defer close(changes)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-stopped:
 				return
+			case <-ticker.C:
+				next, path, stamp := preferredAppearance(portalAppearance)
+				if path == omarchyPath && stamp == omarchyStamp {
+					continue
+				}
+				omarchyPath, omarchyStamp = path, stamp
+				current = next
+				sendLatest(changes, current)
 			case signal := <-signals:
 				if signal == nil || len(signal.Body) < 3 {
 					continue
@@ -56,12 +70,10 @@ func Watch() (Appearance, <-chan Appearance, func()) {
 				if namespace != appearanceSpace || (key != "color-scheme" && key != "accent-color") {
 					continue
 				}
-				current = readPortalAppearance(obj)
-				select {
-				case changes <- current:
-				default:
-					<-changes
-					changes <- current
+				portalAppearance = readPortalAppearance(obj)
+				if omarchyPath == "" {
+					current = portalAppearance
+					sendLatest(changes, current)
 				}
 			}
 		}
@@ -74,6 +86,154 @@ func Watch() (Appearance, <-chan Appearance, func()) {
 			conn.Close()
 		})
 	}
+}
+
+func watchOmarchyWithoutPortal(changes chan Appearance, fallback Appearance) (Appearance, <-chan Appearance, func()) {
+	current, path, stamp := preferredAppearance(fallback)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(changes)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-ticker.C:
+				next, nextPath, nextStamp := preferredAppearance(fallback)
+				if nextPath == path && nextStamp == stamp {
+					continue
+				}
+				current, path, stamp = next, nextPath, nextStamp
+				sendLatest(changes, current)
+			}
+		}
+	}()
+	var once sync.Once
+	return current, changes, func() { once.Do(func() { close(stopped) }) }
+}
+
+func sendLatest(changes chan Appearance, appearance Appearance) {
+	select {
+	case changes <- appearance:
+	default:
+		<-changes
+		changes <- appearance
+	}
+}
+
+var omarchyThemePaths = func() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	state := os.Getenv("XDG_STATE_HOME")
+	if state == "" {
+		state = filepath.Join(home, ".local", "state")
+	}
+	config := os.Getenv("XDG_CONFIG_HOME")
+	if config == "" {
+		config = filepath.Join(home, ".config")
+	}
+	return []string{
+		filepath.Join(state, "omarchy", "current", "theme", "colors.toml"),
+		filepath.Join(config, "omarchy", "current", "theme", "colors.toml"),
+	}
+}
+
+func preferredAppearance(fallback Appearance) (Appearance, string, string) {
+	for _, path := range omarchyThemePaths() {
+		appearance, stamp, ok := readOmarchyAppearance(path)
+		if ok {
+			return appearance, path, stamp
+		}
+	}
+	return fallback, "", ""
+}
+
+func readOmarchyAppearance(path string) (Appearance, string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Appearance{}, "", false
+	}
+	colors := make(map[string]color.NRGBA)
+	mode := ""
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && (value[0] == 34 || value[0] == 39) {
+			quote := value[0]
+			if end := strings.IndexByte(value[1:], quote); end >= 0 {
+				value = value[1 : end+1]
+			}
+		}
+		if key == "mode" {
+			mode = strings.ToLower(value)
+			continue
+		}
+		if parsed, ok := parseHexColor(value); ok {
+			colors[key] = parsed
+		}
+	}
+	background, hasBackground := colors["background"]
+	foreground, hasForeground := colors["foreground"]
+	if scanner.Err() != nil || !hasBackground || !hasForeground {
+		return Appearance{}, "", false
+	}
+	dark := mode != "light"
+	if mode == "" {
+		dark = relativeLuminance(background) < relativeLuminance(foreground)
+	}
+	appearance := Appearance{Dark: dark, Colors: colors}
+	if accent, ok := colors["accent"]; ok {
+		appearance.Accent, appearance.HasAccent = accent, true
+	}
+	info, _ := os.Stat(path)
+	stamp := string(data)
+	if info != nil {
+		stamp = info.ModTime().UTC().String() + ":" + stamp
+	}
+	return appearance, stamp, true
+}
+
+func parseHexColor(value string) (color.NRGBA, bool) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "#")
+	if len(value) != 6 && len(value) != 8 {
+		return color.NRGBA{}, false
+	}
+	var components [4]uint8
+	components[3] = 0xff
+	for i := 0; i < len(value)/2; i++ {
+		var v uint8
+		for _, digit := range value[i*2 : i*2+2] {
+			v <<= 4
+			switch {
+			case digit >= '0' && digit <= '9':
+				v += uint8(digit - '0')
+			case digit >= 'a' && digit <= 'f':
+				v += uint8(digit-'a') + 10
+			case digit >= 'A' && digit <= 'F':
+				v += uint8(digit-'A') + 10
+			default:
+				return color.NRGBA{}, false
+			}
+		}
+		components[i] = v
+	}
+	return color.NRGBA{R: components[0], G: components[1], B: components[2], A: components[3]}, true
+}
+
+func relativeLuminance(c color.NRGBA) float64 {
+	return 0.2126*float64(c.R) + 0.7152*float64(c.G) + 0.0722*float64(c.B)
 }
 
 func readPortalAppearance(obj dbus.BusObject) Appearance {

@@ -32,3 +32,25 @@ func TestExplicitPaletteIgnoresSystemAccent(t *testing.T) {
 		t.Fatal("explicit light mode was changed by system appearance")
 	}
 }
+
+func TestResolvedSystemPaletteUsesOmarchyColors(t *testing.T) {
+	background := rgb(0x181616)
+	foreground := rgb(0xc5c9c5)
+	accent := rgb(0x658594)
+	p := resolvedPalette(backend.ThemeSystem, themesystem.Appearance{
+		Dark: true,
+		Colors: map[string]color.NRGBA{
+			"background": background,
+			"foreground": foreground,
+			"accent":     accent,
+			"red":        rgb(0xc4746e),
+			"color8":     rgb(0xa6a69c),
+		},
+	})
+	if p.bg != background || p.fg != foreground || p.contrastBg != accent {
+		t.Fatalf("Omarchy palette was not applied: %#v", p)
+	}
+	if p.danger != rgb(0xc4746e) || p.muted != rgb(0xa6a69c) {
+		t.Fatalf("Omarchy semantic colors were not applied: %#v", p)
+	}
+}
