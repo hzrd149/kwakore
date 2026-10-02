@@ -10,7 +10,7 @@ import (
 // NAP-CONFIG: a napplet declares its settings as a JSON Schema, the launcher
 // renders them in the napp's settings window, and the napplet reads what the
 // user chose. The launcher is the only writer; nothing here takes a value
-// from the napplet. Schema and values live in napconfig.go, keyed by the
+// from the napplet. Schema and values live in the napconfig package, keyed by the
 // napp's address.
 //
 // config.values payloads may carry secrets: they are never logged.

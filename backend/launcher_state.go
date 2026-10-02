@@ -32,19 +32,19 @@ type AppState struct {
 
 	// Rules are the answers the user gave to permission prompts that were
 	// meant to stick ("always allow", "always deny"), keyed by RuleKey
-	// (see permissions.go). The "this session" ones are not here: they live
+	// (see window_permissions.go). The "this session" ones are not here: they live
 	// in memory and go when the launcher quits.
 	Rules map[string]Rule `json:"rules"`
 
 	// ActionUsage counts how often each napp ended up handling each action,
-	// keyed by usageKey (see usage.go): both "from this napp, this action
+	// keyed by usageKey (see launcher_usage.go): both "from this napp, this action
 	// went there" and "this action went there". Nothing is dispatched from
 	// these — they only order the options the user gets to choose from. The
 	// "this session" ones are not here either.
 	ActionUsage map[string]int `json:"action_usage"`
 
 	// Theme is the user's preference: "system", "light" or "dark". The
-	// resolved light/dark theme and its colors live in theme.go.
+	// resolved light/dark theme and its colors live in launcher_theme.go.
 	Theme string `json:"theme"`
 
 	// ExposeInstalledApps mirrors installed napps and napplets into the
@@ -59,11 +59,11 @@ type AppState struct {
 	GNOMESearchIntegration *bool `json:"gnome_search_integration,omitempty"`
 
 	// NostrConnectRelay is the relay the login screen's nostrconnect QR
-	// code sends signers to (see nostrconnect.go).
+	// code sends signers to (see auth_nostrconnect.go).
 	NostrConnectRelay string `json:"nostrconnect_relay"`
 
 	// UserRelays is the logged-in user's NIP-65 relay list as last seen
-	// (see user_relays.go), so the next start has it before the relays
+	// (see nostr_user_relays.go), so the next start has it before the relays
 	// answer. DiscoverOnUserRelays turns asking its write relays during
 	// discovery off; nil means on.
 	UserRelays           *userRelayList `json:"user_relays,omitempty"`

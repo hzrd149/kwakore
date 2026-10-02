@@ -13,7 +13,7 @@ import (
 // NAP-OUTBOX: outbox-aware event access (napplet/naps PR #32). Where
 // NAP-RELAY is a relay proxy, this is intent: the napplet gives filters,
 // event ids and templates, and the launcher picks the relays by NIP-65 (see
-// outbox.go), deduplicates, verifies and fans publishes out. Relay EOSE
+// nostr_outbox.go), deduplicates, verifies and fans publishes out. Relay EOSE
 // stays internal: a subscription is events until outbox.close or
 // outbox.closed.
 

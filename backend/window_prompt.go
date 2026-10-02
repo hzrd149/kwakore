@@ -20,9 +20,9 @@ import (
 // forever: an unanswered prompt is denied after promptTimeout.
 //
 // A sensitive question is only asked when no rule has an answer for it (see
-// permissions.go), and the answer can come back with a scope: for this prompt
+// window_permissions.go), and the answer can come back with a scope: for this prompt
 // only, for this session, or always. Anything wider than that gets filed away
-// by permissions.go and settles the next question of the same kind without a
+// by window_permissions.go and settles the next question of the same kind without a
 // prompt.
 
 const promptTimeout = 2 * time.Minute
@@ -64,7 +64,7 @@ type PromptOption struct {
 	// Suggested says the user has been choosing this napp for this action
 	// before, and Uses is how many times, so a UI can put its habitual
 	// handlers at the top in a color of their own. Set by the picker (see
-	// usage.go); a UI never has to work it out.
+	// launcher_usage.go); a UI never has to work it out.
 	Suggested bool `json:"suggested,omitempty"`
 	Uses      int  `json:"uses,omitempty"`
 }

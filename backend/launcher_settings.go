@@ -63,7 +63,7 @@ func SetBlossomServers(servers []string) {
 }
 
 // DiscoverOnUserRelays says whether discovery also asks the user's own
-// NIP-65 write relays (see user_relays.go). On unless turned off.
+// NIP-65 write relays (see nostr_user_relays.go). On unless turned off.
 func DiscoverOnUserRelays() bool {
 	stateMu.Lock()
 	defer stateMu.Unlock()

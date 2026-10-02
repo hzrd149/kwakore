@@ -141,7 +141,7 @@ type launcherState struct {
 
 	// lookup is the address typed into the discovery filter, and resolved
 	// the napps found by address so far: they stay listed in discovery
-	// across refreshes (see address.go).
+	// across refreshes (see registry_address.go).
 	lookup   *AddressLookup
 	resolved map[string]Napp
 
