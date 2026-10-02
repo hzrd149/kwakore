@@ -1,6 +1,6 @@
 //go:build !linux
 
-package main
+package windowchrome
 
 // Windows and macOS provide native decorations directly to Gio.
-func configureNativeWindowChrome() string { return "native" }
+func Configure() string { return "native" }

@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package windowchrome
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 
 const nativeWaylandEnv = "VERDANA_NATIVE_WAYLAND"
 
-// configureNativeWindowChrome selects the Linux display backend before Gio
+// Configure selects the Linux display backend before Gio
 // creates a window. Gio uses native decorations on X11, but on Wayland it
 // draws a generic Material title bar whenever the compositor asks clients to
 // decorate themselves (notably on GNOME). Prefer XWayland in that situation so
@@ -18,7 +18,7 @@ const nativeWaylandEnv = "VERDANA_NATIVE_WAYLAND"
 // Pure Wayland sessions have no DISPLAY and continue to use Gio's Wayland
 // backend. Users who prefer native Wayland rendering over a system-managed
 // title bar can set VERDANA_NATIVE_WAYLAND=1.
-func configureNativeWindowChrome() string {
+func Configure() string {
 	if envEnabled(os.Getenv(nativeWaylandEnv)) {
 		return "wayland"
 	}

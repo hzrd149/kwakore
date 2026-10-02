@@ -10,6 +10,8 @@ import (
 	"time"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/internal/instancelock"
+	"fiatjaf.com/verdana/desktop/internal/windowchrome"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
@@ -150,7 +152,7 @@ func main() {
 		Timestamp().
 		Logger()
 	log.Info().Msg("starting verdana")
-	if backend := configureNativeWindowChrome(); backend != "" {
+	if backend := windowchrome.Configure(); backend != "" {
 		log.Info().Str("window_backend", backend).Msg("configured native window chrome")
 	}
 
@@ -185,7 +187,7 @@ func main() {
 		log.Info().Str("command", forwarded.Command).Msg("forwarded invocation to the running launcher")
 		return
 	}
-	releaseInstanceLock, acquired, err := acquireInstanceLock(verdanaDir)
+	releaseInstanceLock, acquired, err := instancelock.Acquire(verdanaDir)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not acquire the launcher instance lock")
 	}

@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package instancelock
 
 import (
 	"crypto/sha256"
@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func acquireInstanceLock(dataDir string) (release func(), acquired bool, err error) {
+func Acquire(dataDir string) (release func(), acquired bool, err error) {
 	sum := sha256.Sum256([]byte(dataDir))
 	name, err := windows.UTF16PtrFromString(`Local\Verdana-` + hex.EncodeToString(sum[:8]))
 	if err != nil {

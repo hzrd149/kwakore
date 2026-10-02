@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package windowchrome
 
 import (
 	"os"
@@ -12,7 +12,7 @@ func TestConfigureNativeWindowChromePrefersX11Decorations(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
 	t.Setenv("DISPLAY", ":0")
 
-	if got := configureNativeWindowChrome(); got != "x11" {
+	if got := Configure(); got != "x11" {
 		t.Fatalf("backend = %q, want x11", got)
 	}
 	if got := os.Getenv("WAYLAND_DISPLAY"); got != "" {
@@ -25,7 +25,7 @@ func TestConfigureNativeWindowChromeKeepsPureWayland(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
 	t.Setenv("DISPLAY", "")
 
-	if got := configureNativeWindowChrome(); got != "wayland" {
+	if got := Configure(); got != "wayland" {
 		t.Fatalf("backend = %q, want wayland", got)
 	}
 	if got := os.Getenv("WAYLAND_DISPLAY"); got != "wayland-0" {
@@ -38,7 +38,7 @@ func TestConfigureNativeWindowChromeHonorsWaylandOverride(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
 	t.Setenv("DISPLAY", ":0")
 
-	if got := configureNativeWindowChrome(); got != "wayland" {
+	if got := Configure(); got != "wayland" {
 		t.Fatalf("backend = %q, want wayland", got)
 	}
 	if got := os.Getenv("WAYLAND_DISPLAY"); got != "wayland-0" {
