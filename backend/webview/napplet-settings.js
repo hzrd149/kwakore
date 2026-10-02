@@ -545,6 +545,23 @@
         el("label", { class: "field" }, el("span", {}, "Launcher names"), shortcutNaming),
       )
     }
+    let gnomeSearch = null
+    if (l.gnomeSearchSupported) {
+      gnomeSearch = el("input", { type: "checkbox", name: "gnomeSearch", onchange: () => changed(0) })
+      gnomeSearch.checked = !!l.gnomeSearch
+      appearance.append(
+        el(
+          "div",
+          { class: "field check" },
+          el(
+            "label",
+            {},
+            gnomeSearch,
+            el("span", {}, "Show napplets in GNOME search", el("span", { class: "hint" }, "Install and maintain GNOME Shell and D-Bus integration files. A new GNOME session may be required after changing this.")),
+          ),
+        ),
+      )
+    }
     const relays = listEditor(
       "Relays",
       "Napps and napplets are discovered on these relays, and on your own when enabled below.",
@@ -602,6 +619,7 @@
       blossomServers: servers.read(),
       ...(autostart ? { autostart: autostart.checked } : {}),
       ...(l.appShortcutsSupported ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value } : {}),
+      ...(gnomeSearch ? { gnomeSearch: gnomeSearch.checked } : {}),
     })
     const form = el(
       "form",

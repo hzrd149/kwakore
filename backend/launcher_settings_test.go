@@ -68,7 +68,7 @@ func TestLauncherSettingsWindow(t *testing.T) {
 	if load.Napp || !slices.Equal(load.Launcher.Relays, []string{"wss://relay.one"}) ||
 		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) || load.Launcher.ThemeMode != ThemeSystem ||
 		!load.Launcher.AutostartSupported || load.Launcher.Autostart || !load.Launcher.AppShortcutsSupported || load.Launcher.AppShortcuts ||
-		load.Launcher.AppShortcutNaming != AppShortcutNamePlain {
+		load.Launcher.AppShortcutNaming != AppShortcutNamePlain || !load.Launcher.GNOMESearchSupported || !load.Launcher.GNOMESearch {
 		t.Fatalf("load: %+v", load)
 	}
 
@@ -97,6 +97,13 @@ func TestLauncherSettingsWindow(t *testing.T) {
 	}
 	if !AppShortcutsEnabled() || AppShortcutNaming() != AppShortcutNameHosted {
 		t.Fatalf("app shortcut settings were not saved: enabled=%v naming=%q", AppShortcutsEnabled(), AppShortcutNaming())
+	}
+	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 7, Method: "settings.saveLauncher", Params: `{"gnomeSearch":false}`})
+	if r := srec.resp(t, 7); r.Error != "" {
+		t.Fatal(r.Error)
+	}
+	if GNOMESearchEnabled() || h.gnomeSearch {
+		t.Fatalf("GNOME search setting was not disabled: enabled=%v host=%v", GNOMESearchEnabled(), h.gnomeSearch)
 	}
 
 	// a napp's window carries the launcher's page too

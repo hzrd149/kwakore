@@ -69,6 +69,12 @@ type Host interface {
 	AppShortcutsSupported() bool
 	SyncAppShortcuts([]AppShortcut) error
 
+	// GNOMESearchIntegration reconciles the files GNOME Shell needs to find
+	// and D-Bus activate Verdana's search provider. Unsupported platforms do
+	// not expose the setting.
+	GNOMESearchSupported() bool
+	SetGNOMESearchIntegration(bool) error
+
 	// AmberRequest hands a NIP-55 operation (sign_event, nip44_encrypt, …)
 	// to the phone's signer app — the Android host launches the signer and
 	// the answer comes back to AnswerAmber with the same id. False means
@@ -261,6 +267,10 @@ func (noopHost) AutostartEnabled() bool               { return false }
 func (noopHost) SetAutostart(bool) error              { return errors.New("no autostart service") }
 func (noopHost) AppShortcutsSupported() bool          { return false }
 func (noopHost) SyncAppShortcuts([]AppShortcut) error { return nil }
+func (noopHost) GNOMESearchSupported() bool           { return false }
+func (noopHost) SetGNOMESearchIntegration(bool) error {
+	return errors.New("no GNOME search integration")
+}
 func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
 	return false
 }

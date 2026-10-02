@@ -198,6 +198,9 @@ Open **Settings** from the launcher or the tray. The **Verdana** page sets:
 - **Show installed apps in the system launcher**: add an entry for every
   installed app to your desktop's app menu, Start menu or Launchpad, so each
   one can be started directly.
+- **Show napplets in GNOME search**: install and maintain the GNOME Shell and
+  D-Bus registration files for contact-authored and installed napplet results.
+  Turning it off removes those files and stops returning search results.
 - **Relays**: where napps and napplets are discovered.
 - **Also discover on my relays**: after you log in, Verdana loads your relay
   list (NIP-65) in the background and keeps it up to date. With this on (the

@@ -156,6 +156,16 @@ func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 	return syncAppShortcuts(shortcuts, exe)
 }
 
+func (gioHost) GNOMESearchSupported() bool { return gnomeSearchSupported() }
+
+func (gioHost) SetGNOMESearchIntegration(enabled bool) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return setGNOMESearchIntegration(enabled, exe)
+}
+
 func (gioHost) OpenLink(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

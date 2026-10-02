@@ -197,6 +197,10 @@ func (h mobileHost) AutostartEnabled() bool                       { return false
 func (h mobileHost) SetAutostart(bool) error                      { return errors.New("autostart is a desktop feature") }
 func (h mobileHost) AppShortcutsSupported() bool                  { return false }
 func (h mobileHost) SyncAppShortcuts([]backend.AppShortcut) error { return nil }
+func (h mobileHost) GNOMESearchSupported() bool                   { return false }
+func (h mobileHost) SetGNOMESearchIntegration(bool) error {
+	return errors.New("GNOME search is a desktop feature")
+}
 
 type mobileTransport struct {
 	ui       UI

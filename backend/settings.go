@@ -245,6 +245,8 @@ type launcherSettings struct {
 	AppShortcutsSupported bool     `json:"appShortcutsSupported"`
 	AppShortcuts          bool     `json:"appShortcuts"`
 	AppShortcutNaming     string   `json:"appShortcutNaming"`
+	GNOMESearchSupported  bool     `json:"gnomeSearchSupported"`
+	GNOMESearch           bool     `json:"gnomeSearch"`
 
 	// the user's NIP-65 relays, shown read-only; UserRelaysLoadedAt is unix
 	// seconds, 0 while not loaded yet
@@ -309,6 +311,7 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 			Autostart      *bool    `json:"autostart"`
 			AppShortcuts   *bool    `json:"appShortcuts"`
 			ShortcutNaming string   `json:"appShortcutNaming"`
+			GNOMESearch    *bool    `json:"gnomeSearch"`
 			DiscoverOnUser *bool    `json:"discoverOnUserRelays"`
 		}
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
@@ -350,6 +353,11 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 			}
 			SetAppShortcutSettings(enabled, naming)
 		}
+		if req.GNOMESearch != nil {
+			if err := SetGNOMESearchIntegration(*req.GNOMESearch); err != nil {
+				return nil, err
+			}
+		}
 		return settingsLoadFor(w), nil
 	case "settings.forgetPermission":
 		var req struct {
@@ -379,6 +387,8 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 			AppShortcutsSupported: host.AppShortcutsSupported(),
 			AppShortcuts:          AppShortcutsEnabled(),
 			AppShortcutNaming:     AppShortcutNaming(),
+			GNOMESearchSupported:  GNOMESearchSupported(),
+			GNOMESearch:           GNOMESearchEnabled(),
 			DiscoverOnUserRelays:  DiscoverOnUserRelays(),
 			UserRelays:            []userRelayView{},
 			LoggedIn:              LoggedIn(),

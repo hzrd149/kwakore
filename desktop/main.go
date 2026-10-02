@@ -189,6 +189,9 @@ func main() {
 		log.Fatal().Err(err).Msg("could not start the backend")
 	}
 	defer closeStores()
+	if err := backend.SyncGNOMESearchIntegration(); err != nil {
+		log.Warn().Err(err).Msg("could not synchronize GNOME search integration")
+	}
 	stopSearchProvider := startSearchProvider()
 	defer stopSearchProvider()
 

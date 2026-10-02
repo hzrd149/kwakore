@@ -59,12 +59,18 @@ func startSearchProvider() func() {
 }
 
 func (p *searchProvider) GetInitialResultSet(terms []string) ([]string, *dbus.Error) {
+	if !backend.GNOMESearchEnabled() {
+		return []string{}, nil
+	}
 	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
 	logSearchQuery("initial", terms, nil, ids)
 	return ids, nil
 }
 
 func (p *searchProvider) GetSubsearchResultSet(previous []string, terms []string) ([]string, *dbus.Error) {
+	if !backend.GNOMESearchEnabled() {
+		return []string{}, nil
+	}
 	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
 	logSearchQuery("subsearch", terms, previous, ids)
 	return ids, nil

@@ -53,6 +53,11 @@ type AppState struct {
 	ExposeInstalledApps  bool   `json:"expose_installed_apps,omitempty"`
 	AppShortcutNameStyle string `json:"app_shortcut_name_style,omitempty"`
 
+	// GNOMESearchIntegration controls whether the desktop host registers a
+	// GNOME Shell search provider. Nil preserves the default-on behavior for
+	// existing installations.
+	GNOMESearchIntegration *bool `json:"gnome_search_integration,omitempty"`
+
 	// NostrConnectRelay is the relay the login screen's nostrconnect QR
 	// code sends signers to (see nostrconnect.go).
 	NostrConnectRelay string `json:"nostrconnect_relay"`
