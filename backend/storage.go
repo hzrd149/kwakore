@@ -242,6 +242,104 @@ func storageClear(nappID string) (bool, error) {
 	return true, nil
 }
 
+func trialStorageFor(ci *Instance, storeID string) *nappStorage {
+	if s, ok := ci.trialStorage[storeID]; ok {
+		return s
+	}
+	s := &nappStorage{data: make(map[string]string)}
+	ci.trialStorage[storeID] = s
+	return s
+}
+
+func napStorageGetValue(ci *Instance, storeID, key string) (string, bool) {
+	if !ci.trial {
+		return storageGet(storeID, key)
+	}
+	s := trialStorageFor(ci, storeID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.data[key]
+	return v, ok
+}
+
+func napStorageSetValue(ci *Instance, storeID, key, value string) error {
+	if !ci.trial {
+		return storageSetQuota(storeID, key, value, nappletStorageQuota, errNappletQuota)
+	}
+	s := trialStorageFor(ci, storeID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, exists := s.data[key]
+	delta := len(key) + len(value)
+	if exists {
+		delta -= len(key) + len(old)
+	}
+	if s.size+delta > nappletStorageQuota {
+		return errNappletQuota
+	}
+	s.data[key] = value
+	s.size += delta
+	return nil
+}
+
+func napStorageRemoveValue(ci *Instance, storeID, key string) (bool, error) {
+	if !ci.trial {
+		return storageRemove(storeID, key)
+	}
+	s := trialStorageFor(ci, storeID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, ok := s.data[key]
+	if !ok {
+		return false, nil
+	}
+	delete(s.data, key)
+	s.size -= len(key) + len(old)
+	return true, nil
+}
+
+func napStorageKeyList(ci *Instance, storeID string) []string {
+	if !ci.trial {
+		return storageKeys(storeID)
+	}
+	s := trialStorageFor(ci, storeID)
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.data))
+	for key := range s.data {
+		keys = append(keys, key)
+	}
+	s.mu.Unlock()
+	sort.Strings(keys)
+	return keys
+}
+
+// persistTrialStorage promotes the in-memory stores from a successful trial
+// into the normal namespaces used by the installed napplet.
+func persistTrialStorage(ci *Instance) error {
+	for storeID, trial := range ci.trialStorage {
+		trial.mu.Lock()
+		data := make(map[string]string, len(trial.data))
+		for key, value := range trial.data {
+			data[key] = value
+		}
+		size := trial.size
+		trial.mu.Unlock()
+
+		permanent := storageFor(storeID)
+		permanent.mu.Lock()
+		if err := storagePersistLocked(storeID, data); err != nil {
+			permanent.mu.Unlock()
+			return err
+		}
+		permanent.data = data
+		permanent.size = size
+		permanent.mu.Unlock()
+	}
+	ci.trialStorage = make(map[string]*nappStorage)
+	ci.trial = false
+	return nil
+}
+
 // broadcastStorage tells every other open window of the same napp about a
 // mutation, so its shim applies it and fires the storage event browsers
 // fire in every document sharing a store except the one that wrote.

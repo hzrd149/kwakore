@@ -157,6 +157,39 @@ func TryNappletFromDiscovery(id string) bool {
 	return false
 }
 
+// finishNappletTrial asks whether a just-closed preview should become an
+// installation. Trial NAP storage remains in memory while the question is up;
+// it is persisted only after the napplet itself installs successfully.
+func finishNappletTrial(ci *Instance) {
+	if _, installed := InstalledNapp(ci.napp.ID); installed {
+		if err := persistTrialStorage(ci); err != nil {
+			SetFetchErr("could not keep trial data: " + err.Error())
+		}
+		return
+	}
+	p := newPrompt(
+		ci.napp.Label(),
+		"Did you like "+ci.napp.Label()+"?",
+		"Install it to keep the data it saved while you tried it.",
+		"", nil,
+	)
+	p.AcceptLabel = "Install"
+	p.RejectLabel = "Not now"
+	enqueuePrompt(p)
+	if !p.wait().OK {
+		windows.Delete(ci.instance)
+		return
+	}
+	if err := InstallNapp(ci.napp); err != nil {
+		SetFetchErr("install failed: " + err.Error())
+		windows.Delete(ci.instance)
+		return
+	}
+	if err := persistTrialStorage(ci); err != nil {
+		SetFetchErr("installed, but could not keep trial data: " + err.Error())
+	}
+}
+
 // maxParallelAssets caps how many of a napp's files are in flight at once, so
 // a big napp doesn't open a connection per asset against the same server.
 const maxParallelAssets = 6

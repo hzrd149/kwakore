@@ -17,7 +17,7 @@ func TestSearchNappletIDsMatchesAllTermsAndOnlyNapplets(t *testing.T) {
 	napp := backend.Napp{ID: "native", Name: "Paint Studio"}
 	st := backend.State{Discovery: []backend.Napp{notes, napp, paint}}
 
-	got := searchNappletIDs(st, []string{"paint", "pixel"}, map[string]bool{author.Hex(): true})
+	got := searchNappletIDs(st, []string{"paint", "pixel"})
 	if !slices.Equal(got, []string{"paint"}) {
 		t.Fatalf("search results = %v, want [paint]", got)
 	}
@@ -33,7 +33,7 @@ func TestSearchNappletIDsRanksPrefixThenInstalled(t *testing.T) {
 		Discovery: []backend.Napp{other, prefix, installed},
 	}
 
-	got := searchNappletIDs(st, []string{"paint"}, map[string]bool{author.Hex(): true})
+	got := searchNappletIDs(st, []string{"paint"})
 	want := []string{"prefix", "installed", "other"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("search results = %v, want %v", got, want)
@@ -42,22 +42,22 @@ func TestSearchNappletIDsRanksPrefixThenInstalled(t *testing.T) {
 
 func TestSearchNappletIDsRequiresQuery(t *testing.T) {
 	n := backend.Napp{ID: "all", Name: "Everything", Format: backend.FormatNapplet}
-	if got := searchNappletIDs(backend.State{Discovery: []backend.Napp{n}}, nil, nil); len(got) != 0 {
+	if got := searchNappletIDs(backend.State{Discovery: []backend.Napp{n}}, nil); len(got) != 0 {
 		t.Fatalf("empty query returned %v", got)
 	}
 }
 
-func TestSearchNappletIDsExcludesUnfollowedRemoteAuthors(t *testing.T) {
-	followed := nostr.Generate().Public()
-	stranger := nostr.Generate().Public()
+func TestSearchNappletIDsIncludesEntireDiscoveryCatalog(t *testing.T) {
+	first := nostr.Generate().Public()
+	second := nostr.Generate().Public()
 	st := backend.State{Discovery: []backend.Napp{
-		{ID: "friend", Name: "Paint Friend", Format: backend.FormatNapplet, Author: followed},
-		{ID: "stranger", Name: "Paint Stranger", Format: backend.FormatNapplet, Author: stranger},
+		{ID: "first", Name: "Paint Alpha", Format: backend.FormatNapplet, Author: first},
+		{ID: "second", Name: "Paint Beta", Format: backend.FormatNapplet, Author: second},
 	}}
 
-	got := searchNappletIDs(st, []string{"paint"}, map[string]bool{followed.Hex(): true})
-	if !slices.Equal(got, []string{"friend"}) {
-		t.Fatalf("search results = %v, want [friend]", got)
+	got := searchNappletIDs(st, []string{"paint"})
+	if !slices.Equal(got, []string{"first", "second"}) {
+		t.Fatalf("search results = %v, want the complete catalog", got)
 	}
 }
 

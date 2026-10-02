@@ -92,7 +92,7 @@ rpc for it.
 | `shell` | `nap.go` | `shell.ready` → `shell.init {capabilities:{domains}}`. A repeated `shell.ready` is ignored; a reload arrives as `nap.reset` first, which ends the session |
 | `relay` | `nap_relay.go` | subscribe/close/query use the outbox model. publish/publishEncrypted show **one** prompt, then encrypt, sign and publish. Events are delivered exactly as signed: encrypted DMs stay ciphertext, as the napplet spec requires |
 | `identity` | `nap_identity.go` | read-only; `identity.changed` on login/logout |
-| `storage` | `nap_basic.go` | 512 KB, shared or per-window scope. Keyed by the napplet's **address**, not its artifact hash, so data survives updates (a deliberate deviation from NAP-STORAGE) |
+| `storage` | `nap_basic.go` | 512 KB, shared or per-window scope. Keyed by the napplet's **address**, not its artifact hash, so data survives updates (a deliberate deviation from NAP-STORAGE). Trial windows use an isolated in-memory store; accepting the close-time install offer promotes it into the normal persistent namespace |
 | `theme` | `nap_basic.go` | launcher `surface/text/accent` → `background/text/primary`; `theme.changed` on switch |
 | `link` | `nap_basic.go` | http(s) only, behind the open-link prompt |
 | `common` | `nap_common.go` | follow/unfollow (kind 3), react (7), report (1984), getProfile, follows, encode/decodeNip19 (never `nsec`) |

@@ -1117,12 +1117,12 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
             PromptScopes(theme) { ok, scope -> onAnswer(ok, 0, scope) }
         } else {
             Row {
-                Button(onClick = { onAnswer(true, 0, "once") }) { Text("Allow") }
+                Button(onClick = { onAnswer(true, 0, "once") }) { Text(p.acceptLabel.ifBlank { "Allow" }) }
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = { onAnswer(false, 0, "once") },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
-                ) { Text("Deny") }
+                ) { Text(p.rejectLabel.ifBlank { "Deny" }) }
             }
         }
     }

@@ -125,7 +125,8 @@ func napStorageGet(c *napCall) {
 		c.reply(map[string]any{"error": "missing key"})
 		return
 	}
-	if v, found := storageGet(napStoreID(c, r.Scope), *r.Key); found {
+	storeID := napStoreID(c, r.Scope)
+	if v, found := napStorageGetValue(c.ci, storeID, *r.Key); found {
 		c.reply(map[string]any{"value": v})
 		return
 	}
@@ -142,7 +143,7 @@ func napStorageSet(c *napCall) {
 		c.reply(map[string]any{"error": "missing key or value"})
 		return
 	}
-	if err := storageSetQuota(napStoreID(c, r.Scope), *r.Key, *r.Value, nappletStorageQuota, errNappletQuota); err != nil {
+	if err := napStorageSetValue(c.ci, napStoreID(c, r.Scope), *r.Key, *r.Value); err != nil {
 		c.reply(map[string]any{"error": err.Error()})
 		return
 	}
@@ -158,7 +159,7 @@ func napStorageRemove(c *napCall) {
 		c.reply(map[string]any{"error": "missing key"})
 		return
 	}
-	if _, err := storageRemove(napStoreID(c, r.Scope), *r.Key); err != nil {
+	if _, err := napStorageRemoveValue(c.ci, napStoreID(c, r.Scope), *r.Key); err != nil {
 		c.reply(map[string]any{"error": err.Error()})
 		return
 	}
@@ -170,7 +171,7 @@ func napStorageKeys(c *napCall) {
 	if !ok {
 		return
 	}
-	c.reply(map[string]any{"keys": storageKeys(napStoreID(c, r.Scope))})
+	c.reply(map[string]any{"keys": napStorageKeyList(c.ci, napStoreID(c, r.Scope))})
 }
 
 // ─── link ────────────────────────────────────────────────────────

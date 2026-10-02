@@ -88,6 +88,11 @@ type Prompt struct {
 	// only ever about this one dispatch.
 	Remember bool `json:"remember"`
 
+	// AcceptLabel and RejectLabel customize the two buttons on a plain prompt.
+	// Permission prompts leave them empty and use Allow/Deny.
+	AcceptLabel string `json:"acceptLabel,omitempty"`
+	RejectLabel string `json:"rejectLabel,omitempty"`
+
 	// Napp is the napp that asked, for a GUI that wants to show it.
 	Napp string `json:"napp"`
 

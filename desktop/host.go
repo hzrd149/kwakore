@@ -50,6 +50,9 @@ func showDiscoverySearch(query string) {
 }
 
 func (gioHost) PromptsChanged() {
+	if p := backend.CurrentPrompt(); p != nil && p.Instance == "" {
+		showManager()
+	}
 	if w := managerWindow(); w != nil {
 		w.Invalidate()
 	}

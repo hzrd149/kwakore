@@ -154,16 +154,23 @@ func layoutPrompt(
 		)
 	} else if !p.Remember {
 		// nothing to widen the answer into: a plain yes and a plain no
+		acceptLabel, rejectLabel := p.AcceptLabel, p.RejectLabel
+		if acceptLabel == "" {
+			acceptLabel = "Allow"
+		}
+		if rejectLabel == "" {
+			rejectLabel = "Deny"
+		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, &btns.allow, "Allow").Layout(gtx)
+					return material.Button(th, &btns.allow, acceptLabel).Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, &btns.deny, "Deny")
+					b := material.Button(th, &btns.deny, rejectLabel)
 					b.Background = currentTheme().chipBg
 					b.Color = currentTheme().chipFg
 					return b.Layout(gtx)
@@ -316,7 +323,7 @@ func layoutMain(
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn,
-					discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet)
+					discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, followSet(st))
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
@@ -790,20 +797,53 @@ func layoutDiscoveryTab(
 	fetching bool,
 	discovery []backend.Napp,
 	lookup *backend.AddressLookup,
-	installedSet map[string]bool,
+	installedSet,
+	follows map[string]bool,
 ) layout.Dimensions {
+	chip := func(gtx layout.Context, btn *widget.Clickable, label string, on bool) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		b.TextSize = unit.Sp(13)
+		b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+		if on {
+			b.Background = th.Palette.ContrastBg
+		} else {
+			b.Background = currentTheme().chipBg
+			b.Color = currentTheme().chipFg
+		}
+		return b.Layout(gtx)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box comes first, narrowing the entries below by name,
-		// author, author name or description, or naming one by its address.
+		// author, author name or description, or naming one by its address,
+		// with the scope beside it: everyone's apps or just friends'.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
+			scopeBtn := func(k int) layout.FlexChild {
+				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return chip(gtx, &discoScopeBtns[k], discoScopeLabels[k], discoScope == k)
+					})
+				})
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+				scopeBtn(discoScopeFriends),
+				scopeBtn(discoScopeGlobal),
+			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		// the kind tabs (all, napps, napplets) and, at the other end, the
 		// refresh button that asks the relays again
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			counts := [3]int{len(discovery)}
+			var counts [3]int
 			for _, n := range discovery {
+				if !inDiscoScope(n, follows) {
+					continue
+				}
+				counts[discoKindAll]++
 				if matchesKind(n, discoKindNapplets) {
 					counts[discoKindNapplets]++
 				} else {
@@ -813,21 +853,11 @@ func layoutDiscoveryTab(
 			kindBtn := func(k int) layout.FlexChild {
 				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						pointer.CursorPointer.Add(gtx.Ops)
 						label := discoKindLabels[k]
 						if counts[k] > 0 {
 							label += " (" + strconv.Itoa(counts[k]) + ")"
 						}
-						b := material.Button(th, &discoKindBtns[k], label)
-						b.TextSize = unit.Sp(13)
-						b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
-						if discoKind == k {
-							b.Background = th.Palette.ContrastBg
-						} else {
-							b.Background = currentTheme().chipBg
-							b.Color = currentTheme().chipFg
-						}
-						return b.Layout(gtx)
+						return chip(gtx, &discoKindBtns[k], label, discoKind == k)
 					})
 				})
 			}
@@ -869,7 +899,18 @@ func layoutDiscoveryTab(
 				if len(discovery) > 0 {
 					msg = "Nothing matches the filter."
 					if strings.TrimSpace(filterEd.Text()) == "" {
-						msg = "No " + strings.ToLower(discoKindLabels[discoKind]) + " found on these relays."
+						noun := strings.ToLower(discoKindLabels[discoKind])
+						if discoKind == discoKindAll {
+							noun = "apps"
+						}
+						switch {
+						case discoScope == discoScopeFriends && len(follows) == 0:
+							msg = "Loading who you follow…"
+						case discoScope == discoScopeFriends:
+							msg = "No " + noun + " from people you follow yet. Switch to Global to see everyone's."
+						default:
+							msg = "No " + noun + " found on these relays."
+						}
 					}
 				}
 				if lookup != nil {

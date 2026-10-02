@@ -38,6 +38,10 @@ type Instance struct {
 	// previewDocument is the verified, in-memory HTML of a napplet opened
 	// with Try. Preview napplets never need an install directory.
 	previewDocument []byte
+	// trial marks a preview launched without installation. NAP storage stays
+	// in trialStorage until the user accepts the close-time install offer.
+	trial        bool
+	trialStorage map[string]*nappStorage
 
 	sendMu    sync.Mutex
 	transport Transport
@@ -382,6 +386,9 @@ func WindowClosed(instance string) {
 		// don't keep them listed for reopening.
 		windows.Delete(ci.instance)
 	}
+	if ci.trial {
+		go finishNappletTrial(ci)
+	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }
@@ -535,6 +542,8 @@ func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string
 		number:          int(windowSerial.Add(1)),
 		napp:            napp,
 		previewDocument: previewDocument,
+		trial:           previewDocument != nil,
+		trialStorage:    make(map[string]*nappStorage),
 		subs:            make(map[int]context.CancelFunc),
 		actions:         make(map[string]int),
 		changed:         make(chan struct{}),

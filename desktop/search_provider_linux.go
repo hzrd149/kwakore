@@ -3,12 +3,9 @@
 package main
 
 import (
-	"context"
 	"os"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 	"verdana/backend"
 
 	"github.com/godbus/dbus/v5"
@@ -21,10 +18,7 @@ const (
 	searchProviderLimit     = 20
 )
 
-type searchProvider struct {
-	mu      sync.RWMutex
-	authors map[string]bool
-}
+type searchProvider struct{}
 
 // startSearchProvider exposes the GNOME Shell SearchProvider2 interface for
 // this launcher process. Failure is non-fatal: Verdana also runs on Linux
@@ -36,10 +30,7 @@ func startSearchProvider() func() {
 		return func() {}
 	}
 	provider := &searchProvider{}
-	ctx, cancel := context.WithCancel(context.Background())
-	go provider.refreshAuthors(ctx)
 	if err := conn.Export(provider, searchProviderPath, searchProviderInterface); err != nil {
-		cancel()
 		conn.Close()
 		log.Warn().Err(err).Msg("could not export GNOME search provider")
 		return func() {}
@@ -52,7 +43,6 @@ func startSearchProvider() func() {
 	}
 	log.Info().Msg("GNOME search provider ready")
 	return func() {
-		cancel()
 		_, _ = conn.ReleaseName(searchProviderBus)
 		_ = conn.Close()
 	}
@@ -62,7 +52,7 @@ func (p *searchProvider) GetInitialResultSet(terms []string) ([]string, *dbus.Er
 	if !backend.GNOMESearchEnabled() {
 		return []string{}, nil
 	}
-	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
+	ids := searchNappletIDs(backend.Snapshot(), terms)
 	logSearchQuery("initial", terms, nil, ids)
 	return ids, nil
 }
@@ -71,7 +61,7 @@ func (p *searchProvider) GetSubsearchResultSet(previous []string, terms []string
 	if !backend.GNOMESearchEnabled() {
 		return []string{}, nil
 	}
-	ids := searchNappletIDs(backend.Snapshot(), terms, p.allowedAuthors())
+	ids := searchNappletIDs(backend.Snapshot(), terms)
 	logSearchQuery("subsearch", terms, previous, ids)
 	return ids, nil
 }
@@ -121,35 +111,6 @@ func (searchProvider) LaunchSearch(terms []string, _ uint32) *dbus.Error {
 	return nil
 }
 
-func (p *searchProvider) refreshAuthors(ctx context.Context) {
-	refresh := func() {
-		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		authors := backend.FollowedAuthors(fetchCtx)
-		next := make(map[string]bool, len(authors))
-		for _, author := range authors {
-			next[author.Hex()] = true
-		}
-		p.mu.Lock()
-		p.authors = next
-		p.mu.Unlock()
-		if searchDebugEnabled() {
-			log.Info().Int("authors", len(next)).Msg("GNOME search contact index refreshed")
-		}
-	}
-	refresh()
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			refresh()
-		}
-	}
-}
-
 func searchDebugEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("VERDANA_SEARCH_DEBUG"))) {
 	case "1", "true", "yes", "on":
@@ -168,17 +129,7 @@ func logSearchQuery(method string, terms, previous, results []string) {
 		Msg("GNOME search request")
 }
 
-func (p *searchProvider) allowedAuthors() map[string]bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	copy := make(map[string]bool, len(p.authors))
-	for author := range p.authors {
-		copy[author] = true
-	}
-	return copy
-}
-
-func searchNappletIDs(st backend.State, terms []string, allowedAuthors map[string]bool) []string {
+func searchNappletIDs(st backend.State, terms []string) []string {
 	query := make([]string, 0, len(terms))
 	for _, term := range terms {
 		if term = strings.ToLower(strings.TrimSpace(term)); term != "" {
@@ -202,8 +153,7 @@ func searchNappletIDs(st backend.State, terms []string, allowedAuthors map[strin
 	seen := make(map[string]bool)
 	for _, list := range [][]backend.Napp{st.Discovery, st.Installed} {
 		for _, n := range list {
-			if seen[n.ID] || !n.IsNapplet() || !matchesAllTerms(n, query) ||
-				(!installed[n.ID] && !allowedAuthors[n.Author.Hex()]) {
+			if seen[n.ID] || !n.IsNapplet() || !matchesAllTerms(n, query) {
 				continue
 			}
 			seen[n.ID] = true

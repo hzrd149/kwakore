@@ -65,6 +65,8 @@ data class Prompt(
     // remember says the answer can stick: the launcher then offers this
     // prompt only, this session, and always, and files the wider answers away.
     val remember: Boolean = false,
+    val acceptLabel: String = "",
+    val rejectLabel: String = "",
     // instance is the window the prompt belongs over, when a napp fired it.
     // Blank for questions the launcher asked itself.
     val instance: String = "",

@@ -42,9 +42,11 @@ command later to update to the newest release.
 
 On GNOME, the Linux installer also registers Verdana as a system search
 provider. Shell searches return matching napplets published by people you
-follow, plus installed napplets. Search terms are matched locally and are not
-sent to Nostr relays. GNOME may require signing out and back in before a newly
-registered provider first appears.
+have discovered, including installed napplets. Search terms are matched locally
+and are not sent to Nostr relays. Choosing an uninstalled result opens a trial
+whose NAP storage stays in memory; when the trial closes, Verdana offers to
+install it and keep that data. GNOME may require signing out and back in before
+a newly registered provider first appears.
 
 For troubleshooting, start Verdana with `VERDANA_SEARCH_DEBUG=1` to log the
 terms GNOME sends, the result IDs Verdana returns, metadata requests and result
@@ -199,7 +201,8 @@ Open **Settings** from the launcher or the tray. The **Verdana** page sets:
   installed app to your desktop's app menu, Start menu or Launchpad, so each
   one can be started directly.
 - **Show napplets in GNOME search**: install and maintain the GNOME Shell and
-  D-Bus registration files for contact-authored and installed napplet results.
+  D-Bus registration files for the complete local Discovery catalog and
+  installed napplet results.
   Turning it off removes those files and stops returning search results.
 - **Relays**: where napps and napplets are discovered.
 - **Also discover on my relays**: after you log in, Verdana loads your relay
