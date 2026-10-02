@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"fiatjaf.com/verdana/desktop/internal/media"
 	"verdana/backend"
 )
 
@@ -24,6 +25,10 @@ func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 
 func (gioHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error) {
 	return startSettingsChild(spec)
+}
+
+func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+	return media.Play(req, onState)
 }
 
 func (gioHost) StateChanged() {

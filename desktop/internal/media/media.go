@@ -1,4 +1,5 @@
-package main
+// Package media plays NAP-MEDIA requests in the user's own media player.
+package media
 
 import (
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"verdana/backend"
 )
 
@@ -17,12 +19,12 @@ import (
 // VLC otherwise (its remote control interface is polled). The player's own
 // window is the playback UI; the napplet gets the state and may steer it.
 // The OS-specific halves (unix sockets, or none on Windows) live in
-// media_<player>.go and media_windows.go.
+// mpv.go, vlc.go and player_windows.go.
 
-// MediaPlay plays in the player already open when it can take new media
+// Play plays in the player already open when it can take new media
 // (mpv over its IPC socket), and otherwise closes it and starts the first
 // player found: there is only ever one.
-func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+func Play(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
 	playing.mu.Lock()
 	defer playing.mu.Unlock()
 	if playing.cur != nil {
@@ -52,6 +54,11 @@ func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaSta
 }
 
 // playing is the one player process, which may have exited since.
+var log = zerolog.Nop()
+
+// SetLogger sets where player trouble is logged.
+func SetLogger(l zerolog.Logger) { log = l }
+
 var playing struct {
 	mu  sync.Mutex
 	cur sharedPlayer

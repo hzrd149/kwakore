@@ -11,6 +11,7 @@ import (
 	"verdana/backend"
 
 	"fiatjaf.com/verdana/desktop/internal/instancelock"
+	"fiatjaf.com/verdana/desktop/internal/media"
 	"fiatjaf.com/verdana/desktop/internal/windowchrome"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
@@ -152,6 +153,7 @@ func main() {
 		Timestamp().
 		Logger()
 	log.Info().Msg("starting verdana")
+	media.SetLogger(log)
 	if backend := windowchrome.Configure(); backend != "" {
 		log.Info().Str("window_backend", backend).Msg("configured native window chrome")
 	}
