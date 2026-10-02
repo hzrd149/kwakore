@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
@@ -192,4 +193,267 @@ func TestHostileDTagInstallStaysInsideDataDir(t *testing.T) {
 		t.Fatal("failed install was recorded")
 	}
 	r.assertContained(t, "failed install")
+}
+
+// ─── the directory and asset rules ───────────────────────────────
+
+func TestNappBaseDirIsHashedAndContained(t *testing.T) {
+	setupNapTest(t)
+	const pk16 = "0123456789abcdef"
+	ids := []string{
+		pk16 + "~..",
+		pk16 + "~../../..",
+		pk16 + "~a/b",
+		pk16 + "~/../x",
+		pk16 + "~a",
+		pk16 + "~a_b",
+		pk16 + "~", // empty d
+		"napplet~" + pk16 + "~../../..",
+		"napplet~" + pk16 + "~x",
+		pk16 + "~x",
+		"napplet~" + pk16 + "~root",
+	}
+
+	seen := make(map[string]string)
+	for _, id := range ids {
+		dir, err := nappBaseDir(id)
+		if err != nil {
+			t.Fatalf("%q: %v", id, err)
+		}
+		sum := sha256.Sum256([]byte(id))
+		if want := filepath.Join(dataDir, "napps", hex.EncodeToString(sum[:])); dir != want {
+			t.Errorf("%q: %s, want %s", id, dir, want)
+		}
+		if !hashedDirName.MatchString(filepath.Base(dir)) {
+			t.Errorf("%q: directory name %q is not 64 hex", id, filepath.Base(dir))
+		}
+		// deterministic: install, update, launch and uninstall all have to
+		// address the same directory
+		if again, _ := nappBaseDir(id); again != dir {
+			t.Errorf("%q: second call gave %s, first %s", id, again, dir)
+		}
+		if other, dup := seen[dir]; dup {
+			t.Errorf("%q and %q share %s", id, other, dir)
+		}
+		seen[dir] = id
+	}
+
+	// napp "a/b" used to nest inside napp "a", so uninstalling "a" took it
+	a, _ := nappBaseDir(pk16 + "~a")
+	ab, _ := nappBaseDir(pk16 + "~a/b")
+	if rel, err := filepath.Rel(a, ab); err == nil && filepath.IsLocal(rel) {
+		t.Errorf("%s is inside %s", ab, a)
+	}
+	// a napp and a napplet with the same d are different directories
+	napp, _ := nappBaseDir(pk16 + "~x")
+	napplet, _ := nappBaseDir("napplet~" + pk16 + "~x")
+	if napp == napplet {
+		t.Error("napp and napplet with the same d share a directory")
+	}
+
+	// without an absolute data directory there is nowhere safe to be
+	saved := dataDir
+	t.Cleanup(func() { dataDir = saved })
+	for _, bad := range []string{"", "relative/dir"} {
+		dataDir = bad
+		if dir, err := nappBaseDir(pk16 + "~a"); err == nil {
+			t.Errorf("dataDir %q: got %s, want an error", bad, dir)
+		}
+	}
+}
+
+func TestNappAssetPathStaysInsideBase(t *testing.T) {
+	base := t.TempDir()
+	good := map[string]string{
+		"/index.html":    "index.html",
+		"/":              "index.html", // NIP-5D's name for the index
+		"":               "index.html",
+		"/assets/app.js": filepath.Join("assets", "app.js"),
+	}
+	for in, want := range good {
+		t.Run("ok/"+in, func(t *testing.T) {
+			got, err := nappAssetPath(base, in)
+			if err != nil || got != filepath.Join(base, want) {
+				t.Errorf("%q: %s, %v; want %s", in, got, err, filepath.Join(base, want))
+			}
+		})
+	}
+	for _, in := range []string{"../x", "/../../x", "a/../../x", "//etc/passwd", "/a/../../b", "/."} {
+		t.Run("refused/"+in, func(t *testing.T) {
+			if got, err := nappAssetPath(base, in); err == nil {
+				t.Errorf("%q: accepted as %s", in, got)
+			}
+		})
+	}
+}
+
+// ─── the CRIT-01 matrix ──────────────────────────────────────────
+
+// hostileShape builds one manifest shape for a d and the hash of its
+// index.html, signed by sk, so ids come from the production parser.
+type hostileShape struct {
+	name   string
+	prefix string // what goes before {pk16}~{d} in the id
+	event  func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event
+}
+
+func signedWith(t *testing.T, sk nostr.SecretKey, kind nostr.Kind, tags nostr.Tags, content string, at nostr.Timestamp) nostr.Event {
+	t.Helper()
+	evt := nostr.Event{Kind: kind, CreatedAt: at, Tags: tags, Content: content}
+	if err := evt.Sign(sk); err != nil {
+		t.Fatal(err)
+	}
+	return evt
+}
+
+var hostileShapes = []hostileShape{
+	{
+		name: "napp",
+		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
+			tags := nostr.Tags{{"d", d}, {"title", "Hostile"}, {"path", "/index.html", hash}}
+			return signedWith(t, sk, KindNapp, tags, "", at)
+		},
+	},
+	{
+		name:   "nip5d",
+		prefix: "napplet~",
+		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
+			tags := nip5dTags(d, NappPath{Path: "/index.html", Sha256: hash})
+			return signedWith(t, sk, KindNapplet, tags, "", at)
+		},
+	},
+	{
+		name:   "web-napplet",
+		prefix: "napplet~",
+		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
+			tags := validNappletTags()
+			for _, tag := range tags {
+				switch tag[0] {
+				case "d":
+					tag[1] = d
+				case "x":
+					tag[1] = hash
+				}
+			}
+			return signedWith(t, sk, KindNapplet, tags, "A napplet with a hostile d.", at)
+		},
+	},
+}
+
+var hostileDs = []string{"..", "../../..", "a/b", "/../x"}
+
+// hostileNapp parses evt the way discovery does and points it at the rig.
+func (r *containmentRig) hostileNapp(t *testing.T, evt nostr.Event) Napp {
+	t.Helper()
+	n, ok := nappFromEvent(evt)
+	if !ok {
+		t.Fatalf("%d event with d=%q rejected", evt.Kind, evt.Tags.GetD())
+	}
+	n.Servers = []string{r.server.URL}
+	return n
+}
+
+func TestHostileDTagStaysInsideDataDir(t *testing.T) {
+	for _, shape := range hostileShapes {
+		for _, d := range hostileDs {
+			t.Run(shape.name+"/d="+d, func(t *testing.T) {
+				// each case its own data directory, so none can mask another
+				r := newContainmentRig(t)
+				sk := nostr.Generate()
+				pk := sk.Public()
+				wantID := shape.prefix + pk.Hex()[:16] + "~" + d
+
+				v1 := []byte("<!doctype html><title>v1 " + d + "</title>")
+				n := r.hostileNapp(t, shape.event(t, sk, d, r.blob(v1), 1700000000))
+				// the raw d, byte for byte: nothing trimmed or normalized
+				if n.D != d || n.ID != wantID {
+					t.Fatalf("d or id rewritten: d=%q id=%q, want d=%q id=%q", n.D, n.ID, d, wantID)
+				}
+				dir := r.hashedDir(n.ID)
+				index := filepath.Join(dir, "index.html")
+
+				// install
+				if err := InstallNapp(n); err != nil {
+					t.Fatalf("install: %v", err)
+				}
+				if got, err := os.ReadFile(index); err != nil || string(got) != string(v1) {
+					t.Fatalf("install: index.html %q, %v", got, err)
+				}
+				stateMu.Lock()
+				_, recorded := state.InstalledNapps[wantID]
+				stateMu.Unlock()
+				if !recorded {
+					t.Fatal("install: not recorded under the raw id")
+				}
+				r.assertContained(t, "install")
+
+				// launch
+				h := &previewTestHost{}
+				previousHost := host
+				host = h
+				ci, err := launchWithDocument(context.Background(), n, "", nil)
+				host = previousHost
+				if err != nil {
+					t.Fatalf("launch: %v", err)
+				}
+				WindowClosed(ci.instance)
+				if h.spec.Dir != dir || h.spec.NappID != wantID {
+					t.Fatalf("launch: window spec dir=%q napp=%q, want %q %q", h.spec.Dir, h.spec.NappID, dir, wantID)
+				}
+				if n.IsNapplet() {
+					if got, err := nappletDocument(n); err != nil || string(got) != string(v1) {
+						t.Fatalf("launch: napplet document %q, %v", got, err)
+					}
+				}
+				r.assertContained(t, "launch")
+
+				// the storage key is the raw id too, and its file stays put
+				storage := storageFileFor(n.ID)
+				if rel, err := filepath.Rel(filepath.Join(r.dataDir, "storage"), storage); err != nil || !filepath.IsLocal(rel) || filepath.Dir(storage) != filepath.Join(r.dataDir, "storage") {
+					t.Fatalf("storage file %s escapes %s/storage", storage, r.dataDir)
+				}
+
+				// update: a newer event with a changed file, same directory
+				v2 := []byte("<!doctype html><title>v2 " + d + "</title>")
+				newer := r.hostileNapp(t, shape.event(t, sk, d, r.blob(v2), 1700000001))
+				applyUpdate(n, newer)
+				if got, err := os.ReadFile(index); err != nil || string(got) != string(v2) {
+					t.Fatalf("update: index.html %q, %v", got, err)
+				}
+				updated, ok := InstalledNapp(wantID)
+				if !ok || updated.D != d {
+					t.Fatalf("update: installed %+v, %v", updated, ok)
+				}
+				if n.IsNapplet() {
+					if got, err := nappletDocument(updated); err != nil || string(got) != string(v2) {
+						t.Fatalf("update: napplet document %q, %v", got, err)
+					}
+				}
+				r.assertContained(t, "update")
+
+				// uninstall
+				Uninstall(wantID)
+				if _, err := os.Stat(dir); !os.IsNotExist(err) {
+					t.Fatalf("uninstall: directory left: %v", err)
+				}
+				if _, ok := InstalledNapp(wantID); ok {
+					t.Fatal("uninstall: still recorded")
+				}
+				r.assertContained(t, "uninstall")
+
+				// failed install: nobody serves the file
+				r.missing.Store(true)
+				if err := InstallNapp(n); err == nil {
+					t.Fatal("failed install: succeeded")
+				}
+				if _, err := os.Stat(dir); !os.IsNotExist(err) {
+					t.Fatalf("failed install: directory left: %v", err)
+				}
+				if _, ok := InstalledNapp(wantID); ok {
+					t.Fatal("failed install: recorded")
+				}
+				r.assertContained(t, "failed install")
+			})
+		}
+	}
 }
