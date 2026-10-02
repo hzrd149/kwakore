@@ -27,6 +27,7 @@ import (
 	"fiatjaf.com/nostr/nipb7/blossom"
 	"github.com/rs/zerolog"
 	"verdana/backend/napconfig"
+	"verdana/backend/webview"
 )
 
 // ─── test rig ────────────────────────────────────────────────────
@@ -190,13 +191,23 @@ func TestBuildSrcdoc(t *testing.T) {
 	if !strings.HasPrefix(doc, `<!doctype html><html><head><meta http-equiv="Content-Security-Policy"`) {
 		t.Fatalf("preamble not first: %.120s", doc)
 	}
+	// CSP, then one function-scoped script: the pristine prelude and its
+	// activation, so nothing but window.napplet is left in the frame (SHIM-04)
 	csp := strings.Index(doc, `http-equiv="Content-Security-Policy"`)
-	shim := strings.Index(doc, "NappletShimPrelude")
+	scope := strings.Index(doc, "<script>(function(){")
+	shim := strings.Index(doc, webview.ShimPrelude())
 	activate := strings.Index(doc, `NappletShimPrelude.install({"domains":["relay","storage"]})`)
-	ready := strings.Index(doc, `{type:"shell.ready"}`)
+	closeScope := strings.Index(doc, "})()</script>")
 	end := strings.Index(doc, "</head>")
-	if !(csp < shim && shim < activate && activate < ready && ready < end) {
-		t.Fatalf("preamble out of order: csp=%d shim=%d activate=%d ready=%d end=%d", csp, shim, activate, ready, end)
+	if !(csp >= 0 && csp < scope && scope < shim && shim < activate && activate < closeScope && closeScope < end) {
+		t.Fatalf("preamble out of order: csp=%d scope=%d shim=%d activate=%d close=%d end=%d", csp, scope, shim, activate, closeScope, end)
+	}
+	// no handshake (presence detection) and no global install call
+	rest := strings.Replace(doc, webview.ShimPrelude(), "", 1)
+	for _, gone := range []string{"shell.ready", "globalThis.NappletShimPrelude"} {
+		if strings.Contains(rest, gone) {
+			t.Errorf("srcdoc still carries %q outside the prelude", gone)
+		}
 	}
 	// the napplet's bytes follow, untouched
 	if !strings.HasSuffix(doc, napplet) {
