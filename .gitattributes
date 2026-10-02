@@ -2,3 +2,8 @@
 # (TestShimPreludeIsPristineUpstream pins its sha256), so git never converts its
 # line endings or touches its missing final newline.
 backend/webview/shim/prelude.global.js -text
+
+# Pinned spec snapshots hold the upstream git blobs byte for byte
+# (TestPinnedSpecSnapshotsMatchTheirHashes checks body_sha256), so git never
+# converts their line endings either.
+spec/pinned/*@*.md -text
