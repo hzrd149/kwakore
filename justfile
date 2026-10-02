@@ -4,6 +4,11 @@ run:
 prod:
     cd desktop && go build -o child/child ./child && go build -o verdana -tags 'novulkan' .
 
+# Install the production desktop launcher into GOBIN (or GOPATH/bin). The
+# child webview host must be built first because it is embedded in Verdana.
+go-install:
+    cd desktop && go build -o child/child ./child && go install -tags 'novulkan' .
+
 # the ui kit carries the launcher's own face (desktop/assets/*.ttf is
 # Verdana, in three faces) as woff2, inlined by backend/webview/embed.go.
 # Regenerate them when those ttf files change.

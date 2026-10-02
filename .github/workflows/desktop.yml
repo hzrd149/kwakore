@@ -48,25 +48,53 @@ jobs:
         include:
           - os: ubuntu-24.04
             id: linux-amd64
+            goos: linux
+            goarch: amd64
+            cgo: "1"
+            binary: verdana
           - os: ubuntu-24.04-arm
             id: linux-arm64
+            goos: linux
+            goarch: arm64
+            cgo: "1"
+            binary: verdana
           - os: windows-2022
             id: windows-amd64
+            goos: windows
+            goarch: amd64
+            cgo: "1"
+            binary: verdana.exe
+          # Gio and the Windows webview host compile without cgo. Building on
+          # Linux avoids depending on the limited Windows ARM runner pool.
+          - os: ubuntu-24.04
+            id: windows-arm64
+            goos: windows
+            goarch: arm64
+            cgo: "0"
+            binary: verdana.exe
           - os: macos-15-intel
             id: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            cgo: "1"
+            binary: verdana
           - os: macos-15
             id: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            cgo: "1"
+            binary: verdana
 
     steps:
       - uses: actions/checkout@v4
 
       # gio (wayland/x11 + egl) and go-webview (gtk3 + webkit2gtk 4.1) are cgo
       - name: linux deps
-        if: runner.os == 'Linux'
+        if: matrix.goos == 'linux'
         uses: ./.github/actions/linux-build-deps
 
       - name: windows deps
-        if: runner.os == 'Windows'
+        if: matrix.goos == 'windows' && matrix.cgo == '1'
         run: |
           choco install --yes --no-progress mingw
           echo "C:\ProgramData\mingw64\mingw64\bin" >> $env:GITHUB_PATH
@@ -90,26 +118,32 @@ jobs:
       - name: build child
         working-directory: desktop
         env:
-          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: go build -o child/child ./child
 
       - name: build verdana
         working-directory: desktop
         env:
-          CGO_ENABLED: "1"
-        run: go build -o verdana -tags novulkan -ldflags "-s -w" .
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: go build -o ${{ matrix.binary }} -tags novulkan -ldflags "-s -w" .
 
       - name: package
         shell: bash
         working-directory: desktop
         run: |
           mkdir -p dist
-          if [ "$RUNNER_OS" = "Windows" ]; then
+          if [ "${{ matrix.goos }}" = "windows" ]; then
             mv verdana.exe dist/verdana.exe
             7z a "dist/verdana-${{ matrix.id }}.zip" ./dist/verdana.exe
+            rm dist/verdana.exe
           else
             mv verdana dist/verdana
             tar czf "dist/verdana-${{ matrix.id }}.tar.gz" -C dist verdana
+            rm dist/verdana
           fi
 
       - uses: actions/upload-artifact@v4
@@ -131,6 +165,11 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: write checksums
+        working-directory: dist
+        run: sha256sum verdana-* > SHA256SUMS
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          generate_release_notes: true

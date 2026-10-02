@@ -31,9 +31,16 @@ holds a single `verdana` binary (`verdana.exe` on Windows):
 |---|---|
 | Linux x86-64 / ARM64 | `verdana-linux-amd64.tar.gz` / `verdana-linux-arm64.tar.gz` |
 | macOS Intel / Apple silicon | `verdana-darwin-amd64.tar.gz` / `verdana-darwin-arm64.tar.gz` |
-| Windows x86-64 | `verdana-windows-amd64.zip` |
+| Windows x86-64 / ARM64 | `verdana-windows-amd64.zip` / `verdana-windows-arm64.zip` |
 
 Unpack it, put the binary somewhere convenient and run it.
+
+Every tagged release also includes `SHA256SUMS`. From the directory containing
+the downloaded archive, verify it before unpacking:
+
+```sh
+sha256sum --check SHA256SUMS --ignore-missing
+```
 
 - **Linux** needs GTK 3 and WebKitGTK 4.1. On Debian or Ubuntu, that is
   `sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0`. Most desktops already
@@ -51,7 +58,10 @@ To play media for apps that ask for it (NAP-MEDIA), install
 
 Android 8.0 (API 26) or newer is required. Debug APKs are built by CI on every
 push (the `verdana-apk` artifact of the
-[android workflow](.github/workflows/android.yml)). You can also
+[android workflow](.github/workflows/android.yml)) and
+`verdana-android-debug.apk` is attached to tagged releases. Because it is a
+debug build, Android may warn about installing an app from outside its app
+store. You can also
 [build one yourself](#building-from-source).
 
 To keep your key on your phone instead of in Verdana, install a signer app
@@ -184,6 +194,33 @@ cd desktop
 go build -o child/child ./child   # the webview host, embedded in the binary
 go build -o verdana -tags novulkan .
 ```
+
+### Install from source with Go
+
+The desktop launcher uses native GUI libraries, so install the prerequisites
+listed above first. Then clone the repository and use `go install`:
+
+```sh
+git clone https://github.com/fiatjaf/verdana.git
+cd verdana
+just go-install
+```
+
+Or, without `just`:
+
+```sh
+cd verdana/desktop
+go build -o child/child ./child
+go install -tags novulkan .
+```
+
+This installs `verdana` in `GOBIN`, or in `$(go env GOPATH)/bin` when `GOBIN`
+is unset. Make sure that directory is on your `PATH`.
+
+The preliminary child build is required because the production launcher
+embeds its webview host into the installed executable. For that reason,
+`go install fiatjaf.com/verdana/desktop@latest` is not currently a supported
+one-line installation; use the release archive for the simplest install.
 
 To run the tests:
 
