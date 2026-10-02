@@ -74,7 +74,11 @@ func napConfigRegisterSchema(c *napCall) {
 func napConfigGet(c *napCall) {
 	values, ok := napconfig.Values(c.ci.napp.ID)
 	if !ok {
-		// with the request's id, so the shim can settle the pending get
+		// Go still sends the request's id, but the pristine shim routes
+		// config.schemaError only to onSchemaError, so a get made before
+		// any schema settles only by the shim's request timeout. NAP-CONFIG
+		// gives schemaError no id, so the spec has no way to settle it
+		// either; spec/CONFORMANCE.md P7/A22, decided in Phase 8 (MISC-02).
 		c.replyAs("config.schemaError", map[string]any{"code": napconfig.CodeNoSchema, "error": "no schema has been registered"})
 		return
 	}
