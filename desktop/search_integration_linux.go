@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,14 +35,40 @@ func xdgDataHome() string {
 func gnomeSearchIntegrationPaths() (desktop, provider, service string) {
 	base := xdgDataHome()
 	return filepath.Join(base, "applications", verdanaDesktopID),
-		filepath.Join(base, "gnome-shell", "search-providers", searchProviderFileName),
+		gnomeSearchProviderPath(),
 		filepath.Join(base, "dbus-1", "services", searchServiceFileName)
+}
+
+// GNOME Shell intentionally looks for search providers in XDG_DATA_DIRS, not
+// XDG_DATA_HOME. Prefer the first per-user data directory the session already
+// treats as a system data directory (normally Flatpak's user export directory).
+func gnomeSearchProviderPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dirs := os.Getenv("XDG_DATA_DIRS")
+	if dirs == "" {
+		dirs = "/usr/local/share:/usr/share"
+	}
+	for _, dir := range filepath.SplitList(dirs) {
+		dir = filepath.Clean(dir)
+		rel, err := filepath.Rel(home, dir)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.Join(dir, "gnome-shell", "search-providers", searchProviderFileName)
+		}
+	}
+	return ""
 }
 
 func setGNOMESearchIntegration(enabled bool, exe string) error {
 	desktopPath, providerPath, servicePath := gnomeSearchIntegrationPaths()
+	legacyProviderPath := filepath.Join(xdgDataHome(), "gnome-shell", "search-providers", searchProviderFileName)
 	if !enabled {
-		for _, path := range []string{desktopPath, providerPath, servicePath} {
+		for _, path := range []string{desktopPath, providerPath, legacyProviderPath, servicePath} {
+			if path == "" {
+				continue
+			}
 			err := os.Remove(path)
 			if err != nil && !os.IsNotExist(err) {
 				return err
@@ -52,6 +79,9 @@ func setGNOMESearchIntegration(enabled bool, exe string) error {
 		}
 		refreshShortcutParent(filepath.Dir(desktopPath))
 		return nil
+	}
+	if providerPath == "" {
+		return errors.New("GNOME search needs a user-writable directory in XDG_DATA_DIRS")
 	}
 
 	desktop := fmt.Sprintf(`[Desktop Entry]
@@ -90,6 +120,11 @@ Exec=%s --background
 		if searchDebugEnabled() {
 			log.Info().Str("kind", file.kind).Str("path", file.path).Str("executable", exe).
 				Msg("installed GNOME search integration file")
+		}
+	}
+	if legacyProviderPath != providerPath {
+		if err := os.Remove(legacyProviderPath); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	refreshShortcutParent(filepath.Dir(desktopPath))

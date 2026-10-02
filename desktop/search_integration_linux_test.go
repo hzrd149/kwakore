@@ -20,11 +20,22 @@ func TestGNOMESearchSupported(t *testing.T) {
 }
 
 func TestSetGNOMESearchIntegrationCreatesAndRemovesFiles(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	home := t.TempDir()
+	dataHome := home + "/data-home"
+	dataDir := home + "/flatpak-exports"
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	t.Setenv("XDG_DATA_DIRS", dataDir+":/usr/share")
 	if err := setGNOMESearchIntegration(true, "/opt/Verdana App/verdana"); err != nil {
 		t.Fatal(err)
 	}
 	desktop, provider, service := gnomeSearchIntegrationPaths()
+	if strings.HasPrefix(provider, dataHome) {
+		t.Fatalf("provider was written under XDG_DATA_HOME, which GNOME Shell does not scan: %s", provider)
+	}
+	if !strings.HasPrefix(provider, dataDir) {
+		t.Fatalf("provider was not written under a user XDG_DATA_DIR: %s", provider)
+	}
 	checks := map[string]string{
 		desktop:  `Exec="/opt/Verdana App/verdana"`,
 		provider: "BusName=com.verdana.Verdana.SearchProvider",
@@ -47,5 +58,14 @@ func TestSetGNOMESearchIntegrationCreatesAndRemovesFiles(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("integration file remains at %s: %v", path, err)
 		}
+	}
+}
+
+func TestGNOMESearchIntegrationNeedsUserDataDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
+	if err := setGNOMESearchIntegration(true, "/opt/verdana"); err == nil {
+		t.Fatal("integration succeeded without a user-writable XDG_DATA_DIR")
 	}
 }

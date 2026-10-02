@@ -71,6 +71,13 @@ remove_integrations() {
       "$applications/com.verdana.Verdana.desktop" \
       "$data_home/gnome-shell/search-providers/com.verdana.Verdana.search-provider.ini" \
       "$data_home/dbus-1/services/com.verdana.Verdana.SearchProvider.service"
+    local search_dir
+    IFS=: read -ra search_dirs <<< "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    for search_dir in "${search_dirs[@]}"; do
+      case "$search_dir/" in
+        "$HOME/"*) rm -f -- "$search_dir/gnome-shell/search-providers/com.verdana.Verdana.search-provider.ini" ;;
+      esac
+    done
     if [[ -d "$applications" ]]; then
       find "$applications" -maxdepth 1 -type f \
         \( -name 'verdana-*.desktop' -o -name 'com.verdana.napp.*.desktop' \) \
@@ -142,9 +149,20 @@ install -m 0755 "$tmp_dir/verdana" "$install_dir/verdana"
 if [[ "$os" == linux ]]; then
   data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
   applications="$data_home/applications"
-  providers="$data_home/gnome-shell/search-providers"
+  providers=""
+  IFS=: read -ra search_dirs <<< "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+  for search_dir in "${search_dirs[@]}"; do
+    case "$search_dir/" in
+      "$HOME/"*) providers="$search_dir/gnome-shell/search-providers"; break ;;
+    esac
+  done
+  if [[ -z "$providers" ]]; then
+    echo "GNOME search integration needs a per-user directory in XDG_DATA_DIRS." >&2
+    echo "Verdana was installed, but its GNOME search provider could not be registered." >&2
+  fi
   services="$data_home/dbus-1/services"
-  mkdir -p -- "$applications" "$providers" "$services"
+  mkdir -p -- "$applications" "$services"
+  [[ -z "$providers" ]] || mkdir -p -- "$providers"
 
   binary="$install_dir/verdana"
   escaped_binary="${binary//\\/\\\\}"
@@ -165,13 +183,15 @@ Categories=Network;
 Keywords=Nostr;Napp;Napplet;
 EOF
 
-  cat > "$providers/com.verdana.Verdana.search-provider.ini" <<'EOF'
+  if [[ -n "$providers" ]]; then
+    cat > "$providers/com.verdana.Verdana.search-provider.ini" <<'EOF'
 [Shell Search Provider]
 DesktopId=com.verdana.Verdana.desktop
 BusName=com.verdana.Verdana.SearchProvider
 ObjectPath=/com/verdana/Verdana/SearchProvider
 Version=2
 EOF
+  fi
 
   cat > "$services/com.verdana.Verdana.SearchProvider.service" <<EOF
 [D-BUS Service]
