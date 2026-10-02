@@ -395,7 +395,7 @@
     return box
   }
 
-  // the napp's own page: its NAP-CONFIG form and its permissions
+  // the napp's own page: its NAP-CONFIG form
   const nappPage = () => {
     const out = []
     let schema = null
@@ -437,7 +437,6 @@
       )
       out.push(form)
     }
-    out.push(permissionsView())
     return out
   }
 
@@ -478,165 +477,223 @@
     return { box, read: () => inputs.map(i => i.value.trim()).filter(Boolean) }
   }
 
-  // the launcher's own page: where napps are found and fetched from
-  const verdanaPage = () => {
+  const loginFromSettings = async (input, button) => {
+    const value = input.value.trim()
+    if (!value) {
+      status("Enter an nsec, bunker URL, or NIP-05 address.", true)
+      return
+    }
+    button.disabled = true
+    status("Signing in…")
+    const previous = (data.launcher || {}).pubkey || ""
+    try {
+      await rpc("settings.login", { input: value })
+      let sawLoading = false
+      for (let attempt = 0; attempt < 130; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+        const next = await rpc("settings.load")
+        const account = next.launcher || {}
+        sawLoading = sawLoading || account.phase === "loading"
+        const finished = account.phase !== "loading" && (sawLoading || account.pubkey !== previous || account.loginErr || attempt >= 3)
+        if (!finished) continue
+        data = next
+        render()
+        status(account.loginErr || (account.loggedIn ? "Signed in" : "Sign-in failed"), !!account.loginErr || !account.loggedIn)
+        return
+      }
+      status("Sign-in is taking longer than expected.", true)
+    } catch (err) {
+      status((err && err.message) || String(err), true)
+    } finally {
+      button.disabled = false
+    }
+  }
+
+  const accountPage = () => {
+    const l = data.launcher || {}
+    const section = el("section", {})
+    if (l.loggedIn) {
+      const identity = el("div", { class: "account-identity" }, el("strong", {}, l.profileName || "Nostr account"))
+      if (l.pubkey) identity.append(el("div", { class: "account-key" }, l.pubkey))
+      const card = el("div", { class: "account-card" })
+      if (l.profilePicture) card.append(el("img", { class: "account-avatar", src: l.profilePicture, alt: "" }))
+      card.append(identity)
+      section.append(card)
+    } else {
+      section.append(el("p", { class: "muted" }, "You are not signed in."))
+    }
+    const input = el("input", {
+      type: "password",
+      autocomplete: "off",
+      placeholder: "nsec1…, bunker://…, or name@example.com",
+    })
+    const login = el("button", { type: "button" }, l.loggedIn ? "Switch account" : "Sign in")
+    login.addEventListener("click", () => loginFromSettings(input, login))
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        login.click()
+      }
+    })
+    section.append(
+      el("h2", {}, l.loggedIn ? "Use another account" : "Sign in"),
+      el("div", { class: "hint" }, "Use an nsec, a bunker signer URL, or a NIP-05 address."),
+      el("div", { class: "row", style: "margin-top:8px" }, input, login),
+    )
+    if (l.loggedIn) {
+      section.append(
+        el("h2", {}, "Sign out"),
+        el("div", { class: "hint" }, "Signing out closes open napps and napplets."),
+        el("button", {
+          type: "button",
+          class: "danger",
+          onclick: () => {
+            if (window.confirm("Sign out and close all open apps?")) run("settings.logout", undefined, "Signed out")
+          },
+        }, "Sign out"),
+      )
+    }
+    section.append(el("div", { class: "actions" }, el("span", { id: "status", class: "status" })))
+    return [section]
+  }
+
+  // Verdana's settings are separate pages. Each page sends only the fields it
+  // owns; settings.saveLauncher treats omitted fields as unchanged.
+  const verdanaPage = page => {
     const l = data.launcher || {}
     let readLauncher = () => ({})
     const changed = delay =>
       queueSave({ method: "settings.saveLauncher", params: () => readLauncher() }, typeof delay === "number" ? delay : 350)
-    const themeMode = el(
-      "select",
-      { name: "themeMode", onchange: () => changed(0) },
-      el("option", { value: "system" }, "System"),
-      el("option", { value: "light" }, "Light"),
-      el("option", { value: "dark" }, "Dark"),
-    )
-    themeMode.value = l.themeMode || "system"
-    const appearance = el(
-      "section",
-      {},
-      el("h2", {}, "Appearance"),
-      el("div", { class: "hint" }, "System follows your desktop appearance and updates open napps and napplets automatically."),
-      el("label", { class: "field" }, el("span", {}, "Theme"), themeMode),
-    )
-    let autostart = null
-    if (l.autostartSupported) {
-      autostart = el("input", { type: "checkbox", name: "autostart", onchange: () => changed(0) })
-      autostart.checked = !!l.autostart
-      appearance.append(
-        el(
-          "div",
-          { class: "field check" },
-          el(
-            "label",
-            {},
-            autostart,
-            el("span", {}, "Launch at login", el("span", { class: "hint" }, "Start Verdana in the background.")),
-          ),
-        ),
+    let content
+
+    if (page === "general") {
+      const themeMode = el(
+        "select",
+        { name: "themeMode", onchange: () => changed(0) },
+        el("option", { value: "system" }, "System"),
+        el("option", { value: "light" }, "Light"),
+        el("option", { value: "dark" }, "Dark"),
       )
-    }
-    const appShortcuts = el("input", { type: "checkbox", name: "appShortcuts" })
-    appShortcuts.checked = !!l.appShortcuts
-    const shortcutNaming = el(
-      "select",
-      { name: "appShortcutNaming", onchange: () => changed(0) },
-      el("option", { value: "plain" }, "App name"),
-      el("option", { value: "hosted" }, "App name — Verdana"),
-    )
-    shortcutNaming.value = l.appShortcutNaming || "plain"
-    shortcutNaming.disabled = !appShortcuts.checked
-    appShortcuts.onchange = () => {
+      themeMode.value = l.themeMode || "system"
+      content = el(
+        "section",
+        {},
+        el("h2", {}, "Appearance"),
+        el("div", { class: "hint" }, "System follows your desktop appearance and updates open napps and napplets automatically."),
+        el("label", { class: "field" }, el("span", {}, "Theme"), themeMode),
+      )
+      let autostart = null
+      if (l.autostartSupported) {
+        autostart = el("input", { type: "checkbox", name: "autostart", onchange: () => changed(0) })
+        autostart.checked = !!l.autostart
+        content.append(
+          el("div", { class: "field check" }, el("label", {}, autostart, el("span", {}, "Launch at login", el("span", { class: "hint" }, "Start Verdana in the background.")))),
+        )
+      }
+      const appShortcuts = el("input", { type: "checkbox", name: "appShortcuts" })
+      appShortcuts.checked = !!l.appShortcuts
+      const shortcutNaming = el(
+        "select",
+        { name: "appShortcutNaming", onchange: () => changed(0) },
+        el("option", { value: "plain" }, "App name"),
+        el("option", { value: "hosted" }, "App name — Verdana"),
+      )
+      shortcutNaming.value = l.appShortcutNaming || "plain"
       shortcutNaming.disabled = !appShortcuts.checked
-      changed(0)
-    }
-    if (l.appShortcutsSupported) {
-      appearance.append(
-        el(
-          "div",
-          { class: "field check" },
-          el(
-            "label",
-            {},
-            appShortcuts,
-            el("span", {}, "Show installed apps in the system launcher", el("span", { class: "hint" }, "Keep native entries synchronized for every installed napp and napplet.")),
-          ),
-        ),
-        el("label", { class: "field" }, el("span", {}, "Launcher names"), shortcutNaming),
+      appShortcuts.onchange = () => {
+        shortcutNaming.disabled = !appShortcuts.checked
+        changed(0)
+      }
+      if (l.appShortcutsSupported) {
+        content.append(
+          el("div", { class: "field check" }, el("label", {}, appShortcuts, el("span", {}, "Show installed apps in the system launcher", el("span", { class: "hint" }, "Keep native entries synchronized for every installed napp and napplet.")))),
+          el("label", { class: "field" }, el("span", {}, "Launcher names"), shortcutNaming),
+        )
+      }
+      let gnomeSearch = null
+      if (l.gnomeSearchSupported) {
+        gnomeSearch = el("input", { type: "checkbox", name: "gnomeSearch", onchange: () => changed(0) })
+        gnomeSearch.checked = !!l.gnomeSearch
+        content.append(
+          el("div", { class: "field check" }, el("label", {}, gnomeSearch, el("span", {}, "Show napplets in GNOME search", el("span", { class: "hint" }, "Install and maintain GNOME Shell and D-Bus integration files. A new GNOME session may be required after changing this.")))),
+        )
+      }
+      readLauncher = () => ({
+        themeMode: themeMode.value,
+        ...(autostart ? { autostart: autostart.checked } : {}),
+        ...(l.appShortcutsSupported ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value } : {}),
+        ...(gnomeSearch ? { gnomeSearch: gnomeSearch.checked } : {}),
+      })
+    } else if (page === "discovery") {
+      const relays = listEditor(
+        "Relays",
+        "Napps and napplets are discovered on these relays, and on your own when enabled below.",
+        l.relays,
+        "wss://relay.example.com",
+        changed,
       )
-    }
-    let gnomeSearch = null
-    if (l.gnomeSearchSupported) {
-      gnomeSearch = el("input", { type: "checkbox", name: "gnomeSearch", onchange: () => changed(0) })
-      gnomeSearch.checked = !!l.gnomeSearch
-      appearance.append(
-        el(
-          "div",
-          { class: "field check" },
-          el(
-            "label",
-            {},
-            gnomeSearch,
-            el("span", {}, "Show napplets in GNOME search", el("span", { class: "hint" }, "Install and maintain GNOME Shell and D-Bus integration files. A new GNOME session may be required after changing this.")),
-          ),
-        ),
+      const discoverOnUserRelays = el("input", { type: "checkbox", name: "discoverOnUserRelays", onchange: () => changed(0) })
+      discoverOnUserRelays.checked = !!l.discoverOnUserRelays
+      const userRelays = l.userRelays || []
+      let userStatus = "Log in to load your relays."
+      if (l.loggedIn && !l.userRelaysLoadedAt) userStatus = "Loading your relay list…"
+      else if (l.loggedIn && !userRelays.length) userStatus = "No relay list (NIP-65) found for your account."
+      else if (l.loggedIn) userStatus = "From your relay list (NIP-65), loaded " + new Date(l.userRelaysLoadedAt * 1000).toLocaleString() + "."
+      relays.box.append(
+        el("div", { class: "field check" }, el("label", {}, discoverOnUserRelays, el("span", {}, "Also discover on my relays", el("span", { class: "hint" }, "Ask the write (outbox) relays from your relay list too.")))),
+        el("h3", {}, "Your relays"),
+        el("div", { class: "hint" }, userStatus),
+        el("ul", { class: "user-relays" }, ...userRelays.map(r => el("li", {}, el("span", {}, r.url), ...(r.read ? [el("span", { class: "relay-tag" }, "read")] : []), ...(r.write ? [el("span", { class: "relay-tag" }, "write")] : [])))),
       )
+      content = relays.box
+      readLauncher = () => ({ relays: relays.read(), discoverOnUserRelays: discoverOnUserRelays.checked })
+    } else {
+      const servers = listEditor(
+        "Blossom servers",
+        "Napp and napplet files are fetched from these servers first, before the ones a napp or its author names. Every file is checked against its hash, wherever it comes from.",
+        l.blossomServers,
+        "https://blossom.example.com",
+        changed,
+      )
+      content = servers.box
+      readLauncher = () => ({ blossomServers: servers.read() })
     }
-    const relays = listEditor(
-      "Relays",
-      "Napps and napplets are discovered on these relays, and on your own when enabled below.",
-      l.relays,
-      "wss://relay.example.com",
-      changed,
-    )
-    // the user's NIP-65 list: shown, not edited here (it belongs to their
-    // Nostr account, so their Nostr client edits it)
-    const discoverOnUserRelays = el("input", { type: "checkbox", name: "discoverOnUserRelays", onchange: () => changed(0) })
-    discoverOnUserRelays.checked = !!l.discoverOnUserRelays
-    const userRelays = l.userRelays || []
-    let userStatus = "Log in to load your relays."
-    if (l.loggedIn && !l.userRelaysLoadedAt) userStatus = "Loading your relay list…"
-    else if (l.loggedIn && !userRelays.length) userStatus = "No relay list (NIP-65) found for your account."
-    else if (l.loggedIn) userStatus = "From your relay list (NIP-65), loaded " + new Date(l.userRelaysLoadedAt * 1000).toLocaleString() + "."
-    relays.box.append(
-      el(
-        "div",
-        { class: "field check" },
-        el(
-          "label",
-          {},
-          discoverOnUserRelays,
-          el("span", {}, "Also discover on my relays", el("span", { class: "hint" }, "Ask the write (outbox) relays from your relay list too.")),
-        ),
-      ),
-      el("h3", {}, "Your relays"),
-      el("div", { class: "hint" }, userStatus),
-      el(
-        "ul",
-        { class: "user-relays" },
-        ...userRelays.map(r =>
-          el(
-            "li",
-            {},
-            el("span", {}, r.url),
-            ...(r.read ? [el("span", { class: "relay-tag" }, "read")] : []),
-            ...(r.write ? [el("span", { class: "relay-tag" }, "write")] : []),
-          ),
-        ),
-      ),
-    )
-    const servers = listEditor(
-      "Blossom servers",
-      "Napp and napplet files are fetched from these servers first, before the ones a napp or its author names. Every file is checked against its hash, wherever it comes from.",
-      l.blossomServers,
-      "https://blossom.example.com",
-      changed,
-    )
-    readLauncher = () => ({
-      themeMode: themeMode.value,
-      relays: relays.read(),
-      discoverOnUserRelays: discoverOnUserRelays.checked,
-      blossomServers: servers.read(),
-      ...(autostart ? { autostart: autostart.checked } : {}),
-      ...(l.appShortcutsSupported ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value } : {}),
-      ...(gnomeSearch ? { gnomeSearch: gnomeSearch.checked } : {}),
-    })
+
     const form = el(
       "form",
       { onsubmit: e => (e.preventDefault(), flushSave()) },
-      appearance,
-      relays.box,
-      servers.box,
-      el(
-        "div",
-        { class: "actions" },
-        el("span", { id: "status", class: "status" }),
-      ),
+      content,
+      el("div", { class: "actions" }, el("span", { id: "status", class: "status" })),
     )
     return [form]
   }
 
   let tab = ""
+  const selectTab = async id => {
+    clearTimeout(saveTimer)
+    saveTimer = 0
+    if (queuedSave) await flushSave()
+    while (saveInFlight || queuedSave) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+      if (!saveInFlight && queuedSave) await flushSave()
+    }
+    tab = id
+    render()
+  }
+
+  const pages = () => [
+    ...(data.napp
+      ? [
+          { id: "napp", group: data.name || "App", label: "App settings", title: data.name || "App", description: "Settings provided by this app." },
+          { id: "permissions", group: data.name || "App", label: "Permissions", title: "Permissions", description: "Review decisions Verdana remembers for this app." },
+        ]
+      : []),
+    { id: "account", group: "Verdana", label: "Account", title: "Account", description: "Manage the Nostr identity Verdana uses." },
+    { id: "general", group: "Verdana", label: "General", title: "General", description: "Appearance and operating system integration." },
+    { id: "discovery", group: "Verdana", label: "Discovery", title: "Discovery", description: "Choose where Verdana discovers napps and napplets." },
+    { id: "downloads", group: "Verdana", label: "Downloads", title: "Downloads", description: "Choose where Verdana fetches app files." },
+  ]
+
   const render = () => {
     renderVersion++
     clearTimeout(saveTimer)
@@ -644,31 +701,45 @@
     queuedSave = null
     const app = document.getElementById("app")
     fields = []
-    if (!data.napp) tab = "verdana"
+    if (!data.napp && (!tab || tab === "napp" || tab === "permissions")) tab = "general"
     else if (!tab) tab = "napp"
     document.title = (data.name || "Napp") + " — Settings"
-    const main = [el("h1", {}, data.name || "Napp"), el("div", { class: "muted" }, "Settings")]
-
-    if (data.napp) {
-      const tabBtn = (id, label) =>
+    const available = pages()
+    const current = available.find(page => page.id === tab) || available[0]
+    tab = current.id
+    const nav = el("nav", { class: "settings-nav", role: "tablist", "aria-label": "Settings sections" })
+    let group = ""
+    for (const page of available) {
+      if (page.group !== group) {
+        group = page.group
+        nav.append(el("div", { class: "nav-group" }, group))
+      }
+      nav.append(
         el(
           "button",
           {
             type: "button",
             role: "tab",
-            "aria-selected": tab === id ? "true" : "false",
-            class: "tab" + (tab === id ? " active" : ""),
-            onclick: () => {
-              tab = id
-              render()
-            },
+            "aria-selected": tab === page.id ? "true" : "false",
+            class: "nav-tab" + (tab === page.id ? " active" : ""),
+            onclick: () => selectTab(page.id),
           },
-          label,
-        )
-      main.push(el("div", { class: "tabs", role: "tablist" }, tabBtn("napp", data.name || "Napp"), tabBtn("verdana", "Verdana")))
+          page.label,
+        ),
+      )
     }
-    main.push(...(tab === "napp" ? nappPage() : verdanaPage()))
-    app.replaceChildren(...main)
+    const body = tab === "napp" ? nappPage() : tab === "permissions" ? [permissionsView()] : tab === "account" ? accountPage() : verdanaPage(tab)
+    const content = el(
+      "div",
+      { class: "settings-content", role: "tabpanel" },
+      el("h2", { class: "page-title" }, current.title),
+      el("div", { class: "muted page-description" }, current.description),
+      ...body,
+    )
+    app.replaceChildren(
+      el("header", { class: "settings-header" }, el("h1", {}, "Settings"), el("div", { class: "muted" }, data.napp ? data.name || "Napp" : "Verdana")),
+      el("div", { class: "settings-shell" }, nav, content),
+    )
 
     const sec = pendingSection || data.section
     pendingSection = ""

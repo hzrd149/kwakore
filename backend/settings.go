@@ -254,6 +254,11 @@ type launcherSettings struct {
 	UserRelays           []userRelayView `json:"userRelays"`
 	UserRelaysLoadedAt   int64           `json:"userRelaysLoadedAt"`
 	LoggedIn             bool            `json:"loggedIn"`
+	Phase                string          `json:"phase"`
+	LoginErr             string          `json:"loginErr"`
+	ProfileName          string          `json:"profileName"`
+	ProfilePicture       string          `json:"profilePicture"`
+	Pubkey               string          `json:"pubkey"`
 }
 
 // userRelayView is one relay of the user's list, as the settings page shows it.
@@ -371,11 +376,27 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		}
 		ForgetPermission(w.nappID, req.Permission)
 		return settingsLoadFor(w), nil
+	case "settings.login":
+		var req struct {
+			Input string `json:"input"`
+		}
+		if err := json.Unmarshal([]byte(params), &req); err != nil {
+			return nil, errors.New("invalid request")
+		}
+		if req.Input == "" {
+			return nil, errors.New("enter an nsec, bunker URL, or NIP-05 address")
+		}
+		go Login(req.Input)
+		return map[string]bool{"started": true}, nil
+	case "settings.logout":
+		Logout()
+		return settingsLoadFor(w), nil
 	}
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }
 
 func settingsLoadFor(w *settingsWindow) settingsLoad {
+	state := Snapshot()
 	out := settingsLoad{
 		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
 		Launcher: launcherSettings{
@@ -392,6 +413,11 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 			DiscoverOnUserRelays:  DiscoverOnUserRelays(),
 			UserRelays:            []userRelayView{},
 			LoggedIn:              LoggedIn(),
+			Phase:                 state.Phase,
+			LoginErr:              state.LoginErr,
+			ProfileName:           state.ProfileName,
+			ProfilePicture:        state.ProfilePicture,
+			Pubkey:                state.Pubkey,
 		},
 	}
 	if l, ok := userRelays(); ok {

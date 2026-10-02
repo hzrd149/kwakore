@@ -71,8 +71,8 @@ func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_NAME="+spec.Name,
 		"VERDANA_INSTANCE_ID="+spec.Window,
-		"VERDANA_WINDOW_WIDTH=560",
-		"VERDANA_WINDOW_HEIGHT=640",
+		"VERDANA_WINDOW_WIDTH=860",
+		"VERDANA_WINDOW_HEIGHT=720",
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
 	)
