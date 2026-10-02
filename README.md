@@ -40,6 +40,12 @@ access is not required. The downloaded archive is verified against the
 release's SHA-256 checksum before it is installed. You can rerun the same
 command later to update to the newest release.
 
+On GNOME, the Linux installer also registers Verdana as a system search
+provider. Shell searches return matching napplets published by people you
+follow, plus installed napplets. Search terms are matched locally and are not
+sent to Nostr relays. GNOME may require signing out and back in before a newly
+registered provider first appears.
+
 To uninstall on Linux or macOS while keeping installed apps and settings:
 
 ```sh
