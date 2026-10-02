@@ -85,6 +85,9 @@ data class LauncherState(
     val relays: List<String>,
     val installed: List<Napp>,
     val discovery: List<Napp>,
+    // follows are the hex pubkeys of the user and everyone they follow, for
+    // the discovery tab's friends filter; empty until their list has loaded
+    val follows: Set<String> = emptySet(),
     val busy: List<String>,
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
@@ -147,6 +150,7 @@ fun parseState(json: String): LauncherState {
 
     val windowsArr = o.optJSONArray("windows") ?: JSONArray()
     val busyArr = o.optJSONArray("busy") ?: JSONArray()
+    val followsArr = o.optJSONArray("follows") ?: JSONArray()
     val relaysArr = o.optJSONArray("relays") ?: JSONArray()
     return LauncherState(
         phase = o.optString("phase"),
@@ -161,6 +165,7 @@ fun parseState(json: String): LauncherState {
         relays = (0 until relaysArr.length()).map { relaysArr.getString(it) },
         installed = napps("installed"),
         discovery = napps("discovery"),
+        follows = (0 until followsArr.length()).map { followsArr.getString(it) }.toSet(),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
         nostrConnectUri = o.optString("nostrConnectUri"),

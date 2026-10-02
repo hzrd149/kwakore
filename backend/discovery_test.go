@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -74,5 +75,37 @@ func TestDiscoveryKeepsNewestVersion(t *testing.T) {
 	})
 	if !last.done || len(last.list) != 1 || last.list[0].Name != "Notes v3" {
 		t.Fatalf("final publish = %+v, want only Notes v3, done", last)
+	}
+}
+
+func TestFollowsBelongToTheLoggedInUser(t *testing.T) {
+	setupConfigTest(t)
+	ls.mu.Lock()
+	pubkey, name, pic, follows, phase := ls.pubkey, ls.profName, ls.profPic, ls.follows, ls.phase
+	ls.mu.Unlock()
+	t.Cleanup(func() {
+		ls.mu.Lock()
+		ls.pubkey, ls.profName, ls.profPic, ls.follows, ls.phase = pubkey, name, pic, follows, phase
+		ls.mu.Unlock()
+	})
+
+	setProfile("aa", "alice", "")
+	setFollows("aa", []string{"aa", "bb"})
+	if got := Snapshot().Follows; !slices.Equal(got, []string{"aa", "bb"}) {
+		t.Fatalf("follows: %v", got)
+	}
+	// a list that finishes loading after the user changed is dropped
+	setFollows("cc", []string{"cc", "dd"})
+	if got := Snapshot().Follows; !slices.Equal(got, []string{"aa", "bb"}) {
+		t.Fatalf("stale follows applied: %v", got)
+	}
+	// the same user's profile refreshing keeps them, a new user clears them
+	setProfile("aa", "alice", "pic")
+	if got := Snapshot().Follows; len(got) != 2 {
+		t.Fatalf("refresh dropped follows: %v", got)
+	}
+	setProfile("", "", "")
+	if got := Snapshot().Follows; len(got) != 0 {
+		t.Fatalf("logout kept follows: %v", got)
 	}
 }

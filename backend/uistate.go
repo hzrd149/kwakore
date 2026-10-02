@@ -63,6 +63,11 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
+	// Follows are the hex pubkeys of the logged-in user and everyone they
+	// follow, for the discovery tab's friends filter. Empty until their
+	// follow list has loaded (it always holds the user's own key after).
+	Follows []string `json:"follows"`
+
 	// Lookup is the address typed into the discovery filter being looked
 	// up, or nil when the filter holds no address (see LookupAddress).
 	Lookup *AddressLookup `json:"lookup,omitempty"`
@@ -128,6 +133,7 @@ type launcherState struct {
 	fetching   bool
 	installed  []Napp
 	discovery  []Napp
+	follows    []string
 	dev        []Napp
 	devErr     string
 	devLoading bool
@@ -188,6 +194,7 @@ func Snapshot() State {
 		ThemeMode:      ThemeMode(),
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
+		Follows:        append([]string(nil), ls.follows...),
 		Lookup:         ls.lookup,
 		Dev:            append([]Napp(nil), ls.dev...),
 		DevErr:         ls.devErr,
@@ -305,6 +312,10 @@ func setLoginErr(msg string) {
 func setProfile(pubkey, name, picture string) {
 	ls.mu.Lock()
 	ls.loginErr = ""
+	if pubkey != ls.pubkey {
+		// someone else's follows don't carry over
+		ls.follows = nil
+	}
 	ls.pubkey = pubkey
 	ls.profName = name
 	ls.profPic = picture
@@ -329,6 +340,19 @@ func setFetching(fetching bool) {
 		ls.fetchErr = ""
 		ls.discovery = ls.withResolved(nil)
 	}
+	ls.mu.Unlock()
+	notifyState()
+}
+
+// setFollows replaces the friends filter's pubkeys, unless the user changed
+// while they were loading.
+func setFollows(pubkey string, follows []string) {
+	ls.mu.Lock()
+	if ls.pubkey != pubkey {
+		ls.mu.Unlock()
+		return
+	}
+	ls.follows = follows
 	ls.mu.Unlock()
 	notifyState()
 }

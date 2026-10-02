@@ -89,6 +89,11 @@ var (
 	// discoKind* constants), switched by discoKindBtns.
 	discoKind     int
 	discoKindBtns [3]widget.Clickable
+	// discoScope is whose apps the discovery tab lists: everyone's, or only
+	// those by people the user follows (one of the discoScope* constants),
+	// switched by discoScopeBtns.
+	discoScope     int
+	discoScopeBtns [2]widget.Clickable
 	// discoCols and installedCols are how many napps a row of the
 	// discovery and installed tabs held last frame (see nappGrid).
 	discoCols, installedCols int
@@ -102,6 +107,29 @@ const (
 
 // discoKindLabels name the discovery tab's kind buttons, in discoKind order.
 var discoKindLabels = [3]string{"All", "Napps", "Napplets"}
+
+const (
+	discoScopeGlobal = iota
+	discoScopeFriends
+)
+
+// discoScopeLabels name the discovery tab's scope buttons, in discoScope
+// order.
+var discoScopeLabels = [2]string{"Global", "Friends"}
+
+// followSet is the State's follows as a set, for the friends filter.
+func followSet(st backend.State) map[string]bool {
+	set := make(map[string]bool, len(st.Follows))
+	for _, pk := range st.Follows {
+		set[pk] = true
+	}
+	return set
+}
+
+// inDiscoScope says whether a napp belongs under the chosen discovery scope.
+func inDiscoScope(n backend.Napp, follows map[string]bool) bool {
+	return discoScope == discoScopeGlobal || follows[n.Author.Hex()]
+}
 
 // matchesKind says whether a napp belongs under a discovery kind tab.
 func matchesKind(n backend.Napp, kind int) bool {
@@ -295,8 +323,9 @@ func setShortcutEdit(edit *shortcutEditState) {
 // A napp address (an naddr, a nostr: link) typed there is looked up on
 // relays too; once found, it is listed and it alone passes the filter.
 //
-// The kind tabs narrow it further to napps or napplets, except for an
-// address: that names one app, whatever its kind.
+// The scope and kind tabs narrow it further to the user's friends' apps and
+// to napps or napplets, except for an address: that names one app, whoever
+// published it and whatever its kind.
 func discoveryFilter(st backend.State, archetype string) []int {
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
 	if role, ok := strings.CutPrefix(q, "archetype:"); ok {
@@ -312,12 +341,13 @@ func discoveryFilter(st backend.State, archetype string) []int {
 			return !st.Discovery[i].HandlesArchetype(archetype)
 		})
 	}
-	if discoKind == discoKindAll || backend.IsNappAddress(q) {
+	if backend.IsNappAddress(q) {
 		return vis
 	}
+	follows := followSet(st)
 	out := vis[:0]
 	for _, i := range vis {
-		if matchesKind(st.Discovery[i], discoKind) {
+		if inDiscoScope(st.Discovery[i], follows) && matchesKind(st.Discovery[i], discoKind) {
 			out = append(out, i)
 		}
 	}
@@ -452,10 +482,12 @@ func gioMain() {
 			if discoveryArchetype != "" {
 				filterEd.SetText("archetype:" + discoveryArchetype)
 				discoKind = discoKindNapplets
+				discoScope = discoScopeGlobal
 			}
 			if discoveryQuery != "" {
 				filterEd.SetText(discoveryQuery)
 				discoKind = discoKindNapplets
+				discoScope = discoScopeGlobal
 			}
 
 			installedSet := make(map[string]bool, len(st.Installed))
@@ -558,6 +590,11 @@ func gioMain() {
 					for k := range discoKindBtns {
 						if discoKindBtns[k].Clicked(gtx) {
 							discoKind = k
+						}
+					}
+					for k := range discoScopeBtns {
+						if discoScopeBtns[k].Clicked(gtx) {
+							discoScope = k
 						}
 					}
 					for len(cardBtns) < len(st.Installed) {

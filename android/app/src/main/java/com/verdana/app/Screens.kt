@@ -301,6 +301,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
     var discoveryFilter by remember { mutableStateOf("") }
     var discoveryKind by remember { mutableStateOf(DiscoveryKind.All) }
+    var discoveryScope by remember { mutableStateOf(DiscoveryScope.Global) }
     var installedFilter by remember { mutableStateOf("") }
     // ephemeral detail tabs: vanish the moment any other tab is picked
     var detailNapp by remember { mutableStateOf<Napp?>(null) }
@@ -312,6 +313,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             tab = 1
             discoveryFilter = "archetype:$requestedArchetype"
             discoveryKind = DiscoveryKind.Napplets
+            // a napp asking for a napplet wants everyone's
+            discoveryScope = DiscoveryScope.Global
             detailNapp = null
             detailProfile = null
             VerdanaHost.consumeDiscoveryArchetype()
@@ -371,6 +374,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             else -> DiscoveryTab(activity, st, theme, discoveryFilter, { discoveryFilter = it },
                 discoveryKind, { discoveryKind = it },
+                discoveryScope, { discoveryScope = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
         }
     }
@@ -516,6 +520,19 @@ enum class DiscoveryKind(val label: String) {
     }
 }
 
+// kindNoun names a discovery kind in the empty list's message.
+private fun kindNoun(kind: DiscoveryKind): String =
+    if (kind == DiscoveryKind.All) "apps" else kind.label.lowercase()
+
+// DiscoveryScope is whose apps the discovery tab lists: only those by people
+// the user follows, or everyone's.
+enum class DiscoveryScope(val label: String) {
+    Friends("Friends"),
+    Global("Global");
+
+    fun matches(n: Napp, follows: Set<String>): Boolean = this == Global || n.author in follows
+}
+
 @Composable
 private fun TabChip(label: String, active: Boolean, theme: Theme, onClick: () -> Unit) {
     Button(
@@ -601,6 +618,8 @@ private fun DiscoveryTab(
     setFilter: (String) -> Unit,
     kind: DiscoveryKind,
     setKind: (DiscoveryKind) -> Unit,
+    scope: DiscoveryScope,
+    setScope: (DiscoveryScope) -> Unit,
     onDetail: (Napp) -> Unit,
     onAuthor: (String) -> Unit,
 ) {
@@ -611,15 +630,19 @@ private fun DiscoveryTab(
     val isArchetypeFilter = filter.trim().startsWith("archetype:")
     LaunchedEffect(filter) { activity.lookupAddress(if (isArchetypeFilter) "" else filter) }
     val lookup = st.lookup?.takeIf { !isArchetypeFilter && it.query == filter.trim() }
-    // The kind tabs narrow the list to napps or napplets, except for an
-    // address, which names one app whatever its kind.
+    // The scope and kind tabs narrow the list to friends' apps and to napps
+    // or napplets, except for an address, which names one app whoever
+    // published it and whatever its kind.
     val requestedArchetype = filter.trim().removePrefix("archetype:").takeIf {
         filter.trim().startsWith("archetype:") && it.isNotBlank()
     }
     val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId }
     else st.discovery
         .matching(if (requestedArchetype == null) filter else "")
-        .filter { kind.matches(it) && (requestedArchetype == null || requestedArchetype in it.archetypes) }
+        .filter {
+            scope.matches(it, st.follows) && kind.matches(it) &&
+                (requestedArchetype == null || requestedArchetype in it.archetypes)
+        }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             // the filter comes first
@@ -632,11 +655,19 @@ private fun DiscoveryTab(
                 singleLine = true,
             )
             Spacer(Modifier.height(10.dp))
+            // whose apps: friends' or everyone's
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DiscoveryScope.entries.forEach { s ->
+                    TabChip(s.label, scope == s, theme) { setScope(s) }
+                    Spacer(Modifier.width(6.dp))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             // the kind tabs, and at the other end the refresh button that
             // asks the relays again
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DiscoveryKind.entries.forEach { k ->
-                    val count = st.discovery.count { k.matches(it) }
+                    val count = st.discovery.count { scope.matches(it, st.follows) && k.matches(it) }
                     TabChip(if (count > 0) "${k.label} ($count)" else k.label, kind == k, theme) { setKind(k) }
                     Spacer(Modifier.width(6.dp))
                 }
@@ -660,7 +691,11 @@ private fun DiscoveryTab(
                         lookup?.pending == true -> "Looking up that address…"
                         lookup != null && lookup.err.isNotBlank() -> "Couldn't open that address: ${lookup.err}."
                         st.fetching -> "Searching relays…"
-                        st.discovery.isNotEmpty() && filter.isBlank() -> "No ${kind.label.lowercase()} found on these relays."
+                        st.discovery.isNotEmpty() && filter.isBlank() && scope == DiscoveryScope.Friends && st.follows.isEmpty() ->
+                            "Loading who you follow…"
+                        st.discovery.isNotEmpty() && filter.isBlank() && scope == DiscoveryScope.Friends ->
+                            "No ${kindNoun(kind)} from people you follow yet. Switch to Global to see everyone's."
+                        st.discovery.isNotEmpty() && filter.isBlank() -> "No ${kindNoun(kind)} found on these relays."
                         st.discovery.isNotEmpty() -> "Nothing matches the filter."
                         else -> "No napps yet. Pick some good relays in Settings and tap \"Refresh\"."
                     },

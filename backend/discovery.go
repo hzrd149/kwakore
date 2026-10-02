@@ -39,6 +39,7 @@ func Discover() {
 	// this run asks the user's relays too instead of a second run redoing it
 	waitUserRelays(userRelayWait)
 	urls := discoveryRelays()
+	go refreshFollows(ctx)
 	log.Info().Strs("relays", urls).Strs("settings", Relays()).Strs("user", UserWriteRelays()).
 		Bool("userRelays", DiscoverOnUserRelays()).Msg("fetching napps from relays")
 
@@ -66,6 +67,25 @@ func Discover() {
 	})
 
 	log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
+}
+
+// refreshFollows loads who the user follows for the discovery tab's friends
+// filter. It rides along with each discovery run, so "Refresh" picks up a
+// follow list changed elsewhere too.
+func refreshFollows(ctx context.Context) {
+	pk, ok := currentUser()
+	if !ok {
+		return
+	}
+	authors := FollowedAuthors(ctx)
+	if ctx.Err() != nil || len(authors) == 0 {
+		return
+	}
+	hexes := make([]string, len(authors))
+	for i, a := range authors {
+		hexes[i] = a.Hex()
+	}
+	setFollows(pk.Hex(), hexes)
 }
 
 // collectDiscovery reads napps off a discovery subscription until it
