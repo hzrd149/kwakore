@@ -670,23 +670,18 @@ private fun DiscoveryTab(
         }
         items(visible, key = { it.id }) { napp ->
             val installed = st.installed.any { it.id == napp.id }
-            val busy = st.busy.contains(napp.id)
+            // the only button is Try: installing, updating and opening
+            // live on the napp page the card opens
             NappCard(
                 activity, napp, theme,
                 showActions = false,
                 onDetail = { onDetail(napp) },
                 onAuthor = { onAuthor(napp.author) },
-                onLaunch = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
-                showOpen = installed || napp.isNapplet,
-                openLabel = if (installed) "Open" else "Try",
-                primaryLabel = when {
-                    busy -> "Working…"
-                    installed -> "Uninstall"
-                    else -> "Install"
-                },
-                onPrimary = { if (installed) activity.uninstall(napp.id) else activity.install(napp.id) },
-                secondaryLabel = if (installed && napp.updateAvailable) "Update" else null,
-                onSecondary = { activity.install(napp.id) },
+                onLaunch = { activity.tryNapplet(napp.id) },
+                showOpen = !installed && napp.isNapplet,
+                openLabel = "Try",
+                primaryLabel = null,
+                onPrimary = {},
             )
         }
     }
@@ -697,7 +692,9 @@ private fun NappCard(
     activity: MainActivity,
     napp: Napp,
     theme: Theme,
-    primaryLabel: String,
+    // a null primaryLabel leaves the card without its install/uninstall
+    // button, as the discovery list does
+    primaryLabel: String?,
     onPrimary: () -> Unit,
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
@@ -820,12 +817,14 @@ private fun NappCard(
             }
             Spacer(Modifier.width(6.dp))
         }
-        Button(
-            onClick = onPrimary,
-            enabled = primaryLabel != "Working…",
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        ) {
-            Text(primaryLabel, fontSize = 13.sp)
+        if (primaryLabel != null) {
+            Button(
+                onClick = onPrimary,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(primaryLabel, fontSize = 13.sp)
+            }
         }
     }
 }

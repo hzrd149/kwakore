@@ -256,8 +256,6 @@ func layoutMain(
 	cardBtns,
 	uninstBtns,
 	installedUpdateBtns,
-	actionBtns,
-	updateBtns,
 	devOpenBtns,
 	devUnloadBtns,
 	devPublishBtns []widget.Clickable,
@@ -317,8 +315,8 @@ func layoutMain(
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
-				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn, actionBtns,
-					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, busy)
+				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn,
+					discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet)
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
@@ -784,8 +782,6 @@ func layoutDiscoveryTab(
 	list *widget.List,
 	filterEd *widget.Editor,
 	fetchBtn *widget.Clickable,
-	actionBtns,
-	updateBtns []widget.Clickable,
 	cardBtns,
 	openBtns,
 	authorBtns []widget.Clickable,
@@ -794,8 +790,7 @@ func layoutDiscoveryTab(
 	fetching bool,
 	discovery []backend.Napp,
 	lookup *backend.AddressLookup,
-	installedSet,
-	busy map[string]bool,
+	installedSet map[string]bool,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box comes first, narrowing the entries below by name,
@@ -890,45 +885,25 @@ func layoutDiscoveryTab(
 				return l.Layout(gtx)
 			}
 			// a grid of tiles, as many across as the window fits; a narrow
-			// window gets the one-per-row cards instead
+			// window gets the one-per-row cards instead. The only button is
+			// Try: installing, updating and opening live in the detail tab
+			// the card opens.
 			card := func(gtx layout.Context, row int, tile bool) layout.Dimensions {
-				var btn, updBtn *widget.Clickable
-				if row < len(actionBtns) {
-					btn = &actionBtns[row]
-				}
-				if row < len(updateBtns) {
-					updBtn = &updateBtns[row]
-				}
 				n := discovery[row]
-				label := "Install"
-				if installedSet[n.ID] {
-					label = "Uninstall"
-				}
-				if busy[n.ID] {
-					label = "Working\u2026"
-				}
-				updLabel := ""
-				if installedSet[n.ID] && n.UpdateAvailable != nil {
-					updLabel = "Update"
-				}
-				var cardBtn, openBtn, authorBtn *widget.Clickable
+				var cardBtn, tryBtn, authorBtn *widget.Clickable
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
 				}
-				if row < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
-					openBtn = &openBtns[row]
-				}
-				openLabel := "Open"
-				if !installedSet[n.ID] && n.IsNapplet() {
-					openLabel = "Try"
+				if row < len(openBtns) && !installedSet[n.ID] && n.IsNapplet() {
+					tryBtn = &openBtns[row]
 				}
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
 			}
 			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),

@@ -385,8 +385,6 @@ func gioMain() {
 		installedOpenBtns     []widget.Clickable
 		installedAuthorBtns   []widget.Clickable
 		installedSettingsBtns []widget.Clickable
-		actionBtns            []widget.Clickable
-		updateBtns            []widget.Clickable
 		discoCardBtns         []widget.Clickable
 		discoOpenBtns         []widget.Clickable
 		discoAuthorBtns       []widget.Clickable
@@ -580,12 +578,6 @@ func gioMain() {
 					for len(installedSettingsBtns) < len(st.Installed) {
 						installedSettingsBtns = append(installedSettingsBtns, widget.Clickable{})
 					}
-					for len(actionBtns) < len(st.Discovery) {
-						actionBtns = append(actionBtns, widget.Clickable{})
-					}
-					for len(updateBtns) < len(st.Discovery) {
-						updateBtns = append(updateBtns, widget.Clickable{})
-					}
 					for len(discoCardBtns) < len(st.Discovery) {
 						discoCardBtns = append(discoCardBtns, widget.Clickable{})
 					}
@@ -738,32 +730,8 @@ func gioMain() {
 						}
 						if !acted {
 							for _, i := range vis {
-								if (installedSet[st.Discovery[i].ID] || st.Discovery[i].IsNapplet()) && discoOpenBtns[i].Clicked(gtx) {
-									if n, ok := backend.InstalledNapp(st.Discovery[i].ID); ok {
-										backend.Launch(n)
-									} else {
-										backend.TryNapplet(st.Discovery[i])
-									}
-									acted = true
-								}
-							}
-						}
-						if !acted {
-							for _, i := range vis {
-								if actionBtns[i].Clicked(gtx) {
-									n := st.Discovery[i]
-									if busy[n.ID] {
-										continue
-									}
-									if installedSet[n.ID] {
-										go backend.Uninstall(n.ID)
-									} else {
-										go backend.Install(n)
-									}
-									acted = true
-								}
-								if updateBtns[i].Clicked(gtx) {
-									go backend.Install(st.Discovery[i])
+								if !installedSet[st.Discovery[i].ID] && st.Discovery[i].IsNapplet() && discoOpenBtns[i].Clicked(gtx) {
+									backend.TryNapplet(st.Discovery[i])
 									acted = true
 								}
 							}
@@ -939,8 +907,6 @@ func gioMain() {
 						cardBtns,
 						uninstBtns,
 						installedUpdateBtns,
-						actionBtns,
-						updateBtns,
 						devOpenBtns,
 						devUnloadBtns,
 						devPublishBtns,
