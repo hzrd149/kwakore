@@ -1,0 +1,1166 @@
+{
+  "package": "@napplet/conformance",
+  "version": "0.17.0",
+  "shim": "0.30.0",
+  "source": {
+    "repo": "https://github.com/napplet/web",
+    "commit": "956135bfc41a2cff5e45d6c68d9f9a4d68c50531",
+    "path": "packages/conformance/src/validators/envelope-specs.ts"
+  },
+  "envelopes": {
+    "ble.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string"
+      }
+    },
+    "ble.close.result": {
+      "dir": "in"
+    },
+    "ble.event": {
+      "dir": "in"
+    },
+    "ble.open": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "request": "object"
+      }
+    },
+    "ble.open.result": {
+      "dir": "in"
+    },
+    "ble.read": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "target": "object"
+      }
+    },
+    "ble.read.result": {
+      "dir": "in"
+    },
+    "ble.services": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string"
+      }
+    },
+    "ble.services.result": {
+      "dir": "in"
+    },
+    "ble.subscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "target": "object"
+      }
+    },
+    "ble.subscribe.result": {
+      "dir": "in"
+    },
+    "ble.unsubscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "target": "object"
+      }
+    },
+    "ble.unsubscribe.result": {
+      "dir": "in"
+    },
+    "ble.write": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "target": "object",
+        "data": "array"
+      }
+    },
+    "ble.write.result": {
+      "dir": "in"
+    },
+    "common.decodeNip19": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "value": "string"
+      }
+    },
+    "common.decodeNip19.result": {
+      "dir": "in"
+    },
+    "common.encodeNip19": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "input": "object"
+      }
+    },
+    "common.encodeNip19.result": {
+      "dir": "in"
+    },
+    "common.follow": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "pubkeys": "array"
+      }
+    },
+    "common.follow.result": {
+      "dir": "in"
+    },
+    "common.follows": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "common.follows.result": {
+      "dir": "in"
+    },
+    "common.getProfile": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "target": "string"
+      }
+    },
+    "common.getProfile.result": {
+      "dir": "in"
+    },
+    "common.react": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "targetEventId": "string",
+        "reaction": "string"
+      }
+    },
+    "common.react.result": {
+      "dir": "in"
+    },
+    "common.report": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "target": "object",
+        "reason": "string",
+        "text": "string"
+      }
+    },
+    "common.report.result": {
+      "dir": "in"
+    },
+    "common.unfollow": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "pubkeys": "array"
+      }
+    },
+    "common.unfollow.result": {
+      "dir": "in"
+    },
+    "config.get": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "config.openSettings": {
+      "dir": "out"
+    },
+    "config.registerSchema": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "schema": "object"
+      }
+    },
+    "config.registerSchema.result": {
+      "dir": "in"
+    },
+    "config.schemaError": {
+      "dir": "in"
+    },
+    "config.subscribe": {
+      "dir": "out"
+    },
+    "config.unsubscribe": {
+      "dir": "out"
+    },
+    "config.values": {
+      "dir": "in"
+    },
+    "count.query": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "filters": "array"
+      }
+    },
+    "count.query.result": {
+      "dir": "in"
+    },
+    "cvm.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "server": "object"
+      }
+    },
+    "cvm.close.result": {
+      "dir": "in"
+    },
+    "cvm.discover": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "cvm.discover.result": {
+      "dir": "in"
+    },
+    "cvm.event": {
+      "dir": "in"
+    },
+    "cvm.registry.call": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "family": "string",
+        "tool": "string"
+      }
+    },
+    "cvm.registry.call.result": {
+      "dir": "in"
+    },
+    "cvm.registry.describe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "family": "string"
+      }
+    },
+    "cvm.registry.describe.result": {
+      "dir": "in"
+    },
+    "cvm.registry.has": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "family": "string"
+      }
+    },
+    "cvm.registry.has.result": {
+      "dir": "in"
+    },
+    "cvm.registry.list": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "cvm.registry.list.result": {
+      "dir": "in"
+    },
+    "cvm.request": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "server": "object",
+        "message": "object"
+      }
+    },
+    "cvm.request.result": {
+      "dir": "in"
+    },
+    "dm.conversations": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "dm.conversations.result": {
+      "dir": "in"
+    },
+    "dm.message": {
+      "dir": "in"
+    },
+    "dm.messages": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "conversationId": "string"
+      }
+    },
+    "dm.messages.result": {
+      "dir": "in"
+    },
+    "dm.send": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "recipients": "array",
+        "content": "string"
+      }
+    },
+    "dm.send.result": {
+      "dir": "in"
+    },
+    "dm.status": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "dm.status.result": {
+      "dir": "in"
+    },
+    "dm.subscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "dm.subscribe.result": {
+      "dir": "in"
+    },
+    "dm.unsubscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "subscriptionId": "string"
+      }
+    },
+    "dm.unsubscribe.result": {
+      "dir": "in"
+    },
+    "fs.changed": {
+      "dir": "in"
+    },
+    "fs.info": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "fs.info.result": {
+      "dir": "in"
+    },
+    "fs.list": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.list.result": {
+      "dir": "in"
+    },
+    "fs.mkdir": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.mkdir.result": {
+      "dir": "in"
+    },
+    "fs.move": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "fromPath": "string",
+        "toPath": "string"
+      }
+    },
+    "fs.move.result": {
+      "dir": "in"
+    },
+    "fs.pickDirectory": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "fs.pickDirectory.result": {
+      "dir": "in"
+    },
+    "fs.pickFile": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "fs.pickFile.result": {
+      "dir": "in"
+    },
+    "fs.pickFiles": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "fs.pickFiles.result": {
+      "dir": "in"
+    },
+    "fs.pickSaveFile": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "fs.pickSaveFile.result": {
+      "dir": "in"
+    },
+    "fs.read": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.read.result": {
+      "dir": "in"
+    },
+    "fs.remove": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.remove.result": {
+      "dir": "in"
+    },
+    "fs.stat": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.stat.result": {
+      "dir": "in"
+    },
+    "fs.unwatch": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "watchId": "string"
+      }
+    },
+    "fs.unwatch.result": {
+      "dir": "in"
+    },
+    "fs.watch": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string"
+      }
+    },
+    "fs.watch.result": {
+      "dir": "in"
+    },
+    "fs.write": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "path": "string",
+        "data": "string"
+      }
+    },
+    "fs.write.result": {
+      "dir": "in"
+    },
+    "identity.changed": {
+      "dir": "in"
+    },
+    "identity.getBadges": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getBadges.result": {
+      "dir": "in"
+    },
+    "identity.getBlocked": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getBlocked.result": {
+      "dir": "in"
+    },
+    "identity.getFollows": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getFollows.result": {
+      "dir": "in"
+    },
+    "identity.getList": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "listType": "string"
+      }
+    },
+    "identity.getList.result": {
+      "dir": "in"
+    },
+    "identity.getMutes": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getMutes.result": {
+      "dir": "in"
+    },
+    "identity.getProfile": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getProfile.result": {
+      "dir": "in"
+    },
+    "identity.getPublicKey": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getPublicKey.result": {
+      "dir": "in"
+    },
+    "identity.getRelays": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getRelays.result": {
+      "dir": "in"
+    },
+    "identity.getZaps": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "identity.getZaps.result": {
+      "dir": "in"
+    },
+    "inc.channel.broadcast": {
+      "dir": "out"
+    },
+    "inc.channel.close": {
+      "dir": "out",
+      "fields": {
+        "channelId": "string"
+      }
+    },
+    "inc.channel.closed": {
+      "dir": "in"
+    },
+    "inc.channel.emit": {
+      "dir": "out",
+      "fields": {
+        "channelId": "string"
+      }
+    },
+    "inc.channel.event": {
+      "dir": "in"
+    },
+    "inc.channel.list": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "inc.channel.list.result": {
+      "dir": "in"
+    },
+    "inc.channel.open": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "target": "string"
+      }
+    },
+    "inc.channel.open.result": {
+      "dir": "in"
+    },
+    "inc.channel.opened": {
+      "dir": "in",
+      "fields": {
+        "channelId": "string",
+        "peer": "string"
+      }
+    },
+    "inc.emit": {
+      "dir": "out",
+      "fields": {
+        "topic": "string"
+      },
+      "forbiddenFields": [
+        "sender"
+      ]
+    },
+    "inc.event": {
+      "dir": "in",
+      "fields": {
+        "topic": "string",
+        "sender": "string"
+      }
+    },
+    "inc.subscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "topic": "string"
+      }
+    },
+    "inc.subscribe.result": {
+      "dir": "in"
+    },
+    "inc.unsubscribe": {
+      "dir": "out",
+      "fields": {
+        "topic": "string"
+      }
+    },
+    "intent.available": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "archetype": "string"
+      }
+    },
+    "intent.available.result": {
+      "dir": "in"
+    },
+    "intent.changed": {
+      "dir": "in"
+    },
+    "intent.handlers": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "intent.handlers.result": {
+      "dir": "in"
+    },
+    "intent.invoke": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "request": "object"
+      }
+    },
+    "intent.invoke.result": {
+      "dir": "in",
+      "fields": {
+        "id": "string",
+        "result": "object"
+      }
+    },
+    "keys.action": {
+      "dir": "in"
+    },
+    "keys.bindings": {
+      "dir": "in"
+    },
+    "keys.forward": {
+      "dir": "out",
+      "fields": {
+        "key": "string",
+        "code": "string",
+        "ctrl": "boolean",
+        "alt": "boolean",
+        "shift": "boolean",
+        "meta": "boolean"
+      }
+    },
+    "keys.registerAction": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "action": "object"
+      }
+    },
+    "keys.registerAction.result": {
+      "dir": "in"
+    },
+    "keys.unregisterAction": {
+      "dir": "out",
+      "fields": {
+        "actionId": "string"
+      }
+    },
+    "link.open": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "url": "string"
+      }
+    },
+    "link.open.result": {
+      "dir": "in"
+    },
+    "lists.add": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "list": "object",
+        "items": "array"
+      }
+    },
+    "lists.add.result": {
+      "dir": "in"
+    },
+    "lists.remove": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "list": "object",
+        "items": "array"
+      }
+    },
+    "lists.remove.result": {
+      "dir": "in"
+    },
+    "lists.supported": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "lists.supported.result": {
+      "dir": "in"
+    },
+    "media.capabilities": {
+      "dir": "out",
+      "fields": {
+        "sessionId": "string",
+        "actions": "array"
+      }
+    },
+    "media.command": {
+      "dir": "in"
+    },
+    "media.controls": {
+      "dir": "in"
+    },
+    "media.session.create": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "owner": "object"
+      }
+    },
+    "media.session.create.result": {
+      "dir": "in"
+    },
+    "media.session.destroy": {
+      "dir": "out",
+      "fields": {
+        "sessionId": "string"
+      }
+    },
+    "media.session.update": {
+      "dir": "out",
+      "fields": {
+        "sessionId": "string",
+        "metadata": "object"
+      }
+    },
+    "media.state": {
+      "dir": "out",
+      "fields": {
+        "sessionId": "string",
+        "status": "string"
+      }
+    },
+    "notify.action": {
+      "dir": "in"
+    },
+    "notify.badge": {
+      "dir": "out",
+      "fields": {
+        "count": "number"
+      }
+    },
+    "notify.channel.register": {
+      "dir": "out",
+      "fields": {
+        "channelId": "string",
+        "label": "string"
+      }
+    },
+    "notify.clicked": {
+      "dir": "in"
+    },
+    "notify.controls": {
+      "dir": "in"
+    },
+    "notify.dismiss": {
+      "dir": "out",
+      "fields": {
+        "notificationId": "string"
+      }
+    },
+    "notify.dismissed": {
+      "dir": "in"
+    },
+    "notify.permission.request": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "notify.permission.result": {
+      "dir": "in"
+    },
+    "notify.send": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "title": "string"
+      }
+    },
+    "notify.send.result": {
+      "dir": "in"
+    },
+    "outbox.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "subId": "string"
+      }
+    },
+    "outbox.closed": {
+      "dir": "in"
+    },
+    "outbox.event": {
+      "dir": "in"
+    },
+    "outbox.getEvent": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "eventId": "string"
+      }
+    },
+    "outbox.getEvent.result": {
+      "dir": "in"
+    },
+    "outbox.publish": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "event": "object"
+      }
+    },
+    "outbox.publish.result": {
+      "dir": "in"
+    },
+    "outbox.query": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "filters": "present"
+      }
+    },
+    "outbox.query.result": {
+      "dir": "in"
+    },
+    "outbox.resolveRelays": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "target": "present"
+      }
+    },
+    "outbox.resolveRelays.result": {
+      "dir": "in"
+    },
+    "outbox.subscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "subId": "string",
+        "filters": "present"
+      }
+    },
+    "relay.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "subId": "string"
+      }
+    },
+    "relay.closed": {
+      "dir": "in"
+    },
+    "relay.eose": {
+      "dir": "in"
+    },
+    "relay.event": {
+      "dir": "in"
+    },
+    "relay.publish": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "event": "object"
+      }
+    },
+    "relay.publish.result": {
+      "dir": "in"
+    },
+    "relay.publishEncrypted": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "event": "object",
+        "recipient": "string"
+      }
+    },
+    "relay.publishEncrypted.result": {
+      "dir": "in"
+    },
+    "relay.query": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "filters": "array"
+      }
+    },
+    "relay.query.result": {
+      "dir": "in"
+    },
+    "relay.subscribe": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "subId": "string",
+        "filters": "array"
+      }
+    },
+    "resource.bytes": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "url": "string"
+      }
+    },
+    "resource.bytes.error": {
+      "dir": "in"
+    },
+    "resource.bytes.result": {
+      "dir": "in"
+    },
+    "resource.bytesMany": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "requests": "array"
+      }
+    },
+    "resource.bytesMany.error": {
+      "dir": "in"
+    },
+    "resource.bytesMany.result": {
+      "dir": "in"
+    },
+    "resource.cancel": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "resource.info": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "resource.info.error": {
+      "dir": "in"
+    },
+    "resource.info.result": {
+      "dir": "in"
+    },
+    "serial.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string"
+      }
+    },
+    "serial.close.result": {
+      "dir": "in"
+    },
+    "serial.event": {
+      "dir": "in"
+    },
+    "serial.open": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "request": "object"
+      }
+    },
+    "serial.open.result": {
+      "dir": "in"
+    },
+    "serial.write": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "data": "array"
+      }
+    },
+    "serial.write.result": {
+      "dir": "in"
+    },
+    "storage.get": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "key": "string"
+      }
+    },
+    "storage.get.result": {
+      "dir": "in"
+    },
+    "storage.keys": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "storage.keys.result": {
+      "dir": "in"
+    },
+    "storage.remove": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "key": "string"
+      }
+    },
+    "storage.remove.result": {
+      "dir": "in"
+    },
+    "storage.set": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "key": "string",
+        "value": "string"
+      }
+    },
+    "storage.set.result": {
+      "dir": "in"
+    },
+    "theme.changed": {
+      "dir": "in"
+    },
+    "theme.get": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "theme.get.result": {
+      "dir": "in"
+    },
+    "upload.info": {
+      "dir": "out",
+      "fields": {
+        "id": "string"
+      }
+    },
+    "upload.info.result": {
+      "dir": "in"
+    },
+    "upload.status": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "uploadId": "string"
+      }
+    },
+    "upload.status.changed": {
+      "dir": "in"
+    },
+    "upload.status.result": {
+      "dir": "in"
+    },
+    "upload.upload": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "request": "object"
+      }
+    },
+    "upload.upload.result": {
+      "dir": "in"
+    },
+    "webrtc.close": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string"
+      }
+    },
+    "webrtc.close.result": {
+      "dir": "in"
+    },
+    "webrtc.event": {
+      "dir": "in"
+    },
+    "webrtc.open": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "request": "object"
+      }
+    },
+    "webrtc.open.result": {
+      "dir": "in"
+    },
+    "webrtc.send": {
+      "dir": "out",
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "payload": "present"
+      }
+    },
+    "webrtc.send.result": {
+      "dir": "in"
+    }
+  }
+}
