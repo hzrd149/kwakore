@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"verdana/backend/netguard"
 )
 
 // NAP-RESOURCE: bytes for a napplet that has no network. Its frame can show
@@ -48,7 +50,7 @@ const (
 var resourceClient = &http.Client{
 	Timeout: resourceTimeout,
 	Transport: &http.Transport{
-		DialContext:           guardedDialContext,
+		DialContext:           netguard.DialContext,
 		Proxy:                 nil,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          32,
@@ -275,7 +277,7 @@ func fetchResource(ctx context.Context, c *napCall, raw string, servers []string
 	}
 	// a host that could never be fetched fails before anyone is asked; the
 	// dialer checks again on every connection (DNS can change its mind)
-	if err := publicHost(ctx, u.Hostname()); err != nil {
+	if err := netguard.PublicHost(ctx, u.Hostname()); err != nil {
 		return resourceResult{}, rerr("blocked-by-policy", "not a public address")
 	}
 	if !c.allowFetch() {
@@ -301,7 +303,7 @@ func httpsResource(ctx context.Context, target string) (resourceResult, error) {
 	req.Header.Set("User-Agent", "verdana-napplet-resource")
 	resp, err := resourceClient.Do(req)
 	if err != nil {
-		if errors.Is(err, errPrivateAddress) || strings.Contains(err.Error(), errPrivateAddress.Error()) {
+		if errors.Is(err, netguard.ErrPrivateAddress) || strings.Contains(err.Error(), netguard.ErrPrivateAddress.Error()) {
 			return resourceResult{}, rerr("blocked-by-policy", "not a public address")
 		}
 		if ctx.Err() != nil {

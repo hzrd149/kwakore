@@ -11,6 +11,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"verdana/backend/netguard"
 )
 
 // NAP-RELAY: the napplet's only way to the nostr network. It hands over
@@ -70,7 +71,7 @@ func napExplicitRelay(ctx context.Context, raw string) (string, error) {
 	if err != nil || (u.Scheme != "wss" && u.Scheme != "ws") || u.Host == "" || u.User != nil {
 		return "", errors.New("invalid relay url")
 	}
-	if err := publicHost(ctx, u.Hostname()); err != nil {
+	if err := netguard.PublicHost(ctx, u.Hostname()); err != nil {
 		return "", fmt.Errorf("relay not allowed: %w", err)
 	}
 	return nostr.NormalizeURL(u.String()), nil

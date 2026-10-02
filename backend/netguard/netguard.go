@@ -1,4 +1,6 @@
-package backend
+// Package netguard keeps requests the launcher makes for napplets on the
+// public internet.
+package netguard
 
 import (
 	"context"
@@ -13,7 +15,7 @@ import (
 // become their way into the user's machine or LAN. These checks keep those
 // requests on the public internet.
 
-var errPrivateAddress = errors.New("address is not public")
+var ErrPrivateAddress = errors.New("address is not public")
 
 // blockedPrefixes are the ranges that are never a napplet's business:
 // loopback, private, link-local (including cloud metadata), CGNAT,
@@ -32,8 +34,8 @@ var blockedPrefixes = func() []netip.Prefix {
 	return out
 }()
 
-// publicAddr says whether an address is on the public internet.
-func publicAddr(addr netip.Addr) bool {
+// PublicAddr says whether an address is on the public internet.
+func PublicAddr(addr netip.Addr) bool {
 	addr = addr.Unmap()
 	if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsPrivate() ||
 		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() {
@@ -47,18 +49,18 @@ func publicAddr(addr netip.Addr) bool {
 	return true
 }
 
-// publicHost resolves a host name and fails unless every address it has is
+// PublicHost resolves a host name and fails unless every address it has is
 // public (an attacker-controlled name may resolve to both).
-func publicHost(ctx context.Context, host string) error {
+func PublicHost(ctx context.Context, host string) error {
 	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
 	lower := strings.ToLower(host)
 	if lower == "" || lower == "localhost" || strings.HasSuffix(lower, ".localhost") ||
 		strings.HasSuffix(lower, ".local") || strings.HasSuffix(lower, ".internal") {
-		return errPrivateAddress
+		return ErrPrivateAddress
 	}
 	if addr, err := netip.ParseAddr(host); err == nil {
-		if !publicAddr(addr) {
-			return errPrivateAddress
+		if !PublicAddr(addr) {
+			return ErrPrivateAddress
 		}
 		return nil
 	}
@@ -67,20 +69,20 @@ func publicHost(ctx context.Context, host string) error {
 		return err
 	}
 	if len(addrs) == 0 {
-		return errPrivateAddress
+		return ErrPrivateAddress
 	}
 	for _, a := range addrs {
-		if !publicAddr(a) {
-			return errPrivateAddress
+		if !PublicAddr(a) {
+			return ErrPrivateAddress
 		}
 	}
 	return nil
 }
 
-// guardedDialContext dials only public addresses: the check happens on the
+// DialContext dials only public addresses: the check happens on the
 // address actually being connected to, after resolution, so DNS rebinding
 // and redirects to private hosts are caught on every connection.
-func guardedDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
@@ -90,10 +92,10 @@ func guardedDialContext(ctx context.Context, network, address string) (net.Conn,
 		return nil, err
 	}
 	var dialer net.Dialer
-	var lastErr error = errPrivateAddress
+	var lastErr error = ErrPrivateAddress
 	for _, a := range addrs {
-		if !publicAddr(a) {
-			lastErr = errPrivateAddress
+		if !PublicAddr(a) {
+			lastErr = ErrPrivateAddress
 			continue
 		}
 		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(a.Unmap().String(), port))

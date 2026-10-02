@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"verdana/backend/netguard"
 )
 
 // NAP-MEDIA: media sessions. A shell-owned session plays its source in the
@@ -274,7 +276,7 @@ func resolveMediaSource(ctx context.Context, src mediaSourceRef) (string, string
 		}
 		// the player fetches on its own, so this is the one check the
 		// launcher gets: a host that names a private address is refused
-		if err := publicHost(ctx, u.Hostname()); err != nil {
+		if err := netguard.PublicHost(ctx, u.Hostname()); err != nil {
 			return "", "source blocked"
 		}
 		return u.String(), ""
