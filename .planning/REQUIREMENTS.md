@@ -15,15 +15,15 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 - [x] **SPEC-01**: Every pinned spec text is snapshotted in the repo at its pinned SHA, so the audit survives force-pushed draft PRs
 - [ ] **SPEC-02**: An audit checklist lists every shell-applicable MUST and SHOULD of each pinned spec, each marked conforming, fixed, or N/A with reason, citing the spec SHA and the Verdana code
-- [ ] **SPEC-03**: The checklist has a Conflicts section recording every ambiguity and spec contradiction with the reading chosen (including NAP-SHELL vs NIP-5D presence detection, WEB-NAPPLET legacy 35129 vs NIP-5D shape, NAP-RELAY decrypt vs NIP-5D cleartext, NAP-OUTBOX kind-1059 example)
+- [x] **SPEC-03**: The checklist has a Conflicts section recording every ambiguity and spec contradiction with the reading chosen (including NAP-SHELL vs NIP-5D presence detection, WEB-NAPPLET legacy 35129 vs NIP-5D shape, NAP-RELAY decrypt vs NIP-5D cleartext, NAP-OUTBOX kind-1059 example)
 - [ ] **SPEC-04**: `NAPPLETS.md` matches the code: implemented domains (including `notify` and `config`), storage keying, shim version, capability detection
 - [x] **SPEC-05**: Android CI runs on pull requests, so shared-backend changes that break the AAR fail before merge
 
 ### Shim
 
 - [x] **SHIM-01**: The vendored `prelude.global.js` is byte-identical to npm `@napplet/shim` 0.30.0, verified by a sha256 test; `ShimVersion` and the shim README state exactly that
-- [ ] **SHIM-02**: Behavior the six former Verdana shim patches provided is either dropped (following upstream) or reimplemented in Go / `napplet-host.js`; no napplet regresses silently, and each dropped behavior is noted in the checklist
-- [ ] **SHIM-03**: Capability detection follows NIP-5D: `window.napplet` contains only the domain objects the launcher grants; the host no longer depends on a `shell.ready` / `shell.init` handshake
+- [x] **SHIM-02**: Behavior the six former Verdana shim patches provided is either dropped (following upstream) or reimplemented in Go / `napplet-host.js`; no napplet regresses silently, and each dropped behavior is noted in the checklist
+- [x] **SHIM-03**: Capability detection follows NIP-5D: `window.napplet` contains only the domain objects the launcher grants; the host no longer depends on a `shell.ready` / `shell.init` handshake
 - [x] **SHIM-04**: Nothing but `window.napplet` survives injection into the frame; `NappletShimPrelude` is unreachable from napplet code and cannot be used to install extra domains (5D-1)
 - [x] **SHIM-05**: A test asserts every napplet-to-shell request type the vendored shim can send has a handler or an explicit N/A entry (offline fixture from `@napplet/conformance` 0.17.0)
 
@@ -146,12 +146,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CRIT-01 | Phase 1 | Complete |
 | SPEC-01 | Phase 1 | Complete |
 | SPEC-02 | Phase 8 | Pending |
-| SPEC-03 | Phase 1 | Pending |
+| SPEC-03 | Phase 1 | Complete |
 | SPEC-04 | Phase 8 | Pending |
 | SPEC-05 | Phase 1 | Complete |
 | SHIM-01 | Phase 1 | Complete |
-| SHIM-02 | Phase 1 | Pending |
-| SHIM-03 | Phase 1 | Pending |
+| SHIM-02 | Phase 1 | Complete |
+| SHIM-03 | Phase 1 | Complete |
 | SHIM-04 | Phase 1 | Complete |
 | SHIM-05 | Phase 1 | Complete |
 | SBOX-01 | Phase 4 | Pending |

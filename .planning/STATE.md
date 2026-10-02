@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: Containment Fix and Canonical Shim Baseline
-status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-10-02T23:45:37.554Z"
+status: verifying
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-10-02T23:55:30.515Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 01 execution started
-state_head: f182d61fbca7dfdb325385a8fb1087648c5802e2
+state_head: 63a904c216d99603008645e7eeedb71445d2ea8e
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-02)
 
 Phase: 01 (Containment Fix and Canonical Shim Baseline) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-02 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 5min | 3 tasks | 10 files |
 | Phase 01 P03 | 4min | 2 tasks | 23 files |
 | Phase 01 P04 | 6min | 3 tasks | 8 files |
+| Phase 01 P05 | 7min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 01]: [01-03] Android PRs run only a read-only gomobile AAR bind (aar job, path-filtered pull_request); APK build on workflow_dispatch and v* tags; Kotlin breakage from backend/mobile API changes remains a residual risk
 - [Phase 01]: [01-04] Napplet sessions start only from the host page's nap.start (after nap.boot, before a fresh iframe, on the same ordered lane); a frame shell.ready is an unknown type, no shell.init, and notify.controls is pushed once per session on nap.loaded (frame load)
 - [Phase 01]: [01-04] Pristine prelude runs inside a function scope with its install call, so only window.napplet survives; node-backed scope and host page tests fail instead of skipping under VERDANA_REQUIRE_NODE=1 in CI
+- [Phase 01]: [01-05] spec/CONFORMANCE.md is the audit checklist: conflicts A1-A22 and dropped shim patches P1-P7 have stable IDs; fixed rows must cite code and test, and every curly-quoted passage must be verbatim in spec/pinned (TestConformanceChecklistSkeleton)
+- [Phase 01]: [01-05] A15 settled by the pin (naps master IntentBehavior has focus/newWindow/reuse); a self-reloaded frame keeping its session is open row NIP-5D-reload (Phase 4 SBOX-01); config.get before any schema settles only by shim timeout until Phase 8 MISC-02 (P7/A22)
 
 ### Pending Todos
 
@@ -106,6 +109,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T23:45:31.942Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-10-02T23:55:25.875Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None

@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A test built from the offline `@napplet/conformance` 0.17.0 envelope fixture fails when the vendored shim can send a request type that has neither a handler nor an explicit N/A entry
   5. Every pinned spec text is committed at its SHA. The checklist's Conflicts section records the chosen reading for NAP-SHELL vs NIP-5D presence detection, WEB-NAPPLET legacy 35129 vs NIP-5D, NAP-RELAY decrypt vs NIP-5D cleartext, and the NAP-OUTBOX kind-1059 example. A pull request that breaks the Android AAR build fails CI
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -55,7 +55,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-05-PLAN.md — `spec/CONFORMANCE.md` skeleton (Conflicts A1-A22, dropped patches P1-P7, decisions), probe napplet and end-of-phase smoke (wave 4)
+- [x] 01-05-PLAN.md — `spec/CONFORMANCE.md` skeleton (Conflicts A1-A22, dropped patches P1-P7, decisions), probe napplet and end-of-phase smoke (wave 4)
 
 ### Phase 2: Gated NAP Dispatcher
 
@@ -174,7 +174,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Containment Fix and Canonical Shim Baseline | 4/5 | In Progress|  |
+| 1. Containment Fix and Canonical Shim Baseline | 5/5 | In Progress|  |
 | 2. Gated NAP Dispatcher | 0/TBD | Not started | - |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
