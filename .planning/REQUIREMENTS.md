@@ -143,12 +143,73 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| CRIT-01 | Phase 1 | Pending |
+| SPEC-01 | Phase 1 | Pending |
+| SPEC-02 | Phase 8 | Pending |
+| SPEC-03 | Phase 1 | Pending |
+| SPEC-04 | Phase 8 | Pending |
+| SPEC-05 | Phase 1 | Pending |
+| SHIM-01 | Phase 1 | Pending |
+| SHIM-02 | Phase 1 | Pending |
+| SHIM-03 | Phase 1 | Pending |
+| SHIM-04 | Phase 1 | Pending |
+| SHIM-05 | Phase 1 | Pending |
+| SBOX-01 | Phase 4 | Pending |
+| SBOX-02 | Phase 4 | Pending |
+| SBOX-03 | Phase 4 | Pending |
+| SBOX-04 | Phase 4 | Pending |
+| DISP-01 | Phase 2 | Pending |
+| DISP-02 | Phase 2 | Pending |
+| DISP-03 | Phase 2 | Pending |
+| DISP-04 | Phase 2 | Pending |
+| DISP-05 | Phase 2 | Pending |
+| PROC-01 | Phase 3 | Pending |
+| PROC-02 | Phase 3 | Pending |
+| PROC-03 | Phase 3 | Pending |
+| PROC-04 | Phase 3 | Pending |
+| PROC-05 | Phase 3 | Pending |
+| SECR-01 | Phase 3 | Pending |
+| SECR-02 | Phase 3 | Pending |
+| SECR-03 | Phase 3 | Pending |
+| KEY-01 | Phase 5 | Pending |
+| KEY-02 | Phase 5 | Pending |
+| KEY-03 | Phase 5 | Pending |
+| KEY-04 | Phase 5 | Pending |
+| KEY-05 | Phase 5 | Pending |
+| KEY-06 | Phase 5 | Pending |
+| KEY-07 | Phase 5 | Pending |
+| RELY-01 | Phase 6 | Pending |
+| RELY-02 | Phase 6 | Pending |
+| RELY-03 | Phase 6 | Pending |
+| RELY-04 | Phase 6 | Pending |
+| RELY-05 | Phase 6 | Pending |
+| RELY-06 | Phase 6 | Pending |
+| INTN-01 | Phase 6 | Pending |
+| INTN-02 | Phase 6 | Pending |
+| INTN-03 | Phase 6 | Pending |
+| RES-01 | Phase 7 | Pending |
+| RES-02 | Phase 7 | Pending |
+| RES-03 | Phase 7 | Pending |
+| RES-04 | Phase 7 | Pending |
+| UPLD-01 | Phase 7 | Pending |
+| MDIA-01 | Phase 7 | Pending |
+| MDIA-02 | Phase 7 | Pending |
+| MDIA-03 | Phase 7 | Pending |
+| MISC-01 | Phase 8 | Pending |
+| MISC-02 | Phase 8 | Pending |
+| MISC-03 | Phase 8 | Pending |
+| MISC-04 | Phase 8 | Pending |
+| MISC-05 | Phase 8 | Pending |
+| REG-01 | Phase 5 | Pending |
+| REG-02 | Phase 5 | Pending |
+| REG-03 | Phase 5 | Pending |
+| REG-04 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 61 total
-- Mapped to phases: 0
-- Unmapped: 61 ⚠️
+- Mapped to phases: 61
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-10-02*
-*Last updated: 2026-10-02 after initial definition*
+*Last updated: 2026-10-02 after roadmap creation*
