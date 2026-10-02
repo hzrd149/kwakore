@@ -8,3 +8,6 @@ android/app/build
 android/.gradle
 android/build
 android/local.properties
+
+# GSD research tool cache
+.planning/research/.cache/
