@@ -13,11 +13,11 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Audit and specs
 
-- [ ] **SPEC-01**: Every pinned spec text is snapshotted in the repo at its pinned SHA, so the audit survives force-pushed draft PRs
+- [x] **SPEC-01**: Every pinned spec text is snapshotted in the repo at its pinned SHA, so the audit survives force-pushed draft PRs
 - [ ] **SPEC-02**: An audit checklist lists every shell-applicable MUST and SHOULD of each pinned spec, each marked conforming, fixed, or N/A with reason, citing the spec SHA and the Verdana code
 - [ ] **SPEC-03**: The checklist has a Conflicts section recording every ambiguity and spec contradiction with the reading chosen (including NAP-SHELL vs NIP-5D presence detection, WEB-NAPPLET legacy 35129 vs NIP-5D shape, NAP-RELAY decrypt vs NIP-5D cleartext, NAP-OUTBOX kind-1059 example)
 - [ ] **SPEC-04**: `NAPPLETS.md` matches the code: implemented domains (including `notify` and `config`), storage keying, shim version, capability detection
-- [ ] **SPEC-05**: Android CI runs on pull requests, so shared-backend changes that break the AAR fail before merge
+- [x] **SPEC-05**: Android CI runs on pull requests, so shared-backend changes that break the AAR fail before merge
 
 ### Shim
 
@@ -144,11 +144,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CRIT-01 | Phase 1 | Complete |
-| SPEC-01 | Phase 1 | Pending |
+| SPEC-01 | Phase 1 | Complete |
 | SPEC-02 | Phase 8 | Pending |
 | SPEC-03 | Phase 1 | Pending |
 | SPEC-04 | Phase 8 | Pending |
-| SPEC-05 | Phase 1 | Pending |
+| SPEC-05 | Phase 1 | Complete |
 | SHIM-01 | Phase 1 | Complete |
 | SHIM-02 | Phase 1 | Pending |
 | SHIM-03 | Phase 1 | Pending |

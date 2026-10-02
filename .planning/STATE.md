@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: Containment Fix and Canonical Shim Baseline
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-10-02T23:31:45.992Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-10-02T23:37:08.359Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 01 execution started
-state_head: 9c33b57a8410de112054afa6c99cc0525d9e6e67
+state_head: 20ab93925906de2e6d8836c6b04a540a4d51affa
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-02)
 ## Current Position
 
 Phase: 01 (Containment Fix and Canonical Shim Baseline) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 01 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 01 P01 | 5min | 2 tasks | 9 files |
 | Phase 01 P02 | 5min | 3 tasks | 10 files |
+| Phase 01 P03 | 4min | 2 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 01]: [01-02] Shim is npm @napplet/shim 0.30.0 byte for byte, pinned by ShimSHA256 + TestShimPreludeIsPristineUpstream and .gitattributes -text
 - [Phase 01]: [01-02] Accepted intents reach napplet handlers as inc.event on the convention topic, to the resolved instance only, after its inc.subscribe (intentHandlerWait 20s, else errNoHandler); never intent.deliver, never incPublish
 - [Phase 01]: [01-02] Handler coverage oracle: @napplet/conformance 0.17.0 ENVELOPE_SPECS fixture pinned to webview.ShimVersion; 9 unoffered domains N/A, media.command bidirectional
+- [Phase 01]: [01-03] Spec snapshots are byte-exact git blobs under spec/pinned/{spec}@{sha8}.md with front matter and body_sha256, marked -text; pinnedSnapshots in backend/spec_pinned_test.go is the SPEC-PINS order; re-pin = new file
+- [Phase 01]: [01-03] Android PRs run only a read-only gomobile AAR bind (aar job, path-filtered pull_request); APK build on workflow_dispatch and v* tags; Kotlin breakage from backend/mobile API changes remains a residual risk
 
 ### Pending Todos
 
@@ -100,6 +103,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T23:31:45.979Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-10-02T23:37:08.346Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
