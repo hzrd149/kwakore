@@ -1,6 +1,6 @@
 //go:build !linux || (!amd64 && !386)
 
-package backend
+package eventdb
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	boltdb "fiatjaf.com/nostr/eventstore/boltdb"
 )
 
-func openEventStore(path string) (eventstore.Store, func(), error) {
+func Open(path string) (eventstore.Store, func(), error) {
 	db := &boltdb.BoltBackend{
 		Path: path,
 	}

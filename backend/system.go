@@ -6,11 +6,12 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
+	"verdana/backend/eventdb"
 )
 
 func initSystem(dataDir string) (func(), error) {
 	log.Info().Str("path", filepath.Join(dataDir, "eventstore")).Msg("init eventstore")
-	db, closeEventStore, err := openEventStore(filepath.Join(dataDir, "eventstore"))
+	db, closeEventStore, err := eventdb.Open(filepath.Join(dataDir, "eventstore"))
 	if err != nil {
 		return nil, err
 	}

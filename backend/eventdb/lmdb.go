@@ -1,6 +1,6 @@
 //go:build linux && (amd64 || 386)
 
-package backend
+package eventdb
 
 import (
 	"fmt"
@@ -10,8 +10,8 @@ import (
 )
 
 // lmdb is only used where the fiatjaf/lmdb-go fork has a working cgo build
-// (linux x86), everywhere else openEventStore falls back to boltdb.
-func openEventStore(path string) (eventstore.Store, func(), error) {
+// (linux x86), everywhere else Open falls back to boltdb.
+func Open(path string) (eventstore.Store, func(), error) {
 	db := &lmdb.LMDBBackend{
 		Path: path,
 	}
