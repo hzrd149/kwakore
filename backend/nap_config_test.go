@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"verdana/backend/napconfig"
 )
 
 // settingsTestHost opens settings windows as recording transports.
@@ -108,7 +110,7 @@ func setupConfigTest(t *testing.T) *settingsTestHost {
 
 func configFixture(t *testing.T) map[string]any {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/config/full.json")
+	raw, err := os.ReadFile("napconfig/testdata/config/full.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +130,10 @@ func TestNapConfigRegisterSchema(t *testing.T) {
 		"type": "object", "properties": map[string]any{"u": map[string]any{"type": "string", "pattern": "^a$"}},
 	}})
 	res := rec.wait(t, "config.registerSchema.result", 1)
-	if res["id"] != "bad" || res["ok"] != false || res["code"] != cfgPatternNotAllowed || res["error"] == "" {
+	if res["id"] != "bad" || res["ok"] != false || res["code"] != napconfig.CodePatternNotAllowed || res["error"] == "" {
 		t.Fatalf("rejection: %v", res)
 	}
-	if e := rec.wait(t, "config.schemaError", 1); e["code"] != cfgPatternNotAllowed {
+	if e := rec.wait(t, "config.schemaError", 1); e["code"] != napconfig.CodePatternNotAllowed {
 		t.Fatalf("schemaError: %v", e)
 	}
 
@@ -156,7 +158,7 @@ func TestNapConfigGetAndSubscribe(t *testing.T) {
 	post(t, ci, map[string]any{"type": "config.subscribe"})
 	rec.wait(t, "config.schemaError", 2)
 	for _, e := range rec.find("config.schemaError") {
-		if e["code"] != cfgNoSchema {
+		if e["code"] != napconfig.CodeNoSchema {
 			t.Fatalf("want no-schema: %v", e)
 		}
 	}
@@ -292,7 +294,7 @@ func TestNapConfigReloadDropsSubscription(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready(t, ci, rec, 2)
-	if err := configSave(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
+	if err := napconfig.Save(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
 		t.Fatal(err)
 	}
 	pushConfigValues(ci.napp.ID)
@@ -352,7 +354,7 @@ func TestNapConfigValuesSurviveUpdate(t *testing.T) {
 	ready(t, ci, rec, 1)
 	post(t, ci, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
 	rec.wait(t, "config.registerSchema.result", 1)
-	if err := configSave(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
+	if err := napconfig.Save(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
 		t.Fatal(err)
 	}
 

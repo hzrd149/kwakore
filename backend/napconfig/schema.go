@@ -1,4 +1,4 @@
-package backend
+package napconfig
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 
 // NAP-CONFIG schemas: the Core Subset of JSON Schema a napplet may declare
 // its settings with. checkConfigSchema turns the napplet's JSON into a
-// configNode tree, rejecting anything outside the subset with the NAP's
+// Node tree, rejecting anything outside the subset with the NAP's
 // error codes; the tree is then all the validator and the settings page
 // ever look at. Nothing in a schema is ever run: no $ref, no pattern.
 
@@ -25,31 +25,31 @@ const (
 
 // the schema error codes (NAP-CONFIG "Error codes")
 const (
-	cfgInvalidSchema     = "invalid-schema"
-	cfgUnsupportedDraft  = "unsupported-draft"
-	cfgRefNotAllowed     = "ref-not-allowed"
-	cfgPatternNotAllowed = "pattern-not-allowed"
-	cfgSecretWithDefault = "secret-with-default"
-	cfgTooDeep           = "schema-too-deep"
-	cfgVersionConflict   = "version-conflict"
-	cfgNoSchema          = "no-schema"
+	CodeInvalidSchema     = "invalid-schema"
+	CodeUnsupportedDraft  = "unsupported-draft"
+	CodeRefNotAllowed     = "ref-not-allowed"
+	CodePatternNotAllowed = "pattern-not-allowed"
+	CodeSecretWithDefault = "secret-with-default"
+	CodeTooDeep           = "schema-too-deep"
+	CodeVersionConflict   = "version-conflict"
+	CodeNoSchema          = "no-schema"
 )
 
-// configSchemaError is a rejected schema: a code from the list above and a
+// SchemaError is a rejected schema: a code from the list above and a
 // message for the napplet's developer.
-type configSchemaError struct {
+type SchemaError struct {
 	Code string
 	Msg  string
 }
 
-func (e *configSchemaError) Error() string { return e.Code + ": " + e.Msg }
+func (e *SchemaError) Error() string { return e.Code + ": " + e.Msg }
 
-func schemaErr(code, format string, args ...any) *configSchemaError {
-	return &configSchemaError{Code: code, Msg: fmt.Sprintf(format, args...)}
+func schemaErr(code, format string, args ...any) *SchemaError {
+	return &SchemaError{Code: code, Msg: fmt.Sprintf(format, args...)}
 }
 
-// configNode is one checked schema node.
-type configNode struct {
+// Node is one checked schema node.
+type Node struct {
 	Type string
 
 	Default    any
@@ -61,9 +61,9 @@ type configNode struct {
 	MinItems, MaxItems   *int
 
 	// Items is an array's element schema (a primitive, always).
-	Items *configNode
+	Items *Node
 	// Props and Required are an object's.
-	Props    map[string]*configNode
+	Props    map[string]*Node
 	Required []string
 
 	// Secret is x-napplet-secret on a string: never defaulted, never
@@ -71,9 +71,9 @@ type configNode struct {
 	Secret bool
 }
 
-// configSchema is a schema that passed the check.
-type configSchema struct {
-	Root *configNode
+// Schema is a schema that passed the check.
+type Schema struct {
+	Root *Node
 	// Raw is the schema as the napplet sent it, for the settings page and
 	// for napplets reading it back.
 	Raw json.RawMessage
@@ -85,29 +85,29 @@ type configSchema struct {
 
 // keywords outside the Core Subset, rejected wherever they appear
 var configForbidden = map[string]string{
-	"$ref":                  cfgRefNotAllowed,
-	"$dynamicRef":           cfgRefNotAllowed,
-	"$recursiveRef":         cfgRefNotAllowed,
-	"definitions":           cfgRefNotAllowed,
-	"$defs":                 cfgRefNotAllowed,
-	"pattern":               cfgPatternNotAllowed,
-	"patternProperties":     cfgInvalidSchema,
-	"oneOf":                 cfgInvalidSchema,
-	"anyOf":                 cfgInvalidSchema,
-	"allOf":                 cfgInvalidSchema,
-	"not":                   cfgInvalidSchema,
-	"if":                    cfgInvalidSchema,
-	"then":                  cfgInvalidSchema,
-	"else":                  cfgInvalidSchema,
-	"propertyNames":         cfgInvalidSchema,
-	"dependencies":          cfgInvalidSchema,
-	"dependentSchemas":      cfgInvalidSchema,
-	"dependentRequired":     cfgInvalidSchema,
-	"unevaluatedProperties": cfgInvalidSchema,
-	"unevaluatedItems":      cfgInvalidSchema,
-	"prefixItems":           cfgInvalidSchema,
-	"additionalItems":       cfgInvalidSchema,
-	"contains":              cfgInvalidSchema,
+	"$ref":                  CodeRefNotAllowed,
+	"$dynamicRef":           CodeRefNotAllowed,
+	"$recursiveRef":         CodeRefNotAllowed,
+	"definitions":           CodeRefNotAllowed,
+	"$defs":                 CodeRefNotAllowed,
+	"pattern":               CodePatternNotAllowed,
+	"patternProperties":     CodeInvalidSchema,
+	"oneOf":                 CodeInvalidSchema,
+	"anyOf":                 CodeInvalidSchema,
+	"allOf":                 CodeInvalidSchema,
+	"not":                   CodeInvalidSchema,
+	"if":                    CodeInvalidSchema,
+	"then":                  CodeInvalidSchema,
+	"else":                  CodeInvalidSchema,
+	"propertyNames":         CodeInvalidSchema,
+	"dependencies":          CodeInvalidSchema,
+	"dependentSchemas":      CodeInvalidSchema,
+	"dependentRequired":     CodeInvalidSchema,
+	"unevaluatedProperties": CodeInvalidSchema,
+	"unevaluatedItems":      CodeInvalidSchema,
+	"prefixItems":           CodeInvalidSchema,
+	"additionalItems":       CodeInvalidSchema,
+	"contains":              CodeInvalidSchema,
 }
 
 // the drafts a $schema may name: draft-07 or later
@@ -118,20 +118,20 @@ var configDrafts = []string{
 }
 
 // checkConfigSchema checks a napplet's schema against the Core Subset.
-func checkConfigSchema(raw json.RawMessage) (*configSchema, *configSchemaError) {
+func checkConfigSchema(raw json.RawMessage) (*Schema, *SchemaError) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil, schemaErr(cfgInvalidSchema, "no schema")
+		return nil, schemaErr(CodeInvalidSchema, "no schema")
 	}
 	if len(raw) > configSchemaMax {
-		return nil, schemaErr(cfgInvalidSchema, "schema is larger than %d bytes", configSchemaMax)
+		return nil, schemaErr(CodeInvalidSchema, "schema is larger than %d bytes", configSchemaMax)
 	}
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, schemaErr(cfgInvalidSchema, "schema is not valid JSON")
+		return nil, schemaErr(CodeInvalidSchema, "schema is not valid JSON")
 	}
 	m, ok := doc.(map[string]any)
 	if !ok {
-		return nil, schemaErr(cfgInvalidSchema, "schema must be a JSON object")
+		return nil, schemaErr(CodeInvalidSchema, "schema must be a JSON object")
 	}
 	if s, ok := m["$schema"]; ok {
 		uri, _ := s.(string)
@@ -143,17 +143,17 @@ func checkConfigSchema(raw json.RawMessage) (*configSchema, *configSchemaError) 
 			}
 		}
 		if !known {
-			return nil, schemaErr(cfgUnsupportedDraft, "unsupported $schema %q", uri)
+			return nil, schemaErr(CodeUnsupportedDraft, "unsupported $schema %q", uri)
 		}
 	}
 	if m["type"] != "object" {
-		return nil, schemaErr(cfgInvalidSchema, "schema root must be of type `object`")
+		return nil, schemaErr(CodeInvalidSchema, "schema root must be of type `object`")
 	}
-	out := &configSchema{Raw: append(json.RawMessage(nil), raw...), Sections: map[string]bool{}}
+	out := &Schema{Raw: append(json.RawMessage(nil), raw...), Sections: map[string]bool{}}
 	if v, ok := m["$version"]; ok {
 		n, ok := v.(float64)
 		if !ok || n < 0 || n != math.Trunc(n) || n > 1<<53 {
-			return nil, schemaErr(cfgInvalidSchema, "$version must be a non-negative integer")
+			return nil, schemaErr(CodeInvalidSchema, "$version must be a non-negative integer")
 		}
 		u := uint64(n)
 		out.Version = &u
@@ -166,7 +166,7 @@ func checkConfigSchema(raw json.RawMessage) (*configSchema, *configSchemaError) 
 	return out, nil
 }
 
-func checkConfigNode(m map[string]any, path string, depth int, sections map[string]bool) (*configNode, *configSchemaError) {
+func checkConfigNode(m map[string]any, path string, depth int, sections map[string]bool) (*Node, *SchemaError) {
 	where := path
 	if where == "" {
 		where = "the root"
@@ -183,10 +183,10 @@ func checkConfigNode(m map[string]any, path string, depth int, sections map[stri
 		}
 	}
 
-	n := &configNode{}
+	n := &Node{}
 	t, ok := m["type"].(string)
 	if !ok {
-		return nil, schemaErr(cfgInvalidSchema, "%s needs a single `type`", where)
+		return nil, schemaErr(CodeInvalidSchema, "%s needs a single `type`", where)
 	}
 	n.Type = t
 
@@ -195,26 +195,26 @@ func checkConfigNode(m map[string]any, path string, depth int, sections map[stri
 	}
 	if secret, _ := m["x-napplet-secret"].(bool); secret {
 		if _, has := m["default"]; has {
-			return nil, schemaErr(cfgSecretWithDefault, "%s is x-napplet-secret and so cannot have a default", where)
+			return nil, schemaErr(CodeSecretWithDefault, "%s is x-napplet-secret and so cannot have a default", where)
 		}
 		// a secret is a string thing; on anything else it is opaque metadata
 		n.Secret = t == "string"
 	}
 
-	var err *configSchemaError
+	var err *SchemaError
 	switch t {
 	case "string", "number", "integer", "boolean":
 	case "array":
 		if depth == 0 {
 			// an array's items
-			return nil, schemaErr(cfgInvalidSchema, "%s: arrays of arrays are not in the Core Subset", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s: arrays of arrays are not in the Core Subset", where)
 		}
 		im, ok := m["items"].(map[string]any)
 		if !ok {
-			return nil, schemaErr(cfgInvalidSchema, "%s needs `items` as one schema (no tuples)", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s needs `items` as one schema (no tuples)", where)
 		}
 		if it, _ := im["type"].(string); it == "object" || it == "array" {
-			return nil, schemaErr(cfgInvalidSchema, "%s: only arrays of primitives are in the Core Subset", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s: only arrays of primitives are in the Core Subset", where)
 		}
 		if n.Items, err = checkConfigNode(im, path+"[]", 0, sections); err != nil {
 			return nil, err
@@ -227,27 +227,27 @@ func checkConfigNode(m map[string]any, path string, depth int, sections map[stri
 		}
 	case "object":
 		if depth == 0 {
-			return nil, schemaErr(cfgInvalidSchema, "%s: arrays of objects are not in the Core Subset", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s: arrays of objects are not in the Core Subset", where)
 		}
 		if depth > configMaxDepth {
-			return nil, schemaErr(cfgTooDeep, "objects nest deeper than %d levels at %s", configMaxDepth, where)
+			return nil, schemaErr(CodeTooDeep, "objects nest deeper than %d levels at %s", configMaxDepth, where)
 		}
 		props, ok := m["properties"].(map[string]any)
 		if !ok {
 			if _, has := m["properties"]; has || path == "" {
-				return nil, schemaErr(cfgInvalidSchema, "%s needs `properties` as an object", where)
+				return nil, schemaErr(CodeInvalidSchema, "%s needs `properties` as an object", where)
 			}
 		}
 		if ap, has := m["additionalProperties"]; has {
 			if _, ok := ap.(bool); !ok {
-				return nil, schemaErr(cfgInvalidSchema, "%s: `additionalProperties` must be a boolean", where)
+				return nil, schemaErr(CodeInvalidSchema, "%s: `additionalProperties` must be a boolean", where)
 			}
 		}
-		n.Props = make(map[string]*configNode, len(props))
+		n.Props = make(map[string]*Node, len(props))
 		for name, raw := range props {
 			pm, ok := raw.(map[string]any)
 			if !ok {
-				return nil, schemaErr(cfgInvalidSchema, "property %q is not a schema", name)
+				return nil, schemaErr(CodeInvalidSchema, "property %q is not a schema", name)
 			}
 			child, err := checkConfigNode(pm, joinConfigPath(path, name), depth+1, sections)
 			if err != nil {
@@ -258,18 +258,18 @@ func checkConfigNode(m map[string]any, path string, depth int, sections map[stri
 		if req, has := m["required"]; has {
 			list, ok := req.([]any)
 			if !ok {
-				return nil, schemaErr(cfgInvalidSchema, "%s: `required` must be an array", where)
+				return nil, schemaErr(CodeInvalidSchema, "%s: `required` must be an array", where)
 			}
 			for _, r := range list {
 				s, ok := r.(string)
 				if !ok {
-					return nil, schemaErr(cfgInvalidSchema, "%s: `required` must list property names", where)
+					return nil, schemaErr(CodeInvalidSchema, "%s: `required` must list property names", where)
 				}
 				n.Required = append(n.Required, s)
 			}
 		}
 	default:
-		return nil, schemaErr(cfgInvalidSchema, "%s has unsupported type %q", where, t)
+		return nil, schemaErr(CodeInvalidSchema, "%s has unsupported type %q", where, t)
 	}
 
 	if n.Minimum, err = schemaNumber(m, "minimum", where); err != nil {
@@ -287,19 +287,19 @@ func checkConfigNode(m map[string]any, path string, depth int, sections map[stri
 	if e, has := m["enum"]; has {
 		list, ok := e.([]any)
 		if !ok || len(list) == 0 {
-			return nil, schemaErr(cfgInvalidSchema, "%s: `enum` must be a non-empty array", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s: `enum` must be a non-empty array", where)
 		}
 		n.Enum = list
 		for _, v := range list {
 			if !n.validType(v) {
-				return nil, schemaErr(cfgInvalidSchema, "%s: an `enum` value does not match its type", where)
+				return nil, schemaErr(CodeInvalidSchema, "%s: an `enum` value does not match its type", where)
 			}
 		}
 	}
 	if d, has := m["default"]; has {
 		n.Default, n.HasDefault = d, true
 		if !n.valid(d) {
-			return nil, schemaErr(cfgInvalidSchema, "%s: `default` does not validate against its own schema", where)
+			return nil, schemaErr(CodeInvalidSchema, "%s: `default` does not validate against its own schema", where)
 		}
 	}
 	return n, nil
@@ -312,26 +312,26 @@ func joinConfigPath(path, name string) string {
 	return path + "." + name
 }
 
-func schemaNumber(m map[string]any, key, where string) (*float64, *configSchemaError) {
+func schemaNumber(m map[string]any, key, where string) (*float64, *SchemaError) {
 	v, has := m[key]
 	if !has {
 		return nil, nil
 	}
 	f, ok := v.(float64)
 	if !ok {
-		return nil, schemaErr(cfgInvalidSchema, "%s: `%s` must be a number", where, key)
+		return nil, schemaErr(CodeInvalidSchema, "%s: `%s` must be a number", where, key)
 	}
 	return &f, nil
 }
 
-func schemaCount(m map[string]any, key, where string) (*int, *configSchemaError) {
+func schemaCount(m map[string]any, key, where string) (*int, *SchemaError) {
 	v, has := m[key]
 	if !has {
 		return nil, nil
 	}
 	f, ok := v.(float64)
 	if !ok || f < 0 || f != math.Trunc(f) || f > math.MaxInt32 {
-		return nil, schemaErr(cfgInvalidSchema, "%s: `%s` must be a non-negative integer", where, key)
+		return nil, schemaErr(CodeInvalidSchema, "%s: `%s` must be a non-negative integer", where, key)
 	}
 	i := int(f)
 	return &i, nil
@@ -340,7 +340,7 @@ func schemaCount(m map[string]any, key, where string) (*int, *configSchemaError)
 // ─── values ──────────────────────────────────────────────────────
 
 // validType is v's JSON type matching the node's, nothing more.
-func (n *configNode) validType(v any) bool {
+func (n *Node) validType(v any) bool {
 	switch n.Type {
 	case "string":
 		_, ok := v.(string)
@@ -367,7 +367,7 @@ func (n *configNode) validType(v any) bool {
 // valid is v validating against the node. Objects are valid when every
 // property they carry is declared and valid, and every required one is
 // there; format is a hint, never checked.
-func (n *configNode) valid(v any) bool {
+func (n *Node) valid(v any) bool {
 	if !n.validType(v) {
 		return false
 	}
@@ -421,12 +421,12 @@ func (n *configNode) valid(v any) bool {
 	return true
 }
 
-// resolveConfigValues is what a napplet is delivered: per property, the
+// ResolveValues is what a napplet is delivered: per property, the
 // stored value if it validates, else its own default, else what an
 // ancestor's default says for it, else nothing (NAP-CONFIG's
 // default-resolution rule). Undeclared keys are never delivered, and a
 // secret only ever comes from the store.
-func resolveConfigValues(s *configSchema, stored map[string]any) map[string]any {
+func ResolveValues(s *Schema, stored map[string]any) map[string]any {
 	if s == nil {
 		return nil
 	}
@@ -437,7 +437,7 @@ func resolveConfigValues(s *configSchema, stored map[string]any) map[string]any 
 	return out
 }
 
-func resolveConfigObject(n *configNode, stored, inherited map[string]any) map[string]any {
+func resolveConfigObject(n *Node, stored, inherited map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, p := range n.Props {
 		sv, has := stored[k]
@@ -476,11 +476,11 @@ func resolveConfigObject(n *configNode, stored, inherited map[string]any) map[st
 // keeps unless the page sends null for it. Every value must validate; an
 // undeclared key is an error. Orphans from an older schema go with the
 // save.
-func mergeConfigValues(s *configSchema, stored, in map[string]any) (map[string]any, error) {
+func mergeConfigValues(s *Schema, stored, in map[string]any) (map[string]any, error) {
 	return mergeConfigObject(s.Root, "", stored, in)
 }
 
-func mergeConfigObject(n *configNode, path string, stored, in map[string]any) (map[string]any, error) {
+func mergeConfigObject(n *Node, path string, stored, in map[string]any) (map[string]any, error) {
 	for k := range in {
 		if _, ok := n.Props[k]; !ok {
 			return nil, fmt.Errorf("%s is not a setting", joinConfigPath(path, k))
@@ -521,11 +521,11 @@ func mergeConfigObject(n *configNode, path string, stored, in map[string]any) (m
 }
 
 // checkConfigRequired is every required property resolving to something.
-func checkConfigRequired(s *configSchema, values map[string]any) error {
+func checkConfigRequired(s *Schema, values map[string]any) error {
 	return checkRequiredObject(s.Root, "", values)
 }
 
-func checkRequiredObject(n *configNode, path string, values map[string]any) error {
+func checkRequiredObject(n *Node, path string, values map[string]any) error {
 	for _, r := range n.Required {
 		if _, ok := values[r]; !ok {
 			if p, declared := n.Props[r]; declared && p.Type == "object" {
@@ -553,7 +553,7 @@ func checkRequiredObject(n *configNode, path string, values map[string]any) erro
 	return nil
 }
 
-func requiredIn(n *configNode, k string) bool {
+func requiredIn(n *Node, k string) bool {
 	for _, r := range n.Required {
 		if r == k {
 			return true
@@ -565,14 +565,14 @@ func requiredIn(n *configNode, k string) bool {
 // pruneSecretOrphans drops stored secrets the new schema no longer declares
 // as secrets: NAP-CONFIG wants those gone the moment the schema changes.
 // Non-secret orphans stay on disk (never delivered) until the next save.
-func pruneSecretOrphans(old, next *configNode, stored map[string]any) map[string]any {
+func pruneSecretOrphans(old, next *Node, stored map[string]any) map[string]any {
 	if old == nil || stored == nil {
 		return stored
 	}
 	out := make(map[string]any, len(stored))
 	for k, v := range stored {
 		op := old.Props[k]
-		var np *configNode
+		var np *Node
 		if next != nil {
 			np = next.Props[k]
 		}
@@ -581,7 +581,7 @@ func pruneSecretOrphans(old, next *configNode, stored map[string]any) map[string
 			out[k] = v
 		case op.Type == "object":
 			sub, _ := v.(map[string]any)
-			var nextObj *configNode
+			var nextObj *Node
 			if np != nil && np.Type == "object" {
 				nextObj = np
 			}
@@ -597,19 +597,19 @@ func pruneSecretOrphans(old, next *configNode, stored map[string]any) map[string
 	return out
 }
 
-// configStoredPaths lists the dotted paths of the leaves the user has set
+// StoredPaths lists the dotted paths of the leaves the user has set
 // (with a value the schema still accepts): the secrets among them when
 // secret is true, the rest otherwise. The settings page gets the secrets'
 // paths instead of their values, and sends back only what is set or edited,
 // so an untouched setting keeps following the napplet's default.
-func configStoredPaths(n *configNode, path string, stored map[string]any, secret bool) []string {
+func StoredPaths(n *Node, path string, stored map[string]any, secret bool) []string {
 	out := []string{}
 	for k, p := range n.Props {
 		name := joinConfigPath(path, k)
 		switch {
 		case p.Type == "object":
 			sub, _ := stored[k].(map[string]any)
-			out = append(out, configStoredPaths(p, name, sub, secret)...)
+			out = append(out, StoredPaths(p, name, sub, secret)...)
 		case p.Secret == secret:
 			if sv, ok := stored[k]; ok && p.valid(sv) {
 				out = append(out, name)
@@ -620,8 +620,8 @@ func configStoredPaths(n *configNode, path string, stored map[string]any, secret
 	return out
 }
 
-// withoutConfigSecrets is a copy of values with every secret left out.
-func withoutConfigSecrets(n *configNode, values map[string]any) map[string]any {
+// WithoutSecrets is a copy of values with every secret left out.
+func WithoutSecrets(n *Node, values map[string]any) map[string]any {
 	out := make(map[string]any, len(values))
 	for k, v := range values {
 		p := n.Props[k]
@@ -630,7 +630,7 @@ func withoutConfigSecrets(n *configNode, values map[string]any) map[string]any {
 		case p.Secret:
 		case p.Type == "object":
 			sub, _ := v.(map[string]any)
-			out[k] = withoutConfigSecrets(p, sub)
+			out[k] = WithoutSecrets(p, sub)
 		default:
 			out[k] = v
 		}

@@ -3,6 +3,8 @@ package backend
 import (
 	"encoding/json"
 	"time"
+
+	"verdana/backend/napconfig"
 )
 
 // NAP-CONFIG: a napplet declares its settings as a JSON Schema, the launcher
@@ -37,20 +39,20 @@ func napConfigRegisterSchema(c *napCall) {
 		Version *float64        `json:"version"`
 	}
 	if err := c.decode(&r); err != nil {
-		c.reply(map[string]any{"ok": false, "code": cfgInvalidSchema, "error": "invalid request"})
+		c.reply(map[string]any{"ok": false, "code": napconfig.CodeInvalidSchema, "error": "invalid request"})
 		return
 	}
 	var version *uint64
 	if r.Version != nil {
 		if *r.Version < 0 || *r.Version != float64(uint64(*r.Version)) {
-			c.reply(map[string]any{"ok": false, "code": cfgInvalidSchema, "error": "version must be a non-negative integer"})
+			c.reply(map[string]any{"ok": false, "code": napconfig.CodeInvalidSchema, "error": "version must be a non-negative integer"})
 			return
 		}
 		v := uint64(*r.Version)
 		version = &v
 	}
 	napp := c.ci.napp
-	changed, cerr := configRegister(napp.ID, napp.ArtifactHash, r.Schema, version)
+	changed, cerr := napconfig.Register(napp.ID, napp.ArtifactHash, r.Schema, version)
 	if cerr != nil {
 		log.Info().Str("napplet", napp.ID).Str("code", cerr.Code).Str("error", cerr.Msg).Msg("napplet config schema rejected")
 		c.reply(map[string]any{"ok": false, "code": cerr.Code, "error": cerr.Msg})
@@ -70,10 +72,10 @@ func napConfigRegisterSchema(c *napCall) {
 }
 
 func napConfigGet(c *napCall) {
-	values, ok := configValues(c.ci.napp.ID)
+	values, ok := napconfig.Values(c.ci.napp.ID)
 	if !ok {
 		// with the request's id, so the shim can settle the pending get
-		c.replyAs("config.schemaError", map[string]any{"code": cfgNoSchema, "error": "no schema has been registered"})
+		c.replyAs("config.schemaError", map[string]any{"code": napconfig.CodeNoSchema, "error": "no schema has been registered"})
 		return
 	}
 	c.replyAs("config.values", map[string]any{"values": values})
@@ -84,11 +86,11 @@ func napConfigSubscribe(c *napCall) {
 	s.mu.Lock()
 	s.configSubscribed = true
 	s.mu.Unlock()
-	values, ok := configValues(c.ci.napp.ID)
+	values, ok := napconfig.Values(c.ci.napp.ID)
 	if !ok {
 		// the subscription stands: the first values arrive once a schema
 		// is registered
-		c.ci.napPushGen(c.gen, configSchemaErrorEnv(cfgNoSchema, "no schema has been registered"))
+		c.ci.napPushGen(c.gen, configSchemaErrorEnv(napconfig.CodeNoSchema, "no schema has been registered"))
 		return
 	}
 	c.ci.napPushGen(c.gen, map[string]any{"type": "config.values", "values": values})
@@ -120,7 +122,7 @@ func napConfigOpenSettings(c *napCall) {
 	if section != "" {
 		// an undeclared section is ignored silently: the window opens
 		// at the top, and the napplet learns nothing either way
-		if sch, _ := configSnapshot(c.ci.napp.ID); sch == nil || !sch.Sections[section] {
+		if sch, _ := napconfig.Snapshot(c.ci.napp.ID); sch == nil || !sch.Sections[section] {
 			section = ""
 		}
 	}
@@ -134,7 +136,7 @@ func napConfigOpenSettings(c *napCall) {
 
 // pushConfigValues gives every subscribed window of a napp its values.
 func pushConfigValues(nappID string) {
-	values, ok := configValues(nappID)
+	values, ok := napconfig.Values(nappID)
 	if !ok {
 		return
 	}

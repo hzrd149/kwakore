@@ -1,10 +1,15 @@
-package backend
+// Package napconfig stores the NAP-CONFIG schemas napplets register and
+// the values the user sets for them.
+package napconfig
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+
+	"github.com/rs/zerolog"
 )
 
 // The NAP-CONFIG store: per napp, the schema it last registered and the
@@ -25,16 +30,27 @@ type configRecord struct {
 
 type configEntry struct {
 	rec    configRecord
-	schema *configSchema // nil: none registered (or the stored one is unreadable)
+	schema *Schema // nil: none registered (or the stored one is unreadable)
 }
 
 var (
-	configMu sync.Mutex
-	configs  = make(map[string]*configEntry)
+	log       = zerolog.Nop()
+	configDir string
+	configMu  sync.Mutex
+	configs   = make(map[string]*configEntry)
 )
 
+// Init points the store at dir, forgetting anything already loaded.
+func Init(dir string, logger zerolog.Logger) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	configDir = dir
+	log = logger
+	configs = make(map[string]*configEntry)
+}
+
 func configFileFor(nappID string) string {
-	return filepath.Join(dataDir, "config", safeFileName(nappID)+".json")
+	return filepath.Join(configDir, safeFileName(nappID)+".json")
 }
 
 // configLocked loads a napp's entry on first use; configMu is held.
@@ -59,7 +75,7 @@ func configLocked(nappID string) *configEntry {
 }
 
 func configPersistLocked(nappID string, rec configRecord) error {
-	dir := filepath.Join(dataDir, "config")
+	dir := configDir
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -88,17 +104,17 @@ func configPersistLocked(nappID string, rec configRecord) error {
 	return nil
 }
 
-// configRegister checks and stores a schema for a napp. version, when the
+// Register checks and stores a schema for a napp. version, when the
 // napplet passed one, stands in for the schema's $version. A schema
 // identical to the stored one is a no-op that reports changed=false.
-func configRegister(nappID, artifactHash string, raw json.RawMessage, version *uint64) (changed bool, cerr *configSchemaError) {
+func Register(nappID, artifactHash string, raw json.RawMessage, version *uint64) (changed bool, cerr *SchemaError) {
 	s, cerr := checkConfigSchema(raw)
 	if cerr != nil {
 		return false, cerr
 	}
 	if version != nil {
 		if s.Version != nil && *s.Version != *version {
-			return false, schemaErr(cfgVersionConflict, "version %d disagrees with the schema's $version %d", *version, *s.Version)
+			return false, schemaErr(CodeVersionConflict, "version %d disagrees with the schema's $version %d", *version, *s.Version)
 		}
 		s.Version = version
 	}
@@ -110,7 +126,7 @@ func configRegister(nappID, artifactHash string, raw json.RawMessage, version *u
 		e.schema.Version != nil && s.Version != nil && *s.Version < *e.schema.Version {
 		// the same artifact going back a version is a napplet confused
 		// about its own schema, not an update
-		return false, schemaErr(cfgVersionConflict, "version %d is older than the registered %d", *s.Version, *e.schema.Version)
+		return false, schemaErr(CodeVersionConflict, "version %d is older than the registered %d", *s.Version, *e.schema.Version)
 	}
 	if e.schema != nil && e.rec.ArtifactHash == artifactHash && jsonEqual(e.rec.Schema, raw) {
 		return false, nil
@@ -121,26 +137,26 @@ func configRegister(nappID, artifactHash string, raw json.RawMessage, version *u
 	}
 	if err := configPersistLocked(nappID, rec); err != nil {
 		log.Error().Err(err).Str("napp", nappID).Msg("could not persist a napplet config schema")
-		return false, schemaErr(cfgInvalidSchema, "the launcher could not store the schema")
+		return false, schemaErr(CodeInvalidSchema, "the launcher could not store the schema")
 	}
 	e.rec, e.schema = rec, s
 	return true, nil
 }
 
-// configValues is what the napp is delivered now; ok is false while it has
+// Values is what the napp is delivered now; ok is false while it has
 // no schema.
-func configValues(nappID string) (values map[string]any, ok bool) {
+func Values(nappID string) (values map[string]any, ok bool) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	e := configLocked(nappID)
 	if e.schema == nil {
 		return nil, false
 	}
-	return resolveConfigValues(e.schema, e.rec.Values), true
+	return ResolveValues(e.schema, e.rec.Values), true
 }
 
-// configSnapshot is the schema and the stored values, for the settings page.
-func configSnapshot(nappID string) (*configSchema, map[string]any) {
+// Snapshot is the schema and the stored values, for the settings page.
+func Snapshot(nappID string) (*Schema, map[string]any) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	e := configLocked(nappID)
@@ -148,10 +164,10 @@ func configSnapshot(nappID string) (*configSchema, map[string]any) {
 }
 
 // errNoConfigSchema is a save for a napp that never registered a schema.
-var errNoConfigSchema = &configSchemaError{Code: cfgNoSchema, Msg: "this napplet has no settings"}
+var errNoConfigSchema = &SchemaError{Code: CodeNoSchema, Msg: "this napplet has no settings"}
 
-// configSave stores what the settings page saved, if it all validates.
-func configSave(nappID string, in map[string]any) error {
+// Save stores what the settings page saved, if it all validates.
+func Save(nappID string, in map[string]any) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	e := configLocked(nappID)
@@ -162,7 +178,7 @@ func configSave(nappID string, in map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := checkConfigRequired(e.schema, resolveConfigValues(e.schema, next)); err != nil {
+	if err := checkConfigRequired(e.schema, ResolveValues(e.schema, next)); err != nil {
 		return err
 	}
 	rec := e.rec
@@ -174,8 +190,8 @@ func configSave(nappID string, in map[string]any) error {
 	return nil
 }
 
-// configReset drops every value, so defaults apply again.
-func configReset(nappID string) error {
+// Reset drops every value, so defaults apply again.
+func Reset(nappID string) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	e := configLocked(nappID)
@@ -191,9 +207,9 @@ func configReset(nappID string) error {
 	return nil
 }
 
-// HasConfigSchema is a napp having registered settings, for the platforms'
+// HasSchema is a napp having registered settings, for the platforms'
 // "Settings" buttons.
-func HasConfigSchema(nappID string) bool {
+func HasSchema(nappID string) bool {
 	configMu.Lock()
 	defer configMu.Unlock()
 	return configLocked(nappID).schema != nil
@@ -207,4 +223,24 @@ func jsonEqual(a, b json.RawMessage) bool {
 	ra, _ := json.Marshal(x)
 	rb, _ := json.Marshal(y)
 	return string(ra) == string(rb)
+}
+
+// safeFileName matches the backend storage's file naming, so a napp's
+// config and storage files share a name.
+func safeFileName(nappID string) string {
+	var b strings.Builder
+	for _, r := range nappID {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.' || r == '~' {
+			b.WriteRune(r)
+		} else {
+			b.WriteString("_")
+		}
+	}
+	name := b.String()
+	if name == "" {
+		name = "_"
+	}
+	// belt and suspenders against ".." tricks: filepath.Base strips separators
+	return filepath.Base(name)
 }

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+
+	"verdana/backend/napconfig"
 )
 
 // Settings windows: one per napp, owned by the launcher rather than by the
@@ -301,13 +303,13 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
 		}
-		if err := configSave(w.nappID, req.Values); err != nil {
+		if err := napconfig.Save(w.nappID, req.Values); err != nil {
 			return nil, err
 		}
 		pushConfigValues(w.nappID)
 		return settingsLoadFor(w), nil
 	case "settings.reset":
-		if err := configReset(w.nappID); err != nil {
+		if err := napconfig.Reset(w.nappID); err != nil {
 			return nil, err
 		}
 		pushConfigValues(w.nappID)
@@ -455,13 +457,13 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	if napp, ok := settingsNapp(w.nappID); ok {
 		out.Name = napp.Label()
 	}
-	if s, stored := configSnapshot(w.nappID); s != nil {
+	if s, stored := napconfig.Snapshot(w.nappID); s != nil {
 		out.Schema = s.Raw
 		// what the napplet would be delivered, minus the secrets, which
 		// the page only learns are set
-		out.Values = withoutConfigSecrets(s.Root, resolveConfigValues(s, stored))
-		out.Set = configStoredPaths(s.Root, "", stored, false)
-		out.Secrets = configStoredPaths(s.Root, "", stored, true)
+		out.Values = napconfig.WithoutSecrets(s.Root, napconfig.ResolveValues(s, stored))
+		out.Set = napconfig.StoredPaths(s.Root, "", stored, false)
+		out.Secrets = napconfig.StoredPaths(s.Root, "", stored, true)
 	}
 	for _, r := range PermissionRules() {
 		if r.Napp == w.nappID {

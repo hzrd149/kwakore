@@ -26,6 +26,8 @@ import (
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/nipb7/blossom"
+	"github.com/rs/zerolog"
+	"verdana/backend/napconfig"
 )
 
 // ─── test rig ────────────────────────────────────────────────────
@@ -116,13 +118,12 @@ func setupNapTest(t *testing.T) {
 	t.Helper()
 	dataDir = t.TempDir()
 	host = noopHost{}
+	napconfig.Init(filepath.Join(dataDir, "config"), zerolog.Nop())
 	t.Cleanup(func() {
 		storagesMu.Lock()
 		storages = make(map[string]*nappStorage)
 		storagesMu.Unlock()
-		configMu.Lock()
-		configs = make(map[string]*configEntry)
-		configMu.Unlock()
+		napconfig.Init(filepath.Join(dataDir, "config"), zerolog.Nop())
 	})
 }
 

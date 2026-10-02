@@ -1,4 +1,4 @@
-package backend
+package napconfig
 
 import (
 	"encoding/json"
@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
 
-func loadConfigFixture(t *testing.T) *configSchema {
+func loadConfigFixture(t *testing.T) *Schema {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/config/full.json")
 	if err != nil {
@@ -45,29 +47,29 @@ func TestConfigSchemaRejections(t *testing.T) {
 	cases := []struct {
 		name, schema, code string
 	}{
-		{"not json", `{`, cfgInvalidSchema},
-		{"not an object", `[]`, cfgInvalidSchema},
-		{"root not object", `{"type":"string"}`, cfgInvalidSchema},
-		{"root without properties", `{"type":"object"}`, cfgInvalidSchema},
-		{"draft-04", `{"$schema":"http://json-schema.org/draft-04/schema#","type":"object","properties":{}}`, cfgUnsupportedDraft},
-		{"$ref", `{"type":"object","properties":{"a":{"$ref":"#/definitions/a"}}}`, cfgRefNotAllowed},
-		{"definitions", `{"type":"object","properties":{},"definitions":{}}`, cfgRefNotAllowed},
-		{"$defs", `{"type":"object","properties":{},"$defs":{}}`, cfgRefNotAllowed},
-		{"pattern", `{"type":"object","properties":{"u":{"type":"string","pattern":"^[a-z]+$"}}}`, cfgPatternNotAllowed},
-		{"oneOf", `{"type":"object","properties":{"a":{"oneOf":[]}}}`, cfgInvalidSchema},
-		{"if", `{"type":"object","properties":{},"if":{}}`, cfgInvalidSchema},
-		{"tuple", `{"type":"object","properties":{"a":{"type":"array","items":[{"type":"string"}]}}}`, cfgInvalidSchema},
-		{"array of objects", `{"type":"object","properties":{"a":{"type":"array","items":{"type":"object","properties":{}}}}}`, cfgInvalidSchema},
-		{"type list", `{"type":"object","properties":{"a":{"type":["string","null"]}}}`, cfgInvalidSchema},
-		{"null type", `{"type":"object","properties":{"a":{"type":"null"}}}`, cfgInvalidSchema},
-		{"secret with default", `{"type":"object","properties":{"k":{"type":"string","x-napplet-secret":true,"default":"x"}}}`, cfgSecretWithDefault},
-		{"too deep", nest(5), cfgTooDeep}, // root + four nested objects
-		{"bad default", `{"type":"object","properties":{"n":{"type":"integer","minimum":1,"default":0}}}`, cfgInvalidSchema},
-		{"enum type mismatch", `{"type":"object","properties":{"n":{"type":"string","enum":[1]}}}`, cfgInvalidSchema},
-		{"negative minLength", `{"type":"object","properties":{"s":{"type":"string","minLength":-1}}}`, cfgInvalidSchema},
-		{"additionalProperties schema", `{"type":"object","properties":{},"additionalProperties":{"type":"string"}}`, cfgInvalidSchema},
-		{"bad $version", `{"type":"object","properties":{},"$version":1.5}`, cfgInvalidSchema},
-		{"too big", `{"type":"object","properties":{},"description":"` + strings.Repeat("x", configSchemaMax) + `"}`, cfgInvalidSchema},
+		{"not json", `{`, CodeInvalidSchema},
+		{"not an object", `[]`, CodeInvalidSchema},
+		{"root not object", `{"type":"string"}`, CodeInvalidSchema},
+		{"root without properties", `{"type":"object"}`, CodeInvalidSchema},
+		{"draft-04", `{"$schema":"http://json-schema.org/draft-04/schema#","type":"object","properties":{}}`, CodeUnsupportedDraft},
+		{"$ref", `{"type":"object","properties":{"a":{"$ref":"#/definitions/a"}}}`, CodeRefNotAllowed},
+		{"definitions", `{"type":"object","properties":{},"definitions":{}}`, CodeRefNotAllowed},
+		{"$defs", `{"type":"object","properties":{},"$defs":{}}`, CodeRefNotAllowed},
+		{"pattern", `{"type":"object","properties":{"u":{"type":"string","pattern":"^[a-z]+$"}}}`, CodePatternNotAllowed},
+		{"oneOf", `{"type":"object","properties":{"a":{"oneOf":[]}}}`, CodeInvalidSchema},
+		{"if", `{"type":"object","properties":{},"if":{}}`, CodeInvalidSchema},
+		{"tuple", `{"type":"object","properties":{"a":{"type":"array","items":[{"type":"string"}]}}}`, CodeInvalidSchema},
+		{"array of objects", `{"type":"object","properties":{"a":{"type":"array","items":{"type":"object","properties":{}}}}}`, CodeInvalidSchema},
+		{"type list", `{"type":"object","properties":{"a":{"type":["string","null"]}}}`, CodeInvalidSchema},
+		{"null type", `{"type":"object","properties":{"a":{"type":"null"}}}`, CodeInvalidSchema},
+		{"secret with default", `{"type":"object","properties":{"k":{"type":"string","x-napplet-secret":true,"default":"x"}}}`, CodeSecretWithDefault},
+		{"too deep", nest(5), CodeTooDeep}, // root + four nested objects
+		{"bad default", `{"type":"object","properties":{"n":{"type":"integer","minimum":1,"default":0}}}`, CodeInvalidSchema},
+		{"enum type mismatch", `{"type":"object","properties":{"n":{"type":"string","enum":[1]}}}`, CodeInvalidSchema},
+		{"negative minLength", `{"type":"object","properties":{"s":{"type":"string","minLength":-1}}}`, CodeInvalidSchema},
+		{"additionalProperties schema", `{"type":"object","properties":{},"additionalProperties":{"type":"string"}}`, CodeInvalidSchema},
+		{"bad $version", `{"type":"object","properties":{},"$version":1.5}`, CodeInvalidSchema},
+		{"too big", `{"type":"object","properties":{},"description":"` + strings.Repeat("x", configSchemaMax) + `"}`, CodeInvalidSchema},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -99,7 +101,7 @@ func TestConfigSchemaOpaqueExtensions(t *testing.T) {
 
 func TestConfigResolveDefaults(t *testing.T) {
 	s := loadConfigFixture(t)
-	got := resolveConfigValues(s, nil)
+	got := ResolveValues(s, nil)
 	want := map[string]any{
 		"theme":    "dark",
 		"fontSize": float64(14),
@@ -127,7 +129,7 @@ func TestConfigResolveStoredAndInvalid(t *testing.T) {
 			"ghost":  true,
 		},
 	}
-	got := resolveConfigValues(s, stored)
+	got := ResolveValues(s, stored)
 	want := map[string]any{
 		"theme":    "light",
 		"fontSize": float64(14),
@@ -144,7 +146,7 @@ func TestConfigResolveStoredAndInvalid(t *testing.T) {
 
 func TestConfigSecretNeverDefaulted(t *testing.T) {
 	s := loadConfigFixture(t)
-	got := resolveConfigValues(s, map[string]any{"apiKey": "abc"}) // too short
+	got := ResolveValues(s, map[string]any{"apiKey": "abc"}) // too short
 	if _, ok := got["apiKey"]; ok {
 		t.Fatal("an invalid or unset secret must not be delivered")
 	}
@@ -213,41 +215,40 @@ func TestConfigPruneSecretOrphans(t *testing.T) {
 }
 
 func TestConfigStore(t *testing.T) {
-	setupNapTest(t)
+	dir := t.TempDir()
+	Init(dir, zerolog.Nop())
 	const id = "napplet~0123456789abcdef~cfg"
-	if _, ok := configValues(id); ok {
+	if _, ok := Values(id); ok {
 		t.Fatal("values before any schema")
 	}
 	raw, _ := os.ReadFile("testdata/config/full.json")
-	if changed, err := configRegister(id, "hash1", raw, nil); err != nil || !changed {
+	if changed, err := Register(id, "hash1", raw, nil); err != nil || !changed {
 		t.Fatalf("register: %v %v", changed, err)
 	}
-	if changed, err := configRegister(id, "hash1", raw, nil); err != nil || changed {
+	if changed, err := Register(id, "hash1", raw, nil); err != nil || changed {
 		t.Fatalf("re-register of the same schema: %v %v", changed, err)
 	}
 	v1 := uint64(1)
-	if _, err := configRegister(id, "hash1", raw, &v1); err == nil || err.Code != cfgVersionConflict {
+	if _, err := Register(id, "hash1", raw, &v1); err == nil || err.Code != CodeVersionConflict {
 		t.Fatalf("version disagreeing with $version: %v", err)
 	}
-	if err := configSave(id, map[string]any{"theme": "light", "apiKey": "sekret"}); err != nil {
+	if err := Save(id, map[string]any{"theme": "light", "apiKey": "sekret"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// a fresh process reads it back, and a new artifact keeps the values
-	configMu.Lock()
-	configs = make(map[string]*configEntry)
-	configMu.Unlock()
-	if _, err := configRegister(id, "hash2", raw, nil); err != nil {
+	Init(dir, zerolog.Nop())
+	if _, err := Register(id, "hash2", raw, nil); err != nil {
 		t.Fatal(err)
 	}
-	vals, ok := configValues(id)
+	vals, ok := Values(id)
 	if !ok || vals["theme"] != "light" || vals["apiKey"] != "sekret" {
 		t.Fatalf("after reload: %v %#v", ok, vals)
 	}
-	if err := configReset(id); err != nil {
+	if err := Reset(id); err != nil {
 		t.Fatal(err)
 	}
-	vals, _ = configValues(id)
+	vals, _ = Values(id)
 	if vals["theme"] != "dark" || vals["apiKey"] != nil {
 		t.Fatalf("after reset: %#v", vals)
 	}

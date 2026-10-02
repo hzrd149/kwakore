@@ -18,6 +18,7 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
+	"verdana/backend/napconfig"
 )
 
 var (
@@ -59,6 +60,8 @@ func Start(opts Options) (func(), error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
+
+	napconfig.Init(filepath.Join(dataDir, "config"), log)
 
 	closeStores, err := initSystem(dataDir)
 	if err != nil {
