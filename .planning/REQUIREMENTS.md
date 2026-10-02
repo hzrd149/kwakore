@@ -21,11 +21,11 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Shim
 
-- [ ] **SHIM-01**: The vendored `prelude.global.js` is byte-identical to npm `@napplet/shim` 0.30.0, verified by a sha256 test; `ShimVersion` and the shim README state exactly that
+- [x] **SHIM-01**: The vendored `prelude.global.js` is byte-identical to npm `@napplet/shim` 0.30.0, verified by a sha256 test; `ShimVersion` and the shim README state exactly that
 - [ ] **SHIM-02**: Behavior the six former Verdana shim patches provided is either dropped (following upstream) or reimplemented in Go / `napplet-host.js`; no napplet regresses silently, and each dropped behavior is noted in the checklist
 - [ ] **SHIM-03**: Capability detection follows NIP-5D: `window.napplet` contains only the domain objects the launcher grants; the host no longer depends on a `shell.ready` / `shell.init` handshake
 - [ ] **SHIM-04**: Nothing but `window.napplet` survives injection into the frame; `NappletShimPrelude` is unreachable from napplet code and cannot be used to install extra domains (5D-1)
-- [ ] **SHIM-05**: A test asserts every napplet-to-shell request type the vendored shim can send has a handler or an explicit N/A entry (offline fixture from `@napplet/conformance` 0.17.0)
+- [x] **SHIM-05**: A test asserts every napplet-to-shell request type the vendored shim can send has a handler or an explicit N/A entry (offline fixture from `@napplet/conformance` 0.17.0)
 
 ### Sandbox
 
@@ -149,11 +149,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPEC-03 | Phase 1 | Pending |
 | SPEC-04 | Phase 8 | Pending |
 | SPEC-05 | Phase 1 | Pending |
-| SHIM-01 | Phase 1 | Pending |
+| SHIM-01 | Phase 1 | Complete |
 | SHIM-02 | Phase 1 | Pending |
 | SHIM-03 | Phase 1 | Pending |
 | SHIM-04 | Phase 1 | Pending |
-| SHIM-05 | Phase 1 | Pending |
+| SHIM-05 | Phase 1 | Complete |
 | SBOX-01 | Phase 4 | Pending |
 | SBOX-02 | Phase 4 | Pending |
 | SBOX-03 | Phase 4 | Pending |
