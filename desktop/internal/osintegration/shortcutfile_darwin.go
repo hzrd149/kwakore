@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package osintegration
 
 import (
 	"encoding/xml"
@@ -12,10 +12,10 @@ import (
 	"verdana/backend"
 )
 
-// writeShortcutFile writes a minimal .app bundle into ~/Applications: a
+// WriteShortcutFile writes a minimal .app bundle into ~/Applications: a
 // stub Info.plist and a launcher script whose only line is calling verdana
 // with the bundle token. LaunchServices picks bundles up on their own.
-func writeShortcutFile(name, exe, token string) (string, error) {
+func WriteShortcutFile(name, exe, token string) (string, error) {
 	slug := shortcutSlug(name)
 	appDir, err := shortcutBundleDir(slug)
 	if err != nil {
@@ -47,7 +47,7 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 	if err := os.WriteFile(elem, []byte(script), 0755); err != nil {
 		return "", err
 	}
-	refreshShortcutParent("")
+	RefreshShortcutParent("")
 	return appDir, nil
 }
 
@@ -63,17 +63,17 @@ func shortcutBundleDir(slug string) (string, error) {
 	return filepath.Join(home, "Applications", shortcutPrefix+slug+".app"), nil
 }
 
-// deleteShortcutFile takes the whole bundle away: an .app is a directory.
-func deleteShortcutFile(path string) error {
+// DeleteShortcutFile takes the whole bundle away: an .app is a directory.
+func DeleteShortcutFile(path string) error {
 	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
-// listShortcutFiles reads back every verdana-*.app in ~/Applications: the name
+// ListShortcutFiles reads back every verdana-*.app in ~/Applications: the name
 // out of the Info.plist, the token out of the stub script.
-func listShortcutFiles() []backend.ShortcutFile {
+func ListShortcutFiles() []backend.ShortcutFile {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil

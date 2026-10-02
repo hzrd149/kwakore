@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -11,10 +11,10 @@ import (
 	"verdana/backend"
 )
 
-// syncSearchNapplets mirrors the discovery catalog into a dedicated Start
+// SyncSearchNapplets mirrors the discovery catalog into a dedicated Start
 // menu folder. Windows Search indexes these links and activating one sends the
 // napplet through the trial-aware discovery path.
-func syncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
+func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 	programs, err := userStartMenuPrograms()
 	if err != nil {
 		return err

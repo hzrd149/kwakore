@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 
 const windowsRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
-func autostartEnabled() bool {
+func AutostartEnabled() bool {
 	key, err := registry.OpenKey(registry.CURRENT_USER, windowsRunKey, registry.QUERY_VALUE)
 	if err != nil {
 		return false
@@ -20,7 +20,7 @@ func autostartEnabled() bool {
 	return err == nil
 }
 
-func setAutostart(enabled bool, exe string) error {
+func SetAutostart(enabled bool, exe string) error {
 	key, _, err := registry.CreateKey(registry.CURRENT_USER, windowsRunKey, registry.SET_VALUE)
 	if err != nil {
 		return err

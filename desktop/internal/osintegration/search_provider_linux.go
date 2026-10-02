@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"os"
@@ -18,18 +18,20 @@ const (
 	searchProviderLimit     = 20
 )
 
-type searchProvider struct{}
+type searchProvider struct {
+	onSearch func(query string)
+}
 
-// startSearchProvider exposes the GNOME Shell SearchProvider2 interface for
-// this launcher process. Failure is non-fatal: Verdana also runs on Linux
+// StartSearchProvider exposes the GNOME Shell SearchProvider2 interface for
+// this launcher process; searches the user opens in Verdana go to onSearch. Failure is non-fatal: Verdana also runs on Linux
 // desktops which have no session bus or do not implement GNOME search.
-func startSearchProvider() func() {
+func StartSearchProvider(onSearch func(query string)) func() {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		log.Debug().Err(err).Msg("GNOME search provider unavailable")
 		return func() {}
 	}
-	provider := &searchProvider{}
+	provider := &searchProvider{onSearch: onSearch}
 	if err := conn.Export(provider, searchProviderPath, searchProviderInterface); err != nil {
 		conn.Close()
 		log.Warn().Err(err).Msg("could not export GNOME search provider")
@@ -103,11 +105,11 @@ func (searchProvider) ActivateResult(id string, _ []string, _ uint32) *dbus.Erro
 	return nil
 }
 
-func (searchProvider) LaunchSearch(terms []string, _ uint32) *dbus.Error {
+func (p searchProvider) LaunchSearch(terms []string, _ uint32) *dbus.Error {
 	if searchDebugEnabled() {
 		log.Info().Str("search_method", "launch").Strs("terms", terms).Msg("GNOME search request")
 	}
-	showDiscoverySearch(strings.Join(terms, " "))
+	p.onSearch(strings.Join(terms, " "))
 	return nil
 }
 

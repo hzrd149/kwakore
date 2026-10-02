@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"fiatjaf.com/verdana/desktop/internal/media"
+	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"verdana/backend"
 )
 
@@ -120,15 +121,15 @@ func (gioHost) CreateShortcutFile(name, token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return writeShortcutFile(name, exe, token)
+	return osintegration.WriteShortcutFile(name, exe, token)
 }
 
 func (gioHost) DeleteShortcutFile(path string) error {
-	if err := deleteShortcutFile(path); err != nil {
+	if err := osintegration.DeleteShortcutFile(path); err != nil {
 		return err
 	}
 	// refresh what the desktop environment has indexed, when one exists
-	refreshShortcutParent(filepath.Dir(path))
+	osintegration.RefreshShortcutParent(filepath.Dir(path))
 	log.Info().Str("path", path).Msg("removed shortcut file")
 	return nil
 }
@@ -137,21 +138,21 @@ func (gioHost) DeleteShortcutFile(path string) error {
 // folder, the file being the whole record: the bundle's name, and the token it
 // runs.
 func (gioHost) ListShortcutFiles() []backend.ShortcutFile {
-	files := listShortcutFiles()
+	files := osintegration.ListShortcutFiles()
 	log.Info().Int("count", len(files)).Msg("shortcut files found")
 	return files
 }
 
 func (gioHost) AutostartSupported() bool { return true }
 
-func (gioHost) AutostartEnabled() bool { return autostartEnabled() }
+func (gioHost) AutostartEnabled() bool { return osintegration.AutostartEnabled() }
 
 func (gioHost) SetAutostart(enabled bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return setAutostart(enabled, exe)
+	return osintegration.SetAutostart(enabled, exe)
 }
 
 func (gioHost) AppShortcutsSupported() bool { return true }
@@ -161,7 +162,7 @@ func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 	if err != nil {
 		return err
 	}
-	return syncAppShortcuts(shortcuts, exe)
+	return osintegration.SyncAppShortcuts(shortcuts, exe)
 }
 
 func (gioHost) SyncSearchNapplets(napplets []backend.AppShortcut) error {
@@ -169,17 +170,17 @@ func (gioHost) SyncSearchNapplets(napplets []backend.AppShortcut) error {
 	if err != nil {
 		return err
 	}
-	return syncSearchNapplets(napplets, exe)
+	return osintegration.SyncSearchNapplets(napplets, exe)
 }
 
-func (gioHost) GNOMESearchSupported() bool { return gnomeSearchSupported() }
+func (gioHost) GNOMESearchSupported() bool { return osintegration.GnomeSearchSupported() }
 
 func (gioHost) SetGNOMESearchIntegration(enabled bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return setGNOMESearchIntegration(enabled, exe)
+	return osintegration.SetGNOMESearchIntegration(enabled, exe)
 }
 
 func (gioHost) OpenLink(url string) error {

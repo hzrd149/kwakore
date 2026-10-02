@@ -1,4 +1,4 @@
-package main
+package osintegration
 
 import (
 	"encoding/binary"

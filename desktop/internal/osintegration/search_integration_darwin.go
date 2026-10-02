@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -11,10 +11,10 @@ import (
 	"verdana/backend"
 )
 
-// syncSearchNapplets writes tiny application bundles below ~/Applications.
+// SyncSearchNapplets writes tiny application bundles below ~/Applications.
 // Spotlight indexes application bundles automatically; activating one routes
 // the discovered ID through Verdana's trial-aware launch path.
-func syncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
+func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err

@@ -8,6 +8,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/verdana/desktop/internal/icon"
+	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"github.com/gogpu/systray"
 	"verdana/backend"
 )
@@ -56,7 +57,7 @@ func newTray() *systray.SystemTray {
 		}
 	})
 	var autostartItem *systray.MenuItem
-	autostartItem = menu.AddCheckbox("Launch at login", autostartEnabled(), func() {
+	autostartItem = menu.AddCheckbox("Launch at login", osintegration.AutostartEnabled(), func() {
 		enabled := !autostartItem.IsChecked()
 		if err := (gioHost{}).SetAutostart(enabled); err != nil {
 			log.Warn().Err(err).Msg("could not change launch at login")

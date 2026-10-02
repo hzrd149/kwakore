@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -12,13 +12,13 @@ import (
 	"verdana/backend"
 )
 
-// writeShortcutFile writes a .lnk in the user's Start Menu Programs folder
+// WriteShortcutFile writes a .lnk in the user's Start Menu Programs folder
 // with WScript.Shell through powershell (every Windows has both). The link's
 // Arguments is the bundle token as one argument. COM writes the file, so the
 // link is exactly what Windows expects; the bundle's name goes into its
 // NAME_STRING afterwards, since what COM puts there is the launcher's own file
 // name.
-func writeShortcutFile(name, exe, token string) (string, error) {
+func WriteShortcutFile(name, exe, token string) (string, error) {
 	startMenu, err := userStartMenuPrograms()
 	if err != nil {
 		return "", err
@@ -58,17 +58,17 @@ func nameLnkFile(path, name string) error {
 	return os.WriteFile(path, named, 0644)
 }
 
-func deleteShortcutFile(path string) error {
+func DeleteShortcutFile(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
-// listShortcutFiles reads back every verdana-*.lnk in the Start Menu: the name
+// ListShortcutFiles reads back every verdana-*.lnk in the Start Menu: the name
 // off the link's NAME_STRING (or its file-name slug when it has none) and the
 // token off the arguments the link runs.
-func listShortcutFiles() []backend.ShortcutFile {
+func ListShortcutFiles() []backend.ShortcutFile {
 	startMenu, err := userStartMenuPrograms()
 	if err != nil {
 		return nil

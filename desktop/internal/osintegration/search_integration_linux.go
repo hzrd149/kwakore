@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ const (
 	searchServiceFileName  = "com.verdana.Verdana.SearchProvider.service"
 )
 
-func gnomeSearchSupported() bool {
+func GnomeSearchSupported() bool {
 	desktop := strings.ToLower(os.Getenv("XDG_CURRENT_DESKTOP"))
 	return strings.Contains(desktop, "gnome")
 }
@@ -62,7 +62,7 @@ func gnomeSearchProviderPath() string {
 	return ""
 }
 
-func setGNOMESearchIntegration(enabled bool, exe string) error {
+func SetGNOMESearchIntegration(enabled bool, exe string) error {
 	desktopPath, providerPath, servicePath := gnomeSearchIntegrationPaths()
 	legacyProviderPath := filepath.Join(xdgDataHome(), "gnome-shell", "search-providers", searchProviderFileName)
 	if !enabled {
@@ -78,7 +78,7 @@ func setGNOMESearchIntegration(enabled bool, exe string) error {
 				log.Info().Str("path", path).Msg("removed GNOME search integration file")
 			}
 		}
-		refreshShortcutParent(filepath.Dir(desktopPath))
+		RefreshShortcutParent(filepath.Dir(desktopPath))
 		return nil
 	}
 	if providerPath == "" {
@@ -128,9 +128,9 @@ Exec=%s --background
 			return err
 		}
 	}
-	refreshShortcutParent(filepath.Dir(desktopPath))
+	RefreshShortcutParent(filepath.Dir(desktopPath))
 	return nil
 }
 
 // GNOME queries the live provider, so it needs no indexed launcher entries.
-func syncSearchNapplets([]backend.AppShortcut, string) error { return nil }
+func SyncSearchNapplets([]backend.AppShortcut, string) error { return nil }

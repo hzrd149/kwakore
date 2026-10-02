@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package osintegration
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"github.com/sergeymakinen/go-ico"
 )
 
-func syncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
+func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 	programs, err := userStartMenuPrograms()
 	if err != nil {
 		return err

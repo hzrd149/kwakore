@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"os"
@@ -19,7 +19,7 @@ func TestSyncAppShortcutsCreatesAndReconcilesDesktopEntries(t *testing.T) {
 
 	first := backend.AppShortcut{ID: "napp-one", Name: "One", Description: "First app"}
 	second := backend.AppShortcut{ID: "napplet-two", Name: "Two"}
-	if err := syncAppShortcuts([]backend.AppShortcut{first, second}, "/opt/Verdana App/verdana"); err != nil {
+	if err := SyncAppShortcuts([]backend.AppShortcut{first, second}, "/opt/Verdana App/verdana"); err != nil {
 		t.Fatal(err)
 	}
 	firstPath := filepath.Join(applicationsDir(), appShortcutPrefix+appShortcutKey(first.ID)+".desktop")
@@ -33,7 +33,7 @@ func TestSyncAppShortcutsCreatesAndReconcilesDesktopEntries(t *testing.T) {
 		t.Fatalf("unexpected desktop entry:\n%s", entry)
 	}
 
-	if err := syncAppShortcuts([]backend.AppShortcut{second}, "/opt/verdana"); err != nil {
+	if err := SyncAppShortcuts([]backend.AppShortcut{second}, "/opt/verdana"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
@@ -43,7 +43,7 @@ func TestSyncAppShortcutsCreatesAndReconcilesDesktopEntries(t *testing.T) {
 		t.Fatalf("stale icon remains: %v", err)
 	}
 
-	if err := syncAppShortcuts(nil, "/opt/verdana"); err != nil {
+	if err := SyncAppShortcuts(nil, "/opt/verdana"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(applicationsDir())

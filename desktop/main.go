@@ -12,6 +12,7 @@ import (
 
 	"fiatjaf.com/verdana/desktop/internal/instancelock"
 	"fiatjaf.com/verdana/desktop/internal/media"
+	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"fiatjaf.com/verdana/desktop/internal/windowchrome"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
@@ -154,6 +155,7 @@ func main() {
 		Logger()
 	log.Info().Msg("starting verdana")
 	media.SetLogger(log)
+	osintegration.SetLogger(log)
 	if backend := windowchrome.Configure(); backend != "" {
 		log.Info().Str("window_backend", backend).Msg("configured native window chrome")
 	}
@@ -227,7 +229,7 @@ func main() {
 	if err := backend.SyncGNOMESearchIntegration(); err != nil {
 		log.Warn().Err(err).Msg("could not synchronize GNOME search integration")
 	}
-	stopSearchProvider := startSearchProvider()
+	stopSearchProvider := osintegration.StartSearchProvider(showDiscoverySearch)
 	defer stopSearchProvider()
 
 	// the backend is up: the token this launcher was started with opens its

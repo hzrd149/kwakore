@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -17,12 +17,12 @@ func autostartPath() string {
 	return filepath.Join(home, "Library", "LaunchAgents", "com.verdana.launcher.plist")
 }
 
-func autostartEnabled() bool {
+func AutostartEnabled() bool {
 	_, err := os.Stat(autostartPath())
 	return err == nil
 }
 
-func setAutostart(enabled bool, exe string) error {
+func SetAutostart(enabled bool, exe string) error {
 	path := autostartPath()
 	if !enabled {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

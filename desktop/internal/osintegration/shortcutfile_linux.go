@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -10,11 +10,11 @@ import (
 	"verdana/backend"
 )
 
-// writeShortcutFile writes a freedesktop .desktop entry into the user's
+// WriteShortcutFile writes a freedesktop .desktop entry into the user's
 // applications directory. Its only job is Exec="<verdana> <token>": running
 // the launcher, which forwards the token to the already-running instance (or
 // handles it itself when there is none).
-func writeShortcutFile(name, exe, token string) (string, error) {
+func WriteShortcutFile(name, exe, token string) (string, error) {
 	if !strings.HasPrefix(exe, "/") {
 		// some launchers install by symlink into PATH dirs; absolute or not,
 		// the .desktop file only understands what it can run as-is.
@@ -30,20 +30,20 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		return "", err
 	}
-	refreshShortcutParent(applicationsDir())
+	RefreshShortcutParent(applicationsDir())
 	return path, nil
 }
 
-func deleteShortcutFile(path string) error {
+func DeleteShortcutFile(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
-// listShortcutFiles reads back every verdana-*.desktop in the applications
+// ListShortcutFiles reads back every verdana-*.desktop in the applications
 // directory: ours to begin with, so nothing else is even opened.
-func listShortcutFiles() []backend.ShortcutFile {
+func ListShortcutFiles() []backend.ShortcutFile {
 	dir := applicationsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -77,7 +77,7 @@ func listShortcutFiles() []backend.ShortcutFile {
 }
 
 // parseDesktopShortcut pulls the bundle name and its token back out of a file
-// writeShortcutFile wrote: the name off the "Verdana <name>" entry, the token
+// WriteShortcutFile wrote: the name off the "Verdana <name>" entry, the token
 // as the second field of the Exec line (the first being the launcher itself).
 func parseDesktopShortcut(data []byte) (bundle string, token string, ok bool) {
 	var execLine string

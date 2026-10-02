@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"verdana/backend"
 )
 
-func syncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
+func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 	dir := applicationsDir()
 	icons := appShortcutIconDir()
 	desiredFiles := make(map[string]bool, len(shortcuts))
@@ -51,7 +51,7 @@ X-Verdana-Napp-ID=%s
 	if err := removeStaleAppShortcutFiles(icons, ".png", desiredIcons); err != nil {
 		return err
 	}
-	refreshShortcutParent(dir)
+	RefreshShortcutParent(dir)
 	return nil
 }
 

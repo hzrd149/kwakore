@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package osintegration
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 	"github.com/jackmordaunt/icns/v3"
 )
 
-func syncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
+func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err

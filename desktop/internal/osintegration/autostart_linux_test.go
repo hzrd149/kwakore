@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"os"
@@ -10,13 +10,13 @@ import (
 
 func TestLinuxAutostart(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if autostartEnabled() {
+	if AutostartEnabled() {
 		t.Fatal("autostart begins enabled")
 	}
-	if err := setAutostart(true, "/opt/Verdana App/verdana"); err != nil {
+	if err := SetAutostart(true, "/opt/Verdana App/verdana"); err != nil {
 		t.Fatal(err)
 	}
-	if !autostartEnabled() {
+	if !AutostartEnabled() {
 		t.Fatal("autostart was not enabled")
 	}
 	raw, err := os.ReadFile(autostartPath())
@@ -26,10 +26,10 @@ func TestLinuxAutostart(t *testing.T) {
 	if !strings.Contains(string(raw), `Exec="/opt/Verdana App/verdana" --background`) {
 		t.Fatalf("unexpected desktop entry:\n%s", raw)
 	}
-	if err := setAutostart(false, ""); err != nil {
+	if err := SetAutostart(false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if autostartEnabled() {
+	if AutostartEnabled() {
 		t.Fatal("autostart remains enabled")
 	}
 }

@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package osintegration
 
 import (
 	"os"
@@ -10,11 +10,11 @@ import (
 
 func TestGNOMESearchSupported(t *testing.T) {
 	t.Setenv("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")
-	if !gnomeSearchSupported() {
+	if !GnomeSearchSupported() {
 		t.Fatal("GNOME desktop was not detected")
 	}
 	t.Setenv("XDG_CURRENT_DESKTOP", "KDE")
-	if gnomeSearchSupported() {
+	if GnomeSearchSupported() {
 		t.Fatal("non-GNOME desktop was detected as GNOME")
 	}
 }
@@ -26,7 +26,7 @@ func TestSetGNOMESearchIntegrationCreatesAndRemovesFiles(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", dataHome)
 	t.Setenv("XDG_DATA_DIRS", dataDir+":/usr/share")
-	if err := setGNOMESearchIntegration(true, "/opt/Verdana App/verdana"); err != nil {
+	if err := SetGNOMESearchIntegration(true, "/opt/Verdana App/verdana"); err != nil {
 		t.Fatal(err)
 	}
 	desktop, provider, service := gnomeSearchIntegrationPaths()
@@ -51,7 +51,7 @@ func TestSetGNOMESearchIntegrationCreatesAndRemovesFiles(t *testing.T) {
 		}
 	}
 
-	if err := setGNOMESearchIntegration(false, ""); err != nil {
+	if err := SetGNOMESearchIntegration(false, ""); err != nil {
 		t.Fatal(err)
 	}
 	for path := range checks {
@@ -65,7 +65,7 @@ func TestGNOMESearchIntegrationNeedsUserDataDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
-	if err := setGNOMESearchIntegration(true, "/opt/verdana"); err == nil {
+	if err := SetGNOMESearchIntegration(true, "/opt/verdana"); err == nil {
 		t.Fatal("integration succeeded without a user-writable XDG_DATA_DIR")
 	}
 }

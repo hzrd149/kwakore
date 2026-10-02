@@ -1,4 +1,4 @@
-package main
+package osintegration
 
 import (
 	"fmt"
@@ -38,9 +38,9 @@ func shortcutSlug(name string) string {
 	return b.String() + "-" + fmt.Sprintf("%x", h.Sum32())
 }
 
-// refreshShortcutParent tells desktop environments to re-read a directory of
+// RefreshShortcutParent tells desktop environments to re-read a directory of
 // shortcut files, when that is a thing it does.
-func refreshShortcutParent(dir string) {
+func RefreshShortcutParent(dir string) {
 	if dir == "" {
 		return
 	}
