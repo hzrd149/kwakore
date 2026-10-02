@@ -274,8 +274,17 @@ To run the tests:
 
 ## Making apps for Verdana
 
-[NAPPLETS.md](NAPPLETS.md) covers how napplets run, which NAP domains the
-launcher implements and how to develop one. The development build's **Dev**
+To learn how to build a napplet, start with:
+
+- [napplet.run](https://napplet.run): the napplet framework and the NIP-5D
+  runtime that Verdana implements.
+- [napplet.soy](https://napplet.soy): a playground for building and sharing
+  napplets, with the `soyLI` command-line tool, documentation and conformance
+  checks to run before you publish.
+
+[NAPPLETS.md](NAPPLETS.md) is Verdana's own reference: how napplets run in
+the launcher, which NAP domains it implements and how to test one locally.
+The development build's **Dev**
 tab loads an app from a local folder or a dev-server URL, reloads it in place
 and publishes it to Blossom and Nostr when it's ready. [`env.d.ts`](env.d.ts)
 types the APIs a napp gets.

@@ -123,6 +123,10 @@ Not implemented yet: `notify`, `keys`, `config`, `lists`, `dm` and
 
 ## Developing a napplet
 
+For building napplets in general, see [napplet.run](https://napplet.run) and
+[napplet.soy](https://napplet.soy). This section covers loading one into
+Verdana.
+
 Build a **single-file** napplet (e.g. `@napplet/vite-plugin` with
 `artifactMode: "single-file"`). Put the output in a folder with a
 `metadata.json`:
