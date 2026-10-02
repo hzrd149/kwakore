@@ -22,8 +22,7 @@ re-pin deliberately and record the change here.
 
 | Domain | Ref | Status | Commit |
 |--------|-----|--------|--------|
-| NAP-SHELL, NAP-IDENTITY, NAP-INC, NAP-THEME | `master` | merged | `a040914b4bbd3a5cd8a14b0f316a723c968ebfb2` |
-| NAP-INTENT | `refs/pull/91/head` (master + lifecycle-independent delivery) | draft PR #91 | `a718915ddefa2f03a0126579601f59d8bd86f7c4` |
+| NAP-SHELL, NAP-IDENTITY, NAP-INC, NAP-INTENT, NAP-THEME | `master` | merged | `a040914b4bbd3a5cd8a14b0f316a723c968ebfb2` |
 | NAP-RELAY | `refs/pull/2/head` | draft PR #2 | `0be8abce18beb46ca37bd4ddd042f58d30b4eedc` |
 | NAP-STORAGE | `refs/pull/3/head` | draft PR #3 | `f71e84ebca7474db260346cbfc2d88f41b4e421e` |
 | NAP-MEDIA | `refs/pull/10/head` | draft PR #10 | `2b2d29e90c30b994bf5035a65b57e5fe7f08a9a2` |
@@ -39,11 +38,19 @@ re-pin deliberately and record the change here.
 
 | Package | Version | Commit |
 |---------|---------|--------|
-| `@napplet/shim` | 0.30.0 (Verdana vendors 0.29.2) | `956135bfc41a2cff5e45d6c68d9f9a4d68c50531` |
+| `@napplet/shim` | 0.30.0 (Verdana vendors a patched 0.29.2 build labelled `0.30.0+verdana.2`) | `956135bfc41a2cff5e45d6c68d9f9a4d68c50531` |
 | `@napplet/nap` (per-domain `src/<domain>/shim.ts`) | 0.32.0 | same |
 | `@napplet/conformance` | 0.17.0 | same |
 
 Repo: https://github.com/napplet/web, branch `main`.
+
+## Decisions (2026-10-02)
+
+- **Upstream `napplet/web` is canonical.** The vendored shim is byte-identical npm `@napplet/shim` 0.30.0 with no Verdana patches.
+- **NAP-SHELL:** the upstream shim follows NIP-5D presence-based capability detection (`window.napplet` holds only domain objects; napplet/web #96) and installs no `window.napplet.shell` / `shell.ready` handshake. Verdana follows the shim. The conflict with merged NAP-SHELL's "every runtime MUST implement" is recorded in the checklist.
+- **NAP-INTENT:** pinned to naps master, like the upstream shim (which deliberately omits draft PR #91 delivery hooks). PR #91 is no longer pinned.
+- **NAP-RESOURCE:** pinned to PR #80 head `fa6bcc6` (the live replacement for #13, which was merged by accident and reverted in `a9ad2cf`). The host also accepts the shim 0.30.0 server-hint shape (`requests:[{url,servers}]`, from branch `nap-resource` @ `9511232f69313aa7953d110e35d32cc28d506f66`) as a recorded tolerance, so the canonical shim works.
+- **Napplet ciphertext:** NIP-5D Security #7 ("Shells MUST NOT sign or broadcast events containing ciphertext received from a napplet") is applied as written.
 
 ## Notes
 

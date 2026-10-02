@@ -30,12 +30,12 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 <!-- This milestone: hardening + strict spec conformance, desktop first. -->
 
 **Conformance**
-- [ ] Make the vendored shim reproducible before auditing: pristine `@napplet/shim` 0.30.0 plus a committed Verdana patch, with a hash test (today the file is a hand-patched 0.29.2 build labelled `0.30.0+verdana.2`, and the README sha256 doesn't match it)
+- [ ] Vendor `@napplet/shim` 0.30.0 byte-identical to upstream, with a hash test, before auditing (today the file is a hand-patched 0.29.2 build labelled `0.30.0+verdana.2`, and the README sha256 doesn't match it); follow upstream on capability detection (NIP-5D presence, no shell handshake) and merged NAP-INTENT
 - [ ] Audit checklist covering every MUST and SHOULD in the pinned specs, each marked conforming, fixed, or N/A with reason, with spec commit SHAs recorded
 - [ ] All implemented NAP domains (including `notify` and `config`) conform strictly to their specs
 - [ ] NIP-5D runtime contract (sandbox, CSP, boot, envelope handling) conforms strictly
 - [ ] Both manifest shapes conform to their own specs: NIP-5D and WEB-NAPPLET (the future event schema)
-- [ ] Finish NAP-STORAGE artifact-hash keying (started in `18f8f81`): no address-only fallback when the hash is empty, storage cleaned up on update and uninstall, legacy v0.0.0 address-keyed data migrated aside with a one-time reset notice
+- [ ] Finish NAP-STORAGE artifact-hash keying (started in `18f8f81`): no address-only fallback when the hash is empty, storage cleaned up on update and uninstall, and the update UI says updating resets napplet data
 - [ ] `NAPPLETS.md` domain table reflects what is actually implemented
 
 **Critical (fix first)**
@@ -48,7 +48,7 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 **Desktop process hardening**
 - [ ] Child webview binary extraction cannot be hijacked by a pre-existing file in a shared temp dir, and prod builds never fall back to a working-directory `./child/child`; the `go-webview/embedded` import (extracts `libwebview` into a shared 0777 `/tmp/webview-*` dir) is removed or made safe
-- [ ] Single-instance listener replaced with a user-only Unix socket (named pipe on Windows); legacy token-only TCP path removed
+- [ ] Single-instance listener replaced with a user-only Unix socket (named pipe on Windows); all TCP code removed
 - [ ] `OpenLink` validates the URL scheme inside the desktop host, not only in callers
 
 **Secrets at rest**
@@ -66,6 +66,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - Fuzz testing — robustness is covered by explicit limits and regression tests
 - Upstreaming spec fixes — ambiguities are resolved by choosing the strictest reasonable reading and recording it in the checklist
 - Keeping address-keyed storage — strict conformance chosen over data continuity across napplet updates
+- Migrating existing installs, state or storage — no Verdana instances are deployed yet
+- Shim patches — upstream `napplet/web` is canonical; the NAP-SHELL handshake and NAP-INTENT PR #91 delivery hooks follow upstream and are out
 - A fixed release date — done when the checklist is complete
 
 ## Context
@@ -83,7 +85,7 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 ## Constraints
 
-- **Tech stack:** Go backend and desktop, plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored unmodified
+- **Tech stack:** Go backend and desktop, plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
 - **Compatibility:** Android must keep building and working with shared backend changes (`just apk`), even though Android hardening is deferred
 - **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Verdana deviates on purpose today
 - **Testing:** Changes to parsing, permissions, storage, networking, or napplet lifecycle include focused regression tests (`CLAUDE.md`); backend and desktop test commands pass before each merge
@@ -96,7 +98,10 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Pin specs to upstream heads by SHA | Reproducible audit against a moving target | — Pending |
 | Conform strictly, including storage keyed by artifact hash | Public release as a spec-correct runtime; accept one-time data reset with a notice | — Pending |
 | Support both manifest shapes | WEB-NAPPLET will become the event schema | — Pending |
-| Upgrade shim before auditing | Audit the launcher against the shim that matches the pinned specs | — Pending |
+| Upstream `napplet/web` shim is canonical, vendored unmodified | Upstream follows NIP-5D presence detection and merged NAP-INTENT; Verdana follows it and records the NAP-SHELL conflict | — Pending |
+| NAP-INTENT pinned to naps master; NAP-RESOURCE to PR #80 (also accepting the shim's server-hint shape) | Match the canonical shim; #13 was reverted and replaced by #80 | — Pending |
+| Decrypt events addressed to the user for napplets; never sign napplet ciphertext | NAP-RELAY decrypt MUST and NIP-5D Security #7 | — Pending |
+| No data migrations | Nothing deployed yet | — Pending |
 | Instance listener → Unix socket / named pipe | Filesystem permissions as auth; removes the unauthenticated TCP surface | — Pending |
 | Keyring with plaintext + warning fallback | Don't lock out headless/no-Secret-Service users | — Pending |
 | Audit depth: MUST + SHOULD; ambiguities recorded, not upstreamed | Traceable checklist without blocking on spec changes | — Pending |
