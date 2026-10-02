@@ -9,7 +9,7 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Critical
 
-- [ ] **CRIT-01**: A napp or napplet whose `d` tag contains path separators or `..` installs, launches, updates and uninstalls entirely inside the data directory; the raw `d` is never used as a path segment, `d` itself is not normalized, and a containment check guards every napp directory (W-1)
+- [x] **CRIT-01**: A napp or napplet whose `d` tag contains path separators or `..` installs, launches, updates and uninstalls entirely inside the data directory; the raw `d` is never used as a path segment, `d` itself is not normalized, and a containment check guards every napp directory (W-1)
 
 ### Audit and specs
 
@@ -143,7 +143,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CRIT-01 | Phase 1 | Pending |
+| CRIT-01 | Phase 1 | Complete |
 | SPEC-01 | Phase 1 | Pending |
 | SPEC-02 | Phase 8 | Pending |
 | SPEC-03 | Phase 1 | Pending |
@@ -206,6 +206,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REG-04 | Phase 5 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 61 total
 - Mapped to phases: 61
 - Unmapped: 0 ✓

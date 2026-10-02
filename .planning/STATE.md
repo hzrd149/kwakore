@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
-current_phase: 1
+current_phase: 01
 current_phase_name: Containment Fix and Canonical Shim Baseline
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-10-02T23:17:53.531Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-10-02T23:24:26.327Z"
 last_activity: 2026-10-02
-last_activity_desc: Roadmap created (8 phases, 61/61 v1 requirements mapped)
-state_head: d586fdfd95c99b30403ca9cac3e4076c94aa1b83
+last_activity_desc: Phase 01 execution started
+state_head: b0cdfd6ab6cc6719595c0a9853f513f9079f0ad9
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-02)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 1: Containment Fix and Canonical Shim Baseline
+**Current focus:** Phase 01 — Containment Fix and Canonical Shim Baseline
 
 ## Current Position
 
-Phase: 1 (Containment Fix and Canonical Shim Baseline) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (Containment Fix and Canonical Shim Baseline) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-10-02 — Roadmap created (8 phases, 61/61 v1 requirements mapped)
+Last activity: 2026-10-02 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -54,6 +54,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 5min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -67,6 +72,8 @@ Recent decisions affecting current work:
 - [Roadmap]: Dispatcher (Phase 2) lands before all per-domain work (Phases 4-8) so domain fixes build on the route table instead of conflicting with it
 - [Roadmap]: Desktop process and secrets (Phase 3) is independent of NAP code; inside it, atomic `state.json` writes (SECR-03) land before the keyring work (SECR-01/02)
 - [Roadmap]: SPEC-02 checklist close-out and SPEC-04 `NAPPLETS.md` land last (Phase 8); Phase 1 only creates the checklist skeleton and Conflicts section
+- [Phase 01]: [01-01] Napp install dirs are {dataDir}/napps/hex(sha256(id)) from the single nappBaseDir choke point; d stays raw in id/state/wire/storage; old raw-id dirs orphaned, dev machines reinstall
+- [Phase 01]: [01-01] nappAssetPath is the one manifest-path rule for installer and icon reader (refuses ../, absolute, //, and '.')
 
 ### Pending Todos
 
@@ -89,6 +96,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T22:21:15.065Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-containment-fix-and-canonical-shim-baseline/01-CONTEXT.md
+Last session: 2026-10-02T23:24:26.315Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
