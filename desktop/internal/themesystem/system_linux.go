@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package themesystem
 
 import (
 	"image/color"
@@ -17,12 +17,12 @@ const (
 	appearanceSpace = "org.freedesktop.appearance"
 )
 
-func watchSystemAppearance() (systemAppearance, <-chan systemAppearance, func()) {
-	changes := make(chan systemAppearance, 1)
+func Watch() (Appearance, <-chan Appearance, func()) {
+	changes := make(chan Appearance, 1)
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		close(changes)
-		return systemAppearance{}, changes, func() {}
+		return Appearance{}, changes, func() {}
 	}
 	obj := conn.Object(portalBus, portalPath)
 	current := readPortalAppearance(obj)
@@ -76,16 +76,16 @@ func watchSystemAppearance() (systemAppearance, <-chan systemAppearance, func())
 	}
 }
 
-func readPortalAppearance(obj dbus.BusObject) systemAppearance {
-	var out systemAppearance
+func readPortalAppearance(obj dbus.BusObject) Appearance {
+	var out Appearance
 	if value, ok := readPortalSetting(obj, "color-scheme"); ok {
 		if scheme, ok := uintValue(value); ok {
-			out.dark = scheme == 1
+			out.Dark = scheme == 1
 		}
 	}
 	if value, ok := readPortalSetting(obj, "accent-color"); ok {
 		if accent, ok := accentValue(value); ok {
-			out.accent, out.hasAccent = accent, true
+			out.Accent, out.HasAccent = accent, true
 		}
 	}
 	return out

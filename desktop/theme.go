@@ -8,6 +8,7 @@ import (
 	"sync"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/internal/themesystem"
 	"gioui.org/widget/material"
 )
 
@@ -106,7 +107,7 @@ var (
 	themeMu         sync.RWMutex
 	curTheme        = lightPalette
 	systemThemeMu   sync.RWMutex
-	systemTheme     systemAppearance
+	systemTheme     themesystem.Appearance
 	activeThemeMode string
 )
 
@@ -129,25 +130,19 @@ func appliedThemeMode() string {
 	return activeThemeMode
 }
 
-type systemAppearance struct {
-	dark      bool
-	accent    color.NRGBA
-	hasAccent bool
-}
-
-func resolvedPalette(mode string, appearance systemAppearance) themePalette {
+func resolvedPalette(mode string, appearance themesystem.Appearance) themePalette {
 	name := mode
 	if mode == backend.ThemeSystem {
-		if appearance.dark {
+		if appearance.Dark {
 			name = backend.ThemeDark
 		} else {
 			name = backend.ThemeLight
 		}
 	}
 	p := paletteByName(name)
-	if mode == backend.ThemeSystem && appearance.hasAccent {
-		p.contrastBg = appearance.accent
-		p.contrastFg = readableText(appearance.accent)
+	if mode == backend.ThemeSystem && appearance.HasAccent {
+		p.contrastBg = appearance.Accent
+		p.contrastFg = readableText(appearance.Accent)
 	}
 	return p
 }
@@ -189,7 +184,7 @@ func applyThemeMode() {
 // startThemeController resolves the persisted preference before the first
 // frame and then keeps system mode synchronized with the OS.
 func startThemeController() func() {
-	initial, changes, stop := watchSystemAppearance()
+	initial, changes, stop := themesystem.Watch()
 	systemThemeMu.Lock()
 	systemTheme = initial
 	systemThemeMu.Unlock()

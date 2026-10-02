@@ -1,11 +1,11 @@
 //go:build !linux
 
-package main
+package themesystem
 
 // Native observers for Windows and macOS are added independently. Until
 // then system mode safely follows the light fallback on those platforms.
-func watchSystemAppearance() (systemAppearance, <-chan systemAppearance, func()) {
-	changes := make(chan systemAppearance)
+func Watch() (Appearance, <-chan Appearance, func()) {
+	changes := make(chan Appearance)
 	close(changes)
-	return systemAppearance{}, changes, func() {}
+	return Appearance{}, changes, func() {}
 }
