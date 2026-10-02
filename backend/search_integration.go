@@ -1,5 +1,12 @@
 package backend
 
+import (
+	"sort"
+	"sync"
+)
+
+var systemSearchSyncMu sync.Mutex
+
 // GNOMESearchSupported reports whether this host can register Verdana as a
 // GNOME Shell search provider.
 func GNOMESearchSupported() bool { return host.GNOMESearchSupported() }
@@ -33,4 +40,44 @@ func SetGNOMESearchIntegration(enabled bool) error {
 	saveState()
 	stateMu.Unlock()
 	return nil
+}
+
+// SyncSystemSearch publishes the discovered napplet catalog on systems whose
+// search integration is backed by indexed launcher entries. GNOME serves the
+// same catalog live over D-Bus, so its host implementation is a no-op.
+func SyncSystemSearch() {
+	systemSearchSyncMu.Lock()
+	defer systemSearchSyncMu.Unlock()
+	entries := systemSearchEntries(Snapshot())
+	if err := host.SyncSearchNapplets(entries); err != nil {
+		log.Warn().Err(err).Msg("could not synchronize system search napplets")
+	}
+}
+
+func systemSearchEntries(st State) []AppShortcut {
+	seen := make(map[string]bool, len(st.Discovery)+len(st.Installed))
+	entries := make([]AppShortcut, 0, len(st.Discovery)+len(st.Installed))
+	for _, list := range [][]Napp{st.Discovery, st.Installed} {
+		for _, n := range list {
+			if seen[n.ID] || !n.IsNapplet() {
+				continue
+			}
+			seen[n.ID] = true
+			description := n.Description
+			if n.AuthorName != "" {
+				if description != "" {
+					description += " — "
+				}
+				description += "by " + n.AuthorName
+			}
+			entries = append(entries, AppShortcut{ID: n.ID, Name: n.Label(), Description: description})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Name != entries[j].Name {
+			return entries[i].Name < entries[j].Name
+		}
+		return entries[i].ID < entries[j].ID
+	})
+	return entries
 }

@@ -27,6 +27,7 @@ const (
 	commandOpenManager   = "open-manager"
 	commandRunShortcut   = "run-shortcut"
 	commandEnsureRunning = "ensure-running"
+	commandTryNapplet    = "try-napplet"
 )
 
 func portFilePath(dataDir string) string {
@@ -136,9 +137,16 @@ func runInstanceCommand(msg instanceCommand) {
 		runBundleTokenReady(msg.Token)
 	case commandEnsureRunning:
 		// The caller only wanted to make sure the background process exists.
+	case commandTryNapplet:
+		backend.TryNappletFromDiscovery(msg.Token)
 	default:
 		log.Warn().Str("command", msg.Command).Msg("unknown instance command")
 	}
+}
+
+func tryNappletWhenReady(id string) {
+	<-launcherReady
+	backend.TryNappletFromDiscovery(id)
 }
 
 func runBundleTokenReady(token string) {

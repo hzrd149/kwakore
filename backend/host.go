@@ -69,6 +69,10 @@ type Host interface {
 	AppShortcutsSupported() bool
 	SyncAppShortcuts([]AppShortcut) error
 
+	// SyncSearchNapplets exposes the complete discovered napplet catalog to
+	// system search on platforms without a live query-provider API.
+	SyncSearchNapplets([]AppShortcut) error
+
 	// GNOMESearchIntegration reconciles the files GNOME Shell needs to find
 	// and D-Bus activate Verdana's search provider. Unsupported platforms do
 	// not expose the setting.
@@ -260,14 +264,15 @@ func (noopHost) OpenLink(string) error                   { return errors.New("no
 func (noopHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("no shortcuts here")
 }
-func (noopHost) DeleteShortcutFile(string) error      { return nil }
-func (noopHost) ListShortcutFiles() []ShortcutFile    { return nil }
-func (noopHost) AutostartSupported() bool             { return false }
-func (noopHost) AutostartEnabled() bool               { return false }
-func (noopHost) SetAutostart(bool) error              { return errors.New("no autostart service") }
-func (noopHost) AppShortcutsSupported() bool          { return false }
-func (noopHost) SyncAppShortcuts([]AppShortcut) error { return nil }
-func (noopHost) GNOMESearchSupported() bool           { return false }
+func (noopHost) DeleteShortcutFile(string) error        { return nil }
+func (noopHost) ListShortcutFiles() []ShortcutFile      { return nil }
+func (noopHost) AutostartSupported() bool               { return false }
+func (noopHost) AutostartEnabled() bool                 { return false }
+func (noopHost) SetAutostart(bool) error                { return errors.New("no autostart service") }
+func (noopHost) AppShortcutsSupported() bool            { return false }
+func (noopHost) SyncAppShortcuts([]AppShortcut) error   { return nil }
+func (noopHost) SyncSearchNapplets([]AppShortcut) error { return nil }
+func (noopHost) GNOMESearchSupported() bool             { return false }
 func (noopHost) SetGNOMESearchIntegration(bool) error {
 	return errors.New("no GNOME search integration")
 }

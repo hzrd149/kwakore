@@ -159,6 +159,14 @@ func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 	return syncAppShortcuts(shortcuts, exe)
 }
 
+func (gioHost) SyncSearchNapplets(napplets []backend.AppShortcut) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return syncSearchNapplets(napplets, exe)
+}
+
 func (gioHost) GNOMESearchSupported() bool { return gnomeSearchSupported() }
 
 func (gioHost) SetGNOMESearchIntegration(enabled bool) error {

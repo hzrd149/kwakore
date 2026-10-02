@@ -15,18 +15,20 @@ func TestStartupArgs(t *testing.T) {
 		args       []string
 		background bool
 		token      string
+		trial      string
 	}{
 		{name: "plain launch"},
 		{name: "background", args: []string{"--background"}, background: true},
 		{name: "tool flags ignored", args: []string{"-debug", "napp-id", "+open"}, token: "napp-id +open"},
 		{name: "background shortcut", args: []string{"--background", "napp-id", "+open"}, background: true, token: "napp-id +open"},
 		{name: "native app shortcut", args: []string{"--background", "--launch-napp", "napplet-id"}, background: true, token: "napplet-id"},
+		{name: "search trial", args: []string{"--background", "--try-napplet", "napplet-id"}, background: true, trial: "napplet-id"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			background, token := startupArgs(test.args)
-			if background != test.background || token != test.token {
-				t.Fatalf("startupArgs(%q) = %v, %q; want %v, %q", test.args, background, token, test.background, test.token)
+			background, token, trial := startupArgs(test.args)
+			if background != test.background || token != test.token || trial != test.trial {
+				t.Fatalf("startupArgs(%q) = %v, %q, %q; want %v, %q, %q", test.args, background, token, trial, test.background, test.token, test.trial)
 			}
 		})
 	}

@@ -40,13 +40,14 @@ access is not required. The downloaded archive is verified against the
 release's SHA-256 checksum before it is installed. You can rerun the same
 command later to update to the newest release.
 
-On GNOME, the Linux installer also registers Verdana as a system search
-provider. Shell searches return matching napplets published by people you
-have discovered, including installed napplets. Search terms are matched locally
-and are not sent to Nostr relays. Choosing an uninstalled result opens a trial
-whose NAP storage stays in memory; when the trial closes, Verdana offers to
-install it and keep that data. GNOME may require signing out and back in before
-a newly registered provider first appears.
+Verdana exposes the complete Discovery napplet catalog to system search. GNOME
+uses a live local search provider; Windows indexes entries in the **Verdana
+Discover** Start-menu folder; and macOS Spotlight indexes lightweight launchers
+in `~/Applications/Verdana Discover`. Choosing an uninstalled result opens a
+trial whose NAP storage stays in memory; when the trial closes, Verdana offers
+to install it and keep that data. GNOME search terms stay local and are not sent
+to Nostr relays. GNOME may require signing out and back in before a newly
+registered provider first appears.
 
 For troubleshooting, start Verdana with `VERDANA_SEARCH_DEBUG=1` to log the
 terms GNOME sends, the result IDs Verdana returns, metadata requests and result

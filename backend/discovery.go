@@ -63,6 +63,7 @@ func Discover() {
 		if done {
 			log.Info().Int("count", len(list)).Msg("fetch complete")
 			setFetching(false)
+			go SyncSystemSearch()
 		}
 	})
 

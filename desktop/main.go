@@ -164,7 +164,7 @@ func main() {
 	// a launcher is already running they were forwarded there and we never
 	// got this far; with none running, this process serves it. Tool and
 	// toolkit flags are left for gio and friends to chew on.
-	background, startupToken := startupArgs(os.Args[1:])
+	background, startupToken, trialID := startupArgs(os.Args[1:])
 
 	verdanaDir := filepath.Join(dataDir, "Verdana")
 	if err := os.MkdirAll(verdanaDir, 0700); err != nil {
@@ -175,6 +175,9 @@ func main() {
 	if startupToken != "" {
 		forwarded.Command = commandRunShortcut
 		forwarded.Token = startupToken
+	} else if trialID != "" {
+		forwarded.Command = commandTryNapplet
+		forwarded.Token = trialID
 	} else if background {
 		forwarded.Command = commandEnsureRunning
 	}
@@ -229,6 +232,8 @@ func main() {
 	if startupToken != "" {
 		log.Info().Str("token", previewToken(startupToken)).Msg("bundle invocation at startup")
 		go runBundleToken(startupToken)
+	} else if trialID != "" {
+		go tryNappletWhenReady(trialID)
 	}
 
 	// Resolve the user's system/light/dark preference and keep system mode in
@@ -250,7 +255,7 @@ func main() {
 	killAllChildren()
 }
 
-func startupArgs(args []string) (background bool, token string) {
+func startupArgs(args []string) (background bool, token, trialID string) {
 	var tokenArgs []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -263,12 +268,17 @@ func startupArgs(args []string) (background bool, token string) {
 			tokenArgs = append(tokenArgs, args[i])
 			continue
 		}
+		if arg == "--try-napplet" && i+1 < len(args) {
+			i++
+			trialID = args[i]
+			continue
+		}
 		if strings.HasPrefix(arg, "-") {
 			continue
 		}
 		tokenArgs = append(tokenArgs, arg)
 	}
-	return background, strings.Join(tokenArgs, " ")
+	return background, strings.Join(tokenArgs, " "), trialID
 }
 
 func setTab(t int) {

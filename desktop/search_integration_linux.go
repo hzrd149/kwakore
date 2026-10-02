@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"verdana/backend"
 )
 
 const (
@@ -130,3 +131,6 @@ Exec=%s --background
 	refreshShortcutParent(filepath.Dir(desktopPath))
 	return nil
 }
+
+// GNOME queries the live provider, so it needs no indexed launcher entries.
+func syncSearchNapplets([]backend.AppShortcut, string) error { return nil }
