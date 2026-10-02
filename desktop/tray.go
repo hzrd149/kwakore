@@ -1,17 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
 	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"fiatjaf.com/verdana/desktop/internal/icon"
 	"github.com/gogpu/systray"
 	"verdana/backend"
 )
@@ -39,7 +35,7 @@ func trayStateChanged() {
 func init() { trayUser.changed = make(chan struct{}, 1) }
 
 func newTray() *systray.SystemTray {
-	icon := trayIcon()
+	trayPNG := icon.PNG()
 	menu := systray.NewMenu()
 	userItem := menu.Add("Not logged in", openUserProfile)
 	userItem.SetDisabled(true)
@@ -77,8 +73,8 @@ func newTray() *systray.SystemTray {
 	menu.Add("Quit Verdana", quitDesktop)
 
 	tray := systray.New().
-		SetIcon(icon).
-		SetTemplateIcon(trayTemplateIcon()).
+		SetIcon(trayPNG).
+		SetTemplateIcon(icon.TemplatePNG()).
 		SetAppName(APP_TITLE).
 		SetTooltip(APP_TITLE).
 		SetMenu(menu).
@@ -135,34 +131,4 @@ func trayUserLabel(name, pubkey string) string {
 	}
 	npub := nip19.EncodeNpub(pk)
 	return npub[:10] + "…" + npub[len(npub)-4:]
-}
-
-// trayIcon generates a small high-contrast V without adding another asset
-// pipeline. macOS uses its alpha as a template icon; Windows and Linux use the
-// green and white pixels directly.
-func trayIcon() []byte {
-	return drawTrayIcon(false)
-}
-
-func trayTemplateIcon() []byte {
-	return drawTrayIcon(true)
-}
-
-func drawTrayIcon(template bool) []byte {
-	const size = 32
-	im := image.NewNRGBA(image.Rect(0, 0, size, size))
-	if !template {
-		draw.Draw(im, im.Bounds(), &image.Uniform{C: color.NRGBA{R: 36, G: 128, B: 92, A: 255}}, image.Point{}, draw.Src)
-	}
-	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	for y := 7; y < 25; y++ {
-		x := 7 + (y-7)/2
-		for n := 0; n < 3; n++ {
-			im.SetNRGBA(x+n, y, white)
-			im.SetNRGBA(size-1-x-n, y, white)
-		}
-	}
-	var out bytes.Buffer
-	_ = png.Encode(&out, im)
-	return out.Bytes()
 }

@@ -34,13 +34,6 @@ func TestStartupArgs(t *testing.T) {
 	}
 }
 
-func TestTrayIconIsPNG(t *testing.T) {
-	icon := trayIcon()
-	if len(icon) < 8 || string(icon[:8]) != "\x89PNG\r\n\x1a\n" {
-		t.Fatal("tray icon is not a PNG")
-	}
-}
-
 func TestForwardToInstance(t *testing.T) {
 	dir := t.TempDir()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

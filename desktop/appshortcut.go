@@ -13,6 +13,7 @@ import (
 	"strings"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/internal/icon"
 	_ "golang.org/x/image/webp"
 )
 
@@ -37,7 +38,7 @@ func appShortcutIcon(data []byte) image.Image {
 			return im
 		}
 	}
-	im, _, _ := image.Decode(bytes.NewReader(trayIcon()))
+	im, _, _ := image.Decode(bytes.NewReader(icon.PNG()))
 	return im
 }
 
