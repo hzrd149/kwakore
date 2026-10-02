@@ -23,8 +23,16 @@ jobs:
             desktop/go.sum
             backend/go.sum
 
+      # the napplet frame-scope and host-page tests run in node; the runner
+      # image ships it, and this fails fast if it ever stops doing so
+      - name: check node
+        run: node --version
+
       - name: test backend
         working-directory: backend
+        # node-backed tests must not skip silently in CI
+        env:
+          VERDANA_REQUIRE_NODE: "1"
         run: go test ./...
 
       - name: validate shell installer

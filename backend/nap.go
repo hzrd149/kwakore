@@ -516,8 +516,24 @@ const nappletCSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-
 	"object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'"
 
 // buildSrcdoc puts the launcher's preamble in front of everything the
-// napplet's document does: the CSP first, then the shim, then the activation
-// (window.napplet for the given domains, and shell.ready).
+// napplet's document does: the CSP first, then one script holding the shim
+// and its activation (window.napplet for the given domains).
+//
+// The shim and its activation run inside a function scope. NIP-5D requires
+// that the window.napplet namespace contain only the domain objects the shell
+// exposes; without the scope, the prelude's top-level `var NappletShimPrelude`
+// would be a frame global, and napplet code could call its install to add
+// domains the launcher never granted. Inside the function only napplet, which
+// the shim assigns to window itself, is left behind. The prelude's leading
+// "use strict" becomes the function's directive prologue, so it still runs
+// strict. The newline after the prelude is required: the file ends in a
+// //# sourceMappingURL line comment with no final newline, which would
+// otherwise swallow the install call.
+//
+// The domains are the launcher's policy (napDomains), never the napplet's
+// tags. Nothing is posted to the host page: the napplet detects its domains
+// on window.napplet (NIP-5D presence detection), and the session was already
+// started by the host page before this document existed.
 //
 // The preamble is not spliced into the napplet's HTML (finding "its <head>"
 // in untrusted markup is a parsing contest the napplet can win, with a
@@ -544,9 +560,7 @@ func buildSrcdoc(html []byte, domains []string) (string, error) {
 
 	return "<!doctype html><html><head>" +
 		`<meta http-equiv="Content-Security-Policy" content="` + nappletCSP + `">` +
-		"<script>" + prelude + "\n</script>" +
-		"<script>globalThis.NappletShimPrelude.install(" + string(domainsJSON) + ");" +
-		`window.parent.postMessage({type:"shell.ready"},"*");</script>` +
+		"<script>(function(){" + prelude + "\n;NappletShimPrelude.install(" + string(domainsJSON) + ")\n})()</script>" +
 		"</head>" + doc, nil
 }
 
