@@ -40,7 +40,6 @@ type nappMeta struct {
 	Dir         string
 	URL         string
 	Instance    string
-	Number      string
 	Requires    []string
 	Theme       string
 	ThemeVars   string
@@ -68,7 +67,6 @@ func main() {
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
-		Number:      os.Getenv("VERDANA_WINDOW_NUMBER"),
 		Theme:       os.Getenv("VERDANA_THEME"),
 		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
 	}
@@ -95,7 +93,7 @@ func main() {
 		runSettings(w)
 		return
 	}
-	w.SetTitle(windowTitle(meta.Name, meta.Number))
+	w.SetTitle(windowTitle(meta.Name))
 
 	if os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
 		runNapplet(w)
@@ -174,16 +172,12 @@ func clampWindowSize(v, min, max int) int {
 	return v
 }
 
-// windowTitle names the OS window after the napp and its instance, so the
-// user can match it to the "window #N" entries in action prompts.
-func windowTitle(name, number string) string {
+// windowTitle names the OS window after the napp.
+func windowTitle(name string) string {
 	if name == "" {
-		name = "Napp"
+		return "Napp"
 	}
-	if number == "" {
-		return name
-	}
-	return name + " - window #" + number
+	return name
 }
 
 // storageInitScript seeds window.__nappStorage, which the bridge's
