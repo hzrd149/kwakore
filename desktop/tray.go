@@ -51,6 +51,7 @@ func newTray() *systray.SystemTray {
 	trayStateChanged()
 	menu.AddSeparator()
 	menu.Add("Open Verdana", showManager)
+	menu.Add("Verdana Store", showStore)
 	menu.Add("Settings", func() {
 		if err := backend.OpenLauncherSettings(); err != nil {
 			log.Warn().Err(err).Msg("could not open settings from tray")

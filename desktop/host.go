@@ -34,46 +34,38 @@ func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaSta
 
 func (gioHost) StateChanged() {
 	trayStateChanged()
-	if w := managerWindow(); w != nil {
-		w.Invalidate()
-	}
+	invalidateAll()
 }
 
 func (gioHost) OpenDiscovery(archetype string) {
-	ui.mu.Lock()
-	ui.tab = tabDiscovery
-	ui.discoveryArchetype = archetype
-	ui.mu.Unlock()
-	showManager()
+	store.mu.Lock()
+	store.discoveryArchetype = archetype
+	store.mu.Unlock()
+	showStoreView(storeDiscover)
 }
 
 func showDiscoverySearch(query string) {
-	ui.mu.Lock()
-	ui.tab = tabDiscovery
-	ui.discoveryQuery = strings.TrimSpace(query)
-	ui.mu.Unlock()
-	showManager()
+	store.mu.Lock()
+	store.discoveryQuery = strings.TrimSpace(query)
+	store.mu.Unlock()
+	showStoreView(storeDiscover)
 }
 
 func (gioHost) PromptsChanged() {
 	if p := backend.CurrentPrompt(); p != nil && p.Instance == "" {
 		showManager()
 	}
-	if w := managerWindow(); w != nil {
-		w.Invalidate()
-	}
+	invalidateAll()
 }
 
-// CopyText parks the text for the next Gio frame: writing to the clipboard is
-// a frame command (clipboard.WriteCmd), not something an rpc goroutine can do
-// on its own.
+// CopyText parks the text for the next Gio frame of either launcher window
+// (see drainClipboard): writing to the clipboard is a frame command
+// (clipboard.WriteCmd), not something an rpc goroutine can do on its own.
 func (gioHost) CopyText(text string) error {
 	ui.mu.Lock()
 	ui.clipboard = append(ui.clipboard, text)
 	ui.mu.Unlock()
-	if w := managerWindow(); w != nil {
-		w.Invalidate()
-	}
+	invalidateAll()
 	return nil
 }
 

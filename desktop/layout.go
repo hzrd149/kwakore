@@ -2,7 +2,6 @@ package main
 
 import (
 	"image"
-	"strconv"
 	"strings"
 	"verdana/backend"
 
@@ -238,31 +237,21 @@ func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,
 	tabWindowsBtn,
-	tabNappsBtn,
-	tabDiscoBtn,
 	tabDevBtn,
+	storeBtn,
 	themeBtn,
 	settingsBtn,
 	logoutBtn *widget.Clickable,
 	tab int,
 	windowsList,
-	installedList,
-	discoveryList,
 	devList *widget.List,
-	filterEd,
-	installedFilterEd,
 	devURLed,
 	devPathEd *widget.Editor,
-	fetchBtn,
-	checkUpdBtn,
 	loadURLBtn,
 	browseBtn,
 	loadFolderBtn *widget.Clickable,
 	closeBtns,
 	reopenBtns,
-	cardBtns,
-	uninstBtns,
-	installedUpdateBtns,
 	devOpenBtns,
 	devUnloadBtns,
 	devPublishBtns []widget.Clickable,
@@ -274,65 +263,33 @@ func layoutMain(
 	shortcutDelBtns,
 	shortcutEditBtns []widget.Clickable,
 
-	vis,
-	instVis []int,
 	st backend.State,
-	installedSet,
-	busy map[string]bool,
-
-	extra *extraTab,
-	extraBtn *widget.Clickable,
-	installedOpenBtns,
-	installedAuthorBtns,
-	installedSettingsBtns,
-	discoCardBtns,
-	discoOpenBtns,
-	discoAuthorBtns []widget.Clickable,
-	detailOpenBtn,
-	detailPrimaryBtn,
-	detailUpdateBtn,
-	detailAuthorBtn,
-	detailCopyAddrBtn *widget.Clickable,
-	detailSettingsBtn *widget.Clickable,
-	profileList *widget.List,
-	profileCardBtns,
-	profileOpenBtns,
-	profileActionBtns,
-	profileUpdateBtns []widget.Clickable,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, settingsBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, storeBtn, themeBtn, settingsBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		// the tabs only show when there is more than one: in dev builds
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
+			if tabDevBtn == nil {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layoutTabs(gtx, th, tabWindowsBtn, tabDevBtn, tab)
+			})
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if editing := currentShortcutEdit(); editing != nil {
 				return layoutShortcutEditor(gtx, th, saveShortcutBtn, cancelShortcutBtn, bundleNameEd, editing)
 			}
-			if tab == 0 {
-				return layoutWindowsTab(gtx, th, windowsList,
-					closeBtns, reopenBtns, bundleNameEd, createShortcutBtn,
-					shortcutDelBtns, shortcutEditBtns, st)
+			if tab == tabDev && tabDevBtn != nil {
+				return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
+					devOpenBtns, devUnloadBtns, devPublishBtns, st)
 			}
-			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, checkUpdBtn, instVis, st)
-			}
-			if tab == 2 {
-				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn,
-					discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, followSet(st))
-			}
-			if tab == 4 && extra != nil {
-				if extra.kind == "napp" {
-					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailCopyAddrBtn, detailSettingsBtn, installedSet, busy, st)
-				}
-				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
-			}
-			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
-				devOpenBtns, devUnloadBtns, devPublishBtns, st)
+			return layoutWindowsTab(gtx, th, windowsList,
+				closeBtns, reopenBtns, bundleNameEd, createShortcutBtn,
+				shortcutDelBtns, shortcutEditBtns, st)
 		}),
 	)
 }
@@ -354,14 +311,8 @@ func layoutTabs(
 	gtx layout.Context,
 	th *material.Theme,
 	windowsBtn,
-	nappsBtn,
-	discoBtn,
 	devBtn *widget.Clickable,
-	tab,
-	nInstalled,
-	nDiscovery int,
-	extra *extraTab,
-	extraBtn *widget.Clickable,
+	tab int,
 ) layout.Dimensions {
 	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
@@ -374,39 +325,15 @@ func layoutTabs(
 		}
 		return b.Layout(gtx)
 	}
-	children := []layout.FlexChild{
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, windowsBtn, "Windows", tab == 0)
+			return tabBtn(gtx, windowsBtn, "Windows", tab == tabWindows)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, nappsBtn, "Installed", tab == 1)
+			return tabBtn(gtx, devBtn, "Dev", tab == tabDev)
 		}),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Discovery", tab == 2)
-		}),
-	}
-	// devBtn is nil outside dev builds: no dev tab there
-	if devBtn != nil {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, devBtn, "Dev", tab == 3)
-			}),
-		)
-	}
-	// the ephemeral detail tab lives at the end and vanishes the moment
-	// any other tab is picked
-	if extra != nil && extraBtn != nil {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, extraBtn, extra.title, tab == 4)
-			}),
-		)
-	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+	)
 }
 
 func layoutWindowsTab(
@@ -425,7 +352,7 @@ func layoutWindowsTab(
 	// bundle shortcut outlives the windows it was made from, so a launcher
 	// that has opened no window this run still has shortcuts to show.
 	if len(st.ManagedWindows) == 0 && len(st.Shortcuts) == 0 {
-		l := material.Body2(th, "No windows opened yet.")
+		l := material.Body2(th, "No windows opened yet. Find napps to open in the Store.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
@@ -698,263 +625,10 @@ func editorBoxHeight(gtx layout.Context, th *material.Theme, ed *widget.Editor, 
 	return editorBox(gtx, th, ed, hint)
 }
 
-func layoutNappsTab(
-	gtx layout.Context,
-	th *material.Theme,
-	list *widget.List,
-	filterEd *widget.Editor,
-	cardBtns,
-	uninstBtns []widget.Clickable,
-	installedUpdateBtns []widget.Clickable,
-	openBtns,
-	authorBtns,
-	settingsBtns []widget.Clickable,
-	checkUpdBtn *widget.Clickable,
-	vis []int,
-	st backend.State,
-) layout.Dimensions {
-	if len(st.Installed) == 0 {
-		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
-		l.Color = currentTheme().muted
-		return l.Layout(gtx)
-	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// the filter box, narrowing the entries below by name, author,
-		// author name or description, and the manual update check at its
-		// right (the automatic one runs on its own after startup).
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, filterEd, "filter by name, author or description")
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					pointer.CursorPointer.Add(gtx.Ops)
-					p := currentTheme()
-					b := material.Button(th, checkUpdBtn, "\u21bb")
-					b.Background = p.chipBg
-					b.Color = p.chipFg
-					if st.UpdateCheckRunning {
-						b.Color = p.muted
-					}
-					b.TextSize = unit.Sp(15)
-					b.Inset = layout.UniformInset(unit.Dp(8))
-					return b.Layout(gtx)
-				}),
-			)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if len(vis) == 0 {
-				l := material.Body2(th, "Nothing matches the filter.")
-				l.Color = currentTheme().muted
-				return l.Layout(gtx)
-			}
-			// a grid of tiles, as many across as the window fits; a narrow
-			// window gets the one-per-row cards instead
-			return nappGrid(gtx, th, list, &installedCols, vis, func(gtx layout.Context, row int, tile bool) layout.Dimensions {
-				var cardBtn, uninstBtn *widget.Clickable
-				if row < len(cardBtns) {
-					cardBtn = &cardBtns[row]
-				}
-				if row < len(uninstBtns) {
-					uninstBtn = &uninstBtns[row]
-				}
-				// the card opens the napp page; Open launches it
-				var updateBtn, openBtn, authorBtn, settingsBtn *widget.Clickable
-				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
-					updateBtn = &installedUpdateBtns[row]
-				}
-				if row < len(openBtns) {
-					openBtn = &openBtns[row]
-				}
-				if row < len(authorBtns) {
-					authorBtn = &authorBtns[row]
-				}
-				if row < len(settingsBtns) && st.Installed[row].IsNapplet() {
-					settingsBtn = &settingsBtns[row]
-				}
-				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
-				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
-			})
-		}),
-	)
-}
-
-func layoutDiscoveryTab(
-	gtx layout.Context,
-	th *material.Theme,
-	list *widget.List,
-	filterEd *widget.Editor,
-	fetchBtn *widget.Clickable,
-	cardBtns,
-	openBtns,
-	authorBtns []widget.Clickable,
-	vis []int,
-	fetchErr string,
-	fetching bool,
-	discovery []backend.Napp,
-	lookup *backend.AddressLookup,
-	installedSet,
-	follows map[string]bool,
-) layout.Dimensions {
-	chip := func(gtx layout.Context, btn *widget.Clickable, label string, on bool) layout.Dimensions {
-		pointer.CursorPointer.Add(gtx.Ops)
-		b := material.Button(th, btn, label)
-		b.TextSize = unit.Sp(13)
-		b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
-		if on {
-			b.Background = th.Palette.ContrastBg
-		} else {
-			b.Background = currentTheme().chipBg
-			b.Color = currentTheme().chipFg
-		}
-		return b.Layout(gtx)
-	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// the filter box comes first, narrowing the entries below by name,
-		// author, author name or description, or naming one by its address,
-		// with the scope beside it: everyone's apps or just friends'.
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			scopeBtn := func(k int) layout.FlexChild {
-				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return chip(gtx, &discoScopeBtns[k], discoScopeLabels[k], discoScope == k)
-					})
-				})
-			}
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-				scopeBtn(discoScopeFriends),
-				scopeBtn(discoScopeGlobal),
-			)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-		// the kind tabs (all, napps, napplets) and, at the other end, the
-		// refresh button that asks the relays again
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			var counts [3]int
-			for _, n := range discovery {
-				if !inDiscoScope(n, follows) {
-					continue
-				}
-				counts[discoKindAll]++
-				if matchesKind(n, discoKindNapplets) {
-					counts[discoKindNapplets]++
-				} else {
-					counts[discoKindNapps]++
-				}
-			}
-			kindBtn := func(k int) layout.FlexChild {
-				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						label := discoKindLabels[k]
-						if counts[k] > 0 {
-							label += " (" + strconv.Itoa(counts[k]) + ")"
-						}
-						return chip(gtx, &discoKindBtns[k], label, discoKind == k)
-					})
-				})
-			}
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				kindBtn(discoKindAll),
-				kindBtn(discoKindNapps),
-				kindBtn(discoKindNapplets),
-				layout.Flexed(1, layout.Spacer{}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					pointer.CursorPointer.Add(gtx.Ops)
-					label := "Refresh"
-					if fetching {
-						label = "Refreshing\u2026"
-					}
-					b := material.Button(th, fetchBtn, label)
-					b.TextSize = unit.Sp(13)
-					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
-					return b.Layout(gtx)
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if fetchErr == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, fetchErr)
-				l.Color = currentTheme().danger
-				return l.Layout(gtx)
-			})
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if len(vis) == 0 {
-				msg := "No napps yet. Pick some good relays in Settings and click \"Refresh\"."
-				if fetching {
-					msg = "Searching relays\u2026"
-				}
-				if len(discovery) > 0 {
-					msg = "Nothing matches the filter."
-					if strings.TrimSpace(filterEd.Text()) == "" {
-						noun := strings.ToLower(discoKindLabels[discoKind])
-						if discoKind == discoKindAll {
-							noun = "apps"
-						}
-						switch {
-						case discoScope == discoScopeFriends && len(follows) == 0:
-							msg = "Loading who you follow…"
-						case discoScope == discoScopeFriends:
-							msg = "No " + noun + " from people you follow yet. Switch to Global to see everyone's."
-						default:
-							msg = "No " + noun + " found on these relays."
-						}
-					}
-				}
-				if lookup != nil {
-					switch {
-					case lookup.Pending:
-						msg = "Looking up that address\u2026"
-					case lookup.Err != "":
-						msg = "Couldn't open that address: " + lookup.Err + "."
-					}
-				}
-				l := material.Body2(th, msg)
-				l.Color = currentTheme().muted
-				return l.Layout(gtx)
-			}
-			// a grid of tiles, as many across as the window fits; a narrow
-			// window gets the one-per-row cards instead. The only button is
-			// Try: installing, updating and opening live in the detail tab
-			// the card opens.
-			card := func(gtx layout.Context, row int, tile bool) layout.Dimensions {
-				n := discovery[row]
-				var cardBtn, tryBtn, authorBtn *widget.Clickable
-				if row < len(cardBtns) {
-					cardBtn = &cardBtns[row]
-				}
-				if row < len(openBtns) && !installedSet[n.ID] && n.IsNapplet() {
-					tryBtn = &openBtns[row]
-				}
-				if row < len(authorBtns) {
-					authorBtn = &authorBtns[row]
-				}
-				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
-				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
-			}
-			return nappGrid(gtx, th, list, &discoCols, vis, card)
-		}),
-	)
-}
-
 // layoutDevTab is the dev-build tab for loading ephemeral napps: either a
 // dev-server url (used directly) or a local folder (served from disk by the
 // throwaway server). The cards open on tap, like the
-// installed tab's.
+// store's.
 func layoutDevTab(
 	gtx layout.Context,
 	th *material.Theme,
@@ -1122,6 +796,7 @@ func layoutConfirmLogout(
 func layoutProfile(
 	gtx layout.Context,
 	th *material.Theme,
+	storeBtn,
 	themeBtn,
 	settingsBtn,
 	logoutBtn *widget.Clickable,
@@ -1137,6 +812,17 @@ func layoutProfile(
 			t := material.H6(th, name)
 			t.Font.Weight = font.Bold
 			return t.Layout(gtx)
+		}),
+		// the store window: installed napps and discovery
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if storeBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			b := material.Button(th, storeBtn, "Store")
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if themeBtn == nil {

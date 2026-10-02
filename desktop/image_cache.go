@@ -82,9 +82,7 @@ func cachedImage(key string, load func(context.Context) ([]byte, error)) (paint.
 			}
 			e.op = paint.NewImageOp(img)
 			e.ready.Store(true)
-			if w := managerWindow(); w != nil {
-				w.Invalidate()
-			}
+			invalidateAll()
 		}()
 	})
 	if e.ready.Load() {

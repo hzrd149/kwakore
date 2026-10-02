@@ -15,43 +15,31 @@ import (
 	"gioui.org/widget/material"
 )
 
-// tab ids: the ephemeral detail tab lives at the end and vanishes the
-// moment any other tab is picked.
-const (
-	tabWindows   = 0
-	tabInstalled = 1
-	tabDiscovery = 2
-	tabDev       = 3
-	tabExtra     = 4
-)
-
-// extraTab is the ephemeral tab: either a napp page or a profile page.
-type extraTab struct {
+// storePage is a page the store opens over its lists: either a napp page or
+// a profile page.
+type storePage struct {
 	kind   string // "napp" or "profile"
 	title  string
 	nappID string
 	napp   backend.Napp // fallback copy for napps not in installed/discovery
-	pubkey string       // hex, for profile tabs (and napp author)
+	pubkey string       // hex, for profile pages (and napp author)
 }
-
-var extraTabState *extraTab
 
 // nappDetailList scrolls the napp page, whose description and file list
 // can run past the bottom of the window.
 var nappDetailList = widget.List{List: layout.List{Axis: layout.Vertical}}
 
-func openNappTab(n backend.Napp) {
+func openNappPage(n backend.Napp) {
 	pubkey := ""
 	if n.Author.Hex() != "" {
 		pubkey = n.Author.Hex()
 	}
 	nappDetailList.Position = layout.Position{}
-	extraTabState = &extraTab{kind: "napp", title: truncate(n.Label(), 18), nappID: n.ID, napp: n, pubkey: pubkey}
 	ensureProfile(pubkey)
-	setTab(tabExtra)
+	pushStorePage(&storePage{kind: "napp", title: truncate(n.Label(), 32), nappID: n.ID, napp: n, pubkey: pubkey})
 }
 
-func openProfileTab(pubkeyHex string) {
+func openProfilePage(pubkeyHex string) {
 	pubkeyHex = strings.TrimSpace(pubkeyHex)
 	if pubkeyHex == "" {
 		return
@@ -61,15 +49,12 @@ func openProfileTab(pubkeyHex string) {
 		name = name[:12] + "…"
 	}
 	if p := cachedProfile(pubkeyHex); p != nil && p.ShortName != "" {
-		name = truncate(p.ShortName, 18)
+		name = truncate(p.ShortName, 32)
 	}
-	extraTabState = &extraTab{kind: "profile", title: name, pubkey: pubkeyHex}
 	ensureProfile(pubkeyHex)
 	ensureAuthorNapps(pubkeyHex)
-	setTab(tabExtra)
+	pushStorePage(&storePage{kind: "profile", title: name, pubkey: pubkeyHex})
 }
-
-func clearExtraTab() { extraTabState = nil }
 
 // ─── cached profile + author napps ──────────────────────────────
 // Fetches run off the Gio loop; results land here and invalidate the
@@ -117,9 +102,7 @@ func ensureProfile(pubkeyHex string) {
 		profileCache[pubkeyHex] = p
 		delete(profileBusy, pubkeyHex)
 		profMu.Unlock()
-		if w := managerWindow(); w != nil {
-			w.Invalidate()
-		}
+		invalidateAll()
 	}()
 }
 
@@ -152,16 +135,14 @@ func ensureAuthorNapps(pubkeyHex string) {
 		authorNapps[pubkeyHex] = list
 		authorFetching[pubkeyHex] = false
 		authorMu.Unlock()
-		if w := managerWindow(); w != nil {
-			w.Invalidate()
-		}
+		invalidateAll()
 	}()
 }
 
-// detailNapp resolves the napp a napp tab shows: the freshest copy the
+// detailNapp resolves the napp a napp page shows: the freshest copy the
 // launcher knows (so install/uninstall/update reflect immediately),
-// falling back to the copy taken when the tab was opened.
-func detailNapp(tab *extraTab) backend.Napp {
+// falling back to the copy taken when the page was opened.
+func detailNapp(tab *storePage) backend.Napp {
 	if tab == nil {
 		return backend.Napp{}
 	}
@@ -199,7 +180,7 @@ func detailRow(th *material.Theme, label, value string) layout.FlexChild {
 func layoutNappDetail(
 	gtx layout.Context,
 	th *material.Theme,
-	tab *extraTab,
+	tab *storePage,
 	openBtn, primaryBtn, updateBtn, authorBtn, copyAddrBtn, settingsBtn *widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
@@ -416,7 +397,7 @@ func layoutNappDetail(
 func layoutProfileDetail(
 	gtx layout.Context,
 	th *material.Theme,
-	tab *extraTab,
+	tab *storePage,
 	list *widget.List,
 	cardBtns, openBtns, actionBtns, updateBtns []widget.Clickable,
 	installedSet map[string]bool,

@@ -175,8 +175,8 @@ func applyThemeMode() {
 	curTheme = p
 	activeThemeMode = mode
 	themeMu.Unlock()
-	if w := managerWindow(); changed && w != nil {
-		w.Invalidate()
+	if changed {
+		invalidateAll()
 	}
 	backend.SetTheme(p.name, p.varsJSON())
 }

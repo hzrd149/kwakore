@@ -5,7 +5,7 @@
 Verdana has two Go modules and one Android application:
 
 - `backend/` contains shared application logic, Nostr integration, storage, permissions, and the embedded web UI under `backend/webview/`. The tightly coupled core stays in the root package, with files grouped by prefix (`nap_`, `auth_`, `registry_`, `launcher_`, `window_`, `bridge_`, `nostr_`). Self-contained pieces live in subpackages (`napconfig`, `bunker`, `eventdb`, `netguard`, `qrcode`, `mobile`). Go tests and fixtures live beside the code in `*_test.go` and `testdata/`.
-- `desktop/` contains the Gio desktop launcher and its child webview host. The UI, tray, lifecycle and child-process code stay in the root `main` package; OS-facing pieces that do not touch the UI live in `desktop/internal/` (`osintegration`, `media`, `themesystem`, `instancelock`, `windowchrome`, `icon`). Fonts and other packaged resources are in `desktop/assets/`.
+- `desktop/` contains the Gio desktop launcher and its child webview host. The UI, tray, lifecycle and child-process code stay in the root `main` package: the manager window (`main.go`, `layout.go`) holds the open windows, login and prompts, and the store window (`store.go`, `store_layout.go`, `detail.go`) holds installed napps, discovery and napp/profile pages; OS-facing pieces that do not touch the UI live in `desktop/internal/` (`osintegration`, `media`, `themesystem`, `instancelock`, `windowchrome`, `icon`). Fonts and other packaged resources are in `desktop/assets/`.
 - `android/` is a Gradle/Kotlin app. Native sources are under `android/app/src/main/java/com/verdana/app/`, with resources in `res/`.
 - `.github/workflows/` documents the supported CI builds for desktop and Android.
 
