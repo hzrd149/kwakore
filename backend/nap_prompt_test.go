@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -571,4 +573,192 @@ func TestSessionGrantRecordsOnlyExplicitAnswers(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ─── intents ─────────────────────────────────────────────────────
+
+// launchTestHost opens napp windows on a recording transport and counts the
+// launches.
+type launchTestHost struct {
+	noopHost
+	mu       sync.Mutex
+	launched []string
+}
+
+func (h *launchTestHost) OpenWindow(spec WindowSpec) (Transport, error) {
+	h.mu.Lock()
+	h.launched = append(h.launched, spec.NappID)
+	h.mu.Unlock()
+	return newRecTransport(), nil
+}
+
+func (h *launchTestHost) launches() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.launched)
+}
+
+// installIntentHandler installs a napplet handling napplet:<archetype>/open
+// for the test, with a document on disk so it can be launched. Windows it
+// ends up with are closed at cleanup.
+func installIntentHandler(t *testing.T, d, archetype string) Napp {
+	t.Helper()
+	topic := "napplet:" + archetype + "/open"
+	n := Napp{
+		ID: "napplet~0123456789abcdef~" + d, D: d, Name: d, Format: FormatNapplet, Kind: KindNapplet,
+		Conventions: []NappletConvention{{ID: topic}},
+		Actions:     []string{topic},
+	}
+	dir, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>handler</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[n.ID] = n
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		for _, ci := range runningForNapp(n.ID) {
+			WindowClosed(ci.instance)
+		}
+		stateMu.Lock()
+		delete(state.InstalledNapps, n.ID)
+		stateMu.Unlock()
+	})
+	return n
+}
+
+// invokeResult posts an intent.invoke and returns its nested result.
+func invokeResult(t *testing.T, ci *Instance, rec *recTransport, id string, request map[string]any) map[string]any {
+	t.Helper()
+	post(t, ci, map[string]any{"type": "intent.invoke", "id": id, "request": request})
+	return waitID(t, rec, "intent.invoke.result", id)["result"].(map[string]any)
+}
+
+// TestIntentChooserBoundedAndCancellable: the "open with" chooser obeys the
+// prompt bounds (rate-limited when the window already holds 3 prompts) and
+// the request's lifetime (a session restart dismisses it, answering nothing
+// and remembering nothing), while an explicit pick still routes and stores
+// the archetype's default.
+func TestIntentChooserBoundedAndCancellable(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	host = &launchTestHost{}
+	a := installIntentHandler(t, "chooser-a", "chooser")
+	b := installIntentHandler(t, "chooser-b", "chooser")
+	defaultKey := intentDefaultKey("chooser")
+	t.Cleanup(func() {
+		clearSessionRule(defaultKey)
+		storeRule(defaultKey, Rule{Decision: DecisionAsk})
+	})
+	caller, rec := openNapplet(t, "chooser-caller")
+	ready(t, caller, rec, 1)
+
+	t.Run("bounded", func(t *testing.T) {
+		for i := range napMaxPendingPromptsPerWindow {
+			p := newPrompt("caller", "held "+strconv.Itoa(i), "", "", nil)
+			p.Instance = caller.instance
+			if !enqueueNappPrompt(p) {
+				t.Fatal("rig: prompt refused")
+			}
+		}
+		before := promptIDs()
+		res := invokeResult(t, caller, rec, "full", map[string]any{"archetype": "chooser", "handler": "choose"})
+		if res["ok"] != false || res["handled"] != false || res["error"] != napErrRateLimited {
+			t.Fatalf("chooser over the bound: %v", res)
+		}
+		if after := promptIDs(); !slices.Equal(before, after) {
+			t.Fatalf("the refused chooser changed the queue: %v -> %v", before, after)
+		}
+		if l := host.(*launchTestHost).launches(); len(l) != 0 {
+			t.Fatalf("launched %v", l)
+		}
+		cancelAllPrompts()
+	})
+
+	t.Run("dismissed by a session restart", func(t *testing.T) {
+		post(t, caller, map[string]any{"type": "intent.invoke", "id": "restart", "request": map[string]any{"archetype": "chooser"}})
+		waitPromptsFor(t, caller.instance, 1)
+		ready(t, caller, rec, 2)
+		waitPromptsFor(t, caller.instance, 0)
+		time.Sleep(50 * time.Millisecond)
+		for _, r := range rec.find("intent.invoke.result") {
+			if r["id"] == "restart" {
+				t.Fatalf("the old session's chooser was answered: %v", r)
+			}
+		}
+		if rule, ok := lookupRule(defaultKey); ok {
+			t.Fatalf("a dismissed chooser left a default: %+v", rule)
+		}
+		if l := host.(*launchTestHost).launches(); len(l) != 0 {
+			t.Fatalf("launched %v", l)
+		}
+	})
+
+	t.Run("an explicit pick", func(t *testing.T) {
+		post(t, caller, map[string]any{"type": "intent.invoke", "id": "pick", "request": map[string]any{"archetype": "chooser"}})
+		p := waitPromptsFor(t, caller.instance, 1)[0]
+		pick := slices.IndexFunc(p.Options, func(o PromptOption) bool { return o.NappID == b.ID })
+		if pick < 0 || len(p.Options) != 2 {
+			t.Fatalf("chooser options: %+v", p.Options)
+		}
+		AnswerPrompt(p.ID, Answer{OK: true, Index: pick, Scope: ScopeOnce})
+		res := waitID(t, rec, "intent.invoke.result", "pick")["result"].(map[string]any)
+		if res["ok"] != true || res["handler"] != b.D {
+			t.Fatalf("picked handler: %v", res)
+		}
+		if rule, ok := lookupRule(defaultKey); !ok || rule.Target != b.ID {
+			t.Fatalf("the pick was not stored as the default: %+v %v", rule, ok)
+		}
+		_ = a
+	})
+}
+
+// TestIntentColdLaunchLimited: intents that have to launch their handler
+// draw on the window's cold-launch bucket (frozen clock, burst 1): the first
+// launches, a second that needs another window answers rate-limited and
+// launches nothing, and routing to the window already open costs nothing.
+func TestIntentColdLaunchLimited(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	freezeNapNow(t)
+	h := &launchTestHost{}
+	host = h
+	alpha := installIntentHandler(t, "cold-alpha", "alpha")
+	beta := installIntentHandler(t, "cold-beta", "beta")
+	caller, rec := openNapplet(t, "cold-caller")
+	withLimits(t, caller, limitsWith(napEnvelopeLimit, map[napLimitClass]napLimitSpec{
+		limitColdLaunch: {rate.Every(10 * time.Second), 1},
+	}))
+	ready(t, caller, rec, 1)
+
+	res := invokeResult(t, caller, rec, "first", map[string]any{"archetype": "alpha", "handler": alpha.D})
+	if res["ok"] != true || res["handler"] != alpha.D {
+		t.Fatalf("first cold launch: %v", res)
+	}
+	res = invokeResult(t, caller, rec, "second", map[string]any{"archetype": "beta", "handler": beta.D})
+	if res["ok"] != false || res["error"] != napErrRateLimited {
+		t.Fatalf("second cold launch: %v", res)
+	}
+	if l := h.launches(); !slices.Equal(l, []string{alpha.ID}) {
+		t.Fatalf("launched %v, want only %s", l, alpha.ID)
+	}
+	if open := runningForNapp(beta.ID); len(open) != 0 {
+		t.Fatalf("a refused launch left a window: %v", open)
+	}
+	res = invokeResult(t, caller, rec, "warm", map[string]any{"archetype": "alpha", "handler": alpha.D})
+	if res["ok"] != true || res["handler"] != alpha.D {
+		t.Fatalf("routing to the open window: %v", res)
+	}
+	if l := h.launches(); len(l) != 1 {
+		t.Fatalf("routing to an open window launched again: %v", l)
+	}
 }
