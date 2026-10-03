@@ -73,7 +73,10 @@ func broadcastNappletTheme() {
 // nappletStorageQuota is NAP-STORAGE's recommended per-napplet budget.
 const nappletStorageQuota = 512 * 1024
 
-var errNappletQuota = errors.New("quota exceeded")
+// napQuotaExceeded is NAP-STORAGE's code for a write over the budget.
+const napQuotaExceeded = "quota exceeded"
+
+var errNappletQuota = errors.New(napQuotaExceeded)
 
 // napStoreID returns a domain-separated, collision-resistant storage key.
 // NAP-STORAGE requires shared data to be isolated by address and artifact;
@@ -106,14 +109,26 @@ type napStorageReq struct {
 func (c *napCall) storageReq() (napStorageReq, bool) {
 	var r napStorageReq
 	if err := c.decode(&r); err != nil {
-		c.reply(map[string]any{"error": "invalid request"})
+		c.failWith(napErrInvalid)
 		return r, false
 	}
 	if r.Scope != "" && r.Scope != "shared" && r.Scope != "instance" {
-		c.reply(map[string]any{"error": "invalid scope"})
+		c.failWith(napErrInvalid)
 		return r, false
 	}
 	return r, true
+}
+
+// storageFailed answers a write or remove that did not happen: over the
+// quota is NAP-STORAGE's own code, anything else is the launcher's problem
+// and its details stay in the log (D-07).
+func (c *napCall) storageFailed(err error) {
+	if errors.Is(err, errNappletQuota) {
+		c.reply(map[string]any{"error": napQuotaExceeded})
+		return
+	}
+	log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Str("type", c.Type).Msg("napplet storage failed")
+	c.failWith(napErrInternal)
 }
 
 func napStorageGet(c *napCall) {
@@ -122,7 +137,7 @@ func napStorageGet(c *napCall) {
 		return
 	}
 	if r.Key == nil {
-		c.reply(map[string]any{"error": "missing key"})
+		c.failWith(napErrInvalid)
 		return
 	}
 	storeID := napStoreID(c, r.Scope)
@@ -140,11 +155,11 @@ func napStorageSet(c *napCall) {
 		return
 	}
 	if r.Key == nil || r.Value == nil {
-		c.reply(map[string]any{"error": "missing key or value"})
+		c.failWith(napErrInvalid)
 		return
 	}
 	if err := napStorageSetValue(c.ci, napStoreID(c, r.Scope), *r.Key, *r.Value); err != nil {
-		c.reply(map[string]any{"error": err.Error()})
+		c.storageFailed(err)
 		return
 	}
 	c.reply(nil)
@@ -156,11 +171,11 @@ func napStorageRemove(c *napCall) {
 		return
 	}
 	if r.Key == nil {
-		c.reply(map[string]any{"error": "missing key"})
+		c.failWith(napErrInvalid)
 		return
 	}
 	if _, err := napStorageRemoveValue(c.ci, napStoreID(c, r.Scope), *r.Key); err != nil {
-		c.reply(map[string]any{"error": err.Error()})
+		c.storageFailed(err)
 		return
 	}
 	c.reply(nil)
@@ -238,11 +253,20 @@ func napLinkOpen(c *napCall) {
 		detail = "The napplet describes this link as: " + label
 	}
 	c.async(func(context.Context) {
-		if !askApproval(c.ci, PermOpenLink, "open a link in your browser", detail, preview(link, 200)) {
+		ok, err := c.approve(PermOpenLink, "open a link in your browser", detail, preview(link, 200))
+		if err != nil {
+			c.failForPrompt(err)
+			return
+		}
+		if !ok {
 			napLinkDenied(c, "user-denied")
 			return
 		}
-		if err := openExternalLink(link); err != nil {
+		if err := c.openLink(link); err != nil {
+			if errors.Is(err, errSinkRefused) {
+				// already answered
+				return
+			}
 			log.Warn().Err(err).Str("url", link).Msg("approved NAP-LINK request could not be opened")
 			napLinkDenied(c, "blocked-by-policy")
 			return
