@@ -84,6 +84,7 @@ require (
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839 // indirect
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e // indirect
 	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

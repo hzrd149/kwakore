@@ -1,6 +1,10 @@
 package backend
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/time/rate"
+)
 
 // Every napplet-facing limit lives in this file (D-14): what one envelope may
 // weigh, how long a correlation id may be, and how long a prompt a request
@@ -57,6 +61,149 @@ const (
 	// napDeadlineStorage matches the storage shim's 5 s timeout.
 	napDeadlineStorage = 5 * time.Second
 )
+
+// Counts declared here and enforced elsewhere (D-14, D-15, D-16).
+const (
+	// napQueueSlots is the dispatch queue per window; a full queue answers
+	// rate-limited instead of blocking the reader (D-16, the host page's
+	// MAX_PENDING). Enforced by napEnqueue.
+	napQueueSlots = 256
+	// napMaxPendingPromptsPerWindow and napMaxPendingPromptsGlobal bound the
+	// prompts waiting for the user; more are denied rate-limited (D-15).
+	// Enforced by 02-06.
+	napMaxPendingPromptsPerWindow = 3
+	napMaxPendingPromptsGlobal    = 32
+	// resourceMaxInFlight is NAP-RESOURCE's "10 in-flight" (RS-5). Enforced
+	// by 02-07.
+	resourceMaxInFlight = 10
+	// incMaxChannels bounds the INC channels a window is an end of (I-3).
+	// Enforced by 02-07.
+	incMaxChannels = 32
+	// uploadMaxActive bounds the uploads pending or uploading per window
+	// (U-4). Enforced by 02-07.
+	uploadMaxActive = 4
+)
+
+// ─── rate limits ─────────────────────────────────────────────────
+
+// Rate limits are token buckets (golang.org/x/time/rate, D-13), one set per
+// window (napSession.limits). They never block: a request over its limit is
+// answered rate-limited in its route's shape (reply-less types are dropped),
+// and only that window is affected. They never reset with the session
+// either: a napplet that reloads its frame must not get a full set of
+// tokens back for it, the same reason configOpenedAt survives resets.
+
+// napLimitClass is a category of request with a bucket of its own (D-14).
+// limitNone, the zero value, is charged nothing beyond the envelope bucket.
+type napLimitClass uint8
+
+const (
+	limitNone napLimitClass = iota
+	// limitPrompt: creating a prompt (charged by 02-06)
+	limitPrompt
+	// limitLink: link.open
+	limitLink
+	// limitIntent: intent.invoke
+	limitIntent
+	// limitColdLaunch: an intent that has to launch a napp first (charged by
+	// 02-06)
+	limitColdLaunch
+	// limitUpload: upload.upload
+	limitUpload
+	// limitResource: resource fetches (02-07 charges them per URL)
+	limitResource
+	// limitIncOpen: inc.channel.open
+	limitIncOpen
+	// limitIncEmit: inc.emit, inc.channel.emit, inc.channel.broadcast
+	limitIncEmit
+	// limitPublish: everything that signs and publishes
+	limitPublish
+	// limitNotify and limitNotifyUrgent: notifications (charged by 02-06)
+	limitNotify
+	limitNotifyUrgent
+	// limitOpenSettings: config.openSettings (charged by 02-06)
+	limitOpenSettings
+
+	limitCount
+)
+
+// napLimitSpec is one bucket: its refill rate and its size.
+type napLimitSpec struct {
+	every rate.Limit
+	burst int
+}
+
+// napEnvelopeLimit is every envelope a window sends, whatever its type
+// (D-14: about 200/s, burst 400).
+var napEnvelopeLimit = napLimitSpec{rate.Limit(200), 400}
+
+// napLimitSpecs are the category buckets, by class.
+var napLimitSpecs = [limitCount]napLimitSpec{
+	// L-1: a napplet that keeps asking gets backed off
+	limitPrompt: {rate.Every(6 * time.Second), 5},
+	// L-1: links open in the user's browser, one prompt each
+	limitLink: {rate.Every(2 * time.Second), 5},
+	// N-5: intents route to other napps
+	limitIntent: {rate.Every(time.Second), 10},
+	// D-14: cold launches per minute (6/min, three at once)
+	limitColdLaunch: {rate.Every(10 * time.Second), 3},
+	// U-4: uploads are big and go to the network
+	limitUpload: {rate.Every(6 * time.Second), 5},
+	// D-19, NAP-RESOURCE RS-5: 60 requests a minute, bulk counted per URL;
+	// the burst covers resource.info's maxUrls of 100 (Pitfall 10)
+	limitResource: {rate.Every(time.Second), 100},
+	// I-3: channel opens
+	limitIncOpen: {rate.Every(time.Second), 10},
+	// I-3: emits are cheap but fan out to every subscriber
+	limitIncEmit: {rate.Limit(50), 100},
+	// research A6: an "always allow publish" rule must not let a napplet
+	// sign and publish at the envelope rate
+	limitPublish: {rate.Every(time.Second), 10},
+	// nap_notify.go's 20 notifications a minute
+	limitNotify: {rate.Every(3 * time.Second), 20},
+	// nap_notify.go's 3 urgent notifications a minute
+	limitNotifyUrgent: {rate.Every(20 * time.Second), 3},
+	// nap_config.go's configOpenSettingsEvery: one settings window per 2 s
+	limitOpenSettings: {rate.Every(2 * time.Second), 1},
+}
+
+// napLimiter is one window's buckets. A nil *napLimiter allows everything
+// (a napCall built by hand in a test has no session limiter). rate.Limiter
+// is safe for concurrent use, so callers take no lock of their own.
+type napLimiter struct {
+	envelope *rate.Limiter
+	classes  [limitCount]*rate.Limiter
+}
+
+// newNapLimiter is a window's buckets at the defaults above.
+func newNapLimiter() *napLimiter { return newNapLimiterWith(napEnvelopeLimit, napLimitSpecs) }
+
+// newNapLimiterWith builds buckets from the given specs (tests use tiny ones).
+func newNapLimiterWith(envelope napLimitSpec, classes [limitCount]napLimitSpec) *napLimiter {
+	l := &napLimiter{envelope: rate.NewLimiter(envelope.every, envelope.burst)}
+	for class := limitNone + 1; class < limitCount; class++ {
+		spec := classes[class]
+		l.classes[class] = rate.NewLimiter(spec.every, spec.burst)
+	}
+	return l
+}
+
+// allow takes n tokens from class's bucket, or reports that it cannot. More
+// than the bucket's burst never fits. limitNone always fits.
+func (l *napLimiter) allow(class napLimitClass, n int) bool {
+	if l == nil || class == limitNone || class >= limitCount {
+		return true
+	}
+	return l.classes[class].AllowN(napNow(), n)
+}
+
+// allowEnvelope takes one token from the envelope bucket.
+func (l *napLimiter) allowEnvelope() bool {
+	if l == nil {
+		return true
+	}
+	return l.envelope.AllowN(napNow(), 1)
+}
 
 // napNow is the clock every NAP limit reads. Tests freeze it, so a bucket's
 // count does not drift while a test loop runs (Pitfall 7).
