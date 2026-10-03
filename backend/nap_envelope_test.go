@@ -236,6 +236,17 @@ func TestNapEnqueueBounds(t *testing.T) {
 		t.Fatalf("keys after refusals: %v", got)
 	}
 
+	// an upload over its route cap but under the hard cap gets its spec's
+	// too-large answer rather than nothing: upload.upload has no shim
+	// timeout, so a dropped one would wait forever (WR-04)
+	if napMaxEnvelope <= napMaxRawUpload {
+		t.Fatalf("hard cap %d is not above upload.upload's cap %d", napMaxEnvelope, napMaxRawUpload)
+	}
+	post(t, ci, padded(t, map[string]any{"type": "upload.upload", "id": "upload-over"}, napMaxRawUpload+1))
+	if got := waitID(t, rec, "upload.upload.result", "upload-over"); got["error"] != "file too large" {
+		t.Fatalf("upload over its cap: %v", got)
+	}
+
 	// the hard cap drops without a word, whatever the route
 	napSettled(t, ci, rec)
 	before := len(rec.types())

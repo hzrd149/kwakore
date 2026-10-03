@@ -4,11 +4,12 @@ import "encoding/json"
 
 // MaxInboundWireMsg is the largest wire message a window may send up, in raw
 // bytes before any JSON decoding. What a window sends is napplet-originated
-// input (D-12, D-17): the cap is the host page's 24 MiB upload envelope plus
-// room for the rpc wrapping around it. The desktop pipe reader (one message
-// per line) and Android's HandleWireMessage (one message per string) both
-// enforce it; the Go envelope caps on nap.msg apply after it, to what got
-// through.
+// input (D-12, D-17): the cap is the host page's 24 MiB wire bound on an
+// envelope (MAX_WIRE_BYTES, measured after every escape the carriers add)
+// plus room for the rpc wrapping around it. The desktop pipe reader (one
+// message per line) and Android's HandleWireMessage (one message per string)
+// both enforce it; the Go envelope caps on nap.msg apply after it, to what
+// got through.
 const MaxInboundWireMsg = 24<<20 + 1<<20
 
 // WireMsg is the whole protocol between the backend and a napp's shell (the

@@ -3,6 +3,7 @@ package backend
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -111,5 +112,47 @@ func TestPromptAnswerOnlyFromOwner(t *testing.T) {
 	a, b := newPromptID(), newPromptID()
 	if a <= 0 || b <= 0 || a >= 1<<53 || b >= 1<<53 || a == b || b == a+1 {
 		t.Fatalf("prompt ids %d, %d", a, b)
+	}
+}
+
+// respTransport records the rpc answers a window is sent.
+type respTransport struct {
+	mu    sync.Mutex
+	resps []WireMsg
+}
+
+func (r *respTransport) Send(m WireMsg) {
+	if m.T != "resp" {
+		return
+	}
+	r.mu.Lock()
+	r.resps = append(r.resps, m)
+	r.mu.Unlock()
+}
+func (r *respTransport) Focus() {}
+func (r *respTransport) Close() {}
+
+// TestHandleWireMessageAnswersOversizedRPC: on Android an rpc over
+// MaxInboundWireMsg is not parsed, but it is answered "too-large" by the id
+// at its start, so the host page's ordered lane is not blocked behind a
+// request that never settles (WR-04). Anything whose id cannot be read
+// cheaply, or that is not an rpc, is still dropped.
+func TestHandleWireMessageAnswersOversizedRPC(t *testing.T) {
+	setupNapTest(t)
+	ci, _ := openNapplet(t, "oversized-rpc")
+	rt := &respTransport{}
+	ci.attach(rt)
+
+	big := strings.Repeat("x", MaxInboundWireMsg)
+	HandleWireMessage(ci.instance, `{"t":"rpc","id":7,"method":"nap.msg","params":"`+big+`"}`)
+	// the params ahead of the id: nothing cheap to answer by
+	HandleWireMessage(ci.instance, `{"t":"rpc","params":"`+big+`","id":8}`)
+	// not an rpc
+	HandleWireMessage(ci.instance, `{"t":"promptAnswer","id":9,"params":"`+big+`"}`)
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.resps) != 1 || rt.resps[0].ID != 7 || rt.resps[0].Error != "too-large" {
+		t.Fatalf("answers %+v, want one too-large for id 7", rt.resps)
 	}
 }

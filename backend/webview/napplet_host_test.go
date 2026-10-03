@@ -712,3 +712,65 @@ return out
 		}
 	}
 }
+
+// WR-04: the host page measures an envelope the way Go and the wire do, not
+// in UTF-16 units. Multi-byte text that fits 1 MiB of UTF-16 but not 1 MiB of
+// UTF-8 is refused too-large, as Go would refuse it; an upload whose escapes
+// would push its wire line past Go's cap is refused "file too large" before
+// it reaches Go (where it would close the window); and an envelope within
+// both bounds still reaches Go.
+func TestNappletHostMeasuresWireBytes(t *testing.T) {
+	var got []struct {
+		Posted  []json.RawMessage `json:"posted"`
+		Reached int               `json:"reached"`
+	}
+	runHost(t, `
+handlers["nap.boot"] = () => ({ srcdoc: "<p>sizes</p>", title: "sizes" })
+handlers["nap.msg"] = () => null
+`, `
+await flush()
+const f = appended[0]
+const MiB = 1024 * 1024
+const probe = async data => {
+  const before = f.contentWindow.posted.length
+  const msgsBefore = count("nap.msg")
+  fireMessage(f.contentWindow, data)
+  await flush()
+  return { posted: f.contentWindow.posted.slice(before), reached: count("nap.msg") - msgsBefore }
+}
+return [
+  // 600 Ki UTF-16 units, 1.2 MB of UTF-8
+  await probe({ type: "storage.get", id: "utf8", key: "k", pad: "\u00e9".repeat(600 * 1024) }),
+  // 20 MiB of UTF-16, but 40 MiB once the child escapes every "<"
+  await probe({ type: "upload.upload", id: "escapes", pad: "<".repeat(4 * MiB) + "x".repeat(16 * MiB) }),
+  // within both bounds
+  await probe({ type: "storage.get", id: "fits", key: "k", pad: "x".repeat(900 * 1024) }),
+]
+`, &got)
+
+	if len(got) != 3 {
+		t.Fatalf("%d probes ran", len(got))
+	}
+	want := []string{
+		`{"type":"storage.get.result","error":"too-large","id":"utf8"}`,
+		`{"type":"upload.upload.result","error":"file too large","id":"escapes"}`,
+	}
+	for i, w := range want {
+		if got[i].Reached != 0 {
+			t.Errorf("probe %d reached Go %d times, want refused by the page", i, got[i].Reached)
+		}
+		if len(got[i].Posted) != 1 {
+			t.Errorf("probe %d posted %s, want one refusal", i, got[i].Posted)
+			continue
+		}
+		var a, b any
+		_ = json.Unmarshal(got[i].Posted[0], &a)
+		_ = json.Unmarshal([]byte(w), &b)
+		if !reflect.DeepEqual(a, b) {
+			t.Errorf("probe %d:\n got  %s\n want %s", i, got[i].Posted[0], w)
+		}
+	}
+	if got[2].Reached != 1 || len(got[2].Posted) != 0 {
+		t.Errorf("an envelope within the bounds: reached %d, posted %s", got[2].Reached, got[2].Posted)
+	}
+}

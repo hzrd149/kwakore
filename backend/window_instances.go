@@ -311,14 +311,24 @@ var wireDropBurst = &zerolog.BurstSampler{Burst: 5, Period: time.Minute}
 // HandleWireMessage takes what a napp's shell sent up, as raw JSON. Platforms
 // carrying the protocol as strings (Android over JNI) use this. Android hands
 // the whole message to Go as one string with no framing cap of its own, so
-// this is that cap (D-17): a message longer than MaxInboundWireMsg is dropped
-// before it is parsed, the same bound the desktop pipe reader applies per
-// line.
+// this is that cap (D-17): a message longer than MaxInboundWireMsg is never
+// parsed, the same bound the desktop pipe reader applies per line.
+//
+// An oversized rpc is still answered, with the error "too-large", when its id
+// can be read from the start of the message: the host page sends one rpc at a
+// time down an ordered lane, and an rpc that never settles would block
+// everything behind it, its own nap.loaded and a dev reload's nap.start
+// included (WR-04). Anything else oversized is dropped.
 func HandleWireMessage(instance string, raw string) {
 	if len(raw) > MaxInboundWireMsg {
 		l := log.Sample(wireDropBurst)
 		l.Warn().Str("instance", instance).Int("len", len(raw)).
-			Msg("dropping an oversized message from napp")
+			Msg("refusing an oversized message from napp")
+		if id, ok := oversizedRPCID(raw); ok {
+			if ci := lookupInstance(instance); ci != nil {
+				ci.send(WireMsg{T: "resp", ID: id, Error: "too-large"})
+			}
+		}
 		return
 	}
 	m, err := ParseWireMsg(raw)
@@ -327,6 +337,57 @@ func HandleWireMessage(instance string, raw string) {
 		return
 	}
 	HandleMessage(instance, m)
+}
+
+// oversizedRPCPrefix is how much of an oversized message oversizedRPCID
+// reads: the shells write "t" and "id" ahead of the params.
+const oversizedRPCPrefix = 4 << 10
+
+// oversizedRPCID reads the id of an rpc from the start of a message too large
+// to parse, without decoding the rest: the top-level "t" must be "rpc" and an
+// integer "id" must come before the scan runs out of the prefix.
+func oversizedRPCID(raw string) (int, bool) {
+	prefix := raw[:min(len(raw), oversizedRPCPrefix)]
+	dec := json.NewDecoder(strings.NewReader(prefix))
+	dec.UseNumber()
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return 0, false
+	}
+	var t string
+	var id int
+	haveID := false
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return 0, false
+		}
+		var val json.RawMessage
+		switch key {
+		case "t":
+			if dec.Decode(&t) != nil {
+				return 0, false
+			}
+		case "id":
+			var n json.Number
+			if dec.Decode(&n) != nil {
+				return 0, false
+			}
+			v, err := strconv.Atoi(n.String())
+			if err != nil {
+				return 0, false
+			}
+			id, haveID = v, true
+		default:
+			// a value that runs past the prefix ends the scan
+			if dec.Decode(&val) != nil {
+				return 0, false
+			}
+		}
+		if t != "" && haveID {
+			break
+		}
+	}
+	return id, t == "rpc" && haveID
 }
 
 // HandleMessage takes a parsed message from a napp's shell.

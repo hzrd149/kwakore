@@ -13,21 +13,25 @@ import (
 // whatever it likes, so Go checks everything again after decoding.
 //
 // Sizes count bytes of the envelope's JSON as Go receives it (UTF-8, after the
-// host page's JSON-string wrapping is undone). The host page counts UTF-16
-// code units, so a value heavy in multi-byte text or escapes can pass the
-// page's cap and still be too large here; it then gets a clear too-large
-// answer, never a hang. Every comparison is exact: len > cap rejects,
-// len == cap is accepted.
+// host page's JSON-string wrapping is undone). The host page counts the same
+// UTF-8 bytes against its own caps, and also what the envelope takes on the
+// wire once escaped (its wireBytes), so whatever it accepts fits the wire
+// line cap (MaxInboundWireMsg). Every envelope that reaches napEnqueue is
+// therefore below napMaxEnvelope, and one over its route's cap gets that
+// route's too-large answer (upload.upload's "file too large"), never a hang.
+// Every comparison is exact: len > cap rejects, len == cap is accepted.
 
 const (
-	// napMaxEnvelope is the hard cap on one envelope (D-09): the largest
-	// route cap (upload.upload). Anything above it is dropped unanswered;
-	// the wire line cap (MaxInboundWireMsg, 02-02) sits just above it.
-	napMaxEnvelope = 24 << 20
-	// napMaxParams caps the nap.msg params before they are unquoted: the
-	// host page sends the envelope as a JSON string, so escapes can double
-	// it, plus room for the quotes (D-09).
-	napMaxParams = 2*napMaxEnvelope + 1<<20
+	// napMaxEnvelope is the hard cap on one envelope (D-09). It is the wire
+	// line cap, strictly above the largest route cap (upload.upload's
+	// napMaxRawUpload), so an envelope between the two still reaches its
+	// route's too-large answer (WR-04). Only input that bypassed the wire cap
+	// can be above it, and that is dropped unanswered.
+	napMaxEnvelope = MaxInboundWireMsg
+	// napMaxParams caps the nap.msg params before they are unquoted. The
+	// params arrive inside a wire message, which MaxInboundWireMsg already
+	// bounds, so a larger cap here could never be reached (D-09).
+	napMaxParams = MaxInboundWireMsg
 
 	// napDefaultMaxRaw is a route's cap unless it declares its own (D-09).
 	napDefaultMaxRaw = 256 << 10

@@ -51,7 +51,11 @@
       if (!waiter) return
       pending.delete(msg.id)
       if (msg.error) {
-        waiter.reject(new Error(msg.error))
+        // Go answers an rpc it refused for its size with the bare NAP code
+        // (HandleWireMessage), so the request fails as too-large
+        const err = new Error(msg.error)
+        if (msg.error === "too-large") err.napCode = "too-large"
+        waiter.reject(err)
         return
       }
       try {
@@ -70,9 +74,15 @@
 
   // Ordinary NAP envelopes stay small. NAP-UPLOAD may carry up to 16 MiB of
   // raw bytes; base64 plus its JSON envelope needs a larger transport bound.
+  // Both count UTF-8 bytes of the envelope's JSON, as Go's route caps do.
+  // MAX_WIRE_BYTES bounds what any envelope takes on its way to Go
+  // (wireBytes): Go's line cap (MaxInboundWireMsg, 25 MiB) less room for the
+  // rpc's own wrapping, so an envelope this page accepts never closes the
+  // window for its size.
   const MAX_ENVELOPE = 1024 * 1024
   const MAX_UPLOAD_BYTES = 16 * 1024 * 1024
   const MAX_UPLOAD_ENVELOPE = 24 * 1024 * 1024
+  const MAX_WIRE_BYTES = 24 * 1024 * 1024
 
   // napError is a failure the host page answers itself, tagged with the
   // generic code (D-07) Go would have failed the request with
@@ -219,7 +229,9 @@
       }
       if (typeof json !== "string") throw napError("unencodable NAP envelope", "invalid-request")
       const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
-      if (json.length > limit) throw napError("NAP envelope is too large", "too-large")
+      if (utf8Length(json) > limit || wireBytes(json) > MAX_WIRE_BYTES) {
+        throw napError("NAP envelope is too large", "too-large")
+      }
       return rpc("nap.msg", json)
     }).then(deliver, err => {
       console.error("[napplet-host]", err)
@@ -321,6 +333,19 @@
   const MAX_ID_BYTES = 128
   const own = (obj, key) => obj != null && Object.prototype.hasOwnProperty.call(obj, key)
   const utf8Length = s => new TextEncoder().encode(s).length
+
+  // wireBytes is how many bytes an envelope's JSON takes on its way to Go.
+  // The rpc carries it as a JSON string (encode escapes " and \), and the
+  // desktop child writes that string into its JSON line once more, which
+  // escapes " and \ again and HTML-escapes <, > and & (and U+2028/U+2029)
+  // as \uXXXX. Android's carrier escapes less, so this bounds both.
+  const WIRE_EXTRA = { '"': 1, "\\": 1, "<": 5, ">": 5, "&": 5, "\u2028": 3, "\u2029": 3 }
+  const wireBytes = json => {
+    const quoted = JSON.stringify(json)
+    let extra = 0
+    for (const m of quoted.matchAll(/["\\<>&\u2028\u2029]/g)) extra += WIRE_EXTRA[m[0]]
+    return utf8Length(quoted) + extra
+  }
 
   // napCodeOf is the generic code a failure carries; anything untagged is a
   // failed rpc
