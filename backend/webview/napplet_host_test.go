@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -484,5 +485,230 @@ return {
 	// the trusted calls keep their place: after every queued envelope
 	if !slices.Equal(got.LaneOrder, []string{"nap.msg", "nap.loaded", "nap.start"}) {
 		t.Errorf("lane tail = %v, want the queued envelopes, then nap.loaded, then nap.start", got.LaneOrder)
+	}
+}
+
+// ─── refusals ───────────────────────────────────────────────────────
+
+// loadFailFixture is ../testdata/nap-fail-envelopes.json, the failure
+// envelopes Go's failWith and the host page's refuse must both build
+// (TestGoFailWithMatchesSharedFixture is the Go side).
+func loadFailFixture(t *testing.T) (raw []byte, cases []struct {
+	Name   string          `json:"name"`
+	Code   string          `json:"code"`
+	Expect json.RawMessage `json:"expect"`
+}) {
+	t.Helper()
+	raw, err := os.ReadFile("../testdata/nap-fail-envelopes.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Cases []struct {
+			Name   string          `json:"name"`
+			Code   string          `json:"code"`
+			Expect json.RawMessage `json:"expect"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Cases) == 0 {
+		t.Fatal("nap-fail-envelopes.json has no cases")
+	}
+	return raw, f.Cases
+}
+
+// failShapesJSON is the FAIL_SHAPES table between its markers, as shipped.
+func failShapesJSON(t *testing.T) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(nappletHostJS, "/* nap-fail-shapes:begin */")
+	body, _, ok2 := strings.Cut(rest, "/* nap-fail-shapes:end */")
+	if !ok || !ok2 {
+		t.Fatal("napplet-host.js has no FAIL_SHAPES markers")
+	}
+	return body
+}
+
+// failModes drives a request into each of the host page's own failures:
+// internal-error (nap.msg fails), too-large (past every envelope bound),
+// rate-limited (MAX_PENDING envelopes already in the lane) and
+// invalid-request (an envelope that cannot be encoded). Each returns what
+// the frame was posted for that one request.
+const failModes = `
+const failOnce = async (f, code, request) => {
+  const before = f.contentWindow.posted.length
+  const msgsBefore = count("nap.msg")
+  // a shallow copy, not a JSON round trip: ids such as Infinity must reach
+  // the host page as they are
+  const data = Object.assign({}, request)
+  let reached
+  if (code === "internal-error") {
+    handlers["nap.msg"] = () => ({ __bridge_error: "boom" })
+    fireMessage(f.contentWindow, data)
+    await flush()
+    reached = count("nap.msg") - msgsBefore
+  } else if (code === "too-large") {
+    handlers["nap.msg"] = () => null
+    // one past the bound for this type: upload.upload gets 24 MiB, the rest 1 MiB
+    data.pad = "x".repeat((data.type === "upload.upload" ? 24 : 1) * 1024 * 1024 + 1)
+    fireMessage(f.contentWindow, data)
+    await flush()
+    reached = count("nap.msg") - msgsBefore
+  } else if (code === "invalid-request") {
+    handlers["nap.msg"] = () => null
+    data.self = data
+    fireMessage(f.contentWindow, data)
+    await flush()
+    reached = count("nap.msg") - msgsBefore
+  } else if (code === "rate-limited") {
+    handlers["nap.msg"] = () => null
+    hold("nap.msg")
+    // reply-less fillers: when they drain they post nothing
+    for (let i = 0; i < MAX_PENDING; i++) fireMessage(f.contentWindow, { type: "relay.close", subId: "fill" + i })
+    await flush()
+    fireMessage(f.contentWindow, data)
+    await flush()
+    const posted = f.contentWindow.posted.slice(before)
+    unhold("nap.msg")
+    release("nap.msg")
+    await flush(10)
+    // only the first filler was in flight: the request itself never reached Go
+    reached = count("nap.msg") - msgsBefore - MAX_PENDING
+    return { posted, reached, drained: f.contentWindow.posted.length - before - posted.length }
+  } else {
+    throw new Error("no way to make the host page fail with " + code)
+  }
+  return { posted: f.contentWindow.posted.slice(before), reached, drained: 0 }
+}
+`
+
+func maxPending(t *testing.T) string {
+	t.Helper()
+	m := maxPendingRE.FindStringSubmatch(nappletHostJS)
+	if m == nil {
+		t.Fatal("napplet-host.js declares no MAX_PENDING")
+	}
+	return m[1]
+}
+
+// DISP-02: for every case of the shared fixture the host page posts exactly
+// the envelope Go's failWith sends for it (or nothing when Go sends nothing),
+// whichever of its own failures refused the request.
+func TestNappletHostRefusalsMatchSharedFixture(t *testing.T) {
+	raw, cases := loadFailFixture(t)
+	var got []struct {
+		Posted  []json.RawMessage `json:"posted"`
+		Reached int               `json:"reached"`
+		Drained int               `json:"drained"`
+	}
+	runHost(t, `
+handlers["nap.boot"] = () => ({ srcdoc: "<p>refusals</p>", title: "refusals" })
+const FIXTURE = `+string(raw)+`
+const MAX_PENDING = `+maxPending(t)+`
+`+failModes, `
+await flush()
+const f = appended[0]
+const out = []
+for (const c of FIXTURE.cases) out.push(await failOnce(f, c.code, c.request))
+return out
+`, &got)
+
+	if len(got) != len(cases) {
+		t.Fatalf("harness ran %d cases, fixture has %d", len(got), len(cases))
+	}
+	for i, tc := range cases {
+		r := got[i]
+		// the request must have failed in the host page, never in Go
+		wantReached := 0
+		if tc.Code == "internal-error" {
+			wantReached = 1
+		}
+		if r.Reached != wantReached {
+			t.Errorf("%s: %d nap.msg rpcs for the request, want %d", tc.Name, r.Reached, wantReached)
+		}
+		if r.Drained != 0 {
+			t.Errorf("%s: the drained fillers posted %d messages", tc.Name, r.Drained)
+		}
+		var want any
+		if err := json.Unmarshal(tc.Expect, &want); err != nil {
+			t.Fatalf("%s: expect: %v", tc.Name, err)
+		}
+		if want == nil {
+			if len(r.Posted) != 0 {
+				t.Errorf("%s: host page posted %s, want nothing", tc.Name, r.Posted)
+			}
+			continue
+		}
+		if len(r.Posted) != 1 {
+			t.Errorf("%s: host page posted %d messages %s, want exactly one", tc.Name, len(r.Posted), r.Posted)
+			continue
+		}
+		var posted any
+		if err := json.Unmarshal(r.Posted[0], &posted); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(posted, want) {
+			t.Errorf("%s:\n got  %s\n want %s", tc.Name, r.Posted[0], tc.Expect)
+		}
+	}
+}
+
+// NIP-5D, A16, D-11: whatever fails, the host page never answers an unknown
+// type, a reply-less type (resource.cancel's id names another request), an
+// id Go would not echo, or a subscription without a valid subId.
+func TestNappletHostRefusesNothingItMustNotAnswer(t *testing.T) {
+	var got []struct {
+		Label   string            `json:"label"`
+		Posted  []json.RawMessage `json:"posted"`
+		Reached int               `json:"reached"`
+	}
+	runHost(t, `
+handlers["nap.boot"] = () => ({ srcdoc: "<p>silent</p>", title: "silent" })
+const SHAPES = `+failShapesJSON(t)+`
+const MAX_PENDING = `+maxPending(t)+`
+`+failModes, `
+await flush()
+const f = appended[0]
+const requests = []
+// unknown types, including ones that name an Object.prototype member
+for (const type of ["nope.unknown", "__proto__", "constructor", "toString", "hasOwnProperty", "relay.subscribe.result", "shell.ready", ""]) {
+  requests.push({ type, id: "u", subId: "s" })
+}
+// every reply-less type, even carrying an id and a subId
+for (const type of Object.keys(SHAPES)) {
+  if (SHAPES[type].kind === "none") requests.push({ type, id: "n", subId: "s" })
+}
+// ids Go would not echo, on a type that answers
+for (const id of [{}, [], true, null, "a".repeat(129), "\u00e9".repeat(65), Infinity, NaN]) {
+  requests.push({ type: "storage.get", id, key: "k" })
+}
+requests.push({ type: "storage.get", key: "k" })
+// subscriptions without a valid subId, or with a bad id
+for (const type of Object.keys(SHAPES)) {
+  if (SHAPES[type].kind !== "lifecycle") continue
+  for (const subId of [undefined, "", 5, null, "a".repeat(129)]) requests.push({ type, subId })
+  requests.push({ type, id: {}, subId: "s" })
+}
+const out = []
+for (const code of ["internal-error", "too-large", "rate-limited"]) {
+  for (const request of requests) {
+    const r = await failOnce(f, code, request)
+    out.push({ label: code + " " + JSON.stringify(request).slice(0, 80), posted: r.posted, reached: r.reached })
+  }
+}
+return out
+`, &got)
+
+	if len(got) < 3*20 {
+		t.Fatalf("only %d probes ran", len(got))
+	}
+	for _, r := range got {
+		if len(r.Posted) != 0 {
+			t.Errorf("%s: host page answered %s", r.Label, r.Posted)
+		}
+		if strings.HasPrefix(r.Label, "internal-error ") && r.Reached != 1 {
+			t.Errorf("%s: %d nap.msg rpcs, want the request to have reached (and failed in) the rpc", r.Label, r.Reached)
+		}
 	}
 }

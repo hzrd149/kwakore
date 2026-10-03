@@ -1,0 +1,634 @@
+{
+  "cases": [
+    {
+      "name": "relay.publish fails in its own result with ok false",
+      "type": "relay.publish",
+      "request": {
+        "type": "relay.publish",
+        "id": "p1",
+        "event": {
+          "kind": 1,
+          "content": "hi",
+          "tags": [],
+          "created_at": 1
+        }
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "relay.publish.result",
+        "id": "p1",
+        "ok": false,
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "outbox.publish too large",
+      "type": "outbox.publish",
+      "request": {
+        "type": "outbox.publish",
+        "id": "op1",
+        "event": {}
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "outbox.publish.result",
+        "id": "op1",
+        "ok": false,
+        "error": "too-large"
+      }
+    },
+    {
+      "name": "common.follows keeps its pubkeys list beside ok false",
+      "type": "common.follows",
+      "request": {
+        "type": "common.follows",
+        "id": "cf1"
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "common.follows.result",
+        "id": "cf1",
+        "pubkeys": [],
+        "ok": false,
+        "error": "rate-limited"
+      }
+    },
+    {
+      "name": "identity.getPublicKey answers signed out, never with an error",
+      "type": "identity.getPublicKey",
+      "request": {
+        "type": "identity.getPublicKey",
+        "id": "pk1"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "identity.getPublicKey.result",
+        "id": "pk1",
+        "pubkey": ""
+      }
+    },
+    {
+      "name": "inc.channel.list answers an empty channels list",
+      "type": "inc.channel.list",
+      "request": {
+        "type": "inc.channel.list",
+        "id": "cl1"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "inc.channel.list.result",
+        "id": "cl1",
+        "channels": []
+      }
+    },
+    {
+      "name": "theme.get answers the full default colors",
+      "type": "theme.get",
+      "request": {
+        "type": "theme.get",
+        "id": "th1"
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "theme.get.result",
+        "id": "th1",
+        "theme": {
+          "colors": {
+            "background": "#ffffff",
+            "text": "#111111",
+            "primary": "#111111"
+          }
+        }
+      }
+    },
+    {
+      "name": "intent.invoke nests its failure and echoes the archetype and action",
+      "type": "intent.invoke",
+      "request": {
+        "type": "intent.invoke",
+        "id": "in1",
+        "request": {
+          "archetype": "profile",
+          "action": "view",
+          "params": {}
+        }
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "intent.invoke.result",
+        "id": "in1",
+        "result": {
+          "ok": false,
+          "archetype": "profile",
+          "action": "view",
+          "handled": false,
+          "error": "invoke failed"
+        }
+      }
+    },
+    {
+      "name": "intent.invoke without a request defaults the archetype and action",
+      "type": "intent.invoke",
+      "request": {
+        "type": "intent.invoke",
+        "id": "in2"
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "intent.invoke.result",
+        "id": "in2",
+        "result": {
+          "ok": false,
+          "archetype": "",
+          "action": "open",
+          "handled": false,
+          "error": "too-large"
+        }
+      }
+    },
+    {
+      "name": "intent.invoke with an empty action and a non-string archetype",
+      "type": "intent.invoke",
+      "request": {
+        "type": "intent.invoke",
+        "id": "in3",
+        "request": {
+          "archetype": 5,
+          "action": ""
+        }
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "intent.invoke.result",
+        "id": "in3",
+        "result": {
+          "ok": false,
+          "archetype": "",
+          "action": "open",
+          "handled": false,
+          "error": "rate-limited"
+        }
+      }
+    },
+    {
+      "name": "config.get fails as config.schemaError",
+      "type": "config.get",
+      "request": {
+        "type": "config.get",
+        "id": "cg1"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "config.schemaError",
+        "id": "cg1",
+        "code": "internal-error",
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "config.registerSchema fails with ok false and a code",
+      "type": "config.registerSchema",
+      "request": {
+        "type": "config.registerSchema",
+        "id": "rs1",
+        "schema": {}
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "config.registerSchema.result",
+        "id": "rs1",
+        "ok": false,
+        "code": "too-large",
+        "error": "too-large"
+      }
+    },
+    {
+      "name": "notify.permission.request is not granted",
+      "type": "notify.permission.request",
+      "request": {
+        "type": "notify.permission.request",
+        "id": "np1"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "notify.permission.result",
+        "id": "np1",
+        "granted": false
+      }
+    },
+    {
+      "name": "notify.send rate limited uses the spec's code",
+      "type": "notify.send",
+      "request": {
+        "type": "notify.send",
+        "id": "ns1",
+        "title": "t"
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "notify.send.result",
+        "id": "ns1",
+        "error": "rate limited"
+      }
+    },
+    {
+      "name": "storage.set too large is quota exceeded",
+      "type": "storage.set",
+      "request": {
+        "type": "storage.set",
+        "id": "ss1",
+        "key": "k",
+        "value": "v"
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "storage.set.result",
+        "id": "ss1",
+        "error": "quota exceeded"
+      }
+    },
+    {
+      "name": "upload.upload too large is file too large",
+      "type": "upload.upload",
+      "request": {
+        "type": "upload.upload",
+        "id": "up1"
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "upload.upload.result",
+        "id": "up1",
+        "error": "file too large"
+      }
+    },
+    {
+      "name": "storage.keys rate limited",
+      "type": "storage.keys",
+      "request": {
+        "type": "storage.keys",
+        "id": "sk1"
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "storage.keys.result",
+        "id": "sk1",
+        "error": "rate-limited"
+      }
+    },
+    {
+      "name": "relay.query keeps its events list beside the error",
+      "type": "relay.query",
+      "request": {
+        "type": "relay.query",
+        "id": "rq1",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "relay.query.result",
+        "id": "rq1",
+        "events": [],
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "identity.getProfile keeps a null profile",
+      "type": "identity.getProfile",
+      "request": {
+        "type": "identity.getProfile",
+        "id": "gp1"
+      },
+      "code": "invalid-request",
+      "expect": {
+        "type": "identity.getProfile.result",
+        "id": "gp1",
+        "profile": null,
+        "error": "invalid-request"
+      }
+    },
+    {
+      "name": "a numeric id is echoed as a number",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": 7,
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "storage.get.result",
+        "id": 7,
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "a 128-byte id is echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "storage.get.result",
+        "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "a 64-character two-byte id (128 bytes) is echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "storage.get.result",
+        "id": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "resource.bytes rate limited is resource.bytes.error quota-exceeded",
+      "type": "resource.bytes",
+      "request": {
+        "type": "resource.bytes",
+        "id": "rb1",
+        "url": "https://example.com/x"
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "resource.bytes.error",
+        "id": "rb1",
+        "error": "quota-exceeded"
+      }
+    },
+    {
+      "name": "resource.bytesMany fails as resource.bytesMany.error",
+      "type": "resource.bytesMany",
+      "request": {
+        "type": "resource.bytesMany",
+        "id": "rm1",
+        "urls": []
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "resource.bytesMany.error",
+        "id": "rm1",
+        "error": "internal-error"
+      }
+    },
+    {
+      "name": "link.open too large is denied",
+      "type": "link.open",
+      "request": {
+        "type": "link.open",
+        "id": "lo1",
+        "url": "https://example.com"
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "link.open.result",
+        "id": "lo1",
+        "status": "denied",
+        "error": "too-large"
+      }
+    },
+    {
+      "name": "relay.subscribe fails with relay.closed and a NIP-01 reason",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "subId": "s1",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "relay.closed",
+        "subId": "s1",
+        "reason": "error: internal-error"
+      }
+    },
+    {
+      "name": "relay.subscribe too large is an invalid: reason",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "subId": "s2",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "too-large",
+      "expect": {
+        "type": "relay.closed",
+        "subId": "s2",
+        "reason": "invalid: too-large"
+      }
+    },
+    {
+      "name": "relay.subscribe rate limited",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "subId": "s3",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "rate-limited",
+      "expect": {
+        "type": "relay.closed",
+        "subId": "s3",
+        "reason": "rate-limited: rate-limited"
+      }
+    },
+    {
+      "name": "outbox.subscribe fails with outbox.closed",
+      "type": "outbox.subscribe",
+      "request": {
+        "type": "outbox.subscribe",
+        "subId": "o1",
+        "filter": {}
+      },
+      "code": "internal-error",
+      "expect": {
+        "type": "outbox.closed",
+        "subId": "o1",
+        "reason": "internal-error"
+      }
+    },
+    {
+      "name": "outbox.subscribe echoes an id it carries",
+      "type": "outbox.subscribe",
+      "request": {
+        "type": "outbox.subscribe",
+        "id": "oi1",
+        "subId": "o2",
+        "filter": {}
+      },
+      "code": "invalid-request",
+      "expect": {
+        "type": "outbox.closed",
+        "id": "oi1",
+        "subId": "o2",
+        "reason": "invalid-request"
+      }
+    },
+    {
+      "name": "resource.cancel is never answered: its id names another request",
+      "type": "resource.cancel",
+      "request": {
+        "type": "resource.cancel",
+        "id": "rb1"
+      },
+      "code": "internal-error",
+      "expect": null
+    },
+    {
+      "name": "relay.close is never answered",
+      "type": "relay.close",
+      "request": {
+        "type": "relay.close",
+        "id": "rc1",
+        "subId": "s1"
+      },
+      "code": "internal-error",
+      "expect": null
+    },
+    {
+      "name": "inc.emit is never answered",
+      "type": "inc.emit",
+      "request": {
+        "type": "inc.emit",
+        "id": "ie1",
+        "topic": "t"
+      },
+      "code": "too-large",
+      "expect": null
+    },
+    {
+      "name": "an unknown type is silently ignored",
+      "type": "nope.unknown",
+      "request": {
+        "type": "nope.unknown",
+        "id": "u1"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "an object id is not echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": {
+          "x": 1
+        },
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "a 129-byte id is not echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "a 65-character two-byte id (130 bytes) is not echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "a null id is not echoed",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "id": null,
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "a request without an id cannot be answered",
+      "type": "storage.get",
+      "request": {
+        "type": "storage.get",
+        "key": "k"
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "relay.subscribe without a subId cannot be answered",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "relay.subscribe with an empty subId cannot be answered",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "subId": "",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    },
+    {
+      "name": "relay.subscribe with a bad id is dropped despite its subId",
+      "type": "relay.subscribe",
+      "request": {
+        "type": "relay.subscribe",
+        "id": {
+          "x": 1
+        },
+        "subId": "s4",
+        "filters": [
+          {}
+        ]
+      },
+      "code": "internal-error",
+      "expect": null,
+      "goSkip": "envelope validation is Go's napEnqueue (TestNapEnqueueBounds, 02-03)"
+    }
+  ]
+}
