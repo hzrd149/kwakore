@@ -322,29 +322,21 @@ func napOutboxSubscribe(c *napCall) {
 	}
 
 	key := outboxSubKey(r.SubID)
-	s := c.ci.nap
-	s.mu.Lock()
-	if _, dup := s.subs[key]; dup || len(s.subs) >= napMaxSubs {
-		s.mu.Unlock()
+	ctx, sub, ok := c.trackSub(key)
+	if !ok {
 		closed("too many subscriptions")
 		return
 	}
-	ctx, cancel := context.WithCancel(c.ctx)
-	s.subs[key] = cancel
-	s.mu.Unlock()
+	hook := c.ci.nap.pumpHook
 
 	c.async(func(context.Context) {
-		defer func() {
-			s.mu.Lock()
-			// a teardown already dropped this session's subs; the map
-			// here now belongs to the next session, which may reuse the id
-			if s.gen == c.gen {
-				delete(s.subs, key)
-			}
-			s.mu.Unlock()
-			cancel()
-		}()
-		reason := napOutboxPump(ctx, c, r.SubID, filters, outboxRoutes(ctx, filters, r.Options))
+		defer c.untrackSub(key, sub)
+		var reason string
+		if hook != nil {
+			hook(ctx, r.SubID)
+		} else {
+			reason = napOutboxPump(ctx, c, r.SubID, filters, outboxRoutes(ctx, filters, r.Options))
+		}
 		if ctx.Err() == nil {
 			closed(reason)
 		}
@@ -417,15 +409,7 @@ func napOutboxClose(c *napCall) {
 	if err := c.decode(&r); err != nil || r.SubID == "" {
 		return
 	}
-	key := outboxSubKey(r.SubID)
-	s := c.ci.nap
-	s.mu.Lock()
-	cancel := s.subs[key]
-	delete(s.subs, key)
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	c.ci.nap.closeSub(outboxSubKey(r.SubID))
 	// every request is answered (NAP-OUTBOX); the shim has already dropped
 	// the handle, so this only confirms the end of the stream
 	c.ci.napPushGen(c.gen, map[string]any{"type": "outbox.closed", "subId": r.SubID, "reason": "closed"})

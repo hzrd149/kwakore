@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -350,6 +351,125 @@ func TestNapPanickingHandlerStillReplies(t *testing.T) {
 	if got := rec.wait(t, "test.asyncBoom.result", 1); got["id"] != "b2" || got["error"] == nil {
 		t.Fatalf("async panic: %v", got)
 	}
+}
+
+// ─── subscriptions ───────────────────────────────────────────────
+
+// subEntry is the session's subscription entry under key, or nil.
+func subEntry(ci *Instance, key string) *napSub {
+	ci.nap.mu.Lock()
+	defer ci.nap.mu.Unlock()
+	return ci.nap.subs[key]
+}
+
+// resubscribeCase is one subscription domain (relay or outbox) for
+// testResubscribeKeepsLiveEntry.
+type resubscribeCase struct {
+	subscribe, close, closed string // envelope types
+	key                      func(subID string) string
+	refused                  string // the closed reason past napMaxSubs
+}
+
+// testResubscribeKeepsLiveEntry runs subscribe x, close x, subscribe x in one
+// session, holding the first pump's exit back until the second subscription
+// is live: the order a napplet posting raw envelopes can force. The first
+// pump's cleanup must leave the second entry alone, so close still reaches it
+// and it still counts toward napMaxSubs.
+func testResubscribeKeepsLiveEntry(t *testing.T, tc resubscribeCase) {
+	setupNapTest(t)
+	withSystem(t)
+	ci, rec := openNapplet(t, "resub")
+	hold := make(chan struct{})
+	release := sync.OnceFunc(func() { close(hold) })
+	t.Cleanup(release)
+	started := make(chan string, napMaxSubs+2)
+	var pumps atomic.Int32
+	ci.nap.pumpHook = func(ctx context.Context, subID string) {
+		n := pumps.Add(1)
+		started <- subID
+		<-ctx.Done()
+		if n == 1 {
+			<-hold
+		}
+	}
+	ready(t, ci, rec, 1)
+
+	subscribe := func(id string) {
+		post(t, ci, map[string]any{"type": tc.subscribe, "id": "s-" + id, "subId": id,
+			"filters": []any{map[string]any{"kinds": []int{1}}}})
+	}
+	awaitStart := func(want string) {
+		t.Helper()
+		select {
+		case got := <-started:
+			if got != want {
+				t.Fatalf("pump started for %q, want %q", got, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("no pump started for %q", want)
+		}
+	}
+	awaitDone := func(sub *napSub, what string) {
+		t.Helper()
+		select {
+		case <-sub.done:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s never stopped", what)
+		}
+	}
+	key := tc.key("x")
+
+	subscribe("x")
+	awaitStart("x")
+	first := subEntry(ci, key)
+	post(t, ci, map[string]any{"type": tc.close, "id": "c1", "subId": "x"})
+	subscribe("x")
+	awaitStart("x")
+	second := subEntry(ci, key)
+	if first == nil || second == nil || second == first {
+		t.Fatalf("entries: first %p, second %p", first, second)
+	}
+
+	// the closed pump ends only now, after the re-subscription took the id
+	release()
+	awaitDone(first, "the closed subscription")
+	if got := subEntry(ci, key); got != second {
+		t.Fatalf("the closed pump's cleanup dropped the live re-subscription: entry %p, want %p", got, second)
+	}
+
+	// the live one still counts: napMaxSubs-1 more fit, the next is refused
+	for i := 1; i < napMaxSubs; i++ {
+		id := "more-" + strconv.Itoa(i)
+		subscribe(id)
+		awaitStart(id)
+	}
+	n := len(rec.find(tc.closed)) + 1
+	subscribe("over")
+	if got := rec.wait(t, tc.closed, n); got["subId"] != "over" || got["reason"] != tc.refused {
+		t.Fatalf("subscription past the cap: %v", got)
+	}
+	if len(started) != 0 {
+		t.Fatal("a pump started past the cap")
+	}
+
+	// close still reaches it, and frees its slot
+	post(t, ci, map[string]any{"type": tc.close, "id": "c2", "subId": "x"})
+	awaitDone(second, "the re-subscription after close")
+	if got := subEntry(ci, key); got != nil {
+		t.Fatalf("closed subscription still tracked: %p", got)
+	}
+	subscribe("over")
+	awaitStart("over")
+}
+
+// A closed relay subscription whose pump ends late must not untrack a
+// re-subscription with the same subId (CR-03).
+func TestNapRelayResubscribeKeepsLiveEntry(t *testing.T) {
+	testResubscribeKeepsLiveEntry(t, resubscribeCase{
+		subscribe: "relay.subscribe", close: "relay.close", closed: "relay.closed",
+		key:     func(id string) string { return id },
+		refused: "error: too many subscriptions",
+	})
 }
 
 // ─── uploads ────────────────────────────────────────────────────

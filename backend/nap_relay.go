@@ -122,6 +122,50 @@ func relayEventResult(evt nostr.Event) map[string]any {
 
 // ─── subscribe / close ───────────────────────────────────────────
 
+// trackSub registers a relay or outbox subscription under key, within the
+// per-window cap. It refuses a key that is still live or a window already at
+// napMaxSubs. The pump it starts must end with untrackSub.
+func (c *napCall) trackSub(key string) (context.Context, *napSub, bool) {
+	s := c.ci.nap
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, dup := s.subs[key]; dup || len(s.subs) >= napMaxSubs {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithCancel(c.ctx)
+	sub := &napSub{cancel: cancel, done: make(chan struct{})}
+	s.subs[key] = sub
+	return ctx, sub, true
+}
+
+// untrackSub is a pump's cleanup. It removes the entry only while the map
+// still holds this very subscription. After a close, a re-subscribe with the
+// same id owns the key; after a teardown, the map belongs to the next session
+// (the gen check). Either way a pump that ends late must not drop a live
+// subscription: close would then miss it, and it would stop counting toward
+// napMaxSubs.
+func (c *napCall) untrackSub(key string, sub *napSub) {
+	s := c.ci.nap
+	s.mu.Lock()
+	if s.gen == c.gen && s.subs[key] == sub {
+		delete(s.subs, key)
+	}
+	s.mu.Unlock()
+	sub.cancel()
+	close(sub.done)
+}
+
+// closeSub ends the subscription under key, if one is live.
+func (s *napSession) closeSub(key string) {
+	s.mu.Lock()
+	sub := s.subs[key]
+	delete(s.subs, key)
+	s.mu.Unlock()
+	if sub != nil {
+		sub.cancel()
+	}
+}
+
 func napRelaySubscribe(c *napCall) {
 	var r napRelayReq
 	if err := c.decode(&r); err != nil || r.SubID == "" {
@@ -140,28 +184,19 @@ func napRelaySubscribe(c *napCall) {
 		return
 	}
 
-	s := c.ci.nap
-	s.mu.Lock()
-	if _, dup := s.subs[r.SubID]; dup || len(s.subs) >= napMaxSubs {
-		s.mu.Unlock()
+	ctx, sub, ok := c.trackSub(r.SubID)
+	if !ok {
 		closed("error: too many subscriptions")
 		return
 	}
-	ctx, cancel := context.WithCancel(c.ctx)
-	s.subs[r.SubID] = cancel
-	s.mu.Unlock()
+	hook := c.ci.nap.pumpHook
 
 	c.async(func(context.Context) {
-		defer func() {
-			s.mu.Lock()
-			// a teardown already dropped this session's subs; the map
-			// here now belongs to the next session, which may reuse the id
-			if s.gen == c.gen {
-				delete(s.subs, r.SubID)
-			}
-			s.mu.Unlock()
-			cancel()
-		}()
+		defer c.untrackSub(r.SubID, sub)
+		if hook != nil {
+			hook(ctx, r.SubID)
+			return
+		}
 		var explicit []string
 		if r.Relay != "" {
 			relay, err := napExplicitRelay(ctx, r.Relay)
@@ -288,14 +323,7 @@ func napRelayClose(c *napCall) {
 	if err := c.decode(&r); err != nil || r.SubID == "" {
 		return
 	}
-	s := c.ci.nap
-	s.mu.Lock()
-	cancel := s.subs[r.SubID]
-	delete(s.subs, r.SubID)
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	c.ci.nap.closeSub(r.SubID)
 }
 
 // ─── query ───────────────────────────────────────────────────────

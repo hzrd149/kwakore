@@ -262,6 +262,16 @@ func TestNapOutboxSubscribe(t *testing.T) {
 	}
 }
 
+// A closed outbox subscription whose pump ends late must not untrack a
+// re-subscription with the same subId (CR-03).
+func TestNapOutboxResubscribeKeepsLiveEntry(t *testing.T) {
+	testResubscribeKeepsLiveEntry(t, resubscribeCase{
+		subscribe: "outbox.subscribe", close: "outbox.close", closed: "outbox.closed",
+		key:     outboxSubKey,
+		refused: "too many subscriptions",
+	})
+}
+
 func TestNapOutboxResolveRelaysNeedsAuthors(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "planner")

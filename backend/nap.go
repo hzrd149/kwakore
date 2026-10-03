@@ -75,8 +75,9 @@ type napSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// relay subscriptions by subId
-	subs map[string]context.CancelFunc
+	// relay and outbox subscriptions by subId (outbox ids carry a prefix,
+	// outboxSubKey); each entry is owned by the pump it started
+	subs map[string]*napSub
 	// inc topics this napplet listens on (a set: the shim subscribes once per
 	// handler but unsubscribes once per topic)
 	topics map[string]bool
@@ -118,6 +119,20 @@ type napSession struct {
 	// dispatch. Set it before the session's first envelope (the worker is
 	// started by that one); it is always nil outside tests.
 	beforeHandler func(c *napCall)
+	// pumpHook, when set, runs in place of a relay or outbox subscription's
+	// pump: a test hook for a subscription that stays open with no relays,
+	// or one whose exit is held back. Set it like beforeHandler; it is
+	// always nil outside tests.
+	pumpHook func(ctx context.Context, subID string)
+}
+
+// napSub is one relay or outbox subscription. The pointer is its identity:
+// a pump that ends removes its own entry only, never a later subscription
+// that reused the id after a close (the same pattern as resourceTrack).
+type napSub struct {
+	cancel context.CancelFunc
+	// done is closed once the pump has stopped and its cleanup has run
+	done chan struct{}
 }
 
 func newNapSession() *napSession {
@@ -132,15 +147,15 @@ func (s *napSession) resetLocked() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	for _, cancel := range s.subs {
-		cancel()
+	for _, sub := range s.subs {
+		sub.cancel()
 	}
 	for _, fetch := range s.fetches {
 		fetch.cancel()
 	}
 	s.gen++
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.subs = make(map[string]context.CancelFunc)
+	s.subs = make(map[string]*napSub)
 	s.topics = make(map[string]bool)
 	s.fetches = make(map[string]*resourceFetch)
 	for _, upload := range s.uploads {
