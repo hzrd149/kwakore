@@ -707,7 +707,7 @@ type relayInfoEntry struct {
 	expires time.Time
 }
 
-var relayInfoCache = mustNewCache[string, relayInfoEntry](256)
+var relayInfoCache = cacheOrNil(newCache[string, relayInfoEntry](256))
 
 func loadRelayInfo(ctx context.Context, url string) map[string]any {
 	url = strings.TrimSpace(url)

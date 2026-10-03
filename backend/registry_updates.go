@@ -228,7 +228,7 @@ func fetchCurrentEvent(n Napp) *nostr.Event {
 }
 
 // updateCache remembers newest created_at seen per napp id from last complete check round.
-var updateCache = mustNewCache[string, nostr.Timestamp](4096)
+var updateCache = cacheOrNil(newCache[string, nostr.Timestamp](4096))
 
 // ─── helpers ─────────────────────────────────────────────────────
 func nappAuthors(napps []Napp) []nostr.PubKey {

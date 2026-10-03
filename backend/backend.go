@@ -56,6 +56,9 @@ func Start(opts Options) (func(), error) {
 	} else {
 		log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 	}
+	for _, err := range cacheInitErrs {
+		log.Warn().Err(err).Msg("cache disabled")
+	}
 
 	if opts.Host == nil {
 		opts.Host = noopHost{}
