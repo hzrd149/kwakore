@@ -1121,6 +1121,104 @@ func TestIntentDeliveryWaitsForTheReceivingSession(t *testing.T) {
 	}
 }
 
+// nap.start runs on the host page's rpc goroutine, not on the session worker,
+// so it can land while the worker is inside a handler of the outgoing
+// document. That handler must not write into the new session: a stale
+// inc.subscribe on a convention topic would make the new document look ready
+// for an intent it never subscribed to.
+func TestNapStartWaitsOutAnInFlightHandler(t *testing.T) {
+	setupNapTest(t)
+	saved := intentHandlerWait
+	intentHandlerWait = 100 * time.Millisecond
+	t.Cleanup(func() { intentHandlerWait = saved })
+
+	ci, rec := openNapplet(t, "handler")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var parked, released sync.Once
+	unpark := func() { released.Do(func() { close(release) }) }
+	// on a failure too: the window's own cleanup waits out the handler
+	t.Cleanup(unpark)
+	// set before the first envelope starts the worker
+	ci.nap.beforeHandler = func(c *napCall) {
+		if c.Type != "inc.subscribe" {
+			return
+		}
+		parked.Do(func() {
+			close(entered)
+			<-release
+		})
+	}
+	ready(t, ci, rec, 1)
+
+	// the outgoing document subscribes on its way out; its handler is past
+	// the gen check when the host page starts the next session
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "old", "topic": "napplet:profile/open"})
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("rig: the handler never ran")
+	}
+	started := make(chan int, 1)
+	go func() {
+		gen, err := ci.napStart()
+		if err != nil {
+			t.Error(err)
+		}
+		started <- gen
+	}()
+	// nap.start parks on the dispatch lock: once a writer is waiting, a new
+	// reader cannot get in
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-started:
+			t.Fatal("nap.start opened a session while a handler of the old one was running")
+		case <-deadline:
+			t.Fatal("nap.start never reached the dispatch lock")
+		default:
+		}
+		if !ci.nap.dispatchMu.TryRLock() {
+			break
+		}
+		ci.nap.dispatchMu.RUnlock()
+		time.Sleep(time.Millisecond)
+	}
+	unpark()
+	newGen := <-started
+
+	// a sync point in the new session: the worker is past the old handler
+	subscribeTopic(t, ci, rec, "chat", 2)
+
+	ci.nap.mu.Lock()
+	gen := ci.nap.gen
+	topics := make([]string, 0, len(ci.nap.topics))
+	for topic := range ci.nap.topics {
+		topics = append(topics, topic)
+	}
+	ci.nap.mu.Unlock()
+	if gen != newGen {
+		t.Fatalf("rig: session %d, want %d", gen, newGen)
+	}
+	if !slices.Equal(topics, []string{"chat"}) {
+		t.Errorf("new session's topics = %v, want only its own [chat]", topics)
+	}
+	if _, ok := ci.handlerFor("napplet:profile/open"); ok {
+		t.Error("the old document's subscription is still registered as an action")
+	}
+
+	// and the stale subscription does not count as the new document being
+	// ready: delivery waits for a subscription that never comes
+	_, err := dispatchToNapplet(context.Background(), ci,
+		&actionRequest{name: "napplet:profile/open", sender: "caller"}, json.RawMessage(`{"pubkey":"abc"}`))
+	if !errors.Is(err, errNoHandler) {
+		t.Fatalf("dispatch on a stale subscription: err = %v, want errNoHandler", err)
+	}
+	if got := rec.find("inc.event"); len(got) != 0 {
+		t.Errorf("intent pushed into a session that is not listening: %v", got)
+	}
+}
+
 func TestIntentDeliveryTimesOutWithoutSubscriber(t *testing.T) {
 	setupNapTest(t)
 	saved := intentHandlerWait

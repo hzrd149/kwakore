@@ -49,6 +49,19 @@ var napDomains = []string{
 type napSession struct {
 	mu sync.Mutex
 
+	// dispatchMu makes a handler's synchronous part atomic with the session
+	// lifecycle. napDispatch holds it shared from its gen check until the
+	// handler returns; napStart, napReset and napClosed take it exclusively
+	// before they tear the session down. nap.start runs on the host page's
+	// rpc goroutine, not on the worker, so without it a handler that already
+	// passed the gen check could write its topic, subscription or channel
+	// into the next session's fresh state (a stale inc.subscribe would then
+	// count as the new document being ready for an intent). Work a handler
+	// hands to c.async is outside the lock: it runs on the session context,
+	// which the teardown cancels, and its replies are gen-checked. Lock
+	// order: dispatchMu before mu.
+	dispatchMu sync.RWMutex
+
 	// established flips when the trusted host page starts a session
 	// (nap.start), before it creates the napplet's frame. Every envelope
 	// before it is dropped, and the frame has no way to set it: it can only
@@ -99,6 +112,12 @@ type napSession struct {
 	// queue serializes envelopes; started lazily by the first one
 	queue chan napCall
 	once  sync.Once
+
+	// beforeHandler, when set, runs on the worker after the gen check and
+	// right before the handler: a test hook for parking a handler mid
+	// dispatch. Set it before the session's first envelope (the worker is
+	// started by that one); it is always nil outside tests.
+	beforeHandler func(c *napCall)
 }
 
 func newNapSession() *napSession {
@@ -369,6 +388,10 @@ func (ci *Instance) napWorker() {
 // silently (NIP-5D).
 func (ci *Instance) napDispatch(c napCall) {
 	s := ci.nap
+	// held until the handler returns, so no session starts or ends between
+	// the gen check and the handler's writes to session state
+	s.dispatchMu.RLock()
+	defer s.dispatchMu.RUnlock()
 	s.mu.Lock()
 	ok := s.established
 	// the call was read under an older session: let it go
@@ -391,6 +414,9 @@ func (ci *Instance) napDispatch(c napCall) {
 			c.fail()
 		}
 	}()
+	if s.beforeHandler != nil {
+		s.beforeHandler(&c)
+	}
 	h(&c)
 }
 
@@ -407,6 +433,9 @@ func (ci *Instance) napStart() (int, error) {
 	if s == nil {
 		return 0, errors.New("not a napplet window")
 	}
+	// waits out a handler the worker is inside of (napSession.dispatchMu)
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
 	s.established = true
@@ -446,6 +475,8 @@ func (ci *Instance) napReset() {
 	if ci.nap == nil {
 		return
 	}
+	ci.nap.dispatchMu.Lock()
+	defer ci.nap.dispatchMu.Unlock()
 	ci.nap.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
 	ci.nap.mu.Unlock()
@@ -463,6 +494,8 @@ func (ci *Instance) napClosed() {
 	if ci.nap == nil {
 		return
 	}
+	ci.nap.dispatchMu.Lock()
+	defer ci.nap.dispatchMu.Unlock()
 	ci.nap.mu.Lock()
 	ci.napTeardownLocked("peer destroyed")
 	ci.nap.mu.Unlock()

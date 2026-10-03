@@ -336,7 +336,11 @@ func napOutboxSubscribe(c *napCall) {
 	c.async(func(context.Context) {
 		defer func() {
 			s.mu.Lock()
-			delete(s.subs, key)
+			// a teardown already dropped this session's subs; the map
+			// here now belongs to the next session, which may reuse the id
+			if s.gen == c.gen {
+				delete(s.subs, key)
+			}
 			s.mu.Unlock()
 			cancel()
 		}()
