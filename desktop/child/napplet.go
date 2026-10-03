@@ -1,9 +1,7 @@
 package main
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -28,11 +26,10 @@ import (
 var nappletToken string
 
 func runNapplet(w webview.WebView) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		log.Fatal().Err(err).Msg("no randomness for the napplet window token")
-	}
-	nappletToken = hex.EncodeToString(raw[:])
+	nappletToken = newWindowToken()
+	// the host page is the launcher's own, so its top-frame wrapper (which
+	// holds the token) is what the overlay answers through
+	overlayAnswer = "window.__verdana_prompt_answer"
 
 	_ = w.Bind("__verdana_napplet_rpc", nappletRPC)
 	_ = w.Bind("__verdana_napplet_answer", nappletAnswer)
@@ -44,7 +41,7 @@ func runNapplet(w webview.WebView) {
 	w.Init("(function(){if (window !== window.top) return;" +
 		"var t = " + jsString(nappletToken) + ";" +
 		"window.__verdanaNappletRPC = function(m, p){ return window.__verdana_napplet_rpc(t, m, p) };" +
-		// the prompt overlay (promptLibScript) answers through this name
+		// the prompt overlay (promptShowScript) answers through this name
 		"window.__verdana_prompt_answer = function(id, ok, index, scope){" +
 		"return window.__verdana_napplet_answer(t, id, ok, index, scope) };" +
 		"window.name = " + jsString(meta.Instance) + ";" +

@@ -2,12 +2,13 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/puzpuzpuz/xsync/v3"
@@ -103,7 +104,9 @@ type PromptOption struct {
 
 // Prompt is a question the user has to answer before a napp can continue.
 type Prompt struct {
-	// ID identifies the prompt when answering it.
+	// ID identifies the prompt when answering it. It is random (newPromptID),
+	// not a serial, so a window cannot guess the id of a prompt it was never
+	// shown.
 	ID int `json:"id"`
 
 	// Title is the one-line question, Detail the explanation under it and
@@ -151,8 +154,23 @@ var (
 	promptMu     sync.Mutex
 	promptActive *Prompt
 	promptQueue  []*Prompt
-	promptSerial atomic.Int64
 )
+
+// newPromptID is a random, positive prompt id below 2^53, so it survives a
+// trip through a JavaScript number (the overlay, the Android UI's Long)
+// unchanged. Ids are unguessable rather than serial: knowing one prompt's id
+// tells a window nothing about another's (CR-01).
+func newPromptID() int {
+	var b [8]byte
+	for {
+		if _, err := rand.Read(b[:]); err != nil {
+			panic("no randomness for a prompt id: " + err.Error())
+		}
+		if id := int(binary.BigEndian.Uint64(b[:]) & (1<<53 - 1)); id != 0 {
+			return id
+		}
+	}
+}
 
 // CurrentPrompt is the prompt the user should be answering, or nil.
 func CurrentPrompt() *Prompt {
@@ -257,17 +275,7 @@ func promptsChanged() {
 // promotes the next queued prompt.
 func AnswerPrompt(id int, ans Answer) {
 	promptMu.Lock()
-	var p *Prompt
-	if promptActive != nil && promptActive.ID == id {
-		p = promptActive
-	} else {
-		for _, q := range promptQueue {
-			if q.ID == id {
-				p = q
-				break
-			}
-		}
-	}
+	p := findPromptLocked(id)
 	if p == nil || p.done {
 		promptMu.Unlock()
 		return
@@ -287,6 +295,20 @@ func AnswerPrompt(id int, ans Answer) {
 	default:
 	}
 	promptsChanged()
+}
+
+// findPromptLocked is the pending prompt (showing or queued) with that id, or
+// nil. The caller holds promptMu.
+func findPromptLocked(id int) *Prompt {
+	if promptActive != nil && promptActive.ID == id {
+		return promptActive
+	}
+	for _, q := range promptQueue {
+		if q.ID == id {
+			return q
+		}
+	}
+	return nil
 }
 
 // cancelPrompt takes a prompt down without an answer: whoever asked gave up
@@ -340,7 +362,7 @@ func (p *Prompt) wait() Answer {
 
 func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt {
 	return &Prompt{
-		ID:      int(promptSerial.Add(1)),
+		ID:      newPromptID(),
 		Napp:    napp,
 		Title:   title,
 		Detail:  detail,
@@ -579,7 +601,27 @@ func syncPromptOverlays() {
 }
 
 // handlePromptAnswer is what a shell sends up when its overlay was clicked.
+// A window may only answer a prompt shown over itself: one another window
+// raised, or one the launcher raised (Instance ""), is answered from its own
+// screen or from the launcher's UI (AnswerPrompt, called directly), never
+// through a window's wire. Without this, any napp could approve another
+// napplet's publish or an install confirmation by guessing its id (CR-01).
+//
+// What this does not stop is a bridge napp answering its own prompt: its
+// overlay is drawn in the napp's own document, so the napp can click it.
+// Moving that overlay out of the page is Phase 8 (trusted prompts).
 func (ci *Instance) handlePromptAnswer(m WireMsg) {
+	promptMu.Lock()
+	owner := ""
+	if p := findPromptLocked(m.ID); p != nil {
+		owner = p.Instance
+	}
+	promptMu.Unlock()
+	if owner == "" || owner != ci.instance {
+		napSampled().Warn().Str("instance", ci.instance).Int("prompt", m.ID).
+			Msg("prompt answer from a window that does not own the prompt, ignored")
+		return
+	}
 	var a Answer
 	_ = json.Unmarshal([]byte(m.Params), &a)
 	AnswerPrompt(m.ID, a)

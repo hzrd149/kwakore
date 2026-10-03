@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -104,7 +107,15 @@ func main() {
 	}
 
 	_ = w.Bind("__bridge_rpc", rpcBound)
-	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
+	// the prompt overlay answers through a binding that demands this
+	// window's secret, which only the overlay code eval'd by the reader
+	// carries: a bridge napp's own scripts get no untokened answer function
+	// (CR-01). Go also refuses an answer for a prompt this window does not
+	// own; a napp clicking its own in-page overlay is Phase 8's to fix.
+	bridgeAnswerToken = newWindowToken()
+	_ = w.Bind("__verdana_bridge_answer", bridgeAnswer)
+	overlayAnswer = "function(id, ok, index, scope){ return window.__verdana_bridge_answer(" +
+		jsString(bridgeAnswerToken) + ", id, ok, index, scope) }"
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
@@ -385,39 +396,72 @@ type promptOptionView struct {
 	Suggested bool   `json:"suggested"`
 }
 
-// promptAnswer is the bound call the overlay's buttons make. It sends the
-// answer up to the launcher and takes the overlay down; if the launcher has
-// another prompt queued for this window it will send it right back. scope is
-// how long the answer holds: "once", "session" or "always" (see
-// backend.Scope) — the launcher files the wider ones away and stops asking.
+// promptAnswer sends an answer the overlay's buttons made up to the
+// launcher; if the launcher has another prompt queued for this window it will
+// send it right back. scope is how long the answer holds: "once", "session" or
+// "always" (see backend.Scope) — the launcher files the wider ones away and
+// stops asking. It is never bound as it is: each window kind reaches it
+// through a binding that checks the window's token (bridgeAnswer,
+// nappletAnswer).
 func promptAnswer(id int, ok bool, index int, scope string) {
 	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
+// bridgeAnswerToken is a bridge napp window's prompt-answer secret: it only
+// appears inside the overlay code the reader evals, never in a global the
+// napp's scripts start with.
+var bridgeAnswerToken string
+
+// overlayAnswer is the JavaScript function expression the prompt overlay's
+// buttons call with (id, ok, index, scope). Each window kind sets it to a
+// call that carries its token; the default answers nothing.
+var overlayAnswer = "function(){}"
+
+// newWindowToken is a random per-window secret.
+func newWindowToken() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		log.Fatal().Err(err).Msg("no randomness for a window token")
+	}
+	return hex.EncodeToString(raw[:])
+}
+
+// bridgeAnswer is the overlay's binding in a bridge napp window.
+func bridgeAnswer(token string, id int, ok bool, index int, scope string) {
+	if bridgeAnswerToken == "" ||
+		subtle.ConstantTimeCompare([]byte(token), []byte(bridgeAnswerToken)) != 1 {
+		log.Warn().Int("prompt", id).Msg("napp window: prompt answer without the window token, ignored")
+		return
+	}
+	promptAnswer(id, ok, index, scope)
+}
+
+// promptOverlayCode draws the overlay for one prompt. The runtime is
+// evaluated afresh every time, as a function expression called right away,
+// rather than installed once as a page global a napp could replace before
+// the first prompt and so read the answer call out of.
 func promptOverlayCode(pv promptView) string {
 	data, err := json.Marshal(pv)
 	if err != nil {
 		return ""
 	}
-	return promptLibScript + ";window.__verdana_prompt_lib.show(" + string(data) + ");"
+	return ";(" + promptShowScript + ")(" + string(data) + "," + overlayAnswer + ");"
 }
 
 func promptHideCode() string {
-	return ";if (window.__verdana_prompt_lib) window.__verdana_prompt_lib.hide();"
+	return ";(function(){var o = document.getElementById('__verdana_prompt');" +
+		"if (o && o.parentNode) o.parentNode.removeChild(o);})();"
 }
 
-// promptLibScript defines the overlay runtime once per page. It draws an
-// opaque full-viewport cover — the napp underneath stays hidden until the
-// user answers.
-const promptLibScript = "(function(){" +
-	"if (window.__verdana_prompt_lib) return;" +
+// promptShowScript is the overlay runtime, a function of the prompt and of
+// the answer call. It draws an opaque full-viewport cover — the napp
+// underneath stays hidden until the user answers.
+const promptShowScript = "function(p, answer){" +
 	"function tok(k, fallback) {" +
 	"try { var v = (window.__nappTheme && window.__nappTheme.vars) || {};" +
 	"return v[k] || fallback } catch(e) { return fallback }" +
 	"};" +
-	"window.__verdana_prompt_lib = {" +
-	"show: function(p) {" +
 	"var old = document.getElementById('__verdana_prompt');" +
 	"if (old && old.parentNode) old.parentNode.removeChild(old);" +
 	"var dark = window.__nappTheme && window.__nappTheme.name === 'dark';" +
@@ -468,7 +512,7 @@ const promptLibScript = "(function(){" +
 	";border:0;border-radius:8px;background:' + bgc + ';color:' + fgc + ';font-size:14px;text-align:left" +
 	";cursor:pointer;';" +
 	"b.textContent = label;" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope) };" +
+	"b.onclick = function() { answer(p.id, ok, index, scope) };" +
 	"return b;" +
 	"};" +
 	// row puts buttons side by side, for the scopes of an approval prompt.
@@ -504,10 +548,4 @@ const promptLibScript = "(function(){" +
 	"}" +
 	"o.appendChild(box);" +
 	"document.documentElement.appendChild(o);" +
-	"}," +
-	"hide: function() {" +
-	"var o = document.getElementById('__verdana_prompt');" +
-	"if (o && o.parentNode) o.parentNode.removeChild(o);" +
-	"}" +
-	"};" +
-	"})()"
+	"}"
