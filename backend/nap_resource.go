@@ -101,6 +101,19 @@ func napResourceInfo(c *napCall) {
 	}})
 }
 
+// resourceAtCapacity says whether the window already has resourceMaxInFlight
+// resource requests running (NAP-RESOURCE's "10 in-flight", D-14). Handlers
+// check it in their synchronous part, right before resourceTrack: those parts
+// run one at a time on the session's worker, so nothing else registers
+// between the check and the registration, and completions only lower the
+// count.
+func (c *napCall) resourceAtCapacity() bool {
+	s := c.ci.nap
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.fetches) >= resourceMaxInFlight
+}
+
 // resourceTrack registers a request id for resource.cancel. A live id has one
 // owner, so its completion cannot remove another request's registration.
 func (c *napCall) resourceTrack() (context.Context, func(), bool) {
@@ -158,6 +171,11 @@ func napResourceBytes(c *napCall) {
 		c.replyAs("resource.bytes.error", map[string]any{"error": "invalid-request"})
 		return
 	}
+	if c.resourceAtCapacity() {
+		// quota-exceeded through the route's codes, before any fetch starts
+		c.failWith(napErrRateLimited)
+		return
+	}
 	ctx, done, ok := c.resourceTrack()
 	if !ok {
 		c.replyAs("resource.bytes.error", map[string]any{"error": "duplicate-request"})
@@ -203,6 +221,21 @@ func napResourceBytesMany(c *napCall) {
 	}
 	if len(reqs) > resourceMaxURLs {
 		c.replyAs("resource.bytesMany.error", map[string]any{"error": "too-large"})
+		return
+	}
+	if c.resourceAtCapacity() {
+		// quota-exceeded through the route's codes, before any fetch starts
+		c.failWith(napErrRateLimited)
+		return
+	}
+	// NAP-RESOURCE counts a bulk request per URL. The dispatcher already took
+	// one token from the resource bucket for the envelope (the route's limit
+	// class), so this takes the other len(reqs)-1, all or nothing; a refusal
+	// is quota-exceeded through the route's codes. The bucket's burst (100)
+	// is at least resourceMaxURLs, so a full batch can pass on a full bucket
+	// (D-19, Pitfall 10); a batch costing more than the burst never could.
+	if !c.ci.nap.limits.allow(limitResource, len(reqs)-1) {
+		c.failWith(napErrRateLimited)
 		return
 	}
 

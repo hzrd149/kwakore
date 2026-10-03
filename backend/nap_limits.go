@@ -73,8 +73,9 @@ const (
 	// Enforced by enqueueNappPrompt (window_prompt.go).
 	napMaxPendingPromptsPerWindow = 3
 	napMaxPendingPromptsGlobal    = 32
-	// resourceMaxInFlight is NAP-RESOURCE's "10 in-flight" (RS-5). Enforced
-	// by 02-07.
+	// resourceMaxInFlight is NAP-RESOURCE's "10 in-flight" (RS-5), counting
+	// resource.bytes and resource.bytesMany. Enforced by resourceAtCapacity
+	// (nap_resource.go).
 	resourceMaxInFlight = 10
 	// incMaxChannels bounds the INC channels a window is an end of (I-3).
 	// Enforced by 02-07.
@@ -110,7 +111,9 @@ const (
 	limitColdLaunch
 	// limitUpload: upload.upload
 	limitUpload
-	// limitResource: resource fetches (02-07 charges them per URL)
+	// limitResource: resource fetches, one token per URL: the dispatcher
+	// charges one per request (the route's class), and resource.bytesMany's
+	// handler charges the rest of its URLs
 	limitResource
 	// limitIncOpen: inc.channel.open
 	limitIncOpen

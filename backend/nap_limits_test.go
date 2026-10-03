@@ -438,3 +438,123 @@ func TestNapLimitsSurviveSessionRestart(t *testing.T) {
 		t.Fatalf("a restart refilled the bucket: %v", got)
 	}
 }
+
+// ─── handler-side limits ─────────────────────────────────────────
+
+// dataURLs is n distinct data: URLs, fetched without any network or prompt.
+func dataURLs(n int) []string {
+	urls := make([]string, n)
+	for i := range urls {
+		urls[i] = "data:text/plain,item" + strconv.Itoa(i)
+	}
+	return urls
+}
+
+// TestResourceChargedPerURL: resource.bytesMany costs one resource token per
+// URL in total (the dispatcher's one plus the rest in the handler), so a
+// full batch of resource.info's maxUrls fits a full bucket and the next one
+// does not; a batch costing more than the burst never passes (D-14, D-19).
+func TestResourceChargedPerURL(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+
+	full, rec := openNapplet(t, "per-url")
+	ready(t, full, rec, 1)
+	post(t, full, map[string]any{"type": "resource.bytesMany", "id": "m1", "urls": dataURLs(resourceMaxURLs)})
+	got := waitID(t, rec, "resource.bytesMany.result", "m1")
+	items, _ := got["items"].([]any)
+	if len(items) != resourceMaxURLs {
+		t.Fatalf("a full batch on a full bucket: %v", got)
+	}
+	for _, item := range items {
+		if item.(map[string]any)["ok"] != true {
+			t.Fatalf("item failed: %v", item)
+		}
+	}
+	post(t, full, map[string]any{"type": "resource.bytesMany", "id": "m2", "urls": dataURLs(1)})
+	if got := waitID(t, rec, "resource.bytesMany.error", "m2"); got["error"] != "quota-exceeded" {
+		t.Fatalf("a batch right after a full one: %v", got)
+	}
+	if got := rec.find("resource.bytesMany.result"); len(got) != 1 {
+		t.Fatalf("%d batches answered, want 1", len(got))
+	}
+
+	ten := map[napLimitClass]napLimitSpec{limitResource: {rate.Every(time.Hour), 10}}
+
+	// a batch as large as the burst passes on a full bucket
+	fits, frec := openNapplet(t, "per-url-fits")
+	withLimits(t, fits, limitsWith(napEnvelopeLimit, ten))
+	ready(t, fits, frec, 1)
+	post(t, fits, map[string]any{"type": "resource.bytesMany", "id": "ten", "urls": dataURLs(10)})
+	if got := waitID(t, frec, "resource.bytesMany.result", "ten"); len(got["items"].([]any)) != 10 {
+		t.Fatalf("10 URLs on a bucket of 10: %v", got)
+	}
+
+	// one more than the burst never does, and costs only the dispatcher's
+	// token: the rest is all or nothing
+	over, orec := openNapplet(t, "per-url-over")
+	withLimits(t, over, limitsWith(napEnvelopeLimit, ten))
+	ready(t, over, orec, 1)
+	post(t, over, map[string]any{"type": "resource.bytesMany", "id": "eleven", "urls": dataURLs(11)})
+	if got := waitID(t, orec, "resource.bytesMany.error", "eleven"); got["error"] != "quota-exceeded" {
+		t.Fatalf("11 URLs on a bucket of 10: %v", got)
+	}
+	post(t, over, map[string]any{"type": "resource.bytesMany", "id": "nine", "urls": dataURLs(9)})
+	if got := waitID(t, orec, "resource.bytesMany.result", "nine"); len(got["items"].([]any)) != 9 {
+		t.Fatalf("9 URLs on the 9 tokens left: %v", got)
+	}
+	post(t, over, map[string]any{"type": "resource.bytes", "id": "empty", "url": "data:text/plain,x"})
+	if got := waitID(t, orec, "resource.bytes.error", "empty"); got["error"] != "quota-exceeded" {
+		t.Fatalf("resource.bytes on an empty bucket: %v", got)
+	}
+}
+
+// TestResourceInFlightCap: a window has at most resourceMaxInFlight resource
+// requests running; more are answered quota-exceeded in their own error
+// shape before any fetch starts, and a finished request frees its slot
+// (D-14, NAP-RESOURCE "10 in-flight").
+func TestResourceInFlightCap(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+	ci, rec := openNapplet(t, "in-flight")
+	ready(t, ci, rec, 1)
+
+	// requests that stay in flight, registered the way the handlers do it
+	// (loopback https is blocked by netguard, so no live server holds them)
+	dones := make([]func(), 0, resourceMaxInFlight)
+	for i := range resourceMaxInFlight {
+		call := &napCall{ci: ci, gen: ci.nap.gen, ctx: ci.nap.ctx, ID: json.RawMessage(`"held` + strconv.Itoa(i) + `"`)}
+		_, done, ok := call.resourceTrack()
+		if !ok {
+			t.Fatalf("held request %d refused", i)
+		}
+		dones = append(dones, done)
+	}
+	t.Cleanup(func() {
+		for _, done := range dones {
+			done()
+		}
+	})
+
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "b1", "url": "data:text/plain,one"})
+	if got := waitID(t, rec, "resource.bytes.error", "b1"); got["error"] != "quota-exceeded" {
+		t.Fatalf("resource.bytes past the cap: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "resource.bytesMany", "id": "m1", "urls": dataURLs(2)})
+	if got := waitID(t, rec, "resource.bytesMany.error", "m1"); got["error"] != "quota-exceeded" {
+		t.Fatalf("resource.bytesMany past the cap: %v", got)
+	}
+	ci.nap.mu.Lock()
+	inFlight := len(ci.nap.fetches)
+	ci.nap.mu.Unlock()
+	if inFlight != resourceMaxInFlight {
+		t.Fatalf("%d in flight after refusals, want %d", inFlight, resourceMaxInFlight)
+	}
+
+	// one finishes: the next request runs
+	dones[0]()
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "b2", "url": "data:text/plain,one"})
+	if got := waitID(t, rec, "resource.bytes.result", "b2"); got["blob"] == nil {
+		t.Fatalf("resource.bytes after a slot freed: %v", got)
+	}
+}
