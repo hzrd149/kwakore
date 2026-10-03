@@ -17,11 +17,22 @@ import (
 // through c.async or safeGo (nap.go, which the nap_*.go glob does not match).
 
 // napGuardBannedFuncs are package functions (and sink package vars) only the
-// gate layer may name: as a call, a value or anything else.
+// gate layer may name: as a call, a value or anything else. The HTTP clients
+// are here too: a handler that called resourceClient.Do or
+// napUploadClient.Do itself would reach the network around every sink.
 var napGuardBannedFuncs = map[string]bool{
 	"askApproval": true, "askActionHandler": true, "openExternalLink": true,
-	"publishSigned": true, "httpsResource": true,
+	"publishSigned": true, "napPublishSigned": true, "httpsResource": true,
 	"napUploadToServer": true, "napUploadAuth": true,
+	"resourceClient": true, "napUploadClient": true,
+}
+
+// napGuardAllowed are the few uses of a banned name outside the gate layer
+// that the guard lets through, keyed "file func name", each with its reason.
+var napGuardAllowed = map[string]string{
+	"nap_identity.go zapProvider resourceClient": "the LNURL-pay lookup for the " +
+		"user's own lightning address (lud16 from their kind 0), never a " +
+		"napplet-chosen URL; consent for zap reads is MISC-03 (Phase 8)",
 }
 
 // napGuardBannedSelectors are methods only the gate layer may reach, matched
@@ -35,33 +46,53 @@ var napGuardBannedSelectors = map[string]bool{
 
 // napGuardViolations inspects one parsed file and reports every bare go
 // statement, every use of a banned function's name other than its own
-// declaration, and every banned selector, as "position: reason".
+// declaration (a top-level func or var), and every banned selector, as
+// "position: reason". A use napGuardAllowed lists for its file and enclosing
+// function is let through.
 func napGuardViolations(fset *token.FileSet, file *ast.File) []string {
 	declared := map[*ast.Ident]bool{}
 	for _, d := range file.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok {
-			declared[fd.Name] = true
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			declared[d.Name] = true
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok {
+					for _, name := range vs.Names {
+						declared[name] = true
+					}
+				}
+			}
 		}
 	}
+	base := filepath.Base(fset.Position(file.Pos()).Filename)
 	var out []string
 	report := func(n ast.Node, reason string) {
 		out = append(out, fset.Position(n.Pos()).String()+": "+reason)
 	}
-	ast.Inspect(file, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.GoStmt:
-			report(x, "bare go statement (use c.async or safeGo)")
-		case *ast.SelectorExpr:
-			if napGuardBannedSelectors[x.Sel.Name] {
-				report(x, x.Sel.Name+" outside the gate layer")
-			}
-		case *ast.Ident:
-			if napGuardBannedFuncs[x.Name] && !declared[x] {
-				report(x, x.Name+" outside the gate layer")
-			}
+	for _, d := range file.Decls {
+		fn := ""
+		if fd, ok := d.(*ast.FuncDecl); ok {
+			fn = fd.Name.Name
 		}
-		return true
-	})
+		ast.Inspect(d, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.GoStmt:
+				report(x, "bare go statement (use c.async or safeGo)")
+			case *ast.SelectorExpr:
+				if napGuardBannedSelectors[x.Sel.Name] {
+					report(x, x.Sel.Name+" outside the gate layer")
+				}
+			case *ast.Ident:
+				if napGuardBannedFuncs[x.Name] && !declared[x] {
+					if _, ok := napGuardAllowed[base+" "+fn+" "+x.Name]; !ok {
+						report(x, x.Name+" outside the gate layer")
+					}
+				}
+			}
+			return true
+		})
+	}
 	return out
 }
 
@@ -117,7 +148,15 @@ func planted() {
 	f := askApproval
 	_ = c.sessionGrant
 	_ = f
+	napPublishSigned(ctx, e, nil)
+	resourceClient.Do(req)
+	_ = napUploadClient
 }
+
+var resourceClient = newClient() // a declaration is not a use
+
+// zapProvider is allowed its resourceClient only in nap_identity.go
+func zapProvider() { resourceClient.Do(req) }
 `
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "nap_planted.go", planted, 0)
@@ -131,6 +170,10 @@ func planted() {
 		"nap_planted.go:8:2: SignEvent outside",
 		"nap_planted.go:9:7: askApproval outside",
 		"nap_planted.go:10:6: sessionGrant outside",
+		"nap_planted.go:12:2: napPublishSigned outside",
+		"nap_planted.go:13:2: resourceClient outside",
+		"nap_planted.go:14:6: napUploadClient outside",
+		"nap_planted.go:20:22: resourceClient outside",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d violations, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
@@ -139,6 +182,15 @@ func planted() {
 		if !strings.HasPrefix(got[i], want[i]) {
 			t.Errorf("violation %d = %q, want %q...", i, got[i], want[i])
 		}
+	}
+
+	// the same zapProvider in the file the allowance names passes
+	allowed, err := parser.ParseFile(fset, "nap_identity.go", "package backend\n\nfunc zapProvider() { resourceClient.Do(req) }\n", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := napGuardViolations(fset, allowed); len(got) != 0 {
+		t.Fatalf("an allowed use was reported: %v", got)
 	}
 }
 

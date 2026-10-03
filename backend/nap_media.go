@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -161,7 +160,7 @@ func napMediaCreate(c *napCall) {
 		s.mu.Unlock()
 	}
 	c.async(func(ctx context.Context) {
-		target, code := resolveMediaSource(ctx, *r.Source)
+		target, code := resolveMediaSource(ctx, c, *r.Source)
 		if code != "" {
 			drop()
 			fail(code)
@@ -272,8 +271,9 @@ func (h mediaHolder) preempt() {
 }
 
 // resolveMediaSource turns a source reference into the https url the player
-// opens, or names why it can't.
-func resolveMediaSource(ctx context.Context, src mediaSourceRef) (string, string) {
+// opens, or names why it can't. A Blossom hash is looked up through the
+// call's blossomHas sink.
+func resolveMediaSource(ctx context.Context, c *napCall, src mediaSourceRef) (string, string) {
 	switch {
 	case src.URL != "":
 		u, err := url.Parse(strings.TrimSpace(src.URL))
@@ -292,30 +292,13 @@ func resolveMediaSource(ctx context.Context, src mediaSourceRef) (string, string
 			return "", "unsupported source"
 		}
 		for _, srv := range blossomServers(ctx, nil) {
-			if blossomHas(ctx, srv+"/"+sha) {
+			if c.blossomHas(ctx, srv+"/"+sha) {
 				return srv + "/" + sha, ""
 			}
 		}
 		return "", "source not found"
 	}
 	return "", "unsupported source"
-}
-
-// blossomHas asks a server whether it has a blob, without downloading it.
-func blossomHas(ctx context.Context, target string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("User-Agent", "verdana-napplet-resource")
-	resp, err := resourceClient.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
 }
 
 func mediaTitle(metadata map[string]any) string {

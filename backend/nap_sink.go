@@ -385,6 +385,34 @@ func (c *napCall) fetchBlossom(ctx context.Context, target string) (resourceResu
 	return httpsResource(actx, target)
 }
 
+// blossomHas asks a Blossom server whether it has a blob, without downloading
+// it: a HEAD through resourceClient (public addresses only, on every hop),
+// with its own short deadline.
+//
+// Like fetchBlossom it does not need c.approved, on purpose:
+// media.session.create looks a napplet's blossomHash up on the user's own
+// Blossom servers before its PermMedia grant, to know what the player would
+// be asked to open. Bringing Blossom under the same consent and host policy
+// as https is RES-02 and MDIA-01/MDIA-02 (Phase 7). Until then the exception
+// is here, in the gate layer, where it can be seen, and the test hook still
+// sees every call.
+func (c *napCall) blossomHas(ctx context.Context, target string) bool {
+	napSinkSeen("blossomHas", c.approved.Load())
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "verdana-napplet-resource")
+	resp, err := resourceClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // httpsResource downloads target over https through resourceClient (public
 // addresses only, on every hop) and types the bytes with sniffResource.
 func httpsResource(ctx context.Context, target string) (resourceResult, error) {
