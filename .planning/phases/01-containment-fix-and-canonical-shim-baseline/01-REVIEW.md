@@ -1,21 +1,26 @@
 ---
 phase: 01-containment-fix-and-canonical-shim-baseline
-reviewed: 2026-10-03T00:02:42Z
+reviewed: 2026-10-03T01:42:07Z
 depth: standard
-files_reviewed: 30
+iteration: 3
+files_reviewed: 34
 files_reviewed_list:
   - .gitattributes
   - .github/workflows/android.yml
   - .github/workflows/desktop.yml
+  - backend/app_shortcuts.go
   - backend/backend.go
   - backend/containment_test.go
   - backend/dev_probe_test.go
   - backend/nap.go
   - backend/nap_config.go
   - backend/nap_conformance_test.go
+  - backend/nap_inc.go
   - backend/nap_intent.go
   - backend/nap_notify_test.go
+  - backend/nap_outbox.go
   - backend/nap_outbox_test.go
+  - backend/nap_relay.go
   - backend/nap_scope_test.go
   - backend/nap_test.go
   - backend/napp.go
@@ -35,215 +40,189 @@ files_reviewed_list:
   - spec/CONFORMANCE.md
   - spec/pinned/README.md
 findings:
-  critical: 2
-  warning: 7
-  info: 5
-  total: 14
+  critical: 1
+  warning: 0
+  info: 9
+  total: 10
 status: issues_found
 ---
 
-# Phase 1: Code Review Report
+# Phase 1: Code Review Report (iteration 3)
 
-**Reviewed:** 2026-10-03T00:02:42Z
+**Reviewed:** 2026-10-03T01:42:07Z
 **Depth:** standard
-**Files Reviewed:** 30
+**Files Reviewed:** 34
 **Status:** issues_found
 
 ## Summary
 
-The review covered the phase diff `6fdcbdd^..HEAD`, focusing on CRIT-01 path containment (`nappBaseDir`, `nappAssetPath` and their callers), the start and teardown of host-page sessions (`nap.start` / `nap.loaded` in `backend/nap.go`, `boot`/`enqueue` in `napplet-host.js`), the function-scoped prelude in `buildSrcdoc`, and intent delivery over INC (`dispatchToNapplet`). Upstream content guarded by hashes was skipped as instructed.
+This re-review follows fix iteration 2. It covers the phase diff `6fdcbdd^..HEAD`, with most attention on the iteration-2 commits:
+- `c127c0a`: the per-session `dispatchMu`, plus the gen-gated `subs` cleanup in relay and outbox.
+- `ce0aaea`: `inc.emit` on convention topics now broadcasts (A23).
+- `9e98cac`: the CONFORMANCE NAP-INTENT-1 citation.
 
-What holds up:
-- **Containment.** The 64-hex directory name is fixed-width and cannot escape, and `nappAssetPath` rejects every escape shape tested. The shapes tried were `..`, absolute paths, `//`, `/.`, `a/..` and Windows volume or colon names via `filepath.IsLocal`.
-- **Prelude scope.** It now leaves only `window.napplet` behind.
-- **Host-page ordering.** Old frame removed, then `nap.start`, then the new frame. This is correct for the cases the node harness exercises.
+Upstream content guarded by hash tests was left out on purpose: `backend/webview/shim/prelude.global.js`, `spec/pinned/*@*.md`, and `backend/testdata/napplet-conformance-0.17.0-envelopes.json`.
 
-Backend tests pass (`go test ./...`), and so does `go vet`.
+Verification on the current tree:
+- `gofmt -l .` is empty, and `go vet ./...` is clean.
+- `go test -count=1 ./...` passes.
+- `go test -race -count=3 -run 'Nap|Intent|Inc|Launcher' .` passes.
+- Every `Test*` name cited in `spec/CONFORMANCE.md` exists.
 
-The findings fall into three groups:
+### Checking the iteration-2 fixes
 
-1. **Intent delivery moved onto the INC topic namespace.** Since this phase, a launcher-routed intent and an ordinary peer `inc.emit` reach the handler as the same envelope type on the same topic. The sender attestation that should tell them apart is a d tag the author chooses (`"launcher"`), or empty for root napplets.
-2. **The generation guard and frame replacement leave races.**
-   - A push or intent that passed the gen check can still land in the replacement document. The check in `napPushGen` and the send are not atomic, and the host page cannot filter by session.
-   - Intent readiness is checked against `ci.actions` without any session generation.
-3. **The hashed layout orphans every existing install with no fallback.** This was decided on purpose (D-02/D-04, "nothing is deployed"). But a `v0.0.0` tag and a public `scripts/install.sh` that pulls `releases/latest` both exist.
+| Finding | Verdict | Notes |
+|---|---|---|
+| WR-01 (old-session handler writes into the new session) | **Resolved.** | See the dispatch-lock analysis below. |
+| WR-02 / A23 (`inc.emit` on convention topics) | **Resolved per the user decision "Allow per spec".** | `napIncEmit` routes every topic through `incPublish`, and `incSender` still keeps `launcherSender` out of reach. The rewritten test covers: both listeners receive the event, the impostor is named by its address, the emitter does not hear its own event, and the subscription still registers the action. The A23 row records the decision and the tradeoff. |
+| Gen-gated `subs` cleanup in relay/outbox (part of `c127c0a`) | **Incomplete.** | It stops an old session's pump from deleting the next session's entry. The same delete still removes a **same-session** re-subscription's entry. This bug predates the phase, but the new comment claims the opposite. Reproduced. See CR-03. |
 
-The new containment tests also add data races under `-race`.
+**Dispatch-lock analysis (`dispatchMu`).** `napDispatch` holds `dispatchMu.RLock` from the gen check until `h(&c)` returns. `napStart`, `napReset` and `napClosed` take `dispatchMu.Lock` before `s.mu`. I traced each possible deadlock and found none:
+
+- **Lock order.** No path takes `s.mu` and then `dispatchMu`. `napPushGen`, `napPush`, `liveNapplets`, `incPublish` and `sessionGrant` take only `s.mu`, or `grantMu` then `s.mu`. None of them touches `dispatchMu`.
+- **Re-entrancy.** No handler's synchronous part calls `napStart`, `napReset`, `napClosed`, `WindowClosed`, `DevReload`, `Close` or `CloseWindow`. I grepped every `nap_*.go` handler. Only the single worker goroutine takes the read lock, so a reader never re-acquires it while a writer waits.
+- **Blocking handlers.** Every prompt (`askApproval`, `sessionGrant`) and every network wait sits inside `c.async`: upload, publish, link, notify permission, media, resource, identity and intent. So `nap.start` and `WindowClosed` wait only for synchronous parts, which are short.
+- **Cross-window.** A handler pushes to a peer through the peer's `s.mu` and transport only. On desktop the transport write goes to the child's stdin, which a goroutine drains through `w.Dispatch`, so it never blocks. On Android, `deliver` is `runOnUiThread`, which also never blocks.
+- **Lane.** The host page sends `nap.start` on the same ordered lane as the frame's envelopes. `nap.msg` only enqueues, so `nap.start` waits behind at most one in-flight handler.
+- **Async writes after a teardown.** `napStoreUpload`, the notify handle store and media `drop` are all gen- or identity-checked. `resourceTrack` is identity-checked.
+
+`TestNapStartWaitsOutAnInFlightHandler` detects the writer through `TryRLock`, not a sleep. Its cleanup order (`unpark` runs before `WindowClosed`) is correct.
+
+## Accepted / Deferred
+
+These are carried forward on purpose and are **not** open findings:
+
+- **CR-01: orphaned legacy `napps/{raw-id}` directories.** Accepted by the user under decision D-04. Upgrading users reinstall, and old directories are never swept.
+- **A23: `inc.emit` on `napplet:<archetype>/<action>` broadcasts per NAP-INC.** User decision "Allow per spec". Accepted consequence: a handler cannot tell an intent the launcher routed on napplet X's behalf from X's own broadcast on the same topic. Only the reserved `launcher` sender is attested.
+- **WR-05 remainder: a frame that reloads itself keeps its session, subscriptions, grants and `ci.actions`.** Deferred to Phase 4 SBOX-01, CONFORMANCE row `NIP-5D-reload`.
+- **WR-07 code part: `safeFileName` storage and config filename collisions.** Deferred to Phase 5 KEY-04, CONFORMANCE row `CF-2`.
+
+## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: Switching to hashed install dirs breaks every existing install with no fallback or migration
+### CR-03: A finished subscription's cleanup deletes a later subscription with the same `subId` in the same session, so `relay.close`/`outbox.close` stop working and the 32-subscription cap can be bypassed
 
-**Disposition: ACCEPTED — DO NOT FIX.** The user reconfirmed decision D-04 on 2026-10-03 (keep old `napps/{raw-id}` directories orphaned; upgrading users reinstall). The fixer must skip CR-01; record it as skipped/no_change_needed.
+**File:** `backend/nap_relay.go:143-164`, `backend/nap_relay.go:286-299` (napRelayClose); `backend/nap_outbox.go:325-346`, `backend/nap_outbox.go:413-428` (napOutboxClose)
 
-**File:** `backend/backend.go:131-143`, `backend/window_instances.go:502-530`, `backend/nap.go:491-498`, `backend/registry_install.go:84-89`
-**Issue:** `nappBaseDir` now returns `{dataDir}/napps/{sha256(id)}`. Before, it was `{dataDir}/napps/{id}`. `state.InstalledNapps` still lists every napp installed before the upgrade, so the launcher keeps showing them as installed. But:
-- `launchWithDocument` fails with `napp X is not installed`, or `napplet X is not installed` for napplets.
-- `nappletDocument` fails the same way.
-- `IconBlob` falls back to the network for every icon, every time `syncAppShortcuts` runs.
-- `Uninstall` deletes only the (empty or missing) hashed directory, so the real files under `napps/{raw-id}` leak forever.
+**Issue:** The cleanup deferred in the subscription goroutine now runs `if s.gen == c.gen { delete(s.subs, r.SubID) }`. It checks the session, not the subscription that owns the entry. A napplet can send, all in one session:
 
-D-02 justifies this with "no migration is needed because nothing is deployed". That premise does not hold: the repo has a `v0.0.0` tag, CI attaches the APK to `v*` releases, and `scripts/install.sh:121` installs from `releases/latest/download`. Every upgrading user gets a launcher whose whole installed list fails to start, and the error message is misleading.
-**Fix:** Two options; either one removes the breakage without sweeping unknown directories.
-- Do a one-time, contained rename on load: for each id in `state.InstalledNapps`, the legacy path qualifies only if `filepath.IsLocal(id)` holds and it is a single path element (no separator, not `.`/`..`). Then rename `napps/{id}` to `napps/{hash}` when the hashed directory does not exist yet.
-- Or, at minimum, treat "installed in state but hashed dir missing" as "needs reinstall": call `go Install(n)` and show that instead of "not installed".
+1. `relay.subscribe x` starts pump P1 and stores `subs[x] = cancel1`.
+2. `relay.close x` deletes `subs[x]` and calls `cancel1()`. P1 sees `ctx.Done()` **asynchronously**.
+3. `relay.subscribe x` passes the dup check, because the entry is gone. It starts P2 and stores `subs[x] = cancel2`.
+4. P1's deferred cleanup now runs. The gen is unchanged, so it deletes `subs[x]`, which is **P2's** entry.
 
+P2 keeps streaming, but nothing tracks it:
+- A later `relay.close x` finds no cancel and does nothing, so the napplet keeps receiving events for a subscription it closed.
+- P2 no longer counts toward `napMaxSubs`, so the per-window cap of 32 can be bypassed without limit. Only the session context (reload or window close) ever stops these pumps.
+
+The shim uses `crypto.randomUUID()` for `subId`, so well-behaved napplets never hit this. A hostile napplet that posts raw envelopes can, which matters for a runtime meant to contain untrusted napplets.
+
+**Reproduction:** I ran a throwaway test in a scratch copy of `backend/`. It used `withSystem`, then repeated `subscribe x`, `close x`, `subscribe x`, `close x` 100 times.
+- Result: 0 tracked `subs`, and 100 more goroutines than at the start (17 before, 117 after), against a cap of 32.
+- With a 30 ms pause after the second subscribe, the live re-subscription had lost its entry in 50 of 50 runs.
+
+The bug predates this phase. However, `c127c0a` rewrote exactly these lines, and the new comment says the cleanup "cannot remove a same-id entry", which is true only across sessions. `napResource`'s `resourceTrack` (`nap_resource.go:113-124`) already uses the right pattern: it deletes only when the map still holds its own entry.
+
+**Fix:** Store an owned entry and delete by identity. That covers both the same-session and the cross-session case, so the gen check is no longer needed:
 ```go
-// in loadState / refreshInstalled, once:
-for id := range state.InstalledNapps {
-	if strings.ContainsAny(id, `/\`) || !filepath.IsLocal(id) {
-		continue // hostile legacy ids are left alone, as D-04 wants
-	}
-	legacy := filepath.Join(dataDir, "napps", id)
-	if dst, err := nappBaseDir(id); err == nil {
-		if _, err := os.Stat(dst); os.IsNotExist(err) {
-			_ = os.Rename(legacy, dst)
+// napSession
+subs map[string]*napSub
+
+type napSub struct{ cancel context.CancelFunc }
+
+// napRelaySubscribe (same shape in napOutboxSubscribe with key)
+sub := &napSub{cancel: cancel}
+s.subs[r.SubID] = sub
+s.mu.Unlock()
+c.async(func(context.Context) {
+	defer func() {
+		s.mu.Lock()
+		if s.subs[r.SubID] == sub { // only our own entry, in any session
+			delete(s.subs, r.SubID)
 		}
-	}
-}
+		s.mu.Unlock()
+		cancel()
+	}()
+	...
+})
+
+// napRelayClose / napOutboxClose / resetLocked: call sub.cancel()
 ```
-
-### CR-02: Launcher-routed intents can be forged by any napplet (the "launcher" sender is a d tag anyone can use)
-
-**File:** `backend/window_instances.go:805-811, 1120`, `backend/nap_inc.go:96-118`
-**Issue:** This phase changed intent delivery from `intent.deliver`, a type only Go could produce, to a plain `inc.event` on the convention topic. Any napplet can produce that same envelope with `inc.emit` on `napplet:<archetype>/<action>`. `incPublish` then delivers it to every napplet subscribed to that topic. That reaches exactly the handler napplets, because their readiness signal is that very subscription. The handler therefore cannot tell an intent the launcher resolved (rule-checked and user-approved) from a peer broadcast, except by `sender`. `sender` cannot be trusted either:
-- For launcher-originated intents (`OpenUserProfile`, the tray, `runNappAction` with a nil caller), `sender` is the literal `"launcher"`.
-- d tags are author-chosen and unvalidated. Any author can publish a napplet with `d = "launcher"`. Its `inc.emit("napplet:profile/open", …)` then reaches every profile handler as `{type:"inc.event", topic:"napplet:profile/open", sender:"launcher"}`. That is byte for byte what the launcher sends.
-
-NAP-INC requires `sender` to be "runtime-attested", and "launcher" is not a dTag at all. This is a sender-attestation forgery that the phase introduced, and it bypasses the `PermDispatch` rules and the handler chooser entirely.
-**Fix:**
-- Make the launcher sender a value no d tag can take, or refuse such d tags at parse time.
-- Stop accepting peer `inc.emit` on reserved intent convention topics, so only the launcher's resolved delivery uses them.
-
-```go
-// nap_inc.go napIncEmit
-if _, _, ok := conventionParts(r.Topic); ok {
-	return // napplet:<archetype>/<action> is delivered only by intent resolution
-}
-```
-
-Also record a CONFORMANCE conflict row for the reserved topic, and use `incSender(caller)` for napplet callers (see WR-03).
-
-## Warnings
-
-### WR-01: `napPushGen` checks the generation, then sends without holding the lock, so a stale session's push can reach the replacement frame
-
-**File:** `backend/nap.go:255-275`, `backend/webview/napplet-host.js:146-164`
-**Issue:**
-- `napPushGen` reads `gen == ci.nap.gen && established` under `nap.mu`, then releases the lock, marshals, and calls `ci.eval(...)`. A goroutine from session N can pass the check, then get preempted. `napStart` then runs, its response goes out, and the host page creates the new frame. Only after that does the session-N eval get written.
-- The host page's `__nap_push` delivers to whatever `frame` is current, and it has no idea which session a push belongs to. So relay events, resource bytes and identity answers from the old document's requests reach the new document.
-- This breaks the D-07 claim in `napStart`'s comment ("a late answer for the old session is dropped by napPushGen").
-- The same holds on Android, where `SendToWindow` and RPC replies are not ordered with respect to each other.
-
-**Fix:**
-- Have `nap.start` return the new `gen`, keep it in `napplet-host.js`, and tag every push: `window.__nap_push(gen, json)`. The host page drops any push whose gen is not current.
-- Alternatively, hold `nap.mu` across `ci.send` if the transport's send is a non-blocking enqueue.
-
-### WR-02: Intent readiness is not tied to a session, so intents get lost while the dispatch reports success
-
-**File:** `backend/window_instances.go:1106-1124`
-**Issue:** `dispatchToNapplet` waits on `ci.waitForHandler(req.name)`, which looks only at `ci.actions`, then pushes with `ci.napPush`, which uses whatever the current gen is. Two cases lose the payload while the function returns `nil, nil`, and the caller has already received `ok:true, handled:true`:
-- `nap.start` (a dev reload, or a host-page reload) can run between the wait and the push. The event then goes to a new document that has not subscribed yet, and the shim drops it.
-- The napplet reloads its own frame. The session persists, and so do `ci.actions` and `s.topics` (see WR-05). The handler counts as "ready" at once, and the event reaches a document whose scripts have not called `inc.on`.
-
-**Fix:** Do the readiness check and the push against one generation. Capture `gen` while holding `nap.mu` together with `s.topics[req.name]`, push with `napPushGen(gen, ev)`, and wait again if the session changed:
-
-```go
-for {
-	if _, ok := ci.waitForHandler(waitCtx, req.name); !ok { return nil, errNoHandler… }
-	s := ci.nap
-	s.mu.Lock()
-	gen, live := s.gen, s.established && s.topics[req.name]
-	s.mu.Unlock()
-	if live && ci.napPushGenOK(gen, ev) { break } // napPushGen variant that reports delivery
-}
-```
-
-### WR-03: An intent from a root napplet carries an empty `sender`
-
-**File:** `backend/window_instances.go:810`, `backend/window_instances.go:1120`
-**Issue:** `req.sender = caller.napp.D`. A root napplet (kind 15129) has `D == ""`, so the handler gets `inc.event` with `sender: ""`. NAP-INC makes `sender` required. Verdana's own INC path already handles this case: `incSender` falls back to `Address()`. Now that intents travel as INC events, the two paths name the same caller differently.
-**Fix:** `req.sender = incSender(caller)` when `caller.nap != nil`, and keep the d tag (or address) for napp callers.
-
-### WR-04: Lifecycle RPCs share the napplet's `MAX_PENDING` budget, so a flooding napplet can make `nap.start` fail
-
-**File:** `backend/webview/napplet-host.js:170-183, 296-301, 311`
-**Issue:**
-- `nap.start` and `nap.loaded` go through the same `enqueue` that rejects once `pending >= 256`.
-- If the frame has 256 envelopes in flight when a boot happens (a dev reload, or the Android WebView recreating the host page), `enqueue(() => rpc("nap.start"))` rejects at once. `showBootError` then wipes the body, and nothing retries: the window stays dead until the user reopens it.
-- `nap.loaded` is dropped silently the same way, so `notify.controls` is never sent for that session.
-
-The bound exists to limit the napplet. The host page's own lifecycle calls should not count against it.
-**Fix:** Give `enqueue` a `trusted` flag that skips the bound (it still chains on `outbound` for ordering), and use it for `nap.start` and `nap.loaded`.
-
-### WR-05: A frame that reloads or navigates itself keeps the live session and its intent topics
-
-**File:** `backend/webview/napplet-host.js:273-275, 310-312`, `backend/nap.go:413-427`
-**Issue:** The frame's `contentWindow` stays the same WindowProxy across navigations, so a document the napplet navigates to still passes `event.source === frame.contentWindow`, keeps the session, its grants, `s.topics` and `ci.actions`. That holds even for an `https:` page with no CSP and full network access. On desktop the host page's `navigate-to 'self'` CSP does nothing, and Android allows sub-frame navigation (`NappWebView.kt:102`). This is tracked as 5D-3 / NIP-5D-reload for Phase 4. It is listed here because it interacts with code this phase added:
-- `nap.loaded` fires again on the new document, but `controlsSent` suppresses the push, so a reloaded document never gets `notify.controls`.
-- WR-02's intent readiness counts as satisfied for a document that never subscribed.
-
-**Fix:** The Phase 4 plan stands. Until then, have the `load` listener tell Go about every load after the first (`nap.loaded` with a counter), so Go can at least clear `controlsSent` and the topic registrations.
-
-### WR-06: The new containment tests swap globals that background goroutines read, causing data races
-
-**File:** `backend/containment_test.go:255-261, 391-395`, `backend/nap_test.go:120` (via `newContainmentRig`)
-**Issue:** `go test -race -run 'NappBaseDirIsHashed|HostileDTagStaysInside' .` fails with three `DATA RACE` reports:
-- `InstallNapp`/`Uninstall` call `refreshInstalled`, which starts `go syncAppShortcuts()`. That goroutine reads `host` (`app_shortcuts.go:51`) and, through `IconBlob`, reads `dataDir`.
-- At the same time, the test assigns `host = h` (lines 393/395), and the next subtest's `setupNapTest` and `TestNappBaseDirIsHashedAndContained` assign `dataDir`.
-
-CI does not run `-race` today, but these tests can see the wrong data directory or host. A leftover shortcut sync from a previous subtest can also read the next subtest's state.
-**Fix:**
-- Wait for the shortcut sync in the rig, for example by taking `appShortcutSyncMu` in a `t.Cleanup` before restoring globals.
-- Or inject the host through `previewTestHost` before any install, instead of swapping it mid-test.
-- In `TestNappBaseDirIsHashedAndContained`, call a pure helper that takes `dataDir` as an argument rather than mutating the global.
-
-### WR-07: CRIT-01 and W-1 claim one choke point, but storage and config filenames still normalize the id and can collide
-
-**File:** `backend/window_storage.go:35-55` (used by the test at `backend/containment_test.go:410-414`), `backend/napconfig/store.go:53, 233-249`, `spec/CONFORMANCE.md:47, 125`
-**Issue:** `safeFileName` maps every character outside `[A-Za-z0-9._~-]` to `_`. So `pk~a/b`, `pk~a_b` and `pk~a b` share one localStorage file and one config file. On case-insensitive filesystems (the macOS and Windows defaults), `pk~App` and `pk~app` collide as well. The scope is the same author only, because of the pk16 prefix.
-
-The W-1 row in CONFORMANCE.md is marked "fixed" and says `d` "stays untouched in the id, state, storage keys", and the `nappBaseDir` comment calls it "the one place". But the persisted per-napp files are named by a lossy mapping. 01-RESEARCH defers this to Phase 5 CF-2, and the checklist does not say so.
-**Fix:**
-- Name the storage and config files `hex(sha256(id)).json`, with the same rule as `nappBaseDir`.
-- Or narrow the W-1/CRIT-01 rows and add an open row owned by Phase 5 for the storage/config collision.
+Add a regression test that runs subscribe x, close x, subscribe x, waits for the first pump to exit, then checks that `subs[x]` is still tracked and that a second `close x` cancels the live pump. Also loop the sequence more than `napMaxSubs` times and assert the extra subscriptions are refused.
 
 ## Info
 
-### IN-01: The `nap.reset` RPC has no caller left
+### IN-01: The `nap.reset` RPC still has no caller (carried over)
 
-**File:** `backend/nap.go:296-298`, `backend/nap.go:429-438`
-**Issue:** `napplet-host.js` no longer calls `nap.reset`; `DevReload` calls `ci.napReset()` directly. The RPC case is dead, but it is still a lifecycle entry point that the host page can reach.
-**Fix:** Remove the `case "nap.reset"` branch, and the mentions of it in the comments at lines 60-62 and 280-283.
+**File:** `backend/nap.go:324-326`
+**Issue:** `napplet-host.js` never sends `nap.reset`. `DevReload` calls `ci.napReset()` directly (`dev.go:270`). The case is dead code, but the host page can still reach it as a lifecycle entry point.
+**Fix:** Remove the `case "nap.reset"` branch and the comment references to it (`nap.go:71`, `nap.go:303`).
 
-### IN-02: The `</script` escape in `buildSrcdoc` is case-sensitive
+### IN-02: The `</script` guard in `buildSrcdoc` is case-sensitive (carried over)
 
-**File:** `backend/nap.go:557-559`
-**Issue:** HTML ends a script element at `</script` matched case-insensitively. The guard only rewrites lowercase. Today's prelude is pinned by hash, so there is no live bug, but the guard does not hold up for "a future one", which is the case its comment says it protects against.
-**Fix:** Use a case-insensitive replace, e.g. `regexp.MustCompile("(?i)</script").ReplaceAllString(p, `<\/script`)`, or fail the build if the prelude contains `</script` in any case.
+**File:** `backend/nap.go:604-606`
+**Issue:** HTML matches end tags case-insensitively. The prelude is hash-pinned today, so this is not a live bug.
+**Fix:** Use `regexp.MustCompile("(?i)</script")`, or fail if the prelude contains that string in any case.
 
-### IN-03: Pinned-snapshot integrity is self-referential, and the README hash column is never checked
+### IN-03: Pinned-snapshot integrity is checked against itself (carried over)
 
 **File:** `backend/spec_pinned_test.go:100-157`
-**Issue:** `body_sha256` lives in the same file it verifies, so an edit that updates both passes. The README's `body sha256` column is never compared against the front matter either.
+**Issue:** `body_sha256` lives in the file it verifies, and nothing compares it with the hash column in the README.
+**Fix:** Cross-check the README rows. Optionally pin the upstream git blob SHA-1 as well.
+
+### IN-04: `Start` does not make `DataDir` absolute (carried over)
+
+**File:** `backend/backend.go:65-68`
+**Issue:** `nappBaseDirIn` rejects a relative `dataDir`. With a relative `Options.DataDir`, every install, launch and update fails.
+**Fix:** In `Start`, set `dataDir, err = filepath.Abs(opts.DataDir)`.
+
+### IN-05: Negative assertions still use fixed sleeps (carried over)
+
+**File:** `backend/nap_test.go:1074` (TestIntentDeliveryWaitsForTheReceivingSession), plus the tests listed in iteration 1
+**Issue:** The test checks for absence after `time.After(20ms)` without proving that the dispatch goroutine reached its wait. On a slow runner it passes without exercising the wake-up path. The new `TestNapStartWaitsOutAnInFlightHandler` shows the better pattern: it polls `TryRLock`.
+**Fix:** Poll until `dispatchToNapplet` is parked, using a counter or a hook, before sending the sync subscribe.
+
+### IN-06: Address-form senders look attested but can be forged, and channels cannot target them (carried over)
+
+**File:** `backend/nap_inc.go:78-83`, `backend/nap_inc.go:180`
+**Issue:**
+- `incSender` names root napplets and `d="launcher"` napplets as `<kind>:<pubkey>:<d>`. Any author can choose `d = "15129:<victim pubkey>:"` and produce exactly that string.
+- `inc.channel.open` matches `target` only against `ci.napp.D`, so a handler that tries to answer an address-form sender over a channel gets `target not available`.
+
+A23 now makes `sender` the only signal a handler has, so it matters a little more that the address form cannot be forged.
 **Fix:**
-- Also compare each README row's hash with the front-matter value.
-- Optionally record the upstream git blob SHA-1 and check `sha1("blob <len>\x00" + body)`, which pins the text to upstream rather than to itself.
+- Have `incSender` return the address for any `d` that parses as `<kind>:<64-hex>:…`.
+- In `napIncChannelOpen`, match on `incSender(ci) == r.Target`.
 
-### IN-04: `Start` does not make `DataDir` absolute, so a relative path silently disables every install
+### IN-07: `dispatchToNapplet` records `lastAction` before a push that can fail, and again on every retry (carried over)
 
-**File:** `backend/backend.go:65-68`, `backend/backend.go:131-134`
-**Issue:** `nappBaseDir` refuses a non-absolute `dataDir`, but `Start` accepts one without complaint. A GUI or CLI that passes a relative path gets a backend that starts but fails every install, launch and update.
-**Fix:** In `Start`, run `dataDir, err = filepath.Abs(opts.DataDir)` and return an error if that fails.
+**File:** `backend/window_instances.go:1146-1152`
+**Issue:** `napPushGen` can return false and the loop can then time out. In that case the window keeps showing an action it never received, and every failed pass calls `notifyState()` again.
+**Fix:** On the timeout and `gone` exits, clear `lastAction` with `CompareAndSwap` if it still holds this request.
 
-### IN-05: The "nothing was pushed" assertions use fixed sleeps
+### IN-08: `backgroundSyncs` covers only some background passes, and `WaitGroup.Go` can race `Wait` (carried over)
 
-**File:** `backend/nap_test.go` (TestNapSessionStartsFromHostPage, TestNapFrameShellReadyIsIgnored, TestIntentDeliveryToNapplet, TestIntentDeliveryReachesOnlyTheHandler)
-**Issue:** Negative checks after `time.Sleep(50 * time.Millisecond)` pass trivially if the worker is slow, so a regression could slip through unnoticed. They cannot fail spuriously.
-**Fix:** Before asserting absence, post a sync envelope (as `TestNapFrameShellReadyIsIgnored/after nap.start` already does with `storage.keys`) and wait for its answer.
+**File:** `backend/registry_install.go:17-33`, `backend/dev.go:117`, `backend/window_permissions.go:324`, `backend/window_instances.go:904`
+**Issue:**
+- Three `go broadcastIntentChanges()` sites are still untracked.
+- If a stray goroutine calls `Add` from zero while `setupNapTest` is inside `backgroundSyncs.Wait()`, that is documented `WaitGroup` misuse.
+
+The race-detector runs pass today.
+**Fix:** Route the remaining spawns through `backgroundSyncs.Go`.
+
+### IN-09: "A handler must not block" is now load-bearing for `nap.start` and `WindowClosed`, but nothing says so
+
+**File:** `backend/nap.go:182-184` (napHandler doc), `backend/nap.go:497-498` (napClosed), `backend/window_instances.go:373`
+**Issue:** With `dispatchMu`, a slow synchronous handler part now stalls more than the queue:
+- It delays the host page's `nap.start`, so the boot hangs.
+- It delays `WindowClosed`. On Android that call runs on the main thread, from `NappActivity.onDestroy`.
+
+Every current handler keeps prompts and network waits inside `c.async`, so this is not a live bug. But the `napHandler` comment still says only "it must not block: anything slow goes through c.async". A future handler that prompts or fetches synchronously would freeze the Android UI on close. Separately, `beforeHandler` is a test-only hook on the production struct, read without a lock. That is fine as long as tests set it before the first envelope, as the comment says.
+**Fix:** Extend the `napHandler` doc comment: the synchronous part runs under `dispatchMu.RLock`, and `napStart`/`napClosed` (and so the Android main thread) wait for it. Optionally, log a warning when `h(&c)` takes longer than about 100 ms.
 
 ---
 
-_Reviewed: 2026-10-03T00:02:42Z_
+_Reviewed: 2026-10-03T01:42:07Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
