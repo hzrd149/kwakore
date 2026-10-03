@@ -218,8 +218,8 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		return rows
 	}
 
-	// A1-A17 keep their FEATURES.md numbers; A18-A22 were added in Phase 1
-	conflicts := requireRows("Conflicts", "A", 22, "Specs", "Conflict", "Chosen reading", "Decided by", "Owner")
+	// A1-A17 keep their FEATURES.md numbers; A18-A23 were added in Phase 1
+	conflicts := requireRows("Conflicts", "A", 23, "Specs", "Conflict", "Chosen reading", "Decided by", "Owner")
 	if tb, ok := tableIn("Conflicts"); ok && conflicts != nil {
 		// the four required readings quote both sides verbatim
 		for _, id := range []string{"A1", "A2", "A3", "A18"} {
@@ -255,6 +255,7 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		"WEB-NAPPLET": {"W-1"},
 		"NAP-SHELL":   {"NAP-SHELL-1"},
 		"NAP-INTENT":  {"NAP-INTENT-1"},
+		"NAP-INC":     {"NAP-INC-sender"},
 	} {
 		tb, ok := tableIn(pinSection[spec])
 		if !ok {

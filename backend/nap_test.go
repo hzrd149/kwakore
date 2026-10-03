@@ -1072,6 +1072,93 @@ func TestIntentDeliveryReachesOnlyTheHandler(t *testing.T) {
 	}
 }
 
+// A peer cannot emit on an intent convention topic: only the launcher
+// delivers there, after resolution, so a handler never mistakes a broadcast
+// for an intent the rules and the user routed to it (CR-02, conflict A23).
+func TestIncEmitRefusedOnIntentConventionTopic(t *testing.T) {
+	setupNapTest(t)
+	peer, recPeer := openNapplet(t, "peer")
+	handler, rec := openNapplet(t, "profile-handler")
+	ready(t, peer, recPeer, 1)
+	ready(t, handler, rec, 1)
+	subscribeTopic(t, handler, rec, "napplet:profile/open", 1)
+	subscribeTopic(t, handler, rec, "chat", 2)
+
+	post(t, peer, map[string]any{"type": "inc.emit", "topic": "napplet:profile/open", "payload": map[string]any{"pubkey": "forged"}})
+	// envelopes of one session are handled in order: the emit on an
+	// ordinary topic is the sync point for the refused one before it
+	post(t, peer, map[string]any{"type": "inc.emit", "topic": "chat", "payload": "after"})
+	if ev := rec.wait(t, "inc.event", 1); ev["topic"] != "chat" || ev["payload"] != "after" {
+		t.Fatalf("a peer emit reached the intent handler: %v", ev)
+	}
+	if got := rec.find("inc.event"); len(got) != 1 {
+		t.Errorf("inc.event pushes = %d, want only the chat one: %v", len(got), got)
+	}
+
+	// listening on the convention topic is still the handler's readiness
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, ok := handler.waitForHandler(ctx, "napplet:profile/open"); !ok {
+		t.Error("the handler's subscription no longer registers the intent")
+	}
+}
+
+// launcherSender names only the launcher: a napplet whose author picked the d
+// tag "launcher" is named by its address, both on its own inc emits and on
+// the intents it invokes (CR-02).
+func TestLauncherSenderCannotBeForged(t *testing.T) {
+	setupNapTest(t)
+	impostor, recImpostor := openNapplet(t, launcherSender)
+	if got := incSender(impostor); got == launcherSender || got != impostor.napp.Address() {
+		t.Fatalf("incSender(d=%q) = %q, want its address %q", launcherSender, got, impostor.napp.Address())
+	}
+	// the d tag itself is never rewritten (CRIT-01, W-1)
+	if impostor.napp.D != launcherSender {
+		t.Fatalf("d tag changed to %q", impostor.napp.D)
+	}
+
+	handler, rec := openNapplet(t, "profile-handler")
+	handler.napp.Conventions = []NappletConvention{{ID: "napplet:profile/open"}}
+	handler.napp.Actions = []string{"napplet:profile/open"}
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[handler.napp.ID] = handler.napp
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		delete(state.InstalledNapps, handler.napp.ID)
+		stateMu.Unlock()
+	})
+	key := intentDefaultKey("profile")
+	setSessionRule(key, Rule{Decision: DecisionAllow, Target: handler.napp.ID})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	ready(t, impostor, recImpostor, 1)
+	ready(t, handler, rec, 1)
+	subscribeTopic(t, handler, rec, "chat", 1)
+	post(t, impostor, map[string]any{"type": "inc.emit", "topic": "chat", "payload": "hi"})
+	if ev := rec.wait(t, "inc.event", 1); ev["sender"] != impostor.napp.Address() {
+		t.Errorf("inc emit sender = %v, want the impostor's address", ev["sender"])
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := runNappAction(context.Background(), impostor, "napplet:profile/open",
+			json.RawMessage(`{"pubkey":"abc"}`), actionOptions{DefaultKey: key})
+		done <- err
+	}()
+	subscribeTopic(t, handler, rec, "napplet:profile/open", 2)
+	delivery := rec.wait(t, "inc.event", 2)
+	if delivery["topic"] != "napplet:profile/open" || delivery["sender"] != impostor.napp.Address() {
+		t.Errorf("intent from d=%q delivered as %v", launcherSender, delivery)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("dispatch: %v", err)
+	}
+}
+
 func TestConventionPartsAcceptsOnlyStableIdentity(t *testing.T) {
 	archetype, action, ok := conventionParts("napplet:profile/open")
 	if !ok || archetype != "profile" || action != "open" {

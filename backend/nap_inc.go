@@ -15,6 +15,8 @@ import (
 // A topic subscription doubles as a napplet's "ready for this intent"
 // signal: subscribing to napplet:<role>/<action> registers that action on
 // the window, which is what action dispatch (and so NAP-INTENT) waits for.
+// Napplets may listen on those topics but never emit on them: only the
+// launcher delivers there (napIncEmit).
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -61,10 +63,19 @@ func randomID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// incSender is how a napplet is named to its peers: its d-tag.
+// launcherSender is the sender of an intent the launcher fires itself (the
+// tray, a shortcut, RunAction): there is no napplet behind it. incSender never
+// produces it, so a handler can trust an inc.event from "launcher" to come
+// from the launcher and not from an author who picked that d tag.
+const launcherSender = "launcher"
+
+// incSender is how a napplet (or a napp asking for an action) is named to its
+// peers: its d-tag. A root napplet (kind 15129) has no d tag, and a d tag
+// equal to launcherSender would impersonate the launcher: both are named by
+// their address instead, which always starts with the kind number. The d tag
+// itself is untouched everywhere else (CRIT-01, W-1).
 func incSender(ci *Instance) string {
-	if ci.napp.D == "" {
-		// a root napplet (kind 15129) has no d tag: its address names it
+	if ci.napp.D == "" || ci.napp.D == launcherSender {
 		return ci.napp.Address()
 	}
 	return ci.napp.D
@@ -95,6 +106,16 @@ func napIncEmit(c *napCall) {
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := c.decode(&r); err != nil || r.Topic == "" {
+		return
+	}
+	// napplet:<archetype>/<action> topics are where accepted intents land
+	// (dispatchToNapplet), and only the launcher delivers there, after
+	// resolution. A peer emit on one would reach every handler as if the user
+	// had routed it, past the PermDispatch rules and the chooser, so it is
+	// refused under NAP-INC's ACL clause (CONFORMANCE conflict A23).
+	if _, _, ok := conventionParts(r.Topic); ok {
+		log.Debug().Str("napplet", c.ci.napp.ID).Str("topic", r.Topic).
+			Msg("inc.emit on an intent convention topic refused")
 		return
 	}
 	incPublish(c.ci, r.Topic, r.Payload)

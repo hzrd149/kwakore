@@ -88,8 +88,9 @@ type Instance struct {
 type actionRequest struct {
 	name    string
 	payload json.RawMessage
-	// sender names who asked, for napplet targets (IntentDelivery.sender): the
-	// calling napp's or napplet's d-tag, or "launcher"
+	// sender names who asked, for napplet targets (the inc.event sender):
+	// incSender of the calling napp or napplet, or launcherSender, which no
+	// caller can take
 	sender string
 	accept func(*Instance)
 	focus  bool
@@ -802,12 +803,14 @@ func runNappAction(
 		callerName = caller.napp.Label()
 	}
 
-	req := &actionRequest{name: name, payload: payload, sender: "launcher", accept: opts.Accept, focus: opts.Focus}
+	req := &actionRequest{name: name, payload: payload, sender: launcherSender, accept: opts.Accept, focus: opts.Focus}
 
 	callerID := ""
 	if caller != nil {
 		callerID = caller.napp.ID
-		req.sender = caller.napp.D
+		// runtime-attested, as NAP-INC wants: a root napplet is named by its
+		// address and no d tag can pass for the launcher
+		req.sender = incSender(caller)
 	}
 
 	// an explicit instance skips every choice: route it straight there
