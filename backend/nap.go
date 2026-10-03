@@ -89,10 +89,12 @@ type napSession struct {
 	// network work and makes its upload ids unreachable to the new document.
 	uploads map[string]*napUploadStatus
 	// the session's answers to its standing questions ("may it fetch from
-	// the web", "may it read encrypted messages"): asked once per session,
-	// grantMu makes concurrent requests wait for that one question
-	grantMu sync.Mutex
-	grants  map[Permission]bool
+	// the web", "may it read encrypted messages"): asked once per session.
+	// grants holds only what the user (or a rule) answered; asking is the
+	// question in flight per permission, which concurrent requests wait on
+	// instead of asking again (sessionGrant). Both are guarded by mu.
+	grants map[Permission]bool
+	asking map[Permission]*grantQuestion
 	// notifications are the OS notifications created by this document. The
 	// handles are session-owned so a reload or closed iframe dismisses them.
 	notifications     map[string]NotificationHandle
@@ -172,6 +174,9 @@ func (s *napSession) resetLocked() {
 	}
 	s.uploads = make(map[string]*napUploadStatus)
 	s.grants = make(map[Permission]bool)
+	// a question still in flight belongs to the old session: its asker is
+	// dismissed by the cancelled context, and its waiters see the new gen
+	s.asking = make(map[Permission]*grantQuestion)
 	for _, n := range s.notifications {
 		_ = n.Dismiss()
 	}
@@ -790,29 +795,79 @@ func buildSrcdoc(html []byte, domains []string) (string, error) {
 		"</head>" + doc, nil
 }
 
+// grantQuestion is a session question in flight: the first request that
+// needs the permission asks, and the others wait on done for its answer.
+type grantQuestion struct {
+	done chan struct{}
+	ok   bool
+	// decided is false when the question ended without an answer that
+	// counts (dismissed, refused by the prompt bounds): nothing was recorded
+	// and a waiter has to ask for itself
+	decided bool
+}
+
 // sessionGrant asks once per session (or not at all, once the user said
 // "always") whether the napplet may do something it will want to do over
 // and over: fetching, decrypting. Every caller after the first gets the same
 // answer without another prompt.
-func (c *napCall) sessionGrant(perm Permission, title, detail string) bool {
+//
+// Only an explicit answer is recorded (02-RESEARCH Pattern 9). A question
+// that was dismissed or refused leaves the permission undecided, so the next
+// request asks again instead of being denied for the rest of the session. A
+// caller waiting on someone else's question returns as soon as its own ctx
+// ends, and asks for itself when that question ended without an answer.
+// s.mu is only held to read and write grants and asking, never across the
+// prompt.
+func (c *napCall) sessionGrant(ctx context.Context, perm Permission, title, detail string) (bool, error) {
 	s := c.ci.nap
-	s.grantMu.Lock()
-	defer s.grantMu.Unlock()
-	s.mu.Lock()
-	ok, decided := s.grants[perm]
-	stale := s.gen != c.gen
-	s.mu.Unlock()
-	if stale {
-		return false
+	for {
+		if ctx.Err() != nil {
+			return false, errPromptDismissed
+		}
+		s.mu.Lock()
+		if s.gen != c.gen {
+			s.mu.Unlock()
+			return false, errPromptDismissed
+		}
+		if ok, decided := s.grants[perm]; decided {
+			s.mu.Unlock()
+			return ok, nil
+		}
+		if q := s.asking[perm]; q != nil {
+			s.mu.Unlock()
+			select {
+			case <-q.done:
+				if q.decided {
+					return q.ok, nil
+				}
+				// the asker was dismissed: ask again under our own deadline
+				continue
+			case <-ctx.Done():
+				return false, errPromptDismissed
+			}
+		}
+		q := &grantQuestion{done: make(chan struct{})}
+		s.asking[perm] = q
+		s.mu.Unlock()
+
+		ok, err := askApproval(ctx, c.ci, perm, title, detail, "")
+
+		s.mu.Lock()
+		stale := s.gen != c.gen
+		if err == nil && !stale {
+			s.grants[perm] = ok
+			q.ok, q.decided = ok, true
+		}
+		if s.asking[perm] == q {
+			delete(s.asking, perm)
+		}
+		s.mu.Unlock()
+		close(q.done)
+		if err == nil && stale {
+			// answered for a session that has ended since: nothing may
+			// happen for it
+			return false, errPromptDismissed
+		}
+		return ok, err
 	}
-	if decided {
-		return ok
-	}
-	ok = askApproval(c.ci, perm, title, detail, "")
-	s.mu.Lock()
-	if s.gen == c.gen {
-		s.grants[perm] = ok
-	}
-	s.mu.Unlock()
-	return ok
 }

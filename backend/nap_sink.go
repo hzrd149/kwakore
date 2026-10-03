@@ -96,19 +96,47 @@ func (c *napCall) undeclared(perm Permission, how string) {
 	c.failWith(napErrDenied)
 }
 
+// promptCtx is what a prompt raised for this call lives in (DEC-1, D-20):
+// the session's context, so a teardown (nap.start, nap.reset, a closed
+// window) cancels it, bounded by the route's prompt deadline counted from
+// when the envelope arrived. Past that the shim stopped waiting (30 s, 5 s
+// for storage) and an answer would reach nobody; relay publishes and
+// upload.upload, which the shim does not time out, get promptTimeout. The
+// elapsed time is read on napNow, the clock the limits use, so a test that
+// freezes it still gets the whole deadline.
+func (c *napCall) promptCtx() (context.Context, context.CancelFunc) {
+	parent := c.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	deadline := napDeadlineDefault
+	if r := c.declaredRoute(); r != nil {
+		deadline = r.promptDeadline()
+	}
+	if !c.received.IsZero() {
+		deadline -= napNow().Sub(c.received)
+	}
+	return context.WithTimeout(parent, deadline)
+}
+
 // approve asks the user (or the rules) whether this one call may do what
 // perm covers. Only a PerCall route on perm, or a Dynamic route listing it,
 // may ask. On yes the call's sinks open up.
 //
-// The error is for prompts that end without an answer (02-06 makes them
-// cancellable and bounded); a handler answers it with c.failForPrompt.
+// The prompt lives in c.promptCtx(): it is cancelled as dismissed when the
+// request's deadline passes or its session ends, and the bounds may refuse
+// it. Both come back as the error (errPromptDismissed, errPromptLimited),
+// which a handler answers with c.failForPrompt.
 func (c *napCall) approve(perm Permission, title, detail, code string) (bool, error) {
 	if !c.gateDeclares(perm, false) {
 		c.undeclared(perm, "approve")
 		return false, nil
 	}
-	if !askApproval(c.ci, perm, title, detail, code) {
-		return false, nil
+	ctx, cancel := c.promptCtx()
+	defer cancel()
+	ok, err := askApproval(ctx, c.ci, perm, title, detail, code)
+	if err != nil || !ok {
+		return false, err
 	}
 	c.approved.Store(true)
 	return true, nil
@@ -116,14 +144,18 @@ func (c *napCall) approve(perm Permission, title, detail, code string) (bool, er
 
 // grant asks the session's standing question for perm (once per session,
 // see sessionGrant). Only a Session route on perm, or a Dynamic route
-// listing it, may ask. On yes the call's sinks open up.
+// listing it, may ask. On yes the call's sinks open up. Its prompt, or its
+// wait on another request's prompt, lives in c.promptCtx() like approve's.
 func (c *napCall) grant(perm Permission, title, detail string) (bool, error) {
 	if !c.gateDeclares(perm, true) {
 		c.undeclared(perm, "grant")
 		return false, nil
 	}
-	if !c.sessionGrant(perm, title, detail) {
-		return false, nil
+	ctx, cancel := c.promptCtx()
+	defer cancel()
+	ok, err := c.sessionGrant(ctx, perm, title, detail)
+	if err != nil || !ok {
+		return false, err
 	}
 	c.approved.Store(true)
 	return true, nil
@@ -155,11 +187,19 @@ func (c *napCall) hasGrant(perm Permission) bool {
 	return granted
 }
 
-// failForPrompt answers a request whose prompt ended without an answer.
-// Every such ending is a denial until 02-06 gives them their own codes.
+// failForPrompt answers a request whose prompt ended without an answer, in
+// the route's shape: refused by the prompt bounds is rate-limited (D-15),
+// dismissed (deadline, session end, promptTimeout) is a denial like the
+// user's no, and anything else is internal-error.
 func (c *napCall) failForPrompt(err error) {
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, errPromptLimited):
+		c.failWith(napErrRateLimited)
+	case errors.Is(err, errPromptDismissed):
 		c.failWith(napErrDenied)
+	default:
+		c.failWith(napErrInternal)
 	}
 }
 

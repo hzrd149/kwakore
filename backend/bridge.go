@@ -112,9 +112,11 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &evt); err != nil {
 				return nil, err
 			}
-			if !askApproval(ci, PermSign, "sign an event with your key",
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			if ok, err := askApproval(pctx, ci, PermSign, "sign an event with your key",
 				fmt.Sprintf("Kind %d, %d tags.", evt.Kind, len(evt.Tags)),
-				preview(evt.Content, 200)) {
+				preview(evt.Content, 200)); err != nil || !ok {
 				return nil, errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -149,7 +151,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				perm = PermEncrypt
 				payload = preview(p.Plaintext, 120)
 			}
-			if !askApproval(ci, perm, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			if ok, err := askApproval(pctx, ci, perm, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload); err != nil || !ok {
 				return "", errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -372,7 +376,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				}
 				url = p.URL
 			}
-			if !askApproval(ci, PermOpenLink, "open a link in your browser", "", preview(url, 200)) {
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			if ok, err := askApproval(pctx, ci, PermOpenLink, "open a link in your browser", "", preview(url, 200)); err != nil || !ok {
 				return nil, errors.New("denied by the user")
 			}
 			return nil, openExternalLink(url)
@@ -657,8 +663,10 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				return nil, err
 			}
 			name := SanitizeFilename(p.Name)
-			if !askApproval(ci, PermSaveFile, "save a file to your disk",
-				"“"+name+"” goes to "+host.SaveFileTarget()+".", "") {
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			if ok, err := askApproval(pctx, ci, PermSaveFile, "save a file to your disk",
+				"“"+name+"” goes to "+host.SaveFileTarget()+".", ""); err != nil || !ok {
 				return nil, errors.New("denied by the user")
 			}
 			return saveFileForNapp(p.Name, p.Data)
@@ -673,8 +681,10 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if len(p.Text) > maxCopyChars {
 				return nil, errors.New("text is too long to copy")
 			}
-			if !askApproval(ci, PermCopyText, "copy text to your clipboard",
-				strconv.Itoa(len(p.Text))+" characters.", preview(p.Text, 120)) {
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			if ok, err := askApproval(pctx, ci, PermCopyText, "copy text to your clipboard",
+				strconv.Itoa(len(p.Text))+" characters.", preview(p.Text, 120)); err != nil || !ok {
 				return nil, errors.New("denied by the user")
 			}
 			return copyTextForNapp(p.Text)
@@ -840,10 +850,12 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 
 	log.Println("gathered targets: ", targets)
 
-	if !askApproval(ci, PermPublish, "publish an event",
+	pctx, pcancel := ci.windowPromptCtx()
+	defer pcancel()
+	if ok, err := askApproval(pctx, ci, PermPublish, "publish an event",
 		fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
 			preview(strings.Join(stripSchemes(targets), ", "), 160)),
-		preview(evt.Content, 200)) {
+		preview(evt.Content, 200)); err != nil || !ok {
 		return nil, errors.New("denied by the user")
 	}
 

@@ -1,0 +1,574 @@
+package backend
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"golang.org/x/time/rate"
+)
+
+// ─── test rig ────────────────────────────────────────────────────
+
+// pendingPrompts is every prompt waiting for the user: the active one first,
+// then the queue in order.
+func pendingPrompts() []*Prompt {
+	promptMu.Lock()
+	defer promptMu.Unlock()
+	var out []*Prompt
+	if promptActive != nil {
+		out = append(out, promptActive)
+	}
+	return append(out, promptQueue...)
+}
+
+// promptIDs is pendingPrompts by ID, in queue order.
+func promptIDs() []int {
+	var ids []int
+	for _, p := range pendingPrompts() {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// promptsFor is the pending prompts over one window.
+func promptsFor(instance string) []*Prompt {
+	var out []*Prompt
+	for _, p := range pendingPrompts() {
+		if p.Instance == instance {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// waitPromptsFor waits until exactly n prompts are pending over the window.
+func waitPromptsFor(t *testing.T, instance string, n int) []*Prompt {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := promptsFor(instance)
+		if len(got) == n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d prompts pending over %s, want %d", len(got), instance, n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// cancelAllPrompts takes every pending prompt down, as dismissed.
+func cancelAllPrompts() {
+	for _, p := range pendingPrompts() {
+		cancelPrompt(p)
+	}
+}
+
+// cleanPrompts starts the test with no prompt pending and leaves none behind.
+// Prompts are package state, so these tests never run in parallel.
+func cleanPrompts(t *testing.T) {
+	t.Helper()
+	cancelAllPrompts()
+	t.Cleanup(cancelAllPrompts)
+}
+
+// promptTestHost opens links (counting them safely across async handlers).
+type promptTestHost struct {
+	noopHost
+	mu     sync.Mutex
+	opened []string
+}
+
+func (h *promptTestHost) OpenLink(url string) error {
+	h.mu.Lock()
+	h.opened = append(h.opened, url)
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *promptTestHost) links() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.opened)
+}
+
+// withAskRoute registers test.ask: a link.open in miniature, asking
+// PermOpenLink per call and opening https://example.com/asked on yes, with
+// the given prompt deadline (0 for the default).
+func withAskRoute(t *testing.T, deadline time.Duration) {
+	t.Helper()
+	withTestRoute(t, "test.ask", napRoute{
+		h: func(c *napCall) {
+			c.async(func(context.Context) {
+				ok, err := c.approve(PermOpenLink, "open a test link", "", "")
+				if err != nil {
+					c.failForPrompt(err)
+					return
+				}
+				if !ok {
+					c.failWith(napErrDenied)
+					return
+				}
+				if err := c.openLink("https://example.com/asked"); err != nil {
+					return
+				}
+				c.reply(map[string]any{"status": "opened"})
+			})
+		},
+		gate:     perCallGate(PermOpenLink),
+		fail:     failShape(failLink),
+		deadline: deadline,
+	})
+}
+
+// withRouteDeadline gives a registered route another prompt deadline until
+// restore runs (or the test ends). The route is replaced, not edited: calls
+// already holding the old one keep it.
+func withRouteDeadline(t *testing.T, typ string, d time.Duration) (restore func()) {
+	t.Helper()
+	orig := napRoutes[typ]
+	if orig == nil {
+		t.Fatalf("no route %s", typ)
+	}
+	r := *orig
+	r.deadline = d
+	napRoutes[typ] = &r
+	var once sync.Once
+	restore = func() { once.Do(func() { napRoutes[typ] = orig }) }
+	t.Cleanup(restore)
+	return restore
+}
+
+// ─── bounds ──────────────────────────────────────────────────────
+
+// TestPromptQueueBoundsPerWindowAndGlobal: a window has at most 3 prompts
+// pending and all windows together 32 (D-15). The 3rd and the 32nd are
+// accepted, the 4th and the 33rd refused at once with rate-limited in the
+// route's shape, leaving the queue as it was.
+func TestPromptQueueBoundsPerWindowAndGlobal(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	h := &promptTestHost{}
+	host = h
+	withAskRoute(t, 0)
+	ci, rec := openNapplet(t, "prompt-bounds")
+	ready(t, ci, rec, 1)
+
+	for i := 1; i <= 3; i++ {
+		post(t, ci, map[string]any{"type": "test.ask", "id": "a" + strconv.Itoa(i)})
+	}
+	pending := waitPromptsFor(t, ci.instance, 3)
+	if CurrentPrompt() != pending[0] || PendingPrompts() != 2 {
+		t.Fatalf("want one shown and two queued, got active %v and %d queued", CurrentPrompt(), PendingPrompts())
+	}
+	before := promptIDs()
+
+	post(t, ci, map[string]any{"type": "test.ask", "id": "a4"})
+	got := waitID(t, rec, "test.ask.result", "a4")
+	if got["status"] != "denied" || got["error"] != napErrRateLimited {
+		t.Fatalf("4th prompt: %v", got)
+	}
+	if after := promptIDs(); !slices.Equal(before, after) {
+		t.Fatalf("a refused prompt changed the queue: %v -> %v", before, after)
+	}
+	if n := len(rec.find("test.ask.result")); n != 1 {
+		t.Fatalf("the refusal answered other requests too: %v", rec.find("test.ask.result"))
+	}
+
+	t.Run("global", func(t *testing.T) {
+		cancelAllPrompts()
+		for i := range napMaxPendingPromptsGlobal {
+			p := newPrompt("flood", "global "+strconv.Itoa(i), "", "", nil)
+			p.Instance = "global-" + strconv.Itoa(i)
+			if !enqueueNappPrompt(p) {
+				t.Fatalf("instance prompt %d of %d refused", i+1, napMaxPendingPromptsGlobal)
+			}
+		}
+		before := promptIDs()
+		p := newPrompt("flood", "one too many", "", "", nil)
+		p.Instance = "global-extra"
+		if enqueueNappPrompt(p) {
+			t.Fatalf("instance prompt %d accepted", napMaxPendingPromptsGlobal+1)
+		}
+		if after := promptIDs(); !slices.Equal(before, after) {
+			t.Fatalf("a refused prompt changed the queue: %v -> %v", before, after)
+		}
+	})
+}
+
+// TestLauncherPromptsAreExempt: with the global napplet bound reached, a
+// prompt the launcher raises itself (an install confirmation) still queues
+// and can be answered.
+func TestLauncherPromptsAreExempt(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	for i := range napMaxPendingPromptsGlobal {
+		p := newPrompt("flood", "flood "+strconv.Itoa(i), "", "", nil)
+		p.Instance = "flood-" + strconv.Itoa(i)
+		if !enqueueNappPrompt(p) {
+			t.Fatalf("instance prompt %d refused", i+1)
+		}
+	}
+
+	p := newPrompt("Verdana", "Install and open the napp?", "", "", nil)
+	answered := make(chan bool, 1)
+	go func() {
+		enqueuePrompt(p)
+		answered <- p.wait().OK
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for !slices.Contains(promptIDs(), p.ID) {
+		if time.Now().After(deadline) {
+			t.Fatal("the launcher prompt was not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// an empty Instance goes through enqueueNappPrompt unbounded too
+	q := newPrompt("Verdana", "Another launcher question", "", "", nil)
+	if !enqueueNappPrompt(q) {
+		t.Fatal("a launcher prompt was refused by the napplet bounds")
+	}
+	AnswerPrompt(p.ID, Answer{OK: true})
+	select {
+	case ok := <-answered:
+		if !ok {
+			t.Fatal("the launcher prompt's answer was lost")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the launcher prompt was never answered")
+	}
+}
+
+// TestPromptsStayFIFOWhenRefused: a refused request never reorders,
+// displaces or answers the prompts already pending, whoever owns them.
+func TestPromptsStayFIFOWhenRefused(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	host = &promptTestHost{}
+	withAskRoute(t, 0)
+	ci, rec := openNapplet(t, "prompt-fifo")
+	ready(t, ci, rec, 1)
+
+	// a launcher prompt and another window's prompt between this window's
+	launcher := newPrompt("Verdana", "launcher question", "", "", nil)
+	enqueuePrompt(launcher)
+	post(t, ci, map[string]any{"type": "test.ask", "id": "f1"})
+	waitPromptsFor(t, ci.instance, 1)
+	other := newPrompt("other", "other window's question", "", "", nil)
+	other.Instance = "prompt-fifo-other"
+	if !enqueueNappPrompt(other) {
+		t.Fatal("the other window's prompt was refused")
+	}
+	post(t, ci, map[string]any{"type": "test.ask", "id": "f2"})
+	post(t, ci, map[string]any{"type": "test.ask", "id": "f3"})
+	mine := waitPromptsFor(t, ci.instance, 3)
+
+	before := promptIDs()
+	want := []int{launcher.ID, mine[0].ID, other.ID, mine[1].ID, mine[2].ID}
+	if !slices.Equal(before, want) {
+		t.Fatalf("queue %v, want FIFO %v", before, want)
+	}
+	active := CurrentPrompt()
+
+	post(t, ci, map[string]any{"type": "test.ask", "id": "f4"})
+	if got := waitID(t, rec, "test.ask.result", "f4"); got["error"] != napErrRateLimited {
+		t.Fatalf("4th prompt: %v", got)
+	}
+	if after := promptIDs(); !slices.Equal(before, after) {
+		t.Fatalf("queue %v after a refusal, was %v", after, before)
+	}
+	if CurrentPrompt() != active {
+		t.Fatal("a refusal displaced the active prompt")
+	}
+	if got := rec.find("test.ask.result"); len(got) != 1 {
+		t.Fatalf("a refusal answered pending requests: %v", got)
+	}
+}
+
+// TestPromptBucketLimitsCreation: a window's prompt bucket refuses prompt
+// creation past its burst even when the queue is empty again (frozen clock,
+// burst 2): the 3rd prompt-creating request answers rate-limited.
+func TestPromptBucketLimitsCreation(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	freezeNapNow(t)
+	host = &promptTestHost{}
+	withAskRoute(t, 0)
+	ci, rec := openNapplet(t, "prompt-bucket")
+	withLimits(t, ci, limitsWith(napEnvelopeLimit, map[napLimitClass]napLimitSpec{
+		limitPrompt: {rate.Every(6 * time.Second), 2},
+	}))
+	ready(t, ci, rec, 1)
+
+	for i := 1; i <= 2; i++ {
+		id := "b" + strconv.Itoa(i)
+		post(t, ci, map[string]any{"type": "test.ask", "id": id})
+		p := waitPromptsFor(t, ci.instance, 1)[0]
+		// a no for this prompt only: nothing is remembered
+		AnswerPrompt(p.ID, Answer{OK: false, Scope: ScopeOnce})
+		if got := waitID(t, rec, "test.ask.result", id); got["error"] != napErrDenied {
+			t.Fatalf("%s: %v", id, got)
+		}
+	}
+	post(t, ci, map[string]any{"type": "test.ask", "id": "b3"})
+	if got := waitID(t, rec, "test.ask.result", "b3"); got["status"] != "denied" || got["error"] != napErrRateLimited {
+		t.Fatalf("3rd prompt over the bucket: %v", got)
+	}
+	if n := len(promptsFor(ci.instance)); n != 0 {
+		t.Fatalf("%d prompts pending after a bucket refusal", n)
+	}
+}
+
+// ─── cancellation ────────────────────────────────────────────────
+
+// TestPromptCancelledAtRequestDeadline: a prompt still open when the
+// request's deadline passes is taken down as dismissed (DEC-1, P1): the
+// napplet gets the route's denial, nothing is remembered, nothing opens.
+func TestPromptCancelledAtRequestDeadline(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	h := &promptTestHost{}
+	host = h
+	withAskRoute(t, 50*time.Millisecond)
+	ci, rec := openNapplet(t, "prompt-deadline")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "test.ask", "id": "d1"})
+	got := waitID(t, rec, "test.ask.result", "d1")
+	if got["status"] != "denied" || got["error"] != napErrDenied {
+		t.Fatalf("expired prompt: %v", got)
+	}
+	if p := CurrentPrompt(); p != nil {
+		t.Fatalf("the expired prompt is still up: %+v", p)
+	}
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}); ok {
+		t.Fatalf("an expired prompt left a rule: %+v", rule)
+	}
+	if links := h.links(); len(links) != 0 {
+		t.Fatalf("opened %v", links)
+	}
+}
+
+// TestLateAllowDoesNotRunTheAction: an Allow that arrives after the request's
+// deadline neither runs the action nor creates a rule, whether it comes
+// after the prompt came down or races its cancellation.
+func TestLateAllowDoesNotRunTheAction(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	h := &promptTestHost{}
+	host = h
+	withAskRoute(t, 300*time.Millisecond)
+	ci, rec := openNapplet(t, "prompt-late")
+	ready(t, ci, rec, 1)
+	key := RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	post(t, ci, map[string]any{"type": "test.ask", "id": "late"})
+	p := waitPromptsFor(t, ci.instance, 1)[0]
+	if got := waitID(t, rec, "test.ask.result", "late"); got["error"] != napErrDenied {
+		t.Fatalf("expired prompt: %v", got)
+	}
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeOnce})
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeSession})
+	time.Sleep(50 * time.Millisecond)
+	if links := h.links(); len(links) != 0 {
+		t.Fatalf("a late Allow opened %v", links)
+	}
+	if rule, ok := lookupRule(key); ok {
+		t.Fatalf("a late Allow left a rule: %+v", rule)
+	}
+	if got := rec.find("test.ask.result"); len(got) != 1 {
+		t.Fatalf("answers: %v", got)
+	}
+
+	t.Run("a click racing the cancellation", func(t *testing.T) {
+		for range 50 {
+			p := newPrompt("race", "race", "", "", nil)
+			p.Instance = "prompt-late-race"
+			if !enqueueNappPrompt(p) {
+				t.Fatal("refused")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeOnce})
+			if a, err := p.waitCtx(ctx); !errors.Is(err, errPromptDismissed) || a.OK {
+				t.Fatalf("a click after the asker gave up returned %+v, %v", a, err)
+			}
+		}
+	})
+}
+
+// TestPromptCancelledOnSessionEnd: a new session (nap.start) cancels the old
+// session's pending prompt: it comes down, nothing is remembered, nothing
+// opens, and the old request is never answered into the new document.
+func TestPromptCancelledOnSessionEnd(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	h := &promptTestHost{}
+	host = h
+	ci, rec := openNapplet(t, "prompt-session")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "link.open", "id": "s1", "url": "https://example.com/s"})
+	p := waitPromptsFor(t, ci.instance, 1)[0]
+	ready(t, ci, rec, 2)
+	waitPromptsFor(t, ci.instance, 0)
+
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeAlways})
+	time.Sleep(50 * time.Millisecond)
+	if links := h.links(); len(links) != 0 {
+		t.Fatalf("opened %v", links)
+	}
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}); ok {
+		t.Fatalf("a cancelled prompt left a rule: %+v", rule)
+	}
+	if got := rec.find("link.open.result"); len(got) != 0 {
+		t.Fatalf("the old session's request was answered: %v", got)
+	}
+}
+
+// TestBridgePromptCancelledOnWindowClose: a bridge napp's prompt belongs to
+// its window: closing the window takes it down as dismissed.
+func TestBridgePromptCancelledOnWindowClose(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	ci := &Instance{
+		instance:   "bridge-close-" + randomID()[:6],
+		napp:       Napp{ID: "napp~0123456789abcdef~bridge-close", D: "bridge-close", Name: "bridge"},
+		subs:       map[int]context.CancelFunc{},
+		actions:    map[string]int{},
+		changed:    make(chan struct{}),
+		dispatches: map[int]chan WireMsg{},
+		gone:       make(chan struct{}),
+	}
+	registerInstance(ci)
+	ci.attach(newRecTransport())
+	t.Cleanup(func() { WindowClosed(ci.instance) })
+
+	type result struct {
+		ok  bool
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		ctx, cancel := ci.windowPromptCtx()
+		defer cancel()
+		ok, err := askApproval(ctx, ci, PermSaveFile, "save a file to your disk", "", "")
+		done <- result{ok, err}
+	}()
+	waitPromptsFor(t, ci.instance, 1)
+	WindowClosed(ci.instance)
+
+	select {
+	case r := <-done:
+		if r.ok || !errors.Is(r.err, errPromptDismissed) {
+			t.Fatalf("closed window's prompt: %v, %v", r.ok, r.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the prompt outlived its window")
+	}
+	waitPromptsFor(t, ci.instance, 0)
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermSaveFile}); ok {
+		t.Fatalf("a cancelled prompt left a rule: %+v", rule)
+	}
+}
+
+// ─── session grants ──────────────────────────────────────────────
+
+// TestSessionGrantRecordsOnlyExplicitAnswers: concurrent requests share one
+// session question; a question dismissed by the deadline records nothing,
+// so the next request asks again; an explicit allow is recorded and later
+// requests do not prompt (02-RESEARCH Pattern 9).
+func TestSessionGrantRecordsOnlyExplicitAnswers(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	sinks := recordSinks(t)
+	png := []byte("\x89PNG\r\n\x1a\nnot really an image")
+	prev := resourceClient
+	resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(png))), Request: r}, nil
+	})}
+	t.Cleanup(func() { resourceClient = prev })
+	ci, rec := openNapplet(t, "grant-explicit")
+	ready(t, ci, rec, 1)
+	grant := func() (bool, bool) {
+		ci.nap.mu.Lock()
+		defer ci.nap.mu.Unlock()
+		ok, decided := ci.nap.grants[PermFetch]
+		return ok, decided
+	}
+
+	restore := withRouteDeadline(t, "resource.bytes", 300*time.Millisecond)
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "r1", "url": "https://8.8.8.8/1.png"})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "r2", "url": "https://8.8.8.8/2.png"})
+	waitPromptsFor(t, ci.instance, 1)
+	time.Sleep(50 * time.Millisecond)
+	if n := len(promptsFor(ci.instance)); n != 1 {
+		t.Fatalf("two concurrent requests raised %d prompts", n)
+	}
+	for _, id := range []string{"r1", "r2"} {
+		if got := waitID(t, rec, "resource.bytes.error", id); got["error"] != "blocked-by-policy" {
+			t.Fatalf("%s after a dismissed question: %v", id, got)
+		}
+	}
+	if _, decided := grant(); decided {
+		t.Fatal("a dismissed question was recorded as the session's answer")
+	}
+	ci.nap.mu.Lock()
+	inFlight := len(ci.nap.asking)
+	ci.nap.mu.Unlock()
+	if inFlight != 0 {
+		t.Fatalf("%d questions still in flight", inFlight)
+	}
+	waitPromptsFor(t, ci.instance, 0)
+	restore()
+
+	// the next request asks again, and an explicit allow is kept
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "r3", "url": "https://8.8.8.8/3.png"})
+	p := waitPromptsFor(t, ci.instance, 1)[0]
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeOnce})
+	if got := waitID(t, rec, "resource.bytes.result", "r3"); got["mime"] != "image/png" {
+		t.Fatalf("r3 after an allow: %v", got)
+	}
+	if ok, decided := grant(); !decided || !ok {
+		t.Fatalf("the allow was not recorded: %v %v", ok, decided)
+	}
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "r4", "url": "https://8.8.8.8/4.png"})
+	if got := waitID(t, rec, "resource.bytes.result", "r4"); got["mime"] != "image/png" {
+		t.Fatalf("r4: %v", got)
+	}
+	if n := len(promptsFor(ci.instance)); n != 0 {
+		t.Fatalf("a decided session question prompted again")
+	}
+	if names := sinks.names(); !slices.Equal(names, []string{"fetch", "fetch"}) {
+		t.Fatalf("sinks: %v", names)
+	}
+
+	t.Run("concurrent askers share the answer", func(t *testing.T) {
+		ready(t, ci, rec, 2)
+		if _, decided := grant(); decided {
+			t.Fatal("a new session kept the old one's grant")
+		}
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "r5", "url": "https://8.8.8.8/5.png"})
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "r6", "url": "https://8.8.8.8/6.png"})
+		p := waitPromptsFor(t, ci.instance, 1)[0]
+		time.Sleep(50 * time.Millisecond)
+		if n := len(promptsFor(ci.instance)); n != 1 {
+			t.Fatalf("%d prompts for one session question", n)
+		}
+		AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeOnce})
+		for _, id := range []string{"r5", "r6"} {
+			if got := waitID(t, rec, "resource.bytes.result", id); got["mime"] != "image/png" {
+				t.Fatalf("%s: %v", id, got)
+			}
+		}
+	})
+}

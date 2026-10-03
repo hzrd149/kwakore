@@ -1,7 +1,9 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +19,22 @@ import (
 // handle, and the rpc blocks here until the GUI answers.
 //
 // Only one prompt shows at a time; the rest queue behind it. Nothing blocks
-// forever: an unanswered prompt is denied after promptTimeout.
+// forever: an unanswered prompt is dismissed after promptTimeout.
+//
+// A prompt a napp or napplet window raised belongs to whoever asked (D-15,
+// DEC-1): a napplet's request (its session, bounded by the route's prompt
+// deadline) or a napp's window. When that ends, the prompt is cancelled as
+// dismissed: it comes down, nothing is remembered for it, and the action it
+// asked about never runs, even if the user clicks Allow a moment later. A
+// window also has at most napMaxPendingPromptsPerWindow prompts pending, and
+// all windows together napMaxPendingPromptsGlobal; past that a request is
+// refused at once (errPromptLimited) instead of joining the queue. Prompts
+// the launcher raises itself (install confirmations) are exempt, so a
+// flooding napplet can never keep the user from them.
+//
+// Locking: promptMu is a leaf. Nothing here holds it while calling out
+// (remember, host.PromptsChanged, syncPromptOverlays run after unlocking),
+// and no prompt is created or awaited under a NAP session's dispatchMu or mu.
 //
 // A sensitive question is only asked when no rule has an answer for it (see
 // window_permissions.go), and the answer can come back with a scope: for this prompt
@@ -26,6 +43,21 @@ import (
 // prompt.
 
 const promptTimeout = 2 * time.Minute
+
+var (
+	// errPromptLimited is a prompt refused before it was shown: the window's
+	// or the launcher's prompt queue is full, or the napplet's prompt bucket
+	// is empty (D-15). Napplets get rate-limited for it.
+	errPromptLimited = errors.New("rate-limited")
+	// errPromptDismissed is a prompt that ended without an answer that still
+	// counts: the asker's context ended (request deadline, session teardown,
+	// closed window) or promptTimeout passed.
+	errPromptDismissed = errors.New("dismissed")
+	// errActionCancelled is a handler chooser the user said no to (or
+	// answered with no valid option). The text keeps "cancelled" for the
+	// callers that read it.
+	errActionCancelled = errors.New("action handler selection cancelled")
+)
 
 // Scope is how long the user's answer to a prompt holds.
 type Scope string
@@ -109,7 +141,10 @@ type Prompt struct {
 	// Zero for a picker.
 	key  RuleKey
 	resp chan Answer
-	done bool
+	// dismissed is closed by cancelPrompt, so a waiter learns its prompt was
+	// taken down by someone else
+	dismissed chan struct{}
+	done      bool
 }
 
 var (
@@ -133,15 +168,84 @@ func PendingPrompts() int {
 	return len(promptQueue)
 }
 
-// enqueuePrompt shows the prompt now, or queues it behind the active one.
+// enqueuePrompt shows the prompt now, or queues it behind the active one,
+// whatever is pending. Only the launcher's own prompts (Instance "": install
+// confirmations, the trial's "did you like it") use it: they are exempt from
+// the napplet bounds, so a window flooding the queue cannot keep the user from
+// answering the launcher. Windows go through enqueueNappPrompt.
 func enqueuePrompt(p *Prompt) {
 	promptMu.Lock()
+	placePromptLocked(p)
+	promptMu.Unlock()
+	promptsChanged()
+}
+
+// enqueueNappPrompt queues a prompt a window raised, unless that window
+// already has napMaxPendingPromptsPerWindow prompts pending (shown or
+// queued) or napMaxPendingPromptsGlobal window prompts are pending in all.
+// A refused prompt was never shown and changes nothing: the queue keeps its
+// order and every other prompt stays where it was.
+func enqueueNappPrompt(p *Prompt) bool {
+	if p.Instance == "" {
+		enqueuePrompt(p)
+		return true
+	}
+	promptMu.Lock()
+	mine, all := 0, 0
+	count := func(q *Prompt) {
+		if q == nil || q.Instance == "" {
+			return
+		}
+		all++
+		if q.Instance == p.Instance {
+			mine++
+		}
+	}
+	count(promptActive)
+	for _, q := range promptQueue {
+		count(q)
+	}
+	if mine >= napMaxPendingPromptsPerWindow || all >= napMaxPendingPromptsGlobal {
+		promptMu.Unlock()
+		return false
+	}
+	placePromptLocked(p)
+	promptMu.Unlock()
+	promptsChanged()
+	return true
+}
+
+// placePromptLocked shows p, or queues it last. The caller holds promptMu.
+func placePromptLocked(p *Prompt) {
 	if promptActive == nil {
 		promptActive = p
 	} else {
 		promptQueue = append(promptQueue, p)
 	}
-	promptMu.Unlock()
+}
+
+// removePromptLocked takes p off the screen or out of the queue, promoting
+// the next queued prompt when p was showing. The caller holds promptMu.
+func removePromptLocked(p *Prompt) {
+	if promptActive == p {
+		if len(promptQueue) > 0 {
+			promptActive = promptQueue[0]
+			promptQueue = promptQueue[1:]
+		} else {
+			promptActive = nil
+		}
+		return
+	}
+	for i, q := range promptQueue {
+		if q == p {
+			promptQueue = append(promptQueue[:i], promptQueue[i+1:]...)
+			return
+		}
+	}
+}
+
+// promptsChanged tells the GUIs and the covered windows. Never under promptMu.
+func promptsChanged() {
 	if host != nil {
 		host.PromptsChanged()
 	}
@@ -169,22 +273,7 @@ func AnswerPrompt(id int, ans Answer) {
 		return
 	}
 	p.done = true
-
-	if promptActive == p {
-		if len(promptQueue) > 0 {
-			promptActive = promptQueue[0]
-			promptQueue = promptQueue[1:]
-		} else {
-			promptActive = nil
-		}
-	} else {
-		for i, q := range promptQueue {
-			if q == p {
-				promptQueue = append(promptQueue[:i], promptQueue[i+1:]...)
-				break
-			}
-		}
-	}
+	removePromptLocked(p)
 	promptMu.Unlock()
 
 	// before the rpc goes on, so the rule is already in place by the time
@@ -197,21 +286,56 @@ func AnswerPrompt(id int, ans Answer) {
 	case p.resp <- ans:
 	default:
 	}
-	if host != nil {
-		host.PromptsChanged()
-	}
-	syncPromptOverlays()
+	promptsChanged()
 }
 
-func (p *Prompt) wait() Answer {
+// cancelPrompt takes a prompt down without an answer: whoever asked gave up
+// (or promptTimeout passed). It never remembers anything, and a click on it
+// that comes later finds nothing to answer. Its waiter, if another goroutine
+// cancelled it, returns dismissed.
+func cancelPrompt(p *Prompt) {
+	promptMu.Lock()
+	if p.done {
+		promptMu.Unlock()
+		return
+	}
+	p.done = true
+	removePromptLocked(p)
+	if p.dismissed != nil {
+		close(p.dismissed)
+	}
+	promptMu.Unlock()
+	promptsChanged()
+}
+
+// waitCtx waits for the user's answer for as long as ctx lives, and at most
+// promptTimeout. A prompt that ends any other way is cancelled as dismissed
+// (errPromptDismissed). A click that lost the race to the end of ctx is
+// dismissed all the same: whatever was asked about must not happen after
+// the asker gave up (DEC-1), though a rule the click asked to keep stays,
+// since that was the user's word.
+func (p *Prompt) waitCtx(ctx context.Context) (Answer, error) {
+	t := time.NewTimer(promptTimeout)
+	defer t.Stop()
 	select {
 	case a := <-p.resp:
-		return a
-	case <-time.After(promptTimeout):
-		// unanswered is a plain no: nothing is remembered for it
-		AnswerPrompt(p.ID, Answer{})
-		return Answer{}
+		if ctx.Err() != nil {
+			return Answer{}, errPromptDismissed
+		}
+		return a, nil
+	case <-ctx.Done():
+	case <-t.C:
+	case <-p.dismissed:
 	}
+	cancelPrompt(p)
+	return Answer{}, errPromptDismissed
+}
+
+// wait is waitCtx for the launcher's own prompts, which no request owns:
+// unanswered after promptTimeout is a plain no, with nothing remembered.
+func (p *Prompt) wait() Answer {
+	a, _ := p.waitCtx(context.Background())
+	return a
 }
 
 func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt {
@@ -223,6 +347,8 @@ func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt
 		Code:    code,
 		Options: options,
 		resp:    make(chan Answer, 1),
+
+		dismissed: make(chan struct{}),
 	}
 }
 
@@ -230,7 +356,14 @@ func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt
 // already covers it decides right away, and only a question nothing has an
 // answer to becomes a prompt. It is what makes signEvent, nip04/nip44,
 // saveFile, copyText, napp.link and publish "sensitive".
-func askApproval(ci *Instance, perm Permission, title, detail, code string) bool {
+//
+// The prompt lives as long as ctx: a napplet passes its request's context
+// (session, bounded by the route's deadline), a napp its window's
+// (windowPromptCtx). When ctx ends first the prompt comes down and the answer
+// is errPromptDismissed; a prompt the bounds refuse is errPromptLimited. Either
+// error means no: nothing is remembered, nothing may happen. Never call it
+// with a NAP session's dispatchMu or mu held.
+func askApproval(ctx context.Context, ci *Instance, perm Permission, title, detail, code string) (bool, error) {
 	name := "A napp"
 	nappID := ""
 	if ci != nil {
@@ -247,7 +380,18 @@ func askApproval(ci *Instance, perm Permission, title, detail, code string) bool
 	if rule, ok := lookupRule(key); ok {
 		log.Info().Str("napp", name).Str("ask", title).
 			Str("rule", string(rule.Decision)).Msg("approval answered by the rules")
-		return rule.Decision.granted()
+		return rule.Decision.granted(), nil
+	}
+
+	// the asker already gave up: nobody would see the answer
+	if ctx.Err() != nil {
+		return false, errPromptDismissed
+	}
+	// a napplet that keeps asking is backed off by its prompt bucket (D-14);
+	// bridge napps have no NAP session and only meet the queue bounds
+	if ci != nil && ci.nap != nil && !ci.nap.limits.allow(limitPrompt, 1) {
+		napSampled().Info().Str("napp", name).Str("ask", title).Msg("prompt refused: over the window's prompt rate")
+		return false, errPromptLimited
 	}
 
 	p := newPrompt(name, name+" wants to "+title, detail, code, nil)
@@ -256,12 +400,39 @@ func askApproval(ci *Instance, perm Permission, title, detail, code string) bool
 	if ci != nil {
 		p.Instance = ci.instance
 	}
+	if !enqueueNappPrompt(p) {
+		napSampled().Info().Str("napp", name).Str("ask", title).Msg("prompt refused: too many prompts pending")
+		return false, errPromptLimited
+	}
 	log.Info().Str("napp", name).Str("ask", title).Msg("asking the user for approval")
-	enqueuePrompt(p)
-	answer := p.wait()
+	answer, err := p.waitCtx(ctx)
+	if err != nil {
+		log.Info().Str("napp", name).Str("ask", title).Msg("approval prompt dismissed")
+		return false, err
+	}
 	log.Info().Str("napp", name).Str("ask", title).Bool("granted", answer.OK).
 		Str("scope", string(answer.Scope)).Msg("approval answered")
-	return answer.OK
+	return answer.OK, nil
+}
+
+// windowPromptCtx is the context a napp window's prompts live in: cancelled
+// when the window closes (or by the returned cancel). Bridge napps have no NAP
+// session, so their prompts belong to the window rather than to a request.
+// A nil instance, or one without a gone channel (tests), gets a context only
+// cancel ends.
+func (ci *Instance) windowPromptCtx() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if ci == nil || ci.gone == nil {
+		return ctx, cancel
+	}
+	go func() {
+		select {
+		case <-ci.gone:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
 
 // askActionHandler asks which napp should handle an action when more than one
