@@ -106,11 +106,33 @@ func (h *promptTestHost) links() []string {
 // withAskRoute registers test.ask: a link.open in miniature, asking
 // PermOpenLink per call and opening https://example.com/asked on yes, with
 // the given prompt deadline (0 for the default).
+//
+// The askers outlive the test that started them: a prompt the test left
+// pending is dismissed when its window closes at cleanup, and the asker then
+// takes it down (promptsChanged reads host). So the test waits for them, once
+// its windows are closed, before the next test swaps host and dataDir.
 func withAskRoute(t *testing.T, deadline time.Duration) {
 	t.Helper()
+	var askers sync.WaitGroup
+	// registered before the caller opens its windows, so it runs after
+	// their cleanup closed them and cancelled every pending ask
+	t.Cleanup(func() {
+		done := make(chan struct{})
+		go func() {
+			askers.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("test.ask askers still running after their windows closed")
+		}
+	})
 	withTestRoute(t, "test.ask", napRoute{
 		h: func(c *napCall) {
+			askers.Add(1)
 			c.async(func(context.Context) {
+				defer askers.Done()
 				ok, err := c.approve(PermOpenLink, "open a test link", "", "")
 				if err != nil {
 					c.failForPrompt(err)
