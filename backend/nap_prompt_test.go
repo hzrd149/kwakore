@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -805,4 +806,87 @@ func TestIntentSelfInvokingChainIsBounded(t *testing.T) {
 	if l := h.launches(); len(l) != burst {
 		t.Fatalf("%d launches, want %d", len(l), burst)
 	}
+}
+
+// overlayTransport records the prompt overlays the launcher sends a window:
+// the id of each prompt shown, and how often the overlay was taken down.
+type overlayTransport struct {
+	mu    sync.Mutex
+	shown []int
+	hides int
+}
+
+func (o *overlayTransport) Send(m WireMsg) {
+	if m.T != "prompt" {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if m.Params == "" {
+		o.hides++
+		return
+	}
+	var p struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(m.Params), &p); err == nil {
+		o.shown = append(o.shown, p.ID)
+	}
+}
+func (o *overlayTransport) Focus() {}
+func (o *overlayTransport) Close() {}
+
+func (o *overlayTransport) state() ([]int, int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.shown), o.hides
+}
+
+// TestSecondPromptForAWindowIsShown: with two prompts pending over one
+// window, answering the first puts the second up over that window, instead
+// of leaving the overlay on the answered prompt and the second unanswerable
+// until its deadline (WR-01). Once nothing is pending the overlay comes down.
+func TestSecondPromptForAWindowIsShown(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	ci, _ := openNapplet(t, "two-prompts")
+	ov := &overlayTransport{}
+	ci.attach(ov)
+
+	first := newPrompt("", "first", "", "", nil)
+	first.Instance = ci.instance
+	second := newPrompt("", "second", "", "", nil)
+	second.Instance = ci.instance
+	if !enqueueNappPrompt(first) || !enqueueNappPrompt(second) {
+		t.Fatal("prompts refused")
+	}
+	waitOverlay := func(what string, ok func(shown []int, hides int) bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			shown, hides := ov.state()
+			if ok(shown, hides) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: shown %v, hides %d", what, shown, hides)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	waitOverlay("first prompt shown", func(shown []int, _ int) bool {
+		return slices.Equal(shown, []int{first.ID})
+	})
+
+	HandleMessage(ci.instance, WireMsg{T: "promptAnswer", ID: first.ID, Params: `{"ok":true}`})
+	waitOverlay("second prompt shown after the first was answered", func(shown []int, _ int) bool {
+		return slices.Equal(shown, []int{first.ID, second.ID})
+	})
+
+	// the second is answerable from the window that now shows it
+	HandleMessage(ci.instance, WireMsg{T: "promptAnswer", ID: second.ID, Params: `{"ok":false}`})
+	if a := <-second.resp; a.OK {
+		t.Fatalf("second answered %+v, want no", a)
+	}
+	waitOverlay("overlay taken down", func(_ []int, hides int) bool { return hides >= 1 })
 }

@@ -543,15 +543,62 @@ func askActionHandler(ctx context.Context, caller *Instance, action string, payl
 // covered window keeps it up until the answer comes back, and the launcher
 // chrome only shows prompts it generated itself.
 
-// promptOverlays tracks the instances currently showing a prompt overlay, so
-// each screen gets exactly one and stale ones come down when the prompt is
-// answered (or times out).
-var promptOverlays = xsync.NewMapOf[string, bool]()
+// promptOverlays tracks, per instance, the id of the prompt its overlay
+// shows, so each screen shows exactly the prompt that is its turn: a new one
+// is sent when that changes (the shown prompt was answered or cancelled while
+// another for the same window waited), and stale ones come down when the
+// window has nothing left pending.
+var promptOverlays = xsync.NewMapOf[string, int]()
+
+// overlaySync serializes syncPromptOverlays without making callers wait on
+// each other's sends: a call that finds a sync running marks it dirty and
+// returns, and the running sync goes round again, so the last state always
+// wins and two syncs never send an older prompt after a newer one.
+var overlaySync struct {
+	mu      sync.Mutex
+	running bool
+	dirty   bool
+}
 
 // syncPromptOverlays makes what each napp window shows match the prompt
-// state: one overlay per window with a pending prompt, none elsewhere.
-// Safe to call after any change to the prompt state.
+// state: one overlay per window with a pending prompt, showing the first of
+// them, none elsewhere. Safe to call after any change to the prompt state.
 func syncPromptOverlays() {
+	overlaySync.mu.Lock()
+	if overlaySync.running {
+		overlaySync.dirty = true
+		overlaySync.mu.Unlock()
+		return
+	}
+	overlaySync.running = true
+	finished := false
+	defer func() {
+		// a pass that panicked must not leave every later sync skipped
+		if !finished {
+			overlaySync.mu.Lock()
+			overlaySync.running = false
+			overlaySync.mu.Unlock()
+		}
+	}()
+	for {
+		overlaySync.dirty = false
+		overlaySync.mu.Unlock()
+		syncPromptOverlaysOnce()
+		overlaySync.mu.Lock()
+		if !overlaySync.dirty {
+			// in the same critical section as the dirty check, so a call
+			// that comes after it starts a sync of its own
+			overlaySync.running = false
+			finished = true
+			overlaySync.mu.Unlock()
+			return
+		}
+	}
+}
+
+// syncPromptOverlaysOnce is one pass of syncPromptOverlays. Only the running
+// sync calls it.
+func syncPromptOverlaysOnce() {
 	promptMu.Lock()
 	targets := make(map[string]*Prompt)
 	if promptActive != nil && promptActive.Instance != "" {
@@ -576,7 +623,8 @@ func syncPromptOverlays() {
 		}
 	}
 	for inst, p := range targets {
-		if _, shown := promptOverlays.LoadOrStore(inst, true); !shown {
+		if shown, ok := promptOverlays.Load(inst); !ok || shown != p.ID {
+			promptOverlays.Store(inst, p.ID)
 			showList = append(showList, p)
 		}
 	}
