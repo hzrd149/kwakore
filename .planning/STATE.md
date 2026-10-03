@@ -23,7 +23,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-03)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 02 — Gated NAP Dispatcher
+**Current focus:** Phase 3 — Desktop Process and Secrets Hardening
 
 ## Current Position
 
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-10-03 — Phase 2 complete, transitioned to Phase 3
 
-Progress: [█░░░░░░░░░] 13% (1/8 phases)
+Progress: [██░░░░░░░░] 25% (2/8 phases)
 
 ## Performance Metrics
 
@@ -130,8 +130,11 @@ None yet.
 - [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
 - [Phase 5]: Storage/config file names can collide across `d` values (CONFORMANCE CF-2, KEY-04)
 - [Phase 6]: Address-form INC senders `<kind>:<pubkey>:<d>` can be imitated by a crafted `d` (review IN-06, A5); T-01-21 checklist test should require fixed rows to cite an existing Test func
-- [Rebuild]: Desktop child and Android AAR must be rebuilt after Phase 1 (old builds never send `nap.start`)
+- [Rebuild]: Desktop child and Android AAR must be rebuilt after Phases 1-2 (new host page, wireline readers, bridge answer token)
 - [Phase 2]: Handler synchronous parts must stay short since nap.start/WindowClosed wait on dispatchMu (Android WindowClosed runs on the main thread); prompt cancellation itself is done (02-06)
+- [Phase 6]: `nap_outbox.go` closures pass sentinel strings that are not spec codes ("too many recipients", "no relays to publish to"), prose "not ready" in relay/outbox; bare intent-delivery goroutine at `window_instances.go:1073` lacks recover
+- [Phase 7]: D-17 — a reply over 128 MiB (e.g. large resource.bytesMany) closes that napplet window; Blossom fetch/HEAD ungated exception (RES-02/03)
+- [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
 
 ## Deferred Items
 
@@ -143,6 +146,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T17:07:54.719Z
+Last session: 2026-10-03T23:30:40Z
 Stopped at: Phase 2 complete, ready to plan Phase 3
 Resume file: None

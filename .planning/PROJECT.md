@@ -27,6 +27,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - ✓ A napp/napplet `d` tag can never escape the data directory: napp dirs are `napps/{sha256(id)}` behind one containment check (`nappBaseDir`/`nappAssetPath`), raw `d` unchanged — Phase 1
 - ✓ Vendored `@napplet/shim` 0.30.0 byte-identical with a hash test; NIP-5D presence detection, no shell handshake; intents delivered over INC per NAP-INTENT master — Phase 1
 - ✓ Pinned spec texts snapshotted under `spec/pinned/`, audit checklist skeleton `spec/CONFORMANCE.md` with Conflicts A1–A23, Android AAR bind on pull requests — Phase 1
+- ✓ Every NAP request goes through one route table: declared permission gate per type (init panics otherwise), gated sinks enforced by an AST guard, stored-deny short-circuit — Phase 2
+- ✓ Every napplet request gets exactly one reply in its spec shape (Go and host page in parity), with size, id, case-collision, rate and in-flight bounds, a bounded context-owned prompt queue, and no reachable panics — Phase 2
 
 ### Active
 
@@ -41,8 +43,6 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - [ ] `NAPPLETS.md` domain table reflects what is actually implemented
 
 **Napplet sandbox hardening**
-- [ ] Permission gating enforced centrally in the NAP dispatcher, so a handler cannot be registered without declaring its permission
-- [ ] Every napplet-facing input has explicit size/count/rate bounds and regression tests
 - [ ] A napplet that reloads or navigates its own frame cannot escape the CSP or keep a live session: the host page resets the session on unexpected frame loads, and its CSP replaces the ineffective `navigate-to 'self'` (`desktop/child/main.go`, `desktop/child/napplet.go`) with directives engines enforce
 
 **Desktop process hardening**
@@ -55,7 +55,6 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - [ ] `state.json` is written atomically and a corrupt file is preserved instead of silently resetting state
 
 **Robustness**
-- [ ] No runtime panics reachable from napplet input or filesystem errors (e.g. `backend/cache.go`)
 - [ ] Malformed envelopes, manifests, and relay data are rejected cleanly with regression tests
 
 ### Out of Scope
@@ -109,6 +108,9 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Legacy `napps/{raw-id}` dirs orphaned on upgrade, never swept | Sweeping would reintroduce raw-id paths; reconfirmed despite a `v0.0.0` release (users reinstall) | ✓ Good — Phase 1 (D-04) |
 | Napplet `inc.emit` on intent convention topics broadcasts per NAP-INC (Conflict A23) | Strict spec fidelity; launcher forgery closed instead by a reserved `launcherSender` | ✓ Good — Phase 1 |
 | Napplet sessions start only from the host page (`nap.start`), pushes tagged with session gen, per-session dispatch lock | Frame cannot start/forge sessions; stale-document envelopes and handlers cannot touch the new session | ✓ Good — Phase 1 |
+| Route table with typed gates (`Open(reason)`/`Session`/`PerCall`/`Dynamic`) and per-route failure shapes; JS table mirrors Go under a parity test | One choke point for consent and reply shape; no toolchain in the webview | ✓ Good — Phase 2 |
+| Size caps split by direction: 24/25 MiB for napplet input, 128 MiB for launcher→child replies, no bytesMany budget yet | Keep large legitimate replies working; oversized replies close only that window (Phase 7 RES-03) | ⚠️ Revisit — Phase 7 (D-17) |
+| Prompts owned by their request: ≤3 per window, ≤32 global, cancelled at the route deadline or session end; answers only from the owning window | DEC-1; closes cross-window consent forgery (review CR-01) | ✓ Good — Phase 2 |
 
 ## Evolution
 
@@ -128,4 +130,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-03 after Phase 1*
+*Last updated: 2026-10-03 after Phase 2*
