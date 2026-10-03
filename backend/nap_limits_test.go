@@ -271,6 +271,42 @@ func TestNapEnvelopeBucketRateLimits(t *testing.T) {
 	}
 }
 
+// TestNapEnvelopeBucketChargesRefusedAndDropped: the envelope bucket is
+// charged before an envelope is parsed, so the ones that are refused
+// (colliding keys, too large) or dropped (unknown type, bad id) use it up as
+// well: a napplet cannot loop on them at an unlimited rate (WR-05).
+func TestNapEnvelopeBucketChargesRefusedAndDropped(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+	four := napLimitSpec{rate.Every(time.Hour), 4}
+
+	ci, rec := openNapplet(t, "envelope-charges")
+	withLimits(t, ci, newNapLimiterWith(four, napLimitSpecs))
+	ready(t, ci, rec, 1)
+	// four tokens: a collision and an oversized one (both answered), an
+	// unknown type and a bad id (both dropped)
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "collide", "ID": "x"})
+	post(t, ci, padded(t, map[string]any{"type": "storage.keys", "id": "big"}, napDefaultMaxRaw+1))
+	post(t, ci, map[string]any{"type": "nope.unknown", "id": "u"})
+	post(t, ci, map[string]any{"type": "storage.keys", "id": map[string]any{}})
+	if got := waitID(t, rec, "storage.keys.result", "collide"); got["error"] != napErrInvalid {
+		t.Fatalf("collision: %v", got)
+	}
+	if got := waitID(t, rec, "storage.keys.result", "big"); got["error"] != napErrTooLarge {
+		t.Fatalf("too large: %v", got)
+	}
+	// the bucket is empty now: a well-formed request is rate-limited
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "after"})
+	if got := waitID(t, rec, "storage.keys.result", "after"); got["error"] != napErrRateLimited {
+		t.Fatalf("after four refused or dropped envelopes: %v", got)
+	}
+	// and a colliding one over the bucket is refused for the rate first
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "collide-over", "ID": "x"})
+	if got := waitID(t, rec, "storage.keys.result", "collide-over"); got["error"] != napErrRateLimited {
+		t.Fatalf("collision over the bucket: %v", got)
+	}
+}
+
 // TestNapCategoryLimitRateLimits: a category bucket refuses in the route's
 // shape, and only the window that used it up (D-14).
 func TestNapCategoryLimitRateLimits(t *testing.T) {

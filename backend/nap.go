@@ -424,6 +424,13 @@ func (ci *Instance) napEnqueue(params string) {
 		napSampled().Warn().Str("napplet", ci.napp.ID).Int("len", len(params)).Msg("dropping an oversized NAP message")
 		return
 	}
+	// every envelope counts against the window's bucket, whatever becomes of
+	// it (D-14): the token is taken before anything is parsed, so an envelope
+	// that is refused (colliding keys, too large) or dropped (unknown type,
+	// bad id, no correlator) pays for itself too (WR-05). Over the bucket, a
+	// request that can be answered is answered rate-limited once its head is
+	// known; everything else is dropped.
+	overRate := !s.limits.allowEnvelope()
 	// the host page sends the envelope as a JSON string (rpc params are
 	// JSON); accept the object form too
 	raw := json.RawMessage(params)
@@ -474,6 +481,13 @@ func (ci *Instance) napEnqueue(params string) {
 	}
 	s.mu.Unlock()
 
+	// over the envelope bucket (charged above); a reply-less type is simply
+	// dropped
+	if overRate {
+		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("NAP envelope over the window's rate limit")
+		c.failWith(napErrRateLimited)
+		return
+	}
 	// keys a case-insensitive decode would merge could make the envelope one
 	// type here and another to its handler (D-10)
 	if head.collide {
@@ -482,13 +496,6 @@ func (ci *Instance) napEnqueue(params string) {
 	}
 	if len(raw) > route.maxBytes() {
 		c.failWith(napErrTooLarge)
-		return
-	}
-	// every envelope counts against the window's bucket, whatever its type
-	// (D-14); a reply-less one over it is simply dropped
-	if !s.limits.allowEnvelope() {
-		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("NAP envelope over the window's rate limit")
-		c.failWith(napErrRateLimited)
 		return
 	}
 
