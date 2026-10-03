@@ -1142,8 +1142,14 @@ func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, pa
 		s.mu.Lock()
 		gen, ready := s.gen, s.established && s.topics[req.name]
 		s.mu.Unlock()
-		if ready && ci.napPushGen(gen, ev) {
-			break
+		if ready {
+			// the window shows the action before the handler gets it, so a
+			// handler that answers at once already finds it recorded
+			ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
+			notifyState()
+			if ci.napPushGen(gen, ev) {
+				return nil, nil
+			}
 		}
 
 		select {
@@ -1154,9 +1160,6 @@ func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, pa
 			return nil, fmt.Errorf("%w: %s is not listening for %q", errNoHandler, ci.napp.Label(), req.name)
 		}
 	}
-	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
-	notifyState()
-	return nil, nil
 }
 
 // errNoHandler is a dispatch that found nobody to take it.
