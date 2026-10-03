@@ -167,6 +167,10 @@ func (s *napSession) closeSub(key string) {
 func napRelaySubscribe(c *napCall) {
 	var r napRelayReq
 	if err := c.decode(&r); err != nil || r.SubID == "" {
+		// napEnqueue let the exact subId through, so this subscription has
+		// a correlator, and it gets its one answer: relay.* has no shim
+		// timeout to end it otherwise (WR-02)
+		c.failWith(napErrInvalid)
 		return
 	}
 	// the subscription's one answer: it ends it

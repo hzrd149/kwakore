@@ -390,6 +390,20 @@ func TestNapRepliesExactlyOnce(t *testing.T) {
 		}
 	})
 
+	t.Run("lifecycle route whose payload does not decode", func(t *testing.T) {
+		// the exact subId passes napEnqueue, the struct decode fails on the
+		// relay; relay.* has no shim timeout, so this must still end (WR-02)
+		post(t, ci, map[string]any{"type": "relay.subscribe", "subId": "bad-decode", "filters": []any{map[string]any{}}, "relay": 5})
+		got := rec.wait(t, "relay.closed", 1)
+		if got["subId"] != "bad-decode" || got["reason"] != "invalid: invalid-request" {
+			t.Fatalf("undecodable subscribe: %v", got)
+		}
+		napSettled(t, ci, rec)
+		if n := len(rec.find("relay.closed")); n != 1 {
+			t.Fatalf("%d answers", n)
+		}
+	})
+
 	t.Run("reply-less route gets nothing", func(t *testing.T) {
 		withTestRoute(t, "test.fire", napRoute{h: func(*napCall) {}, gate: open, fail: failShape(failNone)})
 		post(t, ci, map[string]any{"type": "test.fire", "id": "f1"})
