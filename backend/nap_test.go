@@ -1195,21 +1195,10 @@ func TestIncEmitRefusedOnIntentConventionTopic(t *testing.T) {
 	}
 }
 
-// launcherSender names only the launcher: a napplet whose author picked the d
-// tag "launcher" is named by its address, both on its own inc emits and on
-// the intents it invokes (CR-02).
-func TestLauncherSenderCannotBeForged(t *testing.T) {
-	setupNapTest(t)
-	impostor, recImpostor := openNapplet(t, launcherSender)
-	if got := incSender(impostor); got == launcherSender || got != impostor.napp.Address() {
-		t.Fatalf("incSender(d=%q) = %q, want its address %q", launcherSender, got, impostor.napp.Address())
-	}
-	// the d tag itself is never rewritten (CRIT-01, W-1)
-	if impostor.napp.D != launcherSender {
-		t.Fatalf("d tag changed to %q", impostor.napp.D)
-	}
-
-	handler, rec := openNapplet(t, "profile-handler")
+// installProfileHandler makes handler the installed, default handler of the
+// profile archetype for the test, and returns the default's rule key.
+func installProfileHandler(t *testing.T, handler *Instance) RuleKey {
+	t.Helper()
 	handler.napp.Conventions = []NappletConvention{{ID: "napplet:profile/open"}}
 	handler.napp.Actions = []string{"napplet:profile/open"}
 	stateMu.Lock()
@@ -1226,6 +1215,25 @@ func TestLauncherSenderCannotBeForged(t *testing.T) {
 	key := intentDefaultKey("profile")
 	setSessionRule(key, Rule{Decision: DecisionAllow, Target: handler.napp.ID})
 	t.Cleanup(func() { clearSessionRule(key) })
+	return key
+}
+
+// launcherSender names only the launcher: a napplet whose author picked the d
+// tag "launcher" is named by its address, both on its own inc emits and on
+// the intents it invokes (CR-02).
+func TestLauncherSenderCannotBeForged(t *testing.T) {
+	setupNapTest(t)
+	impostor, recImpostor := openNapplet(t, launcherSender)
+	if got := incSender(impostor); got == launcherSender || got != impostor.napp.Address() {
+		t.Fatalf("incSender(d=%q) = %q, want its address %q", launcherSender, got, impostor.napp.Address())
+	}
+	// the d tag itself is never rewritten (CRIT-01, W-1)
+	if impostor.napp.D != launcherSender {
+		t.Fatalf("d tag changed to %q", impostor.napp.D)
+	}
+
+	handler, rec := openNapplet(t, "profile-handler")
+	key := installProfileHandler(t, handler)
 
 	ready(t, impostor, recImpostor, 1)
 	ready(t, handler, rec, 1)
@@ -1245,6 +1253,37 @@ func TestLauncherSenderCannotBeForged(t *testing.T) {
 	delivery := rec.wait(t, "inc.event", 2)
 	if delivery["topic"] != "napplet:profile/open" || delivery["sender"] != impostor.napp.Address() {
 		t.Errorf("intent from d=%q delivered as %v", launcherSender, delivery)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("dispatch: %v", err)
+	}
+}
+
+// WR-03: an intent from a root napplet (kind 15129, no d tag) names its
+// caller by address, as its own inc emits do, never with an empty sender.
+func TestIntentFromRootNappletNamesItsAddress(t *testing.T) {
+	setupNapTest(t)
+	root, recRoot := openNapplet(t, "")
+	root.napp.Kind = KindRootNapplet
+	if root.napp.D != "" || !strings.HasPrefix(root.napp.Address(), "15129:") {
+		t.Fatalf("rig: not a root napplet: %q", root.napp.Address())
+	}
+	handler, rec := openNapplet(t, "profile-handler")
+	key := installProfileHandler(t, handler)
+	ready(t, root, recRoot, 1)
+	ready(t, handler, rec, 1)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := runNappAction(context.Background(), root, "napplet:profile/open",
+			json.RawMessage(`{"pubkey":"abc"}`), actionOptions{DefaultKey: key})
+		done <- err
+	}()
+	subscribeTopic(t, handler, rec, "napplet:profile/open", 1)
+	delivery := rec.wait(t, "inc.event", 1)
+	if delivery["sender"] != root.napp.Address() || delivery["sender"] != incSender(root) {
+		t.Errorf("intent from a root napplet delivered with sender %q, want its address %q",
+			delivery["sender"], root.napp.Address())
 	}
 	if err := <-done; err != nil {
 		t.Errorf("dispatch: %v", err)
