@@ -70,12 +70,12 @@ Plans:
   4. A napplet flooding prompts, link opens, intent invokes, uploads, resource fetches or INC opens/emits is rate-limited and its prompt queue stays bounded; its window stays responsive and no other window is affected
   5. No napplet input or filesystem error (including cache setup in `backend/cache.go`) panics the launcher; a panic inside a NAP goroutine is recovered and answered as a failure
 
-**Plans**: 7 plans
+**Plans**: 1/7 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Route table: every NAP type declares its gate and failure shape, D-04 deny short-circuit, exactly-one reply, safeGo (wave 1)
+- [x] 02-01-PLAN.md — Route table: every NAP type declares its gate and failure shape, D-04 deny short-circuit, exactly-one reply, safeGo (wave 1)
 - [ ] 02-02-PLAN.md — Bounded child pipe (24 MiB up, 128 MiB down) with kill-on-overlong, Android inbound cap, panic-free cache setup (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -192,7 +192,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
-| 2. Gated NAP Dispatcher | 0/7 | Planned | - |
+| 2. Gated NAP Dispatcher | 1/7 | In Progress|  |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |

@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
 status: executing
-stopped_at: Phase 1 complete, ready to plan Phase 2
-last_updated: "2026-10-03T15:47:55.812Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-10-03T15:59:50.640Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: 0ba7c33b3875ce68e8b39aa4d73cbdd5232a02cf
+state_head: 19ed1a7312e3a8c2be18ce759c2c1572a90476e0
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 5
+  completed_plans: 6
   percent: 13
 ---
 
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 02
+Plan: 2 of 7
+Status: Ready to execute
 Last activity: 2026-10-03 — Phase 02 execution started
 
 Progress: [█░░░░░░░░░] 13% (1/8 phases)
@@ -63,6 +63,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 01 P03 | 4min | 2 tasks | 23 files |
 | Phase 01 P04 | 6min | 3 tasks | 8 files |
 | Phase 01 P05 | 7min | 2 tasks | 6 files |
+| Phase 02 P01 | 10min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,10 @@ Recent decisions affecting current work:
 - [Phase 01]: [01-05] A15 settled by the pin (naps master IntentBehavior has focus/newWindow/reuse); a self-reloaded frame keeping its session is open row NIP-5D-reload (Phase 4 SBOX-01); config.get before any schema settles only by shim timeout until Phase 8 MISC-02 (P7/A22)
 - [Phase 01 review]: Launcher intents use a reserved `launcherSender` no `d` can produce; napplet inc.emit on intent topics broadcasts per NAP-INC (A23, user decision); pushes are `__nap_push(gen, json)`; per-session `dispatchMu` keeps old-session handlers out of a new session; relay/outbox subs owned per entry (CR-03)
 - [Phase 01 review]: Legacy napps/{raw-id} dirs stay orphaned on upgrade (CR-01 accepted, D-04 reconfirmed)
+- [Phase 02]: [02-01] Every NAP type runs only through a declared napRoute (gate + spec failure shape) in backend/nap_route.go; TestNapRouteTableGolden pins all 68; handleNap panics on missing/invalid/duplicate/nil/empty
+- [Phase 02]: [02-01] napDispatch short-circuits stored deny rules and session refusals for Session/PerCall routes (read-only, under dispatchMu); Dynamic routes always reach their handler
+- [Phase 02]: [02-01] Exactly one answer per request: reply/replyAs/failWith/drop CAS napCall.answered; forgotten answers auto-fail in the route shape after the handler/async returns; reply-less and lifecycle routes exempt
+- [Phase 02]: [02-01] NAP goroutines start only via c.async or safeGo; publish replies use napPublishErrCode (deliberate codes, else internal-error); link/intent/default failures are <type>.result
 
 ### Pending Todos
 
@@ -115,6 +120,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T14:05:40Z
-Stopped at: Phase 1 complete, ready to plan Phase 2
+Last session: 2026-10-03T15:59:50.609Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
