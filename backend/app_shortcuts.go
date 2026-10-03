@@ -38,7 +38,7 @@ func SetAppShortcutSettings(enabled bool, naming string) {
 	state.AppShortcutNameStyle = naming
 	saveState()
 	stateMu.Unlock()
-	go syncAppShortcuts()
+	backgroundSyncs.Go(syncAppShortcuts)
 }
 
 // syncAppShortcuts serializes complete reconciliation passes. Icon loading is

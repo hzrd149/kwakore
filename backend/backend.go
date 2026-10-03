@@ -129,6 +129,11 @@ func Logger() zerolog.Logger { return log }
 //
 // A caller that gets an error must not touch the filesystem at all.
 func nappBaseDir(id string) (string, error) {
+	return nappBaseDirIn(dataDir, id)
+}
+
+// nappBaseDirIn is nappBaseDir for an explicit data directory.
+func nappBaseDirIn(dataDir, id string) (string, error) {
 	if !filepath.IsAbs(dataDir) {
 		return "", errors.New("data directory is not set")
 	}

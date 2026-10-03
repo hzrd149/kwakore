@@ -125,6 +125,11 @@ func (r *recTransport) wait(t *testing.T, typ string, n int) map[string]any {
 
 func setupNapTest(t *testing.T) {
 	t.Helper()
+	// registered first, so it runs last: installs, uninstalls and settings
+	// changes leave shortcut and intent syncs running, which read host and
+	// dataDir, and the next test must not swap those under them
+	t.Cleanup(backgroundSyncs.Wait)
+	backgroundSyncs.Wait()
 	dataDir = t.TempDir()
 	host = noopHost{}
 	napconfig.Init(filepath.Join(dataDir, "config"), zerolog.Nop())

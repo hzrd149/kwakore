@@ -30,6 +30,9 @@ var hashedDirName = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // files.
 type containmentRig struct {
 	dataDir string
+	// host is the launcher's host for the whole case, set before anything
+	// starts a background sync: swapping host mid-test races those syncs
+	host    *previewTestHost
 	keep    string // sentinel inside the data directory
 	outside string // sentinel in the data directory's parent
 
@@ -44,7 +47,8 @@ func newContainmentRig(t *testing.T) *containmentRig {
 	setupNapTest(t)
 	isolateState(t)
 
-	r := &containmentRig{dataDir: dataDir, blobs: make(map[string][]byte)}
+	r := &containmentRig{dataDir: dataDir, host: &previewTestHost{}, blobs: make(map[string][]byte)}
+	host = r.host
 	r.keep = filepath.Join(dataDir, "sentinel-keep")
 	r.outside = filepath.Join(filepath.Dir(dataDir), "sentinel-outside")
 	for _, p := range []string{r.keep, r.outside} {
@@ -252,11 +256,8 @@ func TestNappBaseDirIsHashedAndContained(t *testing.T) {
 	}
 
 	// without an absolute data directory there is nowhere safe to be
-	saved := dataDir
-	t.Cleanup(func() { dataDir = saved })
 	for _, bad := range []string{"", "relative/dir"} {
-		dataDir = bad
-		if dir, err := nappBaseDir(pk16 + "~a"); err == nil {
+		if dir, err := nappBaseDirIn(bad, pk16+"~a"); err == nil {
 			t.Errorf("dataDir %q: got %s, want an error", bad, dir)
 		}
 	}
@@ -388,11 +389,8 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 				r.assertContained(t, "install")
 
 				// launch
-				h := &previewTestHost{}
-				previousHost := host
-				host = h
+				h := r.host
 				ci, err := launchWithDocument(context.Background(), n, "", nil)
-				host = previousHost
 				if err != nil {
 					t.Fatalf("launch: %v", err)
 				}

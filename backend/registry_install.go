@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+// backgroundSyncs tracks the shortcut and intent passes that installs,
+// uninstalls and settings changes start in the background. They read host and
+// dataDir, so tests wait on it before they swap those globals.
+var backgroundSyncs sync.WaitGroup
+
 // refreshInstalled republishes the installed list into the launcher state.
 // Ordering is installedNapps' business (most recently launched first), and the
 // discovery list gets resorted around the new set: an install or uninstall
@@ -24,8 +29,8 @@ func refreshInstalled() {
 	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()
-	go broadcastIntentChanges()
-	go syncAppShortcuts()
+	backgroundSyncs.Go(broadcastIntentChanges)
+	backgroundSyncs.Go(syncAppShortcuts)
 }
 
 // Install downloads a napp's files and records it as installed. Blocking:
