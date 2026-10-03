@@ -174,18 +174,23 @@
   // ── napplet -> Go ───────────────────────────────────────────────
   // One ordered lane to Go, bounded so a napplet cannot queue without limit.
   // MAX_PENDING matches the 256-slot per-session queue in Go's napEnqueue;
-  // past it every envelope that carries an id is refused at once.
+  // past it every envelope that carries an id is refused at once. The bound
+  // is the napplet's: this page's own lifecycle calls (nap.start, nap.loaded)
+  // are trusted, keep their place in the lane and never count against it, so
+  // a flooding napplet cannot make a boot fail or lose its controls push.
   const MAX_PENDING = 256
   let outbound = Promise.resolve()
   let pending = 0
-  const enqueue = task => {
-    if (pending >= MAX_PENDING) return Promise.reject(new Error("too many pending NAP envelopes"))
-    pending++
+  const enqueue = (task, trusted = false) => {
+    if (!trusted) {
+      if (pending >= MAX_PENDING) return Promise.reject(new Error("too many pending NAP envelopes"))
+      pending++
+    }
     const run = outbound.then(task)
     outbound = run
       .catch(() => {})
       .finally(() => {
-        pending--
+        if (!trusted) pending--
       })
     return run
   }
@@ -304,7 +309,7 @@
 
     let started
     try {
-      started = await enqueue(() => rpc("nap.start"))
+      started = await enqueue(() => rpc("nap.start"), true)
     } catch (err) {
       if (serial === bootSerial) showBootError(err)
       return
@@ -323,7 +328,7 @@
     f.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
     f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
     f.addEventListener("load", () => {
-      if (frame === f) enqueue(() => rpc("nap.loaded")).catch(() => {})
+      if (frame === f) enqueue(() => rpc("nap.loaded"), true).catch(() => {})
     })
     f.srcdoc = doc.srcdoc
     frame = f

@@ -427,3 +427,61 @@ return {
 		t.Errorf("nap.start without a gen: %d frame(s) appended, body %q", got.NoGenAppends, got.BootText)
 	}
 }
+
+// WR-04: the pending bound limits the napplet, not this page. A boot or a
+// load while the napplet has MAX_PENDING envelopes in flight still starts the
+// session and reports the load, after the queued envelopes, in order.
+func TestNappletHostLifecycleBypassesPendingBound(t *testing.T) {
+	m := maxPendingRE.FindStringSubmatch(nappletHostJS)
+	if m == nil {
+		t.Fatal("napplet-host.js declares no MAX_PENDING")
+	}
+	var got struct {
+		BootText  string   `json:"bootText"`
+		Loaded    int      `json:"loaded"`
+		Starts    int      `json:"starts"`
+		Appended  int      `json:"appended"`
+		Refusals  int      `json:"refusals"`
+		LaneOrder []string `json:"laneOrder"`
+	}
+	runHost(t, `
+handlers["nap.boot"] = () => ({ srcdoc: "<p>flood</p>", title: "flood" })
+const TOTAL = `+m[1]+`
+`, `
+await flush()
+const f = appended[0]
+hold("nap.msg")
+for (let i = 0; i < TOTAL; i++) fireMessage(f.contentWindow, { type: "storage.keys", id: "e" + i })
+await flush()
+fireLoad(f)
+window.__nap_reload()
+await flush()
+const bootText = document.body.textContent
+unhold("nap.msg")
+release("nap.msg")
+await flush(10)
+const lane = log.filter(e => e === "nap.loaded" || e === "nap.start" || e === "nap.msg")
+return {
+  bootText, loaded: count("nap.loaded"), starts: count("nap.start"), appended: appended.length,
+  refusals: f.contentWindow.posted.filter(p => p.ok === false).length,
+  laneOrder: lane.slice(-3),
+}
+`, &got)
+
+	if got.BootText != "" {
+		t.Errorf("a boot behind a full lane failed: %q", got.BootText)
+	}
+	if got.Starts != 2 || got.Appended != 2 {
+		t.Errorf("nap.start sent %d times, %d frames appended; want 2 and 2", got.Starts, got.Appended)
+	}
+	if got.Loaded != 1 {
+		t.Errorf("nap.loaded sent %d times behind a full lane, want 1", got.Loaded)
+	}
+	if got.Refusals != 0 {
+		t.Errorf("%d of the napplet's own envelopes were refused, want none (exactly MAX_PENDING)", got.Refusals)
+	}
+	// the trusted calls keep their place: after every queued envelope
+	if !slices.Equal(got.LaneOrder, []string{"nap.msg", "nap.loaded", "nap.start"}) {
+		t.Errorf("lane tail = %v, want the queued envelopes, then nap.loaded, then nap.start", got.LaneOrder)
+	}
+}
