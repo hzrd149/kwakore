@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -184,6 +185,9 @@ func TestNotifyPermissionCombinesVerdanaAndPlatformApproval(t *testing.T) {
 	}
 }
 
+// TestNotifyRateLimitsEachSession: notification limits are per window (the
+// window's limiter) and survive session restarts; 3 urgent ones pass and the
+// 4th answers NAP-NOTIFY's "rate limited".
 func TestNotifyRateLimitsEachSession(t *testing.T) {
 	setupNapTest(t)
 	nh := &notifyTestHost{}
@@ -205,5 +209,61 @@ func TestNotifyRateLimitsEachSession(t *testing.T) {
 	})
 	if got := rec.wait(t, "notify.send.result", 4)["error"]; got != "rate limited" {
 		t.Fatalf("rate limit error = %#v", got)
+	}
+}
+
+// TestNotifyLimitsSurviveSessionRestart: the notify buckets live on the
+// window's limiter, so nap.start cannot refill them (D-14 fold): 3 urgent
+// notifications pass, the 4th and one after a restart answer "rate limited";
+// with the buckets refilled, 20 normal ones pass and the 21st, and one after
+// another restart, answer "rate limited".
+func TestNotifyLimitsSurviveSessionRestart(t *testing.T) {
+	setupNapTest(t)
+	advance := freezeNapNow(t)
+	nh := &notifyTestHost{}
+	host = nh
+	ci, rec := openNapplet(t, "notify-restart")
+	key := RuleKey{Napp: ci.napp.ID, Permission: PermNotify}
+	setSessionRule(key, Rule{Decision: DecisionAllow})
+	t.Cleanup(func() { clearSessionRule(key) })
+	ready(t, ci, rec, 1)
+
+	send := func(id, priority string) map[string]any {
+		t.Helper()
+		env := map[string]any{"type": "notify.send", "id": id, "title": "Hello"}
+		if priority != "" {
+			env["priority"] = priority
+		}
+		post(t, ci, env)
+		return waitID(t, rec, "notify.send.result", id)
+	}
+
+	for i := range 3 {
+		if got := send("u"+strconv.Itoa(i), "urgent"); got["notificationId"] == nil {
+			t.Fatalf("urgent %d: %v", i, got)
+		}
+	}
+	if got := send("u3", "urgent"); got["error"] != "rate limited" {
+		t.Fatalf("4th urgent: %v", got)
+	}
+	ready(t, ci, rec, 2)
+	if got := send("u4", "urgent"); got["error"] != "rate limited" {
+		t.Fatalf("urgent after a restart: %v", got)
+	}
+
+	// a minute later both buckets are full again
+	advance(time.Minute)
+	ready(t, ci, rec, 3)
+	for i := range 20 {
+		if got := send("n"+strconv.Itoa(i), ""); got["notificationId"] == nil {
+			t.Fatalf("normal %d: %v", i, got)
+		}
+	}
+	if got := send("n20", ""); got["error"] != "rate limited" {
+		t.Fatalf("21st notification: %v", got)
+	}
+	ready(t, ci, rec, 4)
+	if got := send("n21", ""); got["error"] != "rate limited" {
+		t.Fatalf("notification after a restart: %v", got)
 	}
 }

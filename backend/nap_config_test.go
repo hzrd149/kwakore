@@ -367,3 +367,60 @@ func TestNapConfigValuesSurviveUpdate(t *testing.T) {
 		t.Fatalf("settings lost across an update: %v", v)
 	}
 }
+
+// TestConfigOpenSettingsLimitedAcrossSessions: config.openSettings draws on
+// the window's limiter (every 2 s), so a second call right after the first
+// does nothing even after nap.start, and one 2 s later opens again.
+func TestConfigOpenSettingsLimitedAcrossSessions(t *testing.T) {
+	h := setupConfigTest(t)
+	advance := freezeNapNow(t)
+	ci, rec := openNapplet(t, "cfg-open-sessions")
+	ready(t, ci, rec, 1)
+
+	waitOpened := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for h.count() < n && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if h.count() != n {
+			t.Fatalf("%d settings windows opened, want %d", h.count(), n)
+		}
+	}
+
+	post(t, ci, map[string]any{"type": "config.openSettings"})
+	waitOpened(1)
+	SettingsClosed(h.opened[0].Window)
+
+	ready(t, ci, rec, 2)
+	post(t, ci, map[string]any{"type": "config.openSettings"})
+	napSettledConfig(t, ci, rec)
+	time.Sleep(50 * time.Millisecond)
+	if h.count() != 1 {
+		t.Fatalf("a restart refilled openSettings: %d windows", h.count())
+	}
+
+	advance(2 * time.Second)
+	post(t, ci, map[string]any{"type": "config.openSettings"})
+	waitOpened(2)
+}
+
+// napSettledConfig waits until the worker handled what was posted before:
+// config.get always answers, in order.
+func napSettledConfig(t *testing.T, ci *Instance, rec *recTransport) {
+	t.Helper()
+	id := "settled-" + randomID()[:6]
+	post(t, ci, map[string]any{"type": "config.get", "id": id})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, typ := range []string{"config.values", "config.schemaError"} {
+			for _, p := range rec.find(typ) {
+				if p["id"] == id {
+					return
+				}
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("config.get %s never answered: %v", id, rec.types())
+}
