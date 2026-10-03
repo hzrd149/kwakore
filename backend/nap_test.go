@@ -801,7 +801,7 @@ func TestNapStartTearsDownThePreviousSession(t *testing.T) {
 	}
 }
 
-func TestNapLoadedPushesControlsOncePerSession(t *testing.T) {
+func TestNapLoadedPushesControlsOnEveryLoad(t *testing.T) {
 	setupNapTest(t)
 	host = &notifyTestHost{}
 	ci, rec := openNapplet(t, "controls")
@@ -821,15 +821,17 @@ func TestNapLoadedPushesControlsOncePerSession(t *testing.T) {
 		t.Fatalf("controls = %v", rec.find("notify.controls")[0])
 	}
 
-	// the napplet reloading its own frame: once per session
+	// the napplet reloading its own frame keeps the session (NIP-5D-reload,
+	// Phase 4), but the new document registered onControls again and gets
+	// the push too (WR-05)
 	loaded(t, ci)
-	if got := rec.find("notify.controls"); len(got) != 1 {
-		t.Fatalf("controls pushed twice in one session: %v", got)
+	if got := rec.find("notify.controls"); len(got) != 2 {
+		t.Fatalf("controls after a self-reload in the same session: %v", got)
 	}
 
 	ready(t, ci, rec, 2)
 	loaded(t, ci)
-	if got := rec.find("notify.controls"); len(got) != 2 {
+	if got := rec.find("notify.controls"); len(got) != 3 {
 		t.Fatalf("controls after the second session: %v", got)
 	}
 }

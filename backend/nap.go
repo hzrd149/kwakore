@@ -54,9 +54,6 @@ type napSession struct {
 	// before it is dropped, and the frame has no way to set it: it can only
 	// post envelopes, which reach Go as nap.msg.
 	established bool
-	// controlsSent is notify.controls having gone out for this session
-	// (nap.loaded); it resets with the session.
-	controlsSent bool
 
 	// gen counts sessions in this window. nap.start (and nap.reset) starts a
 	// new one, and a late answer for the old one must not reach the new
@@ -147,7 +144,6 @@ func (s *napSession) resetLocked() {
 	}
 	s.media = make(map[string]*mediaSession)
 	s.configSubscribed = false
-	s.controlsSent = false
 	s.established = false
 }
 
@@ -420,22 +416,25 @@ func (ci *Instance) napStart() (int, error) {
 	return gen, nil
 }
 
-// napLoaded answers nap.loaded, which the host page sends on the frame's load
-// event, and pushes notify.controls once per session. The trigger is the load
+// napLoaded answers nap.loaded, which the host page sends on every load event
+// of the current frame, and pushes notify.controls. The trigger is the load
 // event because the upstream notify shim keeps no last value: a push before
 // the napplet's top-level scripts registered onControls would be lost, and
 // load fires after them. It is only that trigger, never a session start.
+//
+// A napplet that reloads its own frame keeps its session (NIP-5D-reload,
+// Phase 4), but its new document still registers onControls and needs the
+// push, so every load gets one, not just the session's first.
 func (ci *Instance) napLoaded() {
 	s := ci.nap
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	if !s.established || s.controlsSent {
+	if !s.established {
 		s.mu.Unlock()
 		return
 	}
-	s.controlsSent = true
 	gen := s.gen
 	s.mu.Unlock()
 	ci.napPushGen(gen, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
