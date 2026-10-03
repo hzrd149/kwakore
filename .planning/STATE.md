@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-10-03T15:59:50.640Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-10-03T16:05:50.407Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: 19ed1a7312e3a8c2be18ce759c2c1572a90476e0
+state_head: a679385ba08d638009fc64f29f58d7583dd99e28
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 7
   percent: 13
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 02 execution started
 
@@ -64,6 +64,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 01 P04 | 6min | 3 tasks | 8 files |
 | Phase 01 P05 | 7min | 2 tasks | 6 files |
 | Phase 02 P01 | 10min | 3 tasks | 12 files |
+| Phase 02 P02 | 5min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,8 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-01] napDispatch short-circuits stored deny rules and session refusals for Session/PerCall routes (read-only, under dispatchMu); Dynamic routes always reach their handler
 - [Phase 02]: [02-01] Exactly one answer per request: reply/replyAs/failWith/drop CAS napCall.answered; forgotten answers auto-fail in the route shape after the handler/async returns; reply-less and lifecycle routes exempt
 - [Phase 02]: [02-01] NAP goroutines start only via c.async or safeGo; publish replies use napPublishErrCode (deliberate codes, else internal-error); link/intent/default failures are <type>.result
+- [Phase 02]: [02-02] Napplet-originated wire messages are capped at backend.MaxInboundWireMsg (24 MiB + 1 MiB) in raw bytes before parsing: desktop child lines via desktop/internal/wireline (overlong => Process.Kill before Wait, window closes), Android via HandleWireMessage; launcher->child lines capped at 128 MiB
+- [Phase 02]: [02-02] Cache setup returns errors: newCache + cacheOrNil leave a failed cache nil (ristretto nil-safe => always miss); cacheInitErrs logged at Warn by Start
 
 ### Pending Todos
 
@@ -120,6 +123,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T15:59:50.609Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-10-03T16:05:44.785Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
