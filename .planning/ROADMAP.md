@@ -13,7 +13,7 @@ This milestone hardens Verdana and brings its napplet runtime into strict confor
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Containment Fix and Canonical Shim Baseline** - Stop `d`-tag path escape, vendor upstream shim 0.30.0 unmodified, snapshot specs, scaffold the audit, run Android CI on PRs
+- [x] **Phase 1: Containment Fix and Canonical Shim Baseline** - Stop `d`-tag path escape, vendor upstream shim 0.30.0 unmodified, snapshot specs, scaffold the audit, run Android CI on PRs (completed 2026-10-03)
 - [ ] **Phase 2: Gated NAP Dispatcher** - One route table with declared permission gates, guaranteed spec-shaped replies, Go-side bounds, rate limits and panic recovery
 - [ ] **Phase 3: Desktop Process and Secrets Hardening** - Verified per-user binary extraction, user-only instance IPC, OpenLink validation, keyring secrets, atomic state
 - [ ] **Phase 4: Frame Sandbox Lifecycle** - Frame reload/navigation resets the session, enforced host CSP, adversarial fixture, side channels closed where engines allow
@@ -174,7 +174,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Containment Fix and Canonical Shim Baseline | 5/5 | In Progress|  |
+| 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 0/TBD | Not started | - |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |

@@ -2,7 +2,7 @@
 phase: 01-containment-fix-and-canonical-shim-baseline
 verified: 2026-10-03T01:54:15Z
 verified_at_commit: 5dcc49e
-status: human_needed
+status: passed
 score: 53/56 must-haves verified (5/5 roadmap success criteria, 48/51 plan truths; 3 plan truths are human-only by design)
 behavior_unverified: 0
 overrides_applied: 0
@@ -58,6 +58,7 @@ human_verification:
   - test: "Resolve the three flagged prohibitions listed in flagged_prohibitions"
     expected: "Accept the non-authoritative verdicts, or ask for a nap.boot-level test for the domains-from-tags prohibition"
     why_human: "Judgment-tier items need explicit human resolution; the test-tier item has no wired test on the production path"
+human_validated: 2026-10-03T13:56:16Z
 ---
 
 # Phase 1: Containment Fix and Canonical Shim Baseline Verification Report
