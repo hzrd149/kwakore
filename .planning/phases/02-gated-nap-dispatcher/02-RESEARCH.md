@@ -691,18 +691,23 @@ Permission constants (unchanged; quoted from window_permissions.go:26-53) [VERIF
 | A6 | Adding a publish bucket beyond D-14's listed categories | Limits | Scope creep vs a real spam vector with "always allow" rules |
 | A7 | Launcher-generated prompts are exempt from the 32 global cap | Pattern 8 | If not exempt, a napplet flood can block install prompts |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `relay.close` push `relay.closed`?**
    - What we know: NAP-RELAY says "The shell MUST respond to every request with a result or lifecycle message carrying the same `id` or `subId`", and `relay.close` carries an `id`. The shim removes its listener on close and never waits. Today Verdana sends nothing (nap_relay.go:321-327), while `outbox.close` does push `outbox.closed`.
    - Recommendation: treat it as reply-less in the route table (D-06 lists `*.close`), and leave the decision to push `relay.closed{subId, reason:"closed"}` to Phase 6 RELY-06.
+   - RESOLVED (orchestrator default): reply-less now; Phase 6 RELY-06 decides `relay.closed` (CONTEXT D-21).
 2. **Prompt deadline for routes whose shim has no timeout (relay.publish/publishEncrypted) and for `upload.upload`'s post-reply prompt.**
    - Recommendation: per-route `deadline` field. 30 s default, 5 s storage, 0 (use `promptTimeout` = 2 min) for relay publish routes and the upload prompt. This follows DEC-1's rationale ("prompts must not outlive the request they serve") exactly.
+   - RESOLVED (orchestrator default): per-route deadline as recommended (CONTEXT D-20).
 3. **Large legitimate pushes vs the 24 MiB child line cap (D-12).**
    - What we know: `resource.bytesMany` can return up to 100 × 10 MiB in one reply; relay/outbox queries can return 500 events.
    - Recommendation: an outbound guard in `napPushGen` (oversize reply ⇒ `too-large` fail shape, never a killed child), plus a per-reply cumulative budget for `bytesMany` (later items `quota-exceeded`). Confirm with the user, because this changes current `bytesMany` behavior for very large batches; it overlaps Phase 7 RES-03.
+   - RESOLVED (user): NOT the recommendation. Keep the 24 MiB cap for napplet-originated input (child→parent lines, Android inbound) but allow larger parent→child replies (child stdin reader cap 128 MiB); no `bytesMany` byte budget and no outbound too-large guard in Phase 2 (CONTEXT D-17).
 4. **Resource bucket burst vs advertised `maxUrls: 100`.** Burst 100 with a 1/s refill (allows one full batch per ~100 s), or lower `maxUrls` to 60. Recommendation: burst 100.
+   - RESOLVED (user): burst 100 (CONTEXT D-19).
 5. **Default 256 KiB route cap for `relay.publish`/`publishEncrypted`/`outbox.publish`.** Long-form events can exceed it. Recommendation: 1 MiB for publish routes (matches the host page cap). Needs a user nod, because D-09 lists only three overrides.
+   - RESOLVED (user): 1 MiB for the three publish routes (CONTEXT D-18).
 
 ## Environment Availability
 

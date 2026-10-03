@@ -39,6 +39,13 @@ Out of this phase: changing the consent *semantics* of individual domains (inten
 - D-15: Bounded prompt queue: at most 3 pending prompts per window and 32 globally; excess requests are denied immediately with `rate-limited` and nothing is remembered. Prompts are owned by their session context: on teardown, reload or window close they are cancelled and treated as dismissed (no remembered "always"/"session" answer), and a prompt still open after the shim's 30 s request timeout is cancelled as dismissed (DEC-1 / P1). Cancellation releases waiters on `grantMu`. `askApproval`/`sessionGrant` take a context.
 - D-16: Non-blocking enqueue: a full 256-slot dispatch queue replies `rate-limited` immediately instead of blocking the window reader, so prompt answers and other window traffic are never stuck behind a flood.
 
+### Post-research decisions (2026-10-03)
+- D-17 (user): Size cap direction split. Napplet-originated input keeps the 24 MiB hard cap (child→parent lines on desktop, and an equivalent inbound cap on Android `HandleWireMessage`). Parent→child replies may be larger: the child's stdin line reader is capped at 128 MiB. No outbound too-large guard and no `resource.bytesMany` byte budget in Phase 2 (RES-03 stays with Phase 7). Refines D-09/D-12.
+- D-18 (user): `relay.publish`, `relay.publishEncrypted` and `outbox.publish` get a 1 MiB `maxRaw` override (in addition to D-09's three overrides).
+- D-19 (user): Resource fetch bucket allows a burst of 100 (refill 60/min) so the advertised `maxUrls: 100` for `resource.bytesMany` still works.
+- D-20: Per-route prompt deadline field: 30 s default, 5 s for storage, and the existing 2-minute `promptTimeout` for relay publish routes (no shim timeout) and `upload.upload`'s post-reply prompt. Refines D-15.
+- D-21: `relay.close` is reply-less in the route table for now; whether to push `relay.closed` is decided in Phase 6 RELY-06.
+
 ### Claude's Discretion
 - Exact numeric values for per-category buckets beyond those stated (tune against existing notify/config limits and FEATURES X-3 suggestions).
 - Internal naming of gate types/helpers, file split (`nap_route.go`, `nap_limits.go`), and how the JS shape table is laid out, within project conventions.
