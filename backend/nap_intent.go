@@ -113,13 +113,16 @@ func napIntentInvoke(c *napCall) {
 	}
 
 	// a launch this intent needs is charged to the window's cold-launch
-	// bucket (D-14); routing into an open window is not
+	// bucket (D-14); routing into an open window is not. The window it
+	// launches shares that bucket (CR-02): a napplet that invokes itself
+	// with newWindow cannot fork past the budget its first window had
 	opts.BeforeLaunch = func() error {
 		if !c.ci.nap.limits.allow(limitColdLaunch, 1) {
 			return errColdLaunchLimited
 		}
 		return nil
 	}
+	opts.ColdLaunch = c.ci.nap.limits.coldLaunchBucket()
 
 	c.async(func(ctx context.Context) {
 		// the "open with" chooser belongs to this request: it comes down

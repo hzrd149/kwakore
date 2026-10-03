@@ -761,3 +761,48 @@ func TestIntentColdLaunchLimited(t *testing.T) {
 		t.Fatalf("routing to an open window launched again: %v", l)
 	}
 }
+
+// TestIntentSelfInvokingChainIsBounded: a napplet that handles its own
+// convention and invokes itself with newWindow cannot fork without limit
+// (CR-02). Every copy it launches draws on the cold-launch bucket of the
+// window that started the chain, so with the default burst (and a frozen
+// clock) the chain stops after burst launches however many copies try.
+func TestIntentSelfInvokingChainIsBounded(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	freezeNapNow(t)
+	h := &launchTestHost{}
+	host = h
+	self := installIntentHandler(t, "fork-self", "fork")
+	ci, rec := openNapplet(t, "fork-self")
+	if ci.napp.ID != self.ID {
+		t.Fatalf("the caller is %s, want the handler %s itself", ci.napp.ID, self.ID)
+	}
+	ready(t, ci, rec, 1)
+	fork := map[string]any{"archetype": "fork", "handler": self.D, "behavior": map[string]any{"newWindow": true}}
+
+	burst := napLimitSpecs[limitColdLaunch].burst
+	for i := range burst {
+		res := invokeResult(t, ci, rec, "fork-"+strconv.Itoa(i), fork)
+		if res["ok"] != true || res["handler"] != self.D {
+			t.Fatalf("fork %d: %v", i, res)
+		}
+		// the copy starts its session and forks in turn
+		child := lookupInstance(res["windowId"].(string))
+		if child == nil || child == ci {
+			t.Fatalf("fork %d opened no new window: %v", i, res)
+		}
+		child.sendMu.Lock()
+		rec = child.transport.(*recTransport)
+		child.sendMu.Unlock()
+		ci = child
+		ready(t, ci, rec, 1)
+	}
+	res := invokeResult(t, ci, rec, "fork-over", fork)
+	if res["ok"] != false || res["error"] != napErrRateLimited {
+		t.Fatalf("the copy past the chain's budget: %v", res)
+	}
+	if l := h.launches(); len(l) != burst {
+		t.Fatalf("%d launches, want %d", len(l), burst)
+	}
+}

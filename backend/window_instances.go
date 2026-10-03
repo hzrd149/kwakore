@@ -21,6 +21,7 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 )
 
 // An Instance is one open napp window, whatever a window happens to be on
@@ -511,6 +512,16 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 }
 
 func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte) (*Instance, error) {
+	return launchWindow(ctx, napp, requestedInstance, previewDocument, nil)
+}
+
+// launchWindow opens the window. coldLaunch, when set, is the cold-launch
+// bucket a napplet window opened for a napplet's intent shares with the
+// window that launched it (CR-02): the budget follows the launch chain, so a
+// napplet that keeps launching copies of itself (or of others that launch it
+// back) never gets a fresh bucket per copy. A window the user opens starts a
+// chain of its own.
+func launchWindow(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte, coldLaunch *rate.Limiter) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
@@ -571,6 +582,7 @@ func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string
 	}
 	if napp.IsNapplet() {
 		ci.nap = newNapSession()
+		ci.nap.limits.inheritColdLaunch(coldLaunch)
 	}
 
 	// registered before the window exists, so a napp that starts talking
@@ -774,6 +786,10 @@ type actionOptions struct {
 	// bucket here (D-14); launcher-fired actions leave it nil. Routing into
 	// a window that is already open never calls it.
 	BeforeLaunch func() error `json:"-"`
+	// ColdLaunch, when set, is the cold-launch bucket a napplet window this
+	// dispatch launches inherits: the caller's own, so the D-14 budget holds
+	// for the whole launch chain rather than per window (CR-02).
+	ColdLaunch *rate.Limiter `json:"-"`
 
 	// PromptCtx, when set, is what the handler chooser lives in instead of
 	// the dispatch's ctx: a napplet's request (its session, bounded by the
@@ -782,14 +798,15 @@ type actionOptions struct {
 	PromptCtx context.Context `json:"-"`
 }
 
-// launchFor launches n for this dispatch, after BeforeLaunch allowed it.
+// launchFor launches n for this dispatch, after BeforeLaunch allowed it,
+// handing the new window the caller's cold-launch bucket (ColdLaunch).
 func (opts actionOptions) launchFor(ctx context.Context, n Napp) (*Instance, error) {
 	if opts.BeforeLaunch != nil {
 		if err := opts.BeforeLaunch(); err != nil {
 			return nil, err
 		}
 	}
-	return launch(ctx, n)
+	return launchWindow(ctx, n, "", nil, opts.ColdLaunch)
 }
 
 // dispatchReport is filled with where an action went, for callers that

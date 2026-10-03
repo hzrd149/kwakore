@@ -112,7 +112,10 @@ const (
 	// limitIntent: intent.invoke
 	limitIntent
 	// limitColdLaunch: an intent that has to launch a napp first (charged by
-	// intent.invoke's actionOptions.BeforeLaunch)
+	// intent.invoke's actionOptions.BeforeLaunch). Unlike every other class,
+	// this bucket is shared along a launch chain: a napplet window launched
+	// for a napplet's intent draws on the bucket of the window that launched
+	// it (inheritColdLaunch), so self-invoking napplets cannot multiply it
 	limitColdLaunch
 	// limitUpload: upload.upload
 	limitUpload
@@ -205,6 +208,25 @@ func (l *napLimiter) allow(class napLimitClass, n int) bool {
 		return true
 	}
 	return l.classes[class].AllowN(napNow(), n)
+}
+
+// coldLaunchBucket is the window's cold-launch bucket, for a window it
+// launches to inherit (nil for a nil limiter).
+func (l *napLimiter) coldLaunchBucket() *rate.Limiter {
+	if l == nil {
+		return nil
+	}
+	return l.classes[limitColdLaunch]
+}
+
+// inheritColdLaunch makes the window draw its cold launches from b, the
+// bucket of the window that launched it (CR-02). Called before the window
+// is registered, so nothing reads the bucket concurrently. A nil b keeps the
+// window's own.
+func (l *napLimiter) inheritColdLaunch(b *rate.Limiter) {
+	if l != nil && b != nil {
+		l.classes[limitColdLaunch] = b
+	}
 }
 
 // allowEnvelope takes one token from the envelope bucket.
