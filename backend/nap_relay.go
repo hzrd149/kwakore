@@ -337,7 +337,7 @@ func napRelayQuery(c *napCall) {
 	}
 	filters, err := napFilters(r.Filters)
 	if err != nil {
-		c.reply(map[string]any{"events": []any{}, "error": err.Error()})
+		c.reply(map[string]any{"events": []any{}, "error": napErrInvalid})
 		return
 	}
 	if sys == nil {

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -289,56 +288,15 @@ func fetchResource(ctx context.Context, c *napCall, raw string, servers []string
 	if !c.allowFetch() {
 		return resourceResult{}, rerr("blocked-by-policy", "the user did not allow fetching")
 	}
-	return httpsResource(ctx, u.String())
+	return c.fetch(ctx, u.String())
 }
 
 // allowFetch asks, once per session, if the napplet may have the launcher
-// download from the web.
+// download from the web. A question that ends without an answer is a no.
 func (c *napCall) allowFetch() bool {
-	return c.sessionGrant(PermFetch, "download images and files from the web",
+	ok, err := c.grant(PermFetch, "download images and files from the web",
 		"The napplet has no network of its own; the launcher fetches for it.")
-}
-
-func httpsResource(ctx context.Context, target string) (resourceResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, resourceTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return resourceResult{}, rerr("invalid-request", err.Error())
-	}
-	req.Header.Set("User-Agent", "verdana-napplet-resource")
-	resp, err := resourceClient.Do(req)
-	if err != nil {
-		if errors.Is(err, netguard.ErrPrivateAddress) || strings.Contains(err.Error(), netguard.ErrPrivateAddress.Error()) {
-			return resourceResult{}, rerr("blocked-by-policy", "not a public address")
-		}
-		if ctx.Err() != nil {
-			return resourceResult{}, rerr("timeout", "")
-		}
-		return resourceResult{}, rerr("network-error", err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
-		return resourceResult{}, rerr("not-found", resp.Status)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return resourceResult{}, rerr("network-error", resp.Status)
-	}
-	if resp.ContentLength > resourceMaxBytes {
-		return resourceResult{}, rerr("too-large", "")
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, resourceMaxBytes+1))
-	if err != nil {
-		return resourceResult{}, rerr("network-error", err.Error())
-	}
-	if len(data) > resourceMaxBytes {
-		return resourceResult{}, rerr("too-large", "")
-	}
-	mime, err := sniffResource(data, resp.Header.Get("Content-Type"))
-	if err != nil {
-		return resourceResult{}, err
-	}
-	return resourceResult{data: data, mime: mime}, nil
+	return err == nil && ok
 }
 
 // sniffResource types bytes by their content. Only passive media and plain
@@ -420,7 +378,7 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 	}
 	var lastErr error = rerr("not-found", "")
 	for _, srv := range blossomServers(ctx, hinted) {
-		res, err := httpsBlobAttempt(ctx, srv+"/"+sha)
+		res, err := c.fetchBlossom(ctx, srv+"/"+sha)
 		if err != nil {
 			lastErr = err
 			continue
@@ -464,14 +422,6 @@ func blossomServers(ctx context.Context, hinted []string) []string {
 	add("https://nostr.download")
 	add("https://blossom.primal.net")
 	return servers
-}
-
-// httpsBlobAttempt is httpsResource with its own deadline per server, so one
-// stalling server doesn't eat the whole request.
-func httpsBlobAttempt(ctx context.Context, target string) (resourceResult, error) {
-	actx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	return httpsResource(actx, target)
 }
 
 // fetchNostrResource resolves nostr:<nip19> one hop: the event itself, as

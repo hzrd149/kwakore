@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -504,4 +507,93 @@ func TestNapNotifyGoesThroughItsSinks(t *testing.T) {
 	if n := len(sinks.all()); n != 2 {
 		t.Fatalf("a denied notify reached sinks: %v", sinks.all())
 	}
+}
+
+// ─── resource, media ─────────────────────────────────────────────
+
+// TestNapResourceAndMediaGoThroughTheirSinks: an https fetch needs the
+// session's PermFetch and goes through the fetch sink; data: needs no sink;
+// blossom: goes through fetchBlossom, the documented unprompted exception;
+// shell-owned media plays through its sink after PermMedia, and napplet-owned
+// sessions reach no sink at all.
+func TestNapResourceAndMediaGoThroughTheirSinks(t *testing.T) {
+	t.Run("resource", func(t *testing.T) {
+		setupNapTest(t)
+		sinks := recordSinks(t)
+		png := []byte("\x89PNG\r\n\x1a\nnot really an image")
+		sum := sha256.Sum256(png)
+		hash := hex.EncodeToString(sum[:])
+		prev := resourceClient
+		resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(png))), Request: r}, nil
+		})}
+		t.Cleanup(func() { resourceClient = prev })
+		ci, rec := openNapplet(t, "resource-sinks")
+		ready(t, ci, rec, 1)
+
+		ci.nap.mu.Lock()
+		ci.nap.grants[PermFetch] = true
+		ci.nap.mu.Unlock()
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "web", "url": "https://8.8.8.8/a.png"})
+		if got := waitID(t, rec, "resource.bytes.result", "web"); got["mime"] != "image/png" {
+			t.Fatalf("https fetch: %v", got)
+		}
+		if calls := sinks.all(); !slices.Equal(calls, []napSinkCall{{"fetch", true}}) {
+			t.Fatalf("https sinks: %v", calls)
+		}
+
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "data", "url": "data:text/plain,hello"})
+		if got := waitID(t, rec, "resource.bytes.result", "data"); got["mime"] == nil {
+			t.Fatalf("data: %v", got)
+		}
+		if n := len(sinks.all()); n != 1 {
+			t.Fatalf("a data: URL reached a sink: %v", sinks.all())
+		}
+
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "blob", "url": "blossom:sha256:" + hash, "servers": []string{"https://8.8.4.4"}})
+		if got := waitID(t, rec, "resource.bytes.result", "blob"); got["mime"] != "image/png" {
+			t.Fatalf("blossom: %v", got)
+		}
+		if names := sinks.names(); !slices.Equal(names, []string{"fetch", "fetchBlossom"}) {
+			t.Fatalf("blossom sinks: %v", names)
+		}
+
+		// the session said no: blocked-by-policy, and no fetch
+		ci.nap.mu.Lock()
+		ci.nap.grants[PermFetch] = false
+		ci.nap.mu.Unlock()
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "refused", "url": "https://8.8.8.8/b.png"})
+		if got := waitID(t, rec, "resource.bytes.error", "refused"); got["error"] != "blocked-by-policy" {
+			t.Fatalf("refused fetch: %v", got)
+		}
+		if n := len(sinks.all()); n != 2 {
+			t.Fatalf("a refused fetch reached a sink: %v", sinks.all())
+		}
+	})
+
+	t.Run("media", func(t *testing.T) {
+		ci, rec, mh := setupMediaTest(t, "media-sinks")
+		sinks := recordSinks(t)
+
+		post(t, ci, shellCreate("shell", "https://1.1.1.1/a.mp3"))
+		if got := waitID(t, rec, "media.session.create.result", "shell"); got["sessionId"] == nil {
+			t.Fatalf("shell session: %v", got)
+		}
+		if calls := sinks.all(); !slices.Equal(calls, []napSinkCall{{"playMedia", true}}) {
+			t.Fatalf("media sinks: %v", calls)
+		}
+		mh.player(t, 0)
+
+		post(t, ci, map[string]any{"type": "media.session.create", "id": "own", "owner": "napplet"})
+		if got := waitID(t, rec, "media.session.create.result", "own"); got["owner"] != "napplet" {
+			t.Fatalf("napplet session: %v", got)
+		}
+		post(t, ci, map[string]any{"type": "media.session.create", "id": "garbled", "owner": 7})
+		if got := waitID(t, rec, "media.session.create.result", "garbled"); got["error"] != napErrInvalid {
+			t.Fatalf("undecodable create: %v", got)
+		}
+		if n := len(sinks.all()); n != 1 {
+			t.Fatalf("a napplet-owned session reached a sink: %v", sinks.all())
+		}
+	})
 }

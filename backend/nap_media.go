@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -101,7 +102,7 @@ func napMediaCreate(c *napCall) {
 	fail := func(msg string) { c.reply(map[string]any{"error": msg}) }
 	var r mediaCreateReq
 	if err := c.decode(&r); err != nil {
-		fail("invalid request")
+		c.failWith(napErrInvalid)
 		return
 	}
 	switch r.Owner {
@@ -166,14 +167,15 @@ func napMediaCreate(c *napCall) {
 			fail(code)
 			return
 		}
-		if !c.sessionGrant(PermMedia, "play media in an external player",
-			"The launcher opens your media player on "+target) {
+		ok, err := c.grant(PermMedia, "play media in an external player",
+			"The launcher opens your media player on "+target)
+		if err != nil || !ok {
 			drop()
 			fail("source blocked")
 			return
 		}
 		mediaOutput.Lock()
-		player, err := host.MediaPlay(MediaRequest{
+		player, err := c.playMedia(MediaRequest{
 			URL:      target,
 			MimeType: r.Source.MimeType,
 			Title:    mediaTitle(ms.metadata),
@@ -182,8 +184,12 @@ func napMediaCreate(c *napCall) {
 		}, func(st MediaState) { c.ci.mediaPlayerState(c.gen, ms.id, st) })
 		if err != nil {
 			mediaOutput.Unlock()
-			log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Msg("media player did not start")
 			drop()
+			if errors.Is(err, errSinkRefused) {
+				// already answered
+				return
+			}
+			log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Msg("media player did not start")
 			fail("no media player")
 			return
 		}

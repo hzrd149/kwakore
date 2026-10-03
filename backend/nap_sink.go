@@ -11,10 +11,13 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nipb7/blossom"
+	"verdana/backend/netguard"
 )
 
 // The gate layer (D-02). This file and nap_route.go are the only NAP code
@@ -316,4 +319,80 @@ func (c *napCall) requestNotifyPermission() bool {
 		return false
 	}
 	return host.RequestNotificationPermission()
+}
+
+// fetch downloads a napplet-chosen https URL for the napplet.
+func (c *napCall) fetch(ctx context.Context, target string) (resourceResult, error) {
+	if !c.sinkAllowed("fetch") {
+		return resourceResult{}, errSinkRefused
+	}
+	return httpsResource(ctx, target)
+}
+
+// fetchBlossom downloads one Blossom blob candidate, with its own deadline
+// per server so one stalling server does not eat the whole request.
+//
+// It is the one sink that does not need c.approved, on purpose: Blossom
+// fetches have never asked, and the resource routes' Dynamic reason records
+// that their consent is RES-02 (Phase 7: "Blossom fetches get the same
+// consent and host policy as https fetches"). Until then the exception is
+// here, in the gate layer, where it can be seen, and the test hook still
+// sees every call.
+func (c *napCall) fetchBlossom(ctx context.Context, target string) (resourceResult, error) {
+	napSinkSeen("fetchBlossom", c.approved.Load())
+	actx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return httpsResource(actx, target)
+}
+
+// httpsResource downloads target over https through resourceClient (public
+// addresses only, on every hop) and types the bytes with sniffResource.
+func httpsResource(ctx context.Context, target string) (resourceResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, resourceTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return resourceResult{}, rerr("invalid-request", err.Error())
+	}
+	req.Header.Set("User-Agent", "verdana-napplet-resource")
+	resp, err := resourceClient.Do(req)
+	if err != nil {
+		if errors.Is(err, netguard.ErrPrivateAddress) || strings.Contains(err.Error(), netguard.ErrPrivateAddress.Error()) {
+			return resourceResult{}, rerr("blocked-by-policy", "not a public address")
+		}
+		if ctx.Err() != nil {
+			return resourceResult{}, rerr("timeout", "")
+		}
+		return resourceResult{}, rerr("network-error", err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return resourceResult{}, rerr("not-found", resp.Status)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return resourceResult{}, rerr("network-error", resp.Status)
+	}
+	if resp.ContentLength > resourceMaxBytes {
+		return resourceResult{}, rerr("too-large", "")
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, resourceMaxBytes+1))
+	if err != nil {
+		return resourceResult{}, rerr("network-error", err.Error())
+	}
+	if len(data) > resourceMaxBytes {
+		return resourceResult{}, rerr("too-large", "")
+	}
+	mime, err := sniffResource(data, resp.Header.Get("Content-Type"))
+	if err != nil {
+		return resourceResult{}, err
+	}
+	return resourceResult{data: data, mime: mime}, nil
+}
+
+// playMedia starts the user's external media player on a resolved source.
+func (c *napCall) playMedia(req MediaRequest, onState func(MediaState)) (MediaPlayer, error) {
+	if !c.sinkAllowed("playMedia") {
+		return nil, errSinkRefused
+	}
+	return host.MediaPlay(req, onState)
 }
