@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,17 +157,24 @@ var (
 	promptQueue  []*Prompt
 )
 
-// newPromptID is a random, positive prompt id below 2^53, so it survives a
-// trip through a JavaScript number (the overlay, the Android UI's Long)
-// unchanged. Ids are unguessable rather than serial: knowing one prompt's id
-// tells a window nothing about another's (CR-01).
+// promptIDMask keeps a prompt id positive and below 2^53 on every
+// architecture: 2^53-1 where int is 64-bit, math.MaxInt (2^31-1) where it is
+// 32-bit (gomobile's armeabi-v7a and x86 Android ABIs).
+const promptIDMask = uint64(1<<53-1) & uint64(math.MaxInt)
+
+// newPromptID is a random, positive prompt id below 2^53 (2^31 on 32-bit
+// builds), so it survives a trip through a JavaScript number (the overlay,
+// the Android UI's Long) unchanged. Ids are unguessable rather than serial:
+// knowing one prompt's id tells a window nothing about another's (CR-01).
+// Ownership, not guessability, is what protects a prompt, so 31 random bits
+// are enough where int is 32-bit.
 func newPromptID() int {
 	var b [8]byte
 	for {
 		if _, err := rand.Read(b[:]); err != nil {
 			panic("no randomness for a prompt id: " + err.Error())
 		}
-		if id := int(binary.BigEndian.Uint64(b[:]) & (1<<53 - 1)); id != 0 {
+		if id := int(binary.BigEndian.Uint64(b[:]) & promptIDMask); id != 0 {
 			return id
 		}
 	}

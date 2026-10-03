@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,10 +109,21 @@ func TestPromptAnswerOnlyFromOwner(t *testing.T) {
 		t.Fatal("the launcher could not answer its own prompt")
 	}
 
-	// ids are random, JS-safe and distinct, not a serial
+	// ids are random, JS-safe and distinct, not a serial (compared as int64
+	// so the bound compiles where int is 32-bit)
 	a, b := newPromptID(), newPromptID()
-	if a <= 0 || b <= 0 || a >= 1<<53 || b >= 1<<53 || a == b || b == a+1 {
+	if a <= 0 || b <= 0 || int64(a) >= 1<<53 || int64(b) >= 1<<53 || a == b || b == a+1 {
 		t.Fatalf("prompt ids %d, %d", a, b)
+	}
+	// the mask fits this platform's int, so no draw truncates to a negative
+	// or out-of-range id (half of them did on 32-bit before the mask did)
+	if promptIDMask > uint64(math.MaxInt) || promptIDMask >= 1<<53 {
+		t.Fatalf("prompt id mask %#x does not fit int and 2^53", promptIDMask)
+	}
+	for range 1000 {
+		if id := newPromptID(); id <= 0 || int64(id) >= 1<<53 {
+			t.Fatalf("prompt id %d out of range", id)
+		}
 	}
 }
 
