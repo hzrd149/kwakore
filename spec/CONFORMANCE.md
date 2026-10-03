@@ -44,7 +44,8 @@ has a row.
 
 | ID | Item | Status | Reason | Code |
 |----|------|--------|--------|------|
-| CRIT-01 | A napp or napplet whose `d` contains `/` or `..` installs, launches, updates and uninstalls inside the data directory; `d` itself is never normalized | fixed (Phase 1) | Install directories are `napps/hex(sha256(id))` from one choke point; manifest paths go through one containment rule | `backend/backend.go` nappBaseDir, nappAssetPath; test `backend/containment_test.go` TestHostileDTagStaysInsideDataDir |
+| CRIT-01 | A napp or napplet whose `d` contains `/` or `..` installs, launches, updates and uninstalls inside the data directory; `d` itself is never normalized | fixed (Phase 1) | Install directories are `napps/hex(sha256(id))` from one choke point; manifest paths go through one containment rule. Storage and config files stay inside their directories, but their names are still a lossy mapping of the id that can merge two `d` values (CF-2, open) | `backend/backend.go` nappBaseDir, nappAssetPath; test `backend/containment_test.go` TestHostileDTagStaysInsideDataDir |
+| CF-2 | Storage and config file names cannot collide across different `d` values | open | Owner Phase 5 KEY-04. `safeFileName` (backend `window_storage.go`, `napconfig/store.go`) maps every character outside `[A-Za-z0-9._~-]` to `_`, so `{pk16}~a/b`, `{pk16}~a_b` and `{pk16}~a b` share one localStorage file and one config file, and case-insensitive filesystems (the macOS and Windows defaults) also merge `{pk16}~App` and `{pk16}~app`. Only the same author's napps collide (the pk16 prefix). The files never leave their directories (CRIT-01); the storage key in memory and on the wire stays the raw id | |
 | SHIM-01 | The vendored `prelude.global.js` is byte-identical to npm `@napplet/shim` 0.30.0 | fixed (Phase 1) | Upstream `napplet/web` is canonical; no Verdana patches (see Dropped shim patches) | `backend/webview/embed.go` ShimVersion, ShimSHA256; test `backend/webview/shim_test.go` TestShimPreludeIsPristineUpstream |
 | SHIM-05 | Every request type the vendored shim can send has a handler or an explicit N/A entry | fixed (Phase 1) | Oracle is the `@napplet/conformance` 0.17.0 `ENVELOPE_SPECS` fixture; nine unoffered domains are N/A; `media.command` is bidirectional (A19) | `backend/nap_conformance_test.go` naDomains, bidirectionalOut; test TestNAPHandlersCoverReferenceEnvelopes |
 
@@ -123,7 +124,7 @@ Snapshot: [`pinned/WEB-NAPPLET@7ae5b19a.md`](pinned/WEB-NAPPLET@7ae5b19a.md)
 
 | ID | Requirement | Level | Status | Reason | Code |
 |----|-------------|-------|--------|--------|------|
-| W-1 | “`d` is exact and case-sensitive. Clients MUST NOT normalize it.” | MUST | fixed (Phase 1) | Install directories hash the id instead of using it as a path, so `d` stays untouched in the id, state, storage keys and wire while a hostile `d` cannot escape the data directory | `backend/backend.go` nappBaseDir; test `backend/containment_test.go` TestHostileDTagStaysInsideDataDir |
+| W-1 | “`d` is exact and case-sensitive. Clients MUST NOT normalize it.” | MUST | fixed (Phase 1) | Install directories hash the id instead of using it as a path, so `d` stays untouched in the id, state, storage keys and wire while a hostile `d` cannot escape the data directory. The storage and config file names still normalize the id and can merge two `d` values; that residue is the open row CF-2 (Phase 5 KEY-04) | `backend/backend.go` nappBaseDir; test `backend/containment_test.go` TestHostileDTagStaysInsideDataDir |
 
 ## NAP-SHELL @ a040914b4bbd3a5cd8a14b0f316a723c968ebfb2
 

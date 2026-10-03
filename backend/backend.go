@@ -122,6 +122,11 @@ func Logger() zerolog.Logger { return log }
 // there. The id itself, in state, storage keys and wire messages, keeps the
 // raw d byte for byte.
 //
+// Install directories are all this names. The localStorage and NAP-CONFIG
+// files are named by safeFileName, which stays inside its directory but maps
+// unsafe characters to "_", so two d values of one author can still share a
+// file there (CONFORMANCE CF-2, Phase 5 KEY-04).
+//
 // What goes into the hash may change later (the full address and artifact
 // hash are candidates); nothing is migrated, and directories under the old
 // raw-id layout are left alone rather than swept, since deleting unknown
