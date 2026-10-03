@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
-status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-10-03T17:01:08.903Z"
+status: verifying
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-10-03T17:08:01.505Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: 2d0dd0bec90cd34ddac49e2eac9abeee306370ce
+state_head: 105705dfd02703f58701b8f05677e75987b90b64
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-03 — Phase 02 execution started
 
 Progress: [█░░░░░░░░░] 13% (1/8 phases)
@@ -69,6 +69,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 02 P04 | 11min | 3 tasks | 9 files |
 | Phase 02 P05 | 7min | 3 tasks | 5 files |
 | Phase 02 P06 | 14min | 3 tasks | 13 files |
+| Phase 02 P07 | 5min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -113,6 +114,8 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-06] Window prompts bounded at 3 per window and 32 global (enqueueNappPrompt) plus the prompt bucket for napplets, intent chooser included; launcher prompts exempt; refusal answers rate-limited in the route shape
 - [Phase 02]: [02-06] sessionGrant uses per-permission grantQuestions (grantMu removed): one shared prompt, waiters leave on their own ctx, only explicit answers recorded
 - [Phase 02]: [02-06] intent.invoke charges limitColdLaunch via actionOptions.BeforeLaunch (open windows free); the chooser lives in actionOptions.PromptCtx; notify.send and config.openSettings limits moved to the window limiter
+- [Phase 02]: [02-07] resource.bytesMany costs one resource token per URL: the dispatcher charges 1 via the route class, the handler takes len(urls)-1 in one AllowN (all or nothing); at most 10 resource requests in flight per window (resourceAtCapacity), refused quota-exceeded
+- [Phase 02]: [02-07] INC channels capped at 32 per window counting both ends, checked for opener and peer under incMu with the insert; uploads capped at 4 pending/uploading per window, before the server lookup and again atomically at store (napStoreNewUpload); napMaxSubs lives in nap_limits.go
 
 ### Pending Todos
 
@@ -139,6 +142,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T17:00:53.729Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-10-03T17:07:54.719Z
+Stopped at: Completed 02-07-PLAN.md
 Resume file: None
