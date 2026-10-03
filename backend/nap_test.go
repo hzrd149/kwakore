@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,7 @@ import (
 type recTransport struct {
 	mu      sync.Mutex
 	pushes  []map[string]any
+	gens    []int // the session each push named, one per eval
 	notify  chan struct{}
 	focused int
 }
@@ -49,13 +51,20 @@ func (r *recTransport) Send(m WireMsg) {
 	if m.T != "eval" || !strings.HasPrefix(m.Code, pushPrefix) {
 		return
 	}
+	// __nap_push(<session gen>, "<json>")
+	genStr, arg, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(m.Code, pushPrefix), ")"), ", ")
+	gen, err := strconv.Atoi(genStr)
+	if !ok || err != nil {
+		panic("push without a session gen: " + m.Code)
+	}
 	var js string
-	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(m.Code, pushPrefix), ")")), &js); err != nil {
+	if err := json.Unmarshal([]byte(arg), &js); err != nil {
 		panic(err)
 	}
 	var one map[string]any
 	var many []map[string]any
 	r.mu.Lock()
+	r.gens = append(r.gens, gen)
 	if json.Unmarshal([]byte(js), &many) == nil {
 		r.pushes = append(r.pushes, many...)
 	} else if json.Unmarshal([]byte(js), &one) == nil {
@@ -822,6 +831,34 @@ func TestNapLoadedPushesControlsOncePerSession(t *testing.T) {
 	loaded(t, ci)
 	if got := rec.find("notify.controls"); len(got) != 2 {
 		t.Fatalf("controls after the second session: %v", got)
+	}
+}
+
+// WR-01: nap.start answers with the session it opened, and every push names
+// the session it was made for, so the host page can drop one that passed
+// napPushGen's check but landed after the next nap.start.
+func TestNapPushesNameTheirSession(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "gen-tagged")
+	for i := 1; i <= 2; i++ {
+		res, err := napRPC(ci, "nap.start", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ci.nap.mu.Lock()
+		want := ci.nap.gen
+		ci.nap.mu.Unlock()
+		if got, _ := res.(map[string]any)["gen"].(int); got != want {
+			t.Fatalf("nap.start #%d answered %v, want gen %d", i, res, want)
+		}
+		ci.napPush(map[string]any{"type": "probe"})
+		rec.wait(t, "probe", i)
+		rec.mu.Lock()
+		last := rec.gens[len(rec.gens)-1]
+		rec.mu.Unlock()
+		if last != want {
+			t.Errorf("push after nap.start #%d named session %d, want %d", i, last, want)
+		}
 	}
 }
 

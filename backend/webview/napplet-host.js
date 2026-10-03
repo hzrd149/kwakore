@@ -121,6 +121,12 @@
   }
 
   let frame = null
+  // session is the gen nap.start answered for the current frame. Go tags
+  // every push with the session it was made for, and checks that session
+  // before it sends, but a push that passed the check can still land after
+  // nap.start answered for the next one: only pushes for this session reach
+  // the frame.
+  let session = null
 
   // ── Go -> napplet ───────────────────────────────────────────────
   // Envelopes come back as plain JSON. A resource result carries its bytes as
@@ -154,8 +160,10 @@
     }
   }
 
-  // unsolicited messages: relay events, inc events, theme/identity changes
-  window.__nap_push = json => {
+  // unsolicited messages: relay events, inc events, theme/identity changes,
+  // and the answers to the napplet's requests
+  window.__nap_push = (gen, json) => {
+    if (session === null || gen !== session) return
     try {
       deliver(typeof json === "string" ? JSON.parse(json) : json)
     } catch (err) {
@@ -292,14 +300,21 @@
 
     if (frame) frame.remove()
     frame = null
+    session = null
 
+    let started
     try {
-      await enqueue(() => rpc("nap.start"))
+      started = await enqueue(() => rpc("nap.start"))
     } catch (err) {
       if (serial === bootSerial) showBootError(err)
       return
     }
     if (serial !== bootSerial) return
+    if (!started || typeof started.gen !== "number") {
+      showBootError(new Error("the launcher started no session"))
+      return
+    }
+    session = started.gen
 
     const f = document.createElement("iframe")
     // allow-scripts and nothing else: never allow-same-origin

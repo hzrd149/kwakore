@@ -55,18 +55,24 @@ window.__verdanaNappletRPC = (method, params) => {
   log.push(method)
   rpcs.push({ method, params })
   if (holding.has(method)) {
-    return new Promise((resolve, reject) => { (held[method] = held[method] || []).push({ resolve, reject }) })
+    return new Promise((resolve, reject) => { (held[method] = held[method] || []).push({ resolve, reject, params }) })
   }
   const h = handlers[method]
   return Promise.resolve(JSON.stringify(h ? h(params) : null))
 }
 const hold = method => { holding.add(method) }
 const unhold = method => { holding.delete(method) }
-const release = (method, value = null) => {
+// release settles the oldest held call with value, or with what the method's
+// handler answers when no value is given
+const release = (method, value) => {
   const w = (held[method] || []).shift()
   if (!w) throw new Error("nothing held for " + method)
-  w.resolve(JSON.stringify(value))
+  const h = handlers[method]
+  w.resolve(JSON.stringify(value !== undefined ? value : h ? h(w.params) : null))
 }
+// Go's napStart: every nap.start opens the next session
+let gen = 0
+handlers["nap.start"] = () => ({ gen: ++gen })
 
 const makeFrame = () => {
   const f = {
@@ -362,5 +368,62 @@ return { inFlight, refusals, other: posted.length - refusals.length, drained, af
 	}
 	if got.AfterDrain != maxPending+1 {
 		t.Errorf("the drained lane did not take a new envelope: %d nap.msg", got.AfterDrain)
+	}
+}
+
+// WR-01: Go checks a push's session before it sends, but the send can still
+// land after nap.start answered for the next session. Each push names its
+// session, and the host page delivers only those for the current frame's.
+func TestNappletHostDropsPushesForOtherSessions(t *testing.T) {
+	var got struct {
+		First        []string `json:"first"`
+		Second       []string `json:"second"`
+		BootText     string   `json:"bootText"`
+		NoGenAppends int      `json:"noGenAppends"`
+	}
+	runHost(t, `
+handlers["nap.boot"] = () => ({ srcdoc: "<p>napplet</p>", title: "probe" })
+`, `
+await flush()
+const f0 = appended[0]
+window.__nap_push(1, JSON.stringify({ type: "for-1" }))
+window.__nap_push(2, JSON.stringify({ type: "not-yet" }))
+
+// a reload: the session-1 push in flight lands while nap.start is out, and
+// again once the new frame is up
+hold("nap.start")
+window.__nap_reload()
+await flush()
+window.__nap_push(1, JSON.stringify({ type: "stale-while-starting" }))
+unhold("nap.start")
+release("nap.start")
+await flush()
+const f1 = appended[1]
+window.__nap_push(1, JSON.stringify({ type: "stale-after-start" }))
+window.__nap_push("2", JSON.stringify({ type: "string-gen" }))
+window.__nap_push(2, JSON.stringify({ type: "for-2" }))
+
+// a nap.start answer without a session never gets a frame
+handlers["nap.start"] = () => null
+const before = appended.length
+window.__nap_reload()
+await flush()
+
+return {
+  first: f0.contentWindow.posted.map(p => p.type),
+  second: f1.contentWindow.posted.map(p => p.type),
+  bootText: document.body.textContent,
+  noGenAppends: appended.length - before,
+}
+`, &got)
+
+	if !slices.Equal(got.First, []string{"for-1"}) {
+		t.Errorf("first frame got %v, want only its own session's push", got.First)
+	}
+	if !slices.Equal(got.Second, []string{"for-2"}) {
+		t.Errorf("replacement frame got %v, want only session 2's push", got.Second)
+	}
+	if got.NoGenAppends != 0 || !strings.Contains(got.BootText, "could not be started") {
+		t.Errorf("nap.start without a gen: %d frame(s) appended, body %q", got.NoGenAppends, got.BootText)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -271,7 +272,11 @@ func (ci *Instance) napPushGen(gen int, envs ...any) {
 		log.Error().Err(err).Msg("could not encode a NAP push")
 		return
 	}
-	ci.eval("window.__nap_push && window.__nap_push(" + jsString(string(raw)) + ")")
+	// the check above and the send are not atomic: nap.start can run in
+	// between, and the host page can have the next session's frame up by the
+	// time this lands. So the push names its session, and the host page drops
+	// any push for a session other than the one nap.start gave it.
+	ci.eval("window.__nap_push && window.__nap_push(" + strconv.Itoa(gen) + ", " + jsString(string(raw)) + ")")
 }
 
 // ─── the rpcs the host page makes ────────────────────────────────
@@ -286,7 +291,13 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 	case "nap.boot":
 		return nappletBoot(ci)
 	case "nap.start":
-		return nil, ci.napStart()
+		gen, err := ci.napStart()
+		if err != nil {
+			return nil, err
+		}
+		// the host page tags its frame with this and drops pushes for any
+		// other session (napPushGen)
+		return map[string]any{"gen": gen}, nil
 	case "nap.loaded":
 		ci.napLoaded()
 		return nil, nil
@@ -390,11 +401,13 @@ func (ci *Instance) napDispatch(c napCall) {
 // to. Whatever the window had before is torn down first. The generation bump
 // is what keeps the outgoing document out (D-07): an envelope it queued
 // before the restart carries the old gen and napDispatch drops it, and a late
-// answer for the old session is dropped by napPushGen.
-func (ci *Instance) napStart() error {
+// answer for the old session is dropped by napPushGen, or, when it already
+// passed that check, by the host page, which knows the new session's gen from
+// this answer and ignores pushes tagged with any other.
+func (ci *Instance) napStart() (int, error) {
 	s := ci.nap
 	if s == nil {
-		return errors.New("not a napplet window")
+		return 0, errors.New("not a napplet window")
 	}
 	s.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
@@ -402,7 +415,7 @@ func (ci *Instance) napStart() error {
 	gen := s.gen
 	s.mu.Unlock()
 	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Int("gen", gen).Msg("napplet session started")
-	return nil
+	return gen, nil
 }
 
 // napLoaded answers nap.loaded, which the host page sends on the frame's load
