@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -103,17 +102,15 @@ func napNotifySend(c *napCall) {
 			return
 		}
 	}
-	now := time.Now()
-	s.notifyTimes = recentNotifications(s.notifyTimes, now)
-	s.urgentNotifyTimes = recentNotifications(s.urgentNotifyTimes, now)
-	if len(s.notifyTimes) >= 20 || (req.Priority == "urgent" && len(s.urgentNotifyTimes) >= 3) {
+	// the window's notify buckets (nap_limits.go: 20 a minute, 3 of them
+	// urgent), which a session restart does not refill (D-14). An urgent
+	// one is checked against its own bucket first, so a refused urgent
+	// notification costs no normal token. Over either limit answers
+	// NAP-NOTIFY's own "rate limited".
+	if (req.Priority == "urgent" && !s.limits.allow(limitNotifyUrgent, 1)) || !s.limits.allow(limitNotify, 1) {
 		s.mu.Unlock()
-		c.reply(map[string]any{"error": "rate limited"})
+		c.failWith(napErrRateLimited)
 		return
-	}
-	s.notifyTimes = append(s.notifyTimes, now)
-	if req.Priority == "urgent" {
-		s.urgentNotifyTimes = append(s.urgentNotifyTimes, now)
 	}
 	s.notifySeq++
 	id := fmt.Sprintf("%s-%d", c.ci.instance, s.notifySeq)
@@ -153,15 +150,6 @@ func napNotifySend(c *napCall) {
 		s.mu.Unlock()
 		c.reply(map[string]any{"notificationId": id})
 	})
-}
-
-func recentNotifications(times []time.Time, now time.Time) []time.Time {
-	cutoff := now.Add(-time.Minute)
-	first := 0
-	for first < len(times) && times[first].Before(cutoff) {
-		first++
-	}
-	return times[first:]
 }
 
 func napNotifyDismiss(c *napCall) {

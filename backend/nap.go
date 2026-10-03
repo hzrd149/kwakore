@@ -97,26 +97,22 @@ type napSession struct {
 	asking map[Permission]*grantQuestion
 	// notifications are the OS notifications created by this document. The
 	// handles are session-owned so a reload or closed iframe dismisses them.
-	notifications     map[string]NotificationHandle
-	notifySeq         int
-	notifyChannels    map[string]notificationChannel
-	notifyBadge       uint
-	notifyTimes       []time.Time
-	urgentNotifyTimes []time.Time
+	notifications  map[string]NotificationHandle
+	notifySeq      int
+	notifyChannels map[string]notificationChannel
+	notifyBadge    uint
 	// media sessions by canonical id; shell-owned ones hold a player that a
 	// reset stops. mediaSeq numbers ids and is never reset, so an id from an
 	// old document never names a session in a new one.
 	media    map[string]*mediaSession
 	mediaSeq int
 	// configSubscribed is config.subscribe having been sent: the window
-	// gets config.values pushes. configOpenedAt rate-limits
-	// config.openSettings, across reloads too.
+	// gets config.values pushes. (config.openSettings and notify.send are
+	// rate-limited by limits, which no reset touches.)
 	configSubscribed bool
-	configOpenedAt   time.Time
 
 	// limits are the window's rate limits (nap_limits.go). Created once
-	// with the session and never reset: a reload must not refill them, the
-	// same reason configOpenedAt survives resets.
+	// with the session and never reset: a reload must not refill them.
 	limits *napLimiter
 
 	// queue serializes envelopes; started lazily by the first one
@@ -183,8 +179,6 @@ func (s *napSession) resetLocked() {
 	s.notifications = make(map[string]NotificationHandle)
 	s.notifyChannels = make(map[string]notificationChannel)
 	s.notifyBadge = 0
-	s.notifyTimes = nil
-	s.urgentNotifyTimes = nil
 	for _, ms := range s.media {
 		ms.stop()
 	}

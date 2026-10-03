@@ -307,6 +307,7 @@ func TestNapConfigReloadDropsSubscription(t *testing.T) {
 
 func TestNapConfigOpenSettings(t *testing.T) {
 	h := setupConfigTest(t)
+	advance := freezeNapNow(t)
 	ci, rec := openNapplet(t, "cfg-open")
 	ready(t, ci, rec, 1)
 	post(t, ci, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
@@ -335,9 +336,8 @@ func TestNapConfigOpenSettings(t *testing.T) {
 
 	// an undeclared section opens at the top
 	SettingsClosed(h.opened[0].Window)
-	ci.nap.mu.Lock()
-	ci.nap.configOpenedAt = time.Time{}
-	ci.nap.mu.Unlock()
+	// the window's openSettings bucket refills after 2 s
+	advance(2 * time.Second)
 	post(t, ci, map[string]any{"type": "config.openSettings", "section": "nope"})
 	for h.count() == 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

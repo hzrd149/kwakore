@@ -2,7 +2,6 @@ package backend
 
 import (
 	"encoding/json"
-	"time"
 
 	"verdana/backend/napconfig"
 )
@@ -14,10 +13,6 @@ import (
 // napp's address.
 //
 // config.values payloads may carry secrets: they are never logged.
-
-// configOpenSettingsEvery rate-limits config.openSettings per window, so a
-// napplet cannot keep throwing its settings window in the user's face.
-const configOpenSettingsEvery = 2 * time.Second
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -112,15 +107,13 @@ func napConfigOpenSettings(c *napCall) {
 		Section string `json:"section"`
 	}
 	_ = c.decode(&r)
-	s := c.ci.nap
-	s.mu.Lock()
-	now := time.Now()
-	if now.Sub(s.configOpenedAt) < configOpenSettingsEvery {
-		s.mu.Unlock()
+	// one settings window per 2 s per window (nap_limits.go's
+	// limitOpenSettings), across reloads too, so a napplet cannot keep
+	// throwing its settings window in the user's face. An extra call is
+	// ignored silently: the type is reply-less.
+	if !c.ci.nap.limits.allow(limitOpenSettings, 1) {
 		return
 	}
-	s.configOpenedAt = now
-	s.mu.Unlock()
 
 	section := r.Section
 	if section != "" {

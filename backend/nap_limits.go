@@ -70,7 +70,7 @@ const (
 	napQueueSlots = 256
 	// napMaxPendingPromptsPerWindow and napMaxPendingPromptsGlobal bound the
 	// prompts waiting for the user; more are denied rate-limited (D-15).
-	// Enforced by 02-06.
+	// Enforced by enqueueNappPrompt (window_prompt.go).
 	napMaxPendingPromptsPerWindow = 3
 	napMaxPendingPromptsGlobal    = 32
 	// resourceMaxInFlight is NAP-RESOURCE's "10 in-flight" (RS-5). Enforced
@@ -91,7 +91,7 @@ const (
 // answered rate-limited in its route's shape (reply-less types are dropped),
 // and only that window is affected. They never reset with the session
 // either: a napplet that reloads its frame must not get a full set of
-// tokens back for it, the same reason configOpenedAt survives resets.
+// tokens back for it (notify.send and config.openSettings included).
 
 // napLimitClass is a category of request with a bucket of its own (D-14).
 // limitNone, the zero value, is charged nothing beyond the envelope bucket.
@@ -99,14 +99,14 @@ type napLimitClass uint8
 
 const (
 	limitNone napLimitClass = iota
-	// limitPrompt: creating a prompt (charged by 02-06)
+	// limitPrompt: creating a prompt (askApproval, askActionHandler)
 	limitPrompt
 	// limitLink: link.open
 	limitLink
 	// limitIntent: intent.invoke
 	limitIntent
 	// limitColdLaunch: an intent that has to launch a napp first (charged by
-	// 02-06)
+	// intent.invoke's actionOptions.BeforeLaunch)
 	limitColdLaunch
 	// limitUpload: upload.upload
 	limitUpload
@@ -118,10 +118,11 @@ const (
 	limitIncEmit
 	// limitPublish: everything that signs and publishes
 	limitPublish
-	// limitNotify and limitNotifyUrgent: notifications (charged by 02-06)
+	// limitNotify and limitNotifyUrgent: notifications (charged by
+	// notify.send)
 	limitNotify
 	limitNotifyUrgent
-	// limitOpenSettings: config.openSettings (charged by 02-06)
+	// limitOpenSettings: config.openSettings (charged by its handler)
 	limitOpenSettings
 
 	limitCount
@@ -159,11 +160,12 @@ var napLimitSpecs = [limitCount]napLimitSpec{
 	// research A6: an "always allow publish" rule must not let a napplet
 	// sign and publish at the envelope rate
 	limitPublish: {rate.Every(time.Second), 10},
-	// nap_notify.go's 20 notifications a minute
+	// notify.send: 20 notifications a minute
 	limitNotify: {rate.Every(3 * time.Second), 20},
-	// nap_notify.go's 3 urgent notifications a minute
+	// notify.send: 3 urgent notifications a minute, also counted in the 20
 	limitNotifyUrgent: {rate.Every(20 * time.Second), 3},
-	// nap_config.go's configOpenSettingsEvery: one settings window per 2 s
+	// config.openSettings: one settings window per 2 s, so a napplet cannot
+	// keep throwing its settings window in the user's face
 	limitOpenSettings: {rate.Every(2 * time.Second), 1},
 }
 
