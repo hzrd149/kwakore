@@ -652,7 +652,7 @@ func TestIntentChooserBoundedAndCancellable(t *testing.T) {
 	setupNapTest(t)
 	cleanPrompts(t)
 	host = &launchTestHost{}
-	a := installIntentHandler(t, "chooser-a", "chooser")
+	installIntentHandler(t, "chooser-a", "chooser")
 	b := installIntentHandler(t, "chooser-b", "chooser")
 	defaultKey := intentDefaultKey("chooser")
 	t.Cleanup(func() {
@@ -718,7 +718,6 @@ func TestIntentChooserBoundedAndCancellable(t *testing.T) {
 		if rule, ok := lookupRule(defaultKey); !ok || rule.Target != b.ID {
 			t.Fatalf("the pick was not stored as the default: %+v %v", rule, ok)
 		}
-		_ = a
 	})
 }
 

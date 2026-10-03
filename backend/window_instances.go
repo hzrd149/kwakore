@@ -767,6 +767,29 @@ type actionOptions struct {
 	// Delivery then continues on a runtime-owned context so it is independent
 	// of the caller's window lifecycle.
 	Accept func(*Instance) `json:"-"`
+
+	// BeforeLaunch, when set, runs right before the dispatch launches a napp
+	// window, and an error from it stops the dispatch with that error and
+	// nothing launched. A napplet's intent.invoke charges its cold-launch
+	// bucket here (D-14); launcher-fired actions leave it nil. Routing into
+	// a window that is already open never calls it.
+	BeforeLaunch func() error `json:"-"`
+
+	// PromptCtx, when set, is what the handler chooser lives in instead of
+	// the dispatch's ctx: a napplet's request (its session, bounded by the
+	// request deadline) or a napp's window. Launching and delivering after
+	// the choice keep the dispatch's ctx.
+	PromptCtx context.Context `json:"-"`
+}
+
+// launchFor launches n for this dispatch, after BeforeLaunch allowed it.
+func (opts actionOptions) launchFor(ctx context.Context, n Napp) (*Instance, error) {
+	if opts.BeforeLaunch != nil {
+		if err := opts.BeforeLaunch(); err != nil {
+			return nil, err
+		}
+	}
+	return launch(ctx, n)
 }
 
 // dispatchReport is filled with where an action went, for callers that
@@ -856,7 +879,7 @@ func runNappAction(
 		if len(open) > 0 {
 			return dispatchTo(ctx, callerID, name, open[0], req)
 		}
-		ci, err := launch(ctx, candidates[0])
+		ci, err := opts.launchFor(ctx, candidates[0])
 		if err != nil {
 			return nil, err
 		}
@@ -873,7 +896,7 @@ func runNappAction(
 		}
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("napp", candidates[0].ID).Msg("launching napp for action")
-		ci, err := launch(ctx, candidates[0])
+		ci, err := opts.launchFor(ctx, candidates[0])
 		if err != nil {
 			return nil, err
 		}
@@ -909,9 +932,13 @@ func runNappAction(
 			Str("napp", picked.NappID).Msg("the rules picked the handler")
 		choice = picked
 	} else {
-		picked, ok := askActionHandler(caller, name, payload, candidates, open)
-		if !ok {
-			return nil, errors.New("action handler selection cancelled")
+		askCtx := ctx
+		if opts.PromptCtx != nil {
+			askCtx = opts.PromptCtx
+		}
+		picked, err := askActionHandler(askCtx, caller, name, payload, candidates, open)
+		if err != nil {
+			return nil, fmt.Errorf("choosing a handler for %q: %w", name, err)
 		}
 		choice = picked
 		if opts.DefaultKey.valid() && !opts.Choose {
@@ -929,7 +956,7 @@ func runNappAction(
 	}
 	for _, n := range candidates {
 		if n.ID == choice.NappID {
-			ci, err := launch(ctx, n)
+			ci, err := opts.launchFor(ctx, n)
 			if err != nil {
 				return nil, err
 			}

@@ -37,6 +37,10 @@ type intentRequest struct {
 	Behavior   intentBehavior  `json:"behavior"`
 }
 
+// errColdLaunchLimited is an intent whose handler would have to be launched
+// while the window's cold-launch bucket is empty (D-14).
+var errColdLaunchLimited = errors.New("cold launch limited")
+
 type intentBehavior struct {
 	Focus     bool  `json:"focus"`
 	NewWindow bool  `json:"newWindow"`
@@ -108,7 +112,21 @@ func napIntentInvoke(c *napCall) {
 		c.reply(map[string]any{"result": result})
 	}
 
+	// a launch this intent needs is charged to the window's cold-launch
+	// bucket (D-14); routing into an open window is not
+	opts.BeforeLaunch = func() error {
+		if !c.ci.nap.limits.allow(limitColdLaunch, 1) {
+			return errColdLaunchLimited
+		}
+		return nil
+	}
+
 	c.async(func(ctx context.Context) {
+		// the "open with" chooser belongs to this request: it comes down
+		// when the session ends or the shim stops waiting (DEC-1)
+		promptCtx, cancel := c.promptCtx()
+		defer cancel()
+		opts.PromptCtx = promptCtx
 		_, err := runNappAction(ctx, c.ci, topic, req.Payload, opts)
 		if accepted {
 			return
@@ -117,7 +135,10 @@ func napIntentInvoke(c *napCall) {
 		case errors.Is(err, errNoHandler):
 			result["error"] = "no handler"
 			host.OpenDiscovery(archetype)
-		case err != nil && strings.Contains(err.Error(), "cancelled"):
+		case errors.Is(err, errPromptLimited), errors.Is(err, errColdLaunchLimited):
+			result["error"] = napErrRateLimited
+		case errors.Is(err, errPromptDismissed), errors.Is(err, errActionCancelled):
+			// NAP-INTENT's code for the "open with" prompt
 			result["error"] = "user cancelled"
 		default:
 			result["error"] = "invoke rejected"

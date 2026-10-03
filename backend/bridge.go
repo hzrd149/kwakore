@@ -312,6 +312,11 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
+			// the handler chooser belongs to the window: closing it takes
+			// the chooser down (PromptCtx is never decoded from the napp)
+			pctx, pcancel := ci.windowPromptCtx()
+			defer pcancel()
+			p.Options.PromptCtx = pctx
 			return runNappAction(ctx, ci, p.Name, p.Payload, p.Options)
 
 		case "napp.registerAction":

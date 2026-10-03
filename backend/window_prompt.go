@@ -437,7 +437,13 @@ func (ci *Instance) windowPromptCtx() (context.Context, context.CancelFunc) {
 
 // askActionHandler asks which napp should handle an action when more than one
 // can. Open windows come first — routing into one keeps the user's state.
-func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, bool) {
+//
+// The chooser lives as long as ctx and meets the same bounds as any other
+// prompt a window raises: refused before it shows, it is errPromptLimited
+// (charged against a napplet's prompt bucket too); taken down because ctx
+// ended or promptTimeout passed, errPromptDismissed. A no, or an answer that
+// names no option, is errActionCancelled.
+func askActionHandler(ctx context.Context, caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, error) {
 	callerName := "launcher"
 	callerID := ""
 	if caller != nil {
@@ -482,17 +488,31 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 		code = preview(string(payload), 500)
 	}
 
+	if ctx.Err() != nil {
+		return PromptOption{}, errPromptDismissed
+	}
+	if caller != nil && caller.nap != nil && !caller.nap.limits.allow(limitPrompt, 1) {
+		napSampled().Info().Str("action", action).Msg("handler chooser refused: over the window's prompt rate")
+		return PromptOption{}, errPromptLimited
+	}
 	p := newPrompt(callerName, "Open “"+action+"” with…", "", code, options)
 	if caller != nil {
 		p.Instance = caller.instance
 	}
-	log.Info().Str("action", action).Int("options", len(options)).Msg("asking the user to pick a handler")
-	enqueuePrompt(p)
-	answer := p.wait()
-	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
-		return PromptOption{}, false
+	if !enqueueNappPrompt(p) {
+		napSampled().Info().Str("action", action).Msg("handler chooser refused: too many prompts pending")
+		return PromptOption{}, errPromptLimited
 	}
-	return options[answer.Index], true
+	log.Info().Str("action", action).Int("options", len(options)).Msg("asking the user to pick a handler")
+	answer, err := p.waitCtx(ctx)
+	if err != nil {
+		log.Info().Str("action", action).Msg("handler chooser dismissed")
+		return PromptOption{}, err
+	}
+	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
+		return PromptOption{}, errActionCancelled
+	}
+	return options[answer.Index], nil
 }
 
 // ─── showing prompts over the window that asked ──────────────────
