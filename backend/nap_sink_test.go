@@ -1,11 +1,20 @@
 package backend
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
+	"time"
+
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/keyer"
+	"fiatjaf.com/nostr/nipb7/blossom"
+	"fiatjaf.com/nostr/sdk"
 )
 
 // ─── sink rig ────────────────────────────────────────────────────
@@ -89,6 +98,7 @@ func TestNapLinkOpenGoesThroughItsGate(t *testing.T) {
 // (D-04).
 func TestNapDeniedRoutesMakeNoSinkCalls(t *testing.T) {
 	setupNapTest(t)
+	withSentinel(t)
 	sinks := recordSinks(t)
 	linkHost := &napLinkTestHost{}
 	host = linkHost
@@ -109,6 +119,58 @@ func TestNapDeniedRoutesMakeNoSinkCalls(t *testing.T) {
 		}
 	})
 
+	t.Run("publishing", func(t *testing.T) {
+		withSignedInUser(t)
+		key := RuleKey{Napp: ci.napp.ID, Permission: PermPublish}
+		setSessionRule(key, Rule{Decision: DecisionDeny})
+		t.Cleanup(func() { clearSessionRule(key) })
+		note := map[string]any{"kind": 1, "content": "hi", "tags": []any{}}
+		post(t, ci, map[string]any{"type": "relay.publish", "id": "p1", "event": note, "relay": "wss://8.8.8.8"})
+		post(t, ci, map[string]any{"type": "relay.publishEncrypted", "id": "p2", "event": note, "recipient": nostr.Generate().Public().Hex()})
+		post(t, ci, map[string]any{"type": "outbox.publish", "id": "p3", "event": note})
+		post(t, ci, map[string]any{"type": "common.follow", "id": "p4", "pubkey": nostr.Generate().Public().Hex()})
+		for _, want := range []struct{ typ, id, code string }{
+			{"relay.publish.result", "p1", napErrDenied},
+			{"relay.publishEncrypted.result", "p2", napErrDenied},
+			{"outbox.publish.result", "p3", "publish denied"},
+			{"common.follow.result", "p4", napErrDenied},
+		} {
+			if got := waitID(t, rec, want.typ, want.id); got["ok"] != false || got["error"] != want.code {
+				t.Errorf("%s: %v", want.typ, got)
+			}
+		}
+	})
+
+	t.Run("upload.upload", func(t *testing.T) {
+		setupNapUploadTest(t, ci)
+		key := RuleKey{Napp: ci.napp.ID, Permission: PermUpload}
+		setSessionRule(key, Rule{Decision: DecisionDeny})
+		post(t, ci, uploadEnvelope("u-deny", []byte("no")))
+		if got := waitID(t, rec, "upload.upload.result", "u-deny"); got["error"] != "policy denied" {
+			t.Fatalf("denied upload: %v", got)
+		}
+	})
+
+	t.Run("notify", func(t *testing.T) {
+		nh := &notifyTestHost{permission: true}
+		host = nh
+		key := RuleKey{Napp: ci.napp.ID, Permission: PermNotify}
+		setSessionRule(key, Rule{Decision: DecisionDeny})
+		t.Cleanup(func() { clearSessionRule(key) })
+		post(t, ci, map[string]any{"type": "notify.permission.request", "id": "np"})
+		post(t, ci, map[string]any{"type": "notify.send", "id": "ns", "title": "hello"})
+		if got := waitID(t, rec, "notify.permission.result", "np"); got["granted"] != false {
+			t.Errorf("permission: %v", got)
+		}
+		if got := waitID(t, rec, "notify.send.result", "ns"); got["error"] != "permission denied" {
+			t.Errorf("send: %v", got)
+		}
+		if len(nh.requests) != 0 {
+			t.Errorf("notified: %v", nh.requests)
+		}
+	})
+
+	napSettled(t, ci, rec)
 	if calls := sinks.all(); len(calls) != 0 {
 		t.Fatalf("denied routes reached sinks: %v", calls)
 	}
@@ -251,5 +313,195 @@ func TestNapStorageRepliesUseTheVocabulary(t *testing.T) {
 	post(t, ci, map[string]any{"type": "storage.set", "id": "disk", "key": "c", "value": "v"})
 	if got := waitID(t, rec, "storage.set.result", "disk"); got["error"] != napErrInternal {
 		t.Errorf("persistence failure: %v", got)
+	}
+}
+
+// ─── publish, upload, notify ─────────────────────────────────────
+
+// withSentinel registers the route napSettled posts.
+func withSentinel(t *testing.T) {
+	t.Helper()
+	withTestRoute(t, "test.sentinel", napRoute{h: func(c *napCall) { c.reply(nil) }, gate: openGate("test"), fail: failShape(failErr)})
+}
+
+// withSignedInUser signs a fresh user in with a plain key for the test.
+func withSignedInUser(t *testing.T) nostr.SecretKey {
+	t.Helper()
+	prevKeyer, prevPK := userKeyer, userPubkey
+	sk := nostr.Generate()
+	userKeyer, userPubkey = keyer.NewPlainKeySigner(sk), sk.Public()
+	t.Cleanup(func() { userKeyer, userPubkey = prevKeyer, prevPK })
+	return sk
+}
+
+// staticRelayLists answers every relay list lookup from memory, so a
+// publish finds its targets without asking the network.
+type staticRelayLists map[nostr.PubKey]sdk.GenericList[string, sdk.Relay]
+
+func (s staticRelayLists) Get(k [32]byte) (sdk.GenericList[string, sdk.Relay], bool) {
+	v, ok := s[nostr.PubKey(k)]
+	return v, ok
+}
+func (staticRelayLists) Delete([32]byte)                                       {}
+func (staticRelayLists) Set([32]byte, sdk.GenericList[string, sdk.Relay]) bool { return true }
+func (staticRelayLists) SetWithTTL([32]byte, sdk.GenericList[string, sdk.Relay], time.Duration) bool {
+	return true
+}
+
+// fakePublishing stands in for the relays: every publish lands, and the
+// events it was given are recorded.
+func fakePublishing(t *testing.T) *[]nostr.Event {
+	t.Helper()
+	var mu sync.Mutex
+	var published []nostr.Event
+	saved := napPublishSigned
+	napPublishSigned = func(_ context.Context, evt nostr.Event, targets []string) map[string]any {
+		mu.Lock()
+		published = append(published, evt)
+		mu.Unlock()
+		relays := map[string]any{}
+		for _, u := range targets {
+			relays[u] = map[string]any{"ok": true}
+		}
+		return map[string]any{"relays": relays, "published": len(targets), "failed": 0}
+	}
+	t.Cleanup(func() { napPublishSigned = saved })
+	return &published
+}
+
+// TestNapPublishGoesThroughItsSinks: an approved publish signs and publishes
+// through the call's sinks, in order, with the encryption first when there
+// is one.
+func TestNapPublishGoesThroughItsSinks(t *testing.T) {
+	setupNapTest(t)
+	withSystem(t)
+	sk := withSignedInUser(t)
+	published := fakePublishing(t)
+	sinks := recordSinks(t)
+	ci, rec := openNapplet(t, "publisher")
+	ready(t, ci, rec, 1)
+	key := RuleKey{Napp: ci.napp.ID, Permission: PermPublish}
+	setSessionRule(key, Rule{Decision: DecisionAllow})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	note := map[string]any{"kind": 1, "content": "hello", "tags": []any{}}
+	post(t, ci, map[string]any{"type": "relay.publish", "id": "plain", "event": note, "relay": "wss://8.8.8.8"})
+	if got := waitID(t, rec, "relay.publish.result", "plain"); got["ok"] != true {
+		t.Fatalf("publish: %v", got)
+	}
+	if names := sinks.names(); !slices.Equal(names, []string{"sign", "publish"}) {
+		t.Fatalf("publish sinks: %v", names)
+	}
+
+	peer := nostr.Generate()
+	lists := staticRelayLists{}
+	for _, pk := range []nostr.PubKey{sk.Public(), peer.Public()} {
+		lists[pk] = sdk.GenericList[string, sdk.Relay]{PubKey: pk, Items: []sdk.Relay{{URL: "wss://8.8.4.4", Inbox: true, Outbox: true}}}
+	}
+	sys.RelayListCache = lists
+	post(t, ci, map[string]any{"type": "relay.publishEncrypted", "id": "secret", "event": map[string]any{
+		"kind": 4, "content": "for your eyes", "tags": []any{},
+	}, "recipient": peer.Public().Hex(), "encryption": "nip04"})
+	if got := waitID(t, rec, "relay.publishEncrypted.result", "secret"); got["ok"] != true {
+		t.Fatalf("publishEncrypted: %v", got)
+	}
+	if names := sinks.names(); !slices.Equal(names, []string{"sign", "publish", "encrypt", "sign", "publish"}) {
+		t.Fatalf("publishEncrypted sinks: %v", names)
+	}
+	for _, c := range sinks.all() {
+		if !c.approved {
+			t.Fatalf("an unapproved sink call: %v", sinks.all())
+		}
+	}
+	if len(*published) != 2 || (*published)[1].Content == "for your eyes" || !(*published)[1].VerifySignature() {
+		t.Fatalf("published: %v", *published)
+	}
+}
+
+// TestNapUploadGoesThroughItsSinks: an approved upload signs its
+// authorization and PUTs through the call's sinks; a denied one reaches
+// neither.
+func TestNapUploadGoesThroughItsSinks(t *testing.T) {
+	setupNapTest(t)
+	sinks := recordSinks(t)
+	ci, rec := openNapplet(t, "upload-sinks")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	data := []byte("through the gate")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://one.example"} }
+	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType, _ string) (*blossom.BlobDescriptor, error) {
+		return &blossom.BlobDescriptor{URL: server + "/" + hash, SHA256: hash, Size: len(got), Type: mimeType}, nil
+	}
+	post(t, ci, uploadEnvelope("up", data))
+	rec.wait(t, "upload.upload.result", 1)
+	if got := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any); got["status"] != "complete" {
+		t.Fatalf("upload: %v", got)
+	}
+	if calls := sinks.all(); !slices.Equal(calls, []napSinkCall{{"uploadAuth", true}, {"uploadToServer", true}}) {
+		t.Fatalf("upload sinks: %v", calls)
+	}
+
+	setSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload}, Rule{Decision: DecisionDeny})
+	post(t, ci, uploadEnvelope("down", data))
+	if got := waitID(t, rec, "upload.upload.result", "down"); got["error"] != "policy denied" {
+		t.Fatalf("denied upload: %v", got)
+	}
+	if n := len(sinks.all()); n != 2 {
+		t.Fatalf("a denied upload reached sinks: %v", sinks.all())
+	}
+}
+
+// TestNapNotifyGoesThroughItsSinks: a granted permission request asks the
+// platform through its sink, and a send after it notifies through its sink;
+// with a stored denial neither is reached.
+func TestNapNotifyGoesThroughItsSinks(t *testing.T) {
+	setupNapTest(t)
+	sinks := recordSinks(t)
+	nh := &notifyTestHost{permission: true}
+	host = nh
+	ci, rec := openNapplet(t, "notify-sinks")
+	ready(t, ci, rec, 1)
+	key := RuleKey{Napp: ci.napp.ID, Permission: PermNotify}
+	setSessionRule(key, Rule{Decision: DecisionAllow})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	post(t, ci, map[string]any{"type": "notify.permission.request", "id": "ask"})
+	if got := waitID(t, rec, "notify.permission.result", "ask"); got["granted"] != true {
+		t.Fatalf("permission: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "notify.send", "id": "send", "title": "hello"})
+	if got := waitID(t, rec, "notify.send.result", "send"); got["notificationId"] == nil {
+		t.Fatalf("send: %v", got)
+	}
+	if calls := sinks.all(); !slices.Equal(calls, []napSinkCall{{"requestNotifyPermission", true}, {"notify", true}}) {
+		t.Fatalf("notify sinks: %v", calls)
+	}
+
+	// a fixed string for each validation failure, never Go error text
+	post(t, ci, map[string]any{"type": "notify.send", "id": "icon", "title": "x", "icon": "https://example.com/i.png"})
+	if got := waitID(t, rec, "notify.send.result", "icon"); got["error"] != "unsupported icon" {
+		t.Fatalf("icon: %v", got)
+	}
+
+	// a new window with the rule turned to deny reaches neither sink
+	setSessionRule(key, Rule{Decision: DecisionDeny})
+	other, orec := openNapplet(t, "notify-sinks-denied")
+	ready(t, other, orec, 1)
+	otherKey := RuleKey{Napp: other.napp.ID, Permission: PermNotify}
+	setSessionRule(otherKey, Rule{Decision: DecisionDeny})
+	t.Cleanup(func() { clearSessionRule(otherKey) })
+	post(t, other, map[string]any{"type": "notify.permission.request", "id": "ask2"})
+	post(t, other, map[string]any{"type": "notify.send", "id": "send2", "title": "hello"})
+	if got := waitID(t, orec, "notify.permission.result", "ask2"); got["granted"] != false {
+		t.Fatalf("denied permission: %v", got)
+	}
+	if got := waitID(t, orec, "notify.send.result", "send2"); got["error"] != "permission denied" {
+		t.Fatalf("denied send: %v", got)
+	}
+	if n := len(sinks.all()); n != 2 {
+		t.Fatalf("a denied notify reached sinks: %v", sinks.all())
 	}
 }

@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -61,71 +59,20 @@ type napUploadRequest struct {
 	Metadata    json.RawMessage `json:"metadata"`
 }
 
-var (
-	napUploadServers = func(ctx context.Context, pubkey nostr.PubKey) []string {
-		if sys == nil {
-			return nil
-		}
-		items := sys.FetchBlossomServerList(ctx, pubkey).Items
-		servers := make([]string, 0, len(items))
-		for _, item := range items {
-			servers = append(servers, item.Value())
-		}
-		return servers
+var napUploadServers = func(ctx context.Context, pubkey nostr.PubKey) []string {
+	if sys == nil {
+		return nil
 	}
-	// napUploadAuth signs the Blossom (BUD-02) authorization for one blob.
-	// ctx has no deadline: a remote signer may wait on the user for as long
-	// as it likes.
-	napUploadAuth = func(ctx context.Context, keyer nostr.Keyer, hash string) (string, error) {
-		now := nostr.Now()
-		evt := nostr.Event{
-			Kind: 24242, CreatedAt: now, Content: "Upload blob",
-			Tags: nostr.Tags{
-				{"t", "upload"}, {"x", hash},
-				// generous, since the user may take a while to sign: the
-				// authorization is good for this one blob only
-				{"expiration", strconv.FormatInt(int64(now)+napUploadAuthTTL, 10)},
-			},
-		}
-		if err := keyer.SignEvent(ctx, &evt); err != nil {
-			return "", err
-		}
-		j, err := json.Marshal(evt)
-		if err != nil {
-			return "", err
-		}
-		return "Nostr " + base64.StdEncoding.EncodeToString(j), nil
+	items := sys.FetchBlossomServerList(ctx, pubkey).Items
+	servers := make([]string, 0, len(items))
+	for _, item := range items {
+		servers = append(servers, item.Value())
 	}
-	napUploadToServer = func(ctx context.Context, server string, data []byte, mimeType, auth string) (*blossom.BlobDescriptor, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPut, server+"/upload", bytes.NewReader(data))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", mimeType)
-		req.Header.Set("Authorization", auth)
-		resp, err := napUploadClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode >= 300 {
-			reason := resp.Header.Get("X-Reason")
-			if reason == "" {
-				reason = preview(string(body), 200)
-			}
-			return nil, fmt.Errorf("%s: %s", resp.Status, reason)
-		}
-		var descriptor blossom.BlobDescriptor
-		if err := json.Unmarshal(body, &descriptor); err != nil {
-			return nil, fmt.Errorf("unreadable blob descriptor: %w", err)
-		}
-		return &descriptor, nil
-	}
-)
+	return servers
+}
+
+// napUploadAuth and napUploadToServer, the signing and the PUT, are sinks:
+// they live in nap_sink.go behind c.uploadAuth and c.uploadToServer.
 
 const napUploadAuthTTL = 60 * 60
 
@@ -224,7 +171,9 @@ func napUpload(c *napCall) {
 		detail := fmt.Sprintf("%s (%s, %s) to %d Blossom server(s): %s",
 			napUploadFilename(r.Filename), mimeType, byteCount(len(data)), len(servers),
 			preview(strings.Join(stripSchemes(servers), ", "), 180))
-		if !askApproval(c.ci, PermUpload, "upload a public file", detail, preview(r.Caption, 200)) {
+		// the reply already went out: a prompt that ends without a yes, for
+		// whatever reason, is a cancelled upload
+		if ok, err := c.approve(PermUpload, "upload a public file", detail, preview(r.Caption, 200)); err != nil || !ok {
 			status.OK = false
 			status.Status = "cancelled"
 			status.Error = "user cancelled"
@@ -255,7 +204,7 @@ func napRunUpload(ctx context.Context, c *napCall, status napUploadStatus, data 
 	wantHash := hex.EncodeToString(sum[:])
 	// one signature covers every server: it names the blob, not the server,
 	// so a remote signer is asked once
-	auth, err := napUploadAuth(ctx, keyer, wantHash)
+	auth, err := c.uploadAuth(ctx, keyer, wantHash)
 	if err != nil {
 		log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Msg("NAP-UPLOAD could not sign the Blossom authorization")
 	}
@@ -264,7 +213,7 @@ func napRunUpload(ctx context.Context, c *napCall, status napUploadStatus, data 
 		if err != nil || ctx.Err() != nil {
 			break
 		}
-		descriptor, uploadErr := napUploadToServer(ctx, server, data, mimeType, auth)
+		descriptor, uploadErr := c.uploadToServer(ctx, server, data, mimeType, auth)
 		if uploadErr != nil || !validUploadDescriptor(descriptor, wantHash, len(data)) {
 			log.Warn().Err(uploadErr).Str("server", server).Str("napplet", c.ci.napp.ID).
 				Msg("NAP-UPLOAD server did not confirm the blob")
@@ -281,6 +230,10 @@ func napRunUpload(ctx context.Context, c *napCall, status napUploadStatus, data 
 		status.Error = "upload failed"
 		if err != nil {
 			status.Error = "signing failed"
+		}
+		if errors.Is(err, errSinkRefused) {
+			// a handler bug, already logged: the upload was never authorized
+			status.Error = "policy denied"
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			status.Status = "cancelled"

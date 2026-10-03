@@ -61,9 +61,12 @@ func napNotifyPermission(c *napCall) {
 		if req.Channel != "" {
 			detail += " It requested the " + cleanNotificationText(req.Channel, 100) + " channel."
 		}
-		granted := c.sessionGrant(PermNotify, "show system notifications", detail)
+		granted, err := c.grant(PermNotify, "show system notifications", detail)
+		if err != nil {
+			granted = false
+		}
 		if granted {
-			granted = host.RequestNotificationPermission()
+			granted = c.requestNotifyPermission()
 		}
 		c.replyAs("notify.permission.result", map[string]any{"granted": granted})
 	})
@@ -76,11 +79,18 @@ func napNotifySend(c *napCall) {
 		return
 	}
 	if err := validateNotification(&req); err != nil {
-		c.reply(map[string]any{"error": err.Error()})
+		// fixed strings, never the error's own text (D-07)
+		if errors.Is(err, errNotifyIcon) {
+			c.reply(map[string]any{"error": "unsupported icon"})
+		} else {
+			c.reply(map[string]any{"error": "invalid notification"})
+		}
 		return
 	}
-	if !c.notificationGranted() {
-		c.reply(map[string]any{"error": "permission denied"})
+	// a check, never a prompt: notify.permission.request is where the
+	// napplet asks (the route's denial code is "permission denied")
+	if !c.hasGrant(PermNotify) {
+		c.failWith(napErrDenied)
 		return
 	}
 
@@ -114,11 +124,15 @@ func napNotifySend(c *napCall) {
 		actions[i] = NotificationAction{ID: action.ID, Label: action.Label}
 	}
 	c.async(func(context.Context) {
-		handle, err := host.SendNotification(NotificationRequest{
+		handle, err := c.notify(NotificationRequest{
 			ID: id, NappID: c.ci.napp.ID, NappName: c.ci.napp.Label(),
 			Title: req.Title, Body: req.Body, Icon: req.Icon, Channel: req.Channel,
 			Priority: req.Priority, Actions: actions,
 		})
+		if errors.Is(err, errSinkRefused) {
+			// already answered
+			return
+		}
 		if err != nil || handle == nil {
 			if err == nil {
 				err = errors.New("notification service returned no handle")
@@ -194,32 +208,26 @@ func napNotifyRegisterChannel(c *napCall) {
 	c.ci.nap.mu.Unlock()
 }
 
-func (c *napCall) notificationGranted() bool {
-	s := c.ci.nap
-	s.mu.Lock()
-	granted, ok := s.grants[PermNotify]
-	s.mu.Unlock()
-	if ok {
-		return granted
-	}
-	rule, ok := lookupRule(RuleKey{Napp: c.ci.napp.ID, Permission: PermNotify})
-	return ok && rule.Decision.granted()
-}
+// validateNotification's two refusals; each answers its own fixed string
+var (
+	errNotifyInvalid = errors.New("invalid notification")
+	errNotifyIcon    = errors.New("unsupported icon")
+)
 
 func validateNotification(req *notificationSendRequest) error {
 	req.Title = cleanNotificationText(req.Title, maxNotificationTitle)
 	req.Body = cleanNotificationText(req.Body, maxNotificationBody)
 	if req.Title == "" {
-		return errors.New("invalid notification")
+		return errNotifyInvalid
 	}
 	if req.Icon != "" {
-		return errors.New("unsupported icon")
+		return errNotifyIcon
 	}
 	if req.Priority == "" {
 		req.Priority = "normal"
 	}
 	if !validNotificationPriority(req.Priority) || len(req.Actions) > 3 {
-		return errors.New("invalid notification")
+		return errNotifyInvalid
 	}
 	seen := make(map[string]bool, len(req.Actions))
 	for i := range req.Actions {
@@ -227,7 +235,7 @@ func validateNotification(req *notificationSendRequest) error {
 		req.Actions[i].Label = cleanNotificationText(req.Actions[i].Label, maxNotificationLabel)
 		if req.Actions[i].ID == "" || req.Actions[i].Label == "" ||
 			!shortPlain(req.Actions[i].ID, 100) || seen[req.Actions[i].ID] {
-			return errors.New("invalid notification")
+			return errNotifyInvalid
 		}
 		seen[req.Actions[i].ID] = true
 	}

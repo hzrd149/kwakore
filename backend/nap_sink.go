@@ -1,9 +1,20 @@
 package backend
 
 import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"slices"
+	"strconv"
 	"sync"
+
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nipb7/blossom"
 )
 
 // The gate layer (D-02). This file and nap_route.go are the only NAP code
@@ -171,4 +182,138 @@ func (c *napCall) openLink(url string) error {
 		return errSinkRefused
 	}
 	return openExternalLink(url)
+}
+
+// encrypt encrypts plaintext for to with the user's key, under NIP-04 or
+// NIP-44 (scheme "nip04" or "nip44").
+func (c *napCall) encrypt(ctx context.Context, scheme, plaintext string, to nostr.PubKey) (string, error) {
+	if !c.sinkAllowed("encrypt") {
+		return "", errSinkRefused
+	}
+	k := userKeyer
+	if k == nil {
+		return "", errors.New("not-signed-in")
+	}
+	switch scheme {
+	case "nip04":
+		return k.Nip04Encrypt(ctx, plaintext, to)
+	case "nip44":
+		return k.Encrypt(ctx, plaintext, to)
+	}
+	return "", errors.New("unsupported encryption")
+}
+
+// sign signs evt with the user's key.
+func (c *napCall) sign(ctx context.Context, evt *nostr.Event) error {
+	if !c.sinkAllowed("sign") {
+		return errSinkRefused
+	}
+	k := userKeyer
+	if k == nil {
+		return errors.New("not-signed-in")
+	}
+	return k.SignEvent(ctx, evt)
+}
+
+// napPublishSigned is publishSigned, the store-then-relays publish; tests
+// replace it so a publish needs no relay.
+var napPublishSigned = publishSigned
+
+// publish sends a signed event to targets and reports per relay, as
+// publishSigned does. A refused call gets nil.
+func (c *napCall) publish(ctx context.Context, evt nostr.Event, targets []string) map[string]any {
+	if !c.sinkAllowed("publish") {
+		return nil
+	}
+	return napPublishSigned(ctx, evt, targets)
+}
+
+// uploadAuth signs a Blossom authorization for one blob with keyer.
+func (c *napCall) uploadAuth(ctx context.Context, keyer nostr.Keyer, hash string) (string, error) {
+	if !c.sinkAllowed("uploadAuth") {
+		return "", errSinkRefused
+	}
+	return napUploadAuth(ctx, keyer, hash)
+}
+
+// uploadToServer PUTs a blob to one Blossom server.
+func (c *napCall) uploadToServer(ctx context.Context, server string, data []byte, mimeType, auth string) (*blossom.BlobDescriptor, error) {
+	if !c.sinkAllowed("uploadToServer") {
+		return nil, errSinkRefused
+	}
+	return napUploadToServer(ctx, server, data, mimeType, auth)
+}
+
+// the Blossom upload's two steps, as package vars so tests can stand in for
+// the signer and the server
+var (
+	// napUploadAuth signs the Blossom (BUD-02) authorization for one blob.
+	// ctx has no deadline: a remote signer may wait on the user for as long
+	// as it likes.
+	napUploadAuth = func(ctx context.Context, keyer nostr.Keyer, hash string) (string, error) {
+		now := nostr.Now()
+		evt := nostr.Event{
+			Kind: 24242, CreatedAt: now, Content: "Upload blob",
+			Tags: nostr.Tags{
+				{"t", "upload"}, {"x", hash},
+				// generous, since the user may take a while to sign: the
+				// authorization is good for this one blob only
+				{"expiration", strconv.FormatInt(int64(now)+napUploadAuthTTL, 10)},
+			},
+		}
+		if err := keyer.SignEvent(ctx, &evt); err != nil {
+			return "", err
+		}
+		j, err := json.Marshal(evt)
+		if err != nil {
+			return "", err
+		}
+		return "Nostr " + base64.StdEncoding.EncodeToString(j), nil
+	}
+	napUploadToServer = func(ctx context.Context, server string, data []byte, mimeType, auth string) (*blossom.BlobDescriptor, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, server+"/upload", bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", mimeType)
+		req.Header.Set("Authorization", auth)
+		resp, err := napUploadClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 300 {
+			reason := resp.Header.Get("X-Reason")
+			if reason == "" {
+				reason = preview(string(body), 200)
+			}
+			return nil, fmt.Errorf("%s: %s", resp.Status, reason)
+		}
+		var descriptor blossom.BlobDescriptor
+		if err := json.Unmarshal(body, &descriptor); err != nil {
+			return nil, fmt.Errorf("unreadable blob descriptor: %w", err)
+		}
+		return &descriptor, nil
+	}
+)
+
+// notify shows a system notification.
+func (c *napCall) notify(req NotificationRequest) (NotificationHandle, error) {
+	if !c.sinkAllowed("notify") {
+		return nil, errSinkRefused
+	}
+	return host.SendNotification(req)
+}
+
+// requestNotifyPermission asks the platform for notification permission (on
+// Android, the OS prompt). A refused call gets false.
+func (c *napCall) requestNotifyPermission() bool {
+	if !c.sinkAllowed("requestNotifyPermission") {
+		return false
+	}
+	return host.RequestNotificationPermission()
 }

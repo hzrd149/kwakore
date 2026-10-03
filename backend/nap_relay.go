@@ -532,7 +532,8 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 }
 
 // napApprovePublish asks once, then encrypts (when encryption is set), signs
-// and publishes evt to targets, reporting per relay as publishSigned does.
+// and publishes evt to targets through the call's sinks, reporting per relay
+// as publishSigned does.
 func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nostr.PubKey, encryption string, targets []string, ask *napAsk) (nostr.Event, map[string]any, error) {
 	title := "sign and publish an event"
 	detail := fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
@@ -547,32 +548,34 @@ func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nost
 		title, code = ask.Title, ask.Code
 		detail = fmt.Sprintf("%s (kind %d, to %d relay(s))", ask.Detail, evt.Kind, len(targets))
 	}
-	if !askApproval(c.ci, PermPublish, title, detail, code) {
+	ok, err := c.approve(PermPublish, title, detail, code)
+	if err != nil {
+		c.failForPrompt(err)
+		return nostr.Event{}, nil, err
+	}
+	if !ok {
 		return nostr.Event{}, nil, errors.New("user-denied")
 	}
 
 	// no deadline on the signer: a remote signer may wait on the user to
 	// approve the encryption and the signature in turn
 	if encryption != "" {
-		var (
-			ciphertext string
-			err        error
-		)
-		if encryption == "nip04" {
-			ciphertext, err = userKeyer.Nip04Encrypt(ctx, evt.Content, to)
-		} else {
-			ciphertext, err = userKeyer.Encrypt(ctx, evt.Content, to)
-		}
+		ciphertext, err := c.encrypt(ctx, encryption, evt.Content, to)
 		if err != nil {
 			return nostr.Event{}, nil, keyerErr(err)
 		}
 		evt.Content = ciphertext
 	}
-	if err := userKeyer.SignEvent(ctx, &evt); err != nil {
+	if err := c.sign(ctx, &evt); err != nil {
 		return nostr.Event{}, nil, keyerErr(err)
 	}
 
 	pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer pcancel()
-	return evt, publishSigned(pctx, evt, targets), nil
+	res := c.publish(pctx, evt, targets)
+	if res == nil {
+		// refused, and already answered
+		return nostr.Event{}, nil, errSinkRefused
+	}
+	return evt, res, nil
 }
