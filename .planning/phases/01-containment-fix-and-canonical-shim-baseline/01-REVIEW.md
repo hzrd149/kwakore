@@ -74,6 +74,8 @@ The new containment tests also add data races under `-race`.
 
 ### CR-01: Switching to hashed install dirs breaks every existing install with no fallback or migration
 
+**Disposition: ACCEPTED — DO NOT FIX.** The user reconfirmed decision D-04 on 2026-10-03 (keep old `napps/{raw-id}` directories orphaned; upgrading users reinstall). The fixer must skip CR-01; record it as skipped/no_change_needed.
+
 **File:** `backend/backend.go:131-143`, `backend/window_instances.go:502-530`, `backend/nap.go:491-498`, `backend/registry_install.go:84-89`
 **Issue:** `nappBaseDir` now returns `{dataDir}/napps/{sha256(id)}`. Before, it was `{dataDir}/napps/{id}`. `state.InstalledNapps` still lists every napp installed before the upgrade, so the launcher keeps showing them as installed. But:
 - `launchWithDocument` fails with `napp X is not installed`, or `napplet X is not installed` for napplets.
