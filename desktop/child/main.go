@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"net"
@@ -20,6 +21,8 @@ import (
 	"github.com/rs/zerolog"
 
 	nappbridge "verdana/backend/webview"
+
+	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
 
 type wireMsg struct {
@@ -274,12 +277,19 @@ func rpc(method string, params string) (json.RawMessage, error) {
 	return resp.Result, nil
 }
 
+// maxParentLine bounds one line from the launcher (D-17). Replies from the
+// launcher, such as a resource.bytesMany carrying many blobs, may be far
+// larger than anything a napplet sends up, so this is not the inbound cap:
+// this direction is trusted, and the bound only stops a launcher bug from
+// growing the child without limit.
+const maxParentLine = 128 << 20
+
 func reader(w webview.WebView) {
-	dec := json.NewDecoder(os.Stdin)
-	for {
+	err := wireline.Read(os.Stdin, maxParentLine, func(line []byte) {
 		var m wireMsg
-		if err := dec.Decode(&m); err != nil {
-			break
+		if err := json.Unmarshal(line, &m); err != nil {
+			log.Warn().Err(err).Msg("skipping unreadable line from launcher")
+			return
 		}
 		switch m.T {
 		case "prompt":
@@ -287,12 +297,12 @@ func reader(w webview.WebView) {
 			// answered (empty params take a stale overlay down)
 			if strings.TrimSpace(m.Params) == "" {
 				w.Dispatch(func() { w.Eval(promptHideCode()) })
-				continue
+				return
 			}
 			var pv promptView
 			if err := json.Unmarshal([]byte(m.Params), &pv); err != nil {
 				log.Warn().Err(err).Msg("unreadable prompt from launcher")
-				continue
+				return
 			}
 			code := promptOverlayCode(pv)
 			w.Dispatch(func() { w.Eval(code) })
@@ -335,6 +345,11 @@ func reader(w webview.WebView) {
 		case "close":
 			w.Dispatch(func() { w.Terminate() })
 		}
+	})
+	if errors.Is(err, bufio.ErrTooLong) {
+		log.Warn().Int("max", maxParentLine).Msg("launcher sent an overlong line; closing")
+	} else if err != nil {
+		log.Warn().Err(err).Msg("reading from launcher failed; closing")
 	}
 	w.Terminate()
 }

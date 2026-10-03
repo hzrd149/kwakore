@@ -20,6 +20,7 @@ import (
 	"fiatjaf.com/nostr/sdk"
 
 	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/rs/zerolog"
 )
 
 // An Instance is one open napp window, whatever a window happens to be on
@@ -302,9 +303,23 @@ func CloseAllWindows() {
 
 // ─── platform callbacks ──────────────────────────────────────────
 
+// wireDropBurst bounds the log lines a window can cause by sending oversized
+// messages: a flood of them must not become a log flood.
+var wireDropBurst = &zerolog.BurstSampler{Burst: 5, Period: time.Minute}
+
 // HandleWireMessage takes what a napp's shell sent up, as raw JSON. Platforms
-// carrying the protocol as strings (Android over JNI) use this.
+// carrying the protocol as strings (Android over JNI) use this. Android hands
+// the whole message to Go as one string with no framing cap of its own, so
+// this is that cap (D-17): a message longer than MaxInboundWireMsg is dropped
+// before it is parsed, the same bound the desktop pipe reader applies per
+// line.
 func HandleWireMessage(instance string, raw string) {
+	if len(raw) > MaxInboundWireMsg {
+		l := log.Sample(wireDropBurst)
+		l.Warn().Str("instance", instance).Int("len", len(raw)).
+			Msg("dropping an oversized message from napp")
+		return
+	}
 	m, err := ParseWireMsg(raw)
 	if err != nil {
 		log.Warn().Str("instance", instance).Err(err).Msg("unreadable message from napp")
