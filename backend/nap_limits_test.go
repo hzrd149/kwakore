@@ -1,12 +1,17 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nipb7/blossom"
 	"golang.org/x/time/rate"
 )
 
@@ -557,4 +562,209 @@ func TestResourceInFlightCap(t *testing.T) {
 	if got := waitID(t, rec, "resource.bytes.result", "b2"); got["blob"] == nil {
 		t.Fatalf("resource.bytes after a slot freed: %v", got)
 	}
+}
+
+// TestIncChannelCap: a window is an end of at most incMaxChannels channels,
+// counting both ends. An open past that answers rate-limited and the peer
+// hears nothing, and a window that is full cannot be pulled into more by
+// others either; closing one frees its slot (D-14, I-3).
+func TestIncChannelCap(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+	opens := map[napLimitClass]napLimitSpec{limitIncOpen: {rate.Every(time.Hour), 4 * incMaxChannels}}
+	a, recA := openNapplet(t, "cap-a")
+	withLimits(t, a, limitsWith(napEnvelopeLimit, opens))
+	b, recB := openNapplet(t, "cap-b")
+	withLimits(t, b, limitsWith(napEnvelopeLimit, opens))
+	c, recC := openNapplet(t, "cap-c")
+	withLimits(t, c, limitsWith(napEnvelopeLimit, opens))
+	ready(t, a, recA, 1)
+	ready(t, b, recB, 1)
+	ready(t, c, recC, 1)
+
+	var first string
+	for i := range incMaxChannels {
+		id := "open" + strconv.Itoa(i)
+		post(t, a, map[string]any{"type": "inc.channel.open", "id": id, "target": "cap-b"})
+		got := waitID(t, recA, "inc.channel.open.result", id)
+		channelID, _ := got["channelId"].(string)
+		if channelID == "" {
+			t.Fatalf("channel %d within the cap: %v", i, got)
+		}
+		if i == 0 {
+			first = channelID
+		}
+	}
+	recB.wait(t, "inc.channel.opened", incMaxChannels)
+
+	post(t, a, map[string]any{"type": "inc.channel.open", "id": "over", "target": "cap-b"})
+	if got := waitID(t, recA, "inc.channel.open.result", "over"); got["error"] != napErrRateLimited || got["channelId"] != nil {
+		t.Fatalf("the opener past the cap: %v", got)
+	}
+	// b is full too: it cannot open, and c cannot pull it into another one
+	post(t, b, map[string]any{"type": "inc.channel.open", "id": "b-over", "target": "cap-c"})
+	if got := waitID(t, recB, "inc.channel.open.result", "b-over"); got["error"] != napErrRateLimited {
+		t.Fatalf("the peer opening past the cap: %v", got)
+	}
+	post(t, c, map[string]any{"type": "inc.channel.open", "id": "c-to-b", "target": "cap-b"})
+	if got := waitID(t, recC, "inc.channel.open.result", "c-to-b"); got["error"] != napErrRateLimited {
+		t.Fatalf("opening toward a full window: %v", got)
+	}
+	napSettled(t, b, recB)
+	if n := len(recB.find("inc.channel.opened")); n != incMaxChannels {
+		t.Fatalf("the full window heard of %d channels, want %d", n, incMaxChannels)
+	}
+	if got := recC.find("inc.channel.opened"); len(got) != 0 {
+		t.Fatalf("c heard of a refused channel: %v", got)
+	}
+	if n := len(incChannelsOf(a)); n != incMaxChannels {
+		t.Fatalf("a is an end of %d channels, want %d", n, incMaxChannels)
+	}
+
+	// closing one frees a slot on both ends
+	post(t, a, map[string]any{"type": "inc.channel.close", "channelId": first})
+	recA.wait(t, "inc.channel.closed", 1)
+	post(t, a, map[string]any{"type": "inc.channel.open", "id": "again", "target": "cap-b"})
+	if got := waitID(t, recA, "inc.channel.open.result", "again"); got["channelId"] == nil {
+		t.Fatalf("an open after a close: %v", got)
+	}
+	recB.wait(t, "inc.channel.opened", incMaxChannels+1)
+}
+
+// holdUploads stores uploads in a window's session as if they were running.
+func holdUploads(t *testing.T, ci *Instance, statuses ...string) []string {
+	t.Helper()
+	ids := make([]string, len(statuses))
+	ci.nap.mu.Lock()
+	defer ci.nap.mu.Unlock()
+	for i, status := range statuses {
+		ids[i] = "held-" + strconv.Itoa(i)
+		ci.nap.uploads[ids[i]] = &napUploadStatus{OK: true, UploadID: ids[i], Status: status, Rail: "blossom"}
+	}
+	return ids
+}
+
+// TestUploadActiveCap: a window has at most uploadMaxActive uploads pending
+// or uploading; another is answered rate-limited before any server lookup
+// or prompt, and requests that raced past that check are caught again
+// before their pending entry is stored (D-14, U-4).
+func TestUploadActiveCap(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+	ci, rec := openNapplet(t, "upload-cap")
+	withLimits(t, ci, limitsWith(napEnvelopeLimit, map[napLimitClass]napLimitSpec{
+		limitUpload: {rate.Every(time.Hour), 100},
+	}))
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	var lookups atomic.Int32
+	napUploadServers = func(context.Context, nostr.PubKey) []string {
+		lookups.Add(1)
+		return []string{"https://one.example"}
+	}
+	napUploadToServer = func(context.Context, string, []byte, string, string) (*blossom.BlobDescriptor, error) {
+		return nil, errors.New("test server is down")
+	}
+
+	held := holdUploads(t, ci, "pending", "uploading", "pending", "uploading", "complete", "failed", "cancelled")
+	post(t, ci, uploadEnvelope("over", []byte("one too many")))
+	if got := waitID(t, rec, "upload.upload.result", "over"); got["error"] != napErrRateLimited || got["result"] != nil {
+		t.Fatalf("upload past the cap: %v", got)
+	}
+	if n := lookups.Load(); n != 0 {
+		t.Fatalf("%d server lookups for a refused upload", n)
+	}
+	if p := CurrentPrompt(); p != nil {
+		t.Fatalf("a refused upload prompted: %v", p)
+	}
+
+	// one finishes: the next upload proceeds
+	ci.nap.mu.Lock()
+	ci.nap.uploads[held[0]].Status = "complete"
+	ci.nap.mu.Unlock()
+	post(t, ci, uploadEnvelope("after", []byte("room now")))
+	got := waitID(t, rec, "upload.upload.result", "after")
+	if result, _ := got["result"].(map[string]any); result == nil || result["status"] != "pending" {
+		t.Fatalf("upload after a slot freed: %v", got)
+	}
+	if n := lookups.Load(); n != 1 {
+		t.Fatalf("%d server lookups, want 1", n)
+	}
+	rec.wait(t, "upload.status.changed", 2) // uploading, then failed
+}
+
+// TestUploadActiveCapRace: requests that all passed the synchronous check
+// while the server lookup was running are counted again when they store
+// their pending entry, so no more than uploadMaxActive are ever active.
+func TestUploadActiveCapRace(t *testing.T) {
+	setupNapTest(t)
+	freezeNapNow(t)
+	ci, rec := openNapplet(t, "upload-race")
+	withLimits(t, ci, limitsWith(napEnvelopeLimit, map[napLimitClass]napLimitSpec{
+		limitUpload: {rate.Every(time.Hour), 100},
+	}))
+	setupNapUploadTest(t, ci)
+	// the admitted upload stays pending on its prompt
+	clearSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload})
+	ready(t, ci, rec, 1)
+
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	napUploadServers = func(context.Context, nostr.PubKey) []string {
+		entered <- struct{}{}
+		<-release
+		return []string{"https://one.example"}
+	}
+	napUploadToServer = func(context.Context, string, []byte, string, string) (*blossom.BlobDescriptor, error) {
+		t.Error("uploaded without approval")
+		return nil, errors.New("not approved")
+	}
+
+	holdUploads(t, ci, "pending", "uploading", "pending")
+	post(t, ci, uploadEnvelope("r1", []byte("first")))
+	post(t, ci, uploadEnvelope("r2", []byte("second")))
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(3 * time.Second):
+			t.Fatal("both uploads should be past the synchronous check")
+		}
+	}
+	close(release)
+
+	pending, limited := 0, 0
+	for _, id := range []string{"r1", "r2"} {
+		got := waitID(t, rec, "upload.upload.result", id)
+		switch {
+		case got["error"] == napErrRateLimited:
+			limited++
+		case got["result"] != nil:
+			pending++
+		default:
+			t.Fatalf("%s: %v", id, got)
+		}
+	}
+	if pending != 1 || limited != 1 {
+		t.Fatalf("%d admitted and %d refused, want 1 and 1", pending, limited)
+	}
+	ci.nap.mu.Lock()
+	active := 0
+	for _, u := range ci.nap.uploads {
+		if u.Status == "pending" || u.Status == "uploading" {
+			active++
+		}
+	}
+	ci.nap.mu.Unlock()
+	if active != uploadMaxActive {
+		t.Fatalf("%d uploads active, want %d", active, uploadMaxActive)
+	}
+	// dismiss the admitted upload's prompt
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if p := CurrentPrompt(); p != nil {
+			AnswerPrompt(p.ID, Answer{OK: false})
+			break
+		}
+	}
+	rec.wait(t, "upload.status.changed", 1)
 }
