@@ -139,7 +139,7 @@ status: complete
 
 - `backend/nap_sink.go` is the gate layer. `c.approve` (PerCall), `c.grant` (Session) and `c.hasGrant` (check-only Session) ask only for what the route declared. A Dynamic route may use either kind for the permissions it lists. A pass sets `napCall.approved`.
 - Every sink starts with `c.sinkAllowed(name)`. Without the gate, the sink logs at Error, answers `user-denied` in the route's shape (for example `{status:"denied"}` for link, `{granted:false}` for the notify permission) and returns `errSinkRefused` with no side effect.
-- All six handler files were converted. The guard finds zero violations across the 18 non-test nap_*.go files outside the gate layer.
+- All six handler files were converted. The guard finds zero violations across the 14 non-test nap_*.go files outside the gate layer.
 - D-07 changes. Storage now answers `invalid-request`, `internal-error` or `quota exceeded`. `media.session.create` decode failures answer `invalid-request`. notify.send validation failures answer the fixed strings "invalid notification" and "unsupported icon". relay.query filter errors answer `invalid-request`. This resolves the two items 02-01 deferred.
 
 ## Sinks and the gates that unlock them

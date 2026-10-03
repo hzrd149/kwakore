@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-10-03T16:21:01.202Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-10-03T16:34:20.761Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: 2e107d673dcb63973e102259a5039166d67ade08
+state_head: f4df6240d9659e9b77853415e63b671ca64b7149
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
   percent: 13
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 02 execution started
 
@@ -66,6 +66,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 02 P01 | 10min | 3 tasks | 12 files |
 | Phase 02 P02 | 5min | 3 tasks | 13 files |
 | Phase 02 P03 | 12min | 3 tasks | 11 files |
+| Phase 02 P04 | 11min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,10 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-02] Cache setup returns errors: newCache + cacheOrNil leave a failed cache nil (ristretto nil-safe => always miss); cacheInitErrs logged at Warn by Start
 - [Phase 02]: [02-03] Go bounds every envelope in napEnqueue: exact type key, case-fold key collisions refused (invalid-request or drop), ids at most 128 bytes, per-route maxRaw (256 KiB default; upload 24 MiB, storage.set 600 KiB, registerSchema 64 KiB, publishes 1 MiB) answered too-large, 24 MiB hard cap drops; unknown types and missing correlators drop before queueing
 - [Phase 02]: [02-03] Per-window x/time/rate buckets (golang.org/x/time v0.16.0) on napSession.limits, never reset with the session: envelope 200/s burst 400 in napEnqueue, route category buckets in napDispatch before the D-04 gate; full 256-slot queue answers rate-limited without blocking the reader; routes declare prompt deadlines (storage 5 s, publish/upload promptTimeout, else 30 s)
+- [Phase 02]: [02-04] Every sensitive NAP side effect (open link, encrypt, sign, publish, Blossom upload auth/PUT, https fetch, notify, notification permission, media play) runs only through a sink in backend/nap_sink.go that refuses (Error log, user-denied in the route shape) unless the call passed its declared gate (napCall.approved)
+- [Phase 02]: [02-04] c.approve (PerCall), c.grant (Session) and c.hasGrant (check-only) ask only for the route's declared permission and question kind; anything else is refused without a prompt
+- [Phase 02]: [02-04] c.fetchBlossom is the one unprompted sink, documented in the gate layer; Blossom consent is RES-02 Phase 7
+- [Phase 02]: [02-04] nap_guard_test.go bans prompts, raw sinks, keyer/host sink selectors and bare go in every nap_*.go except nap_sink.go and nap_route.go, and Go error text or old prose in reply errors
 
 ### Pending Todos
 
@@ -126,6 +131,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T16:21:01.171Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-10-03T16:34:20.728Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
