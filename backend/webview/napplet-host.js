@@ -74,6 +74,10 @@
   const MAX_UPLOAD_BYTES = 16 * 1024 * 1024
   const MAX_UPLOAD_ENVELOPE = 24 * 1024 * 1024
 
+  // napError is a failure the host page answers itself, tagged with the
+  // generic code (D-07) Go would have failed the request with
+  const napError = (message, napCode) => Object.assign(new Error(message), { napCode })
+
   const bytesToBase64 = bytes => {
     let out = ""
     const chunk = 0x8000
@@ -88,21 +92,21 @@
   // NAP-UPLOAD's structured-clone API and never have to base64 their own data.
   const dehydrate = async (value, seen = new WeakSet()) => {
     if (value instanceof Blob) {
-      if (value.size > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      if (value.size > MAX_UPLOAD_BYTES) throw napError("upload is too large", "too-large")
       const bytes = new Uint8Array(await value.arrayBuffer())
       return { __blob: { b64: bytesToBase64(bytes), mime: value.type || "" } }
     }
     if (value instanceof ArrayBuffer) {
-      if (value.byteLength > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      if (value.byteLength > MAX_UPLOAD_BYTES) throw napError("upload is too large", "too-large")
       return { __blob: { b64: bytesToBase64(new Uint8Array(value)), mime: "" } }
     }
     if (ArrayBuffer.isView(value)) {
-      if (value.byteLength > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      if (value.byteLength > MAX_UPLOAD_BYTES) throw napError("upload is too large", "too-large")
       const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
       return { __blob: { b64: bytesToBase64(bytes), mime: "" } }
     }
     if (Array.isArray(value)) {
-      if (seen.has(value)) throw new Error("cyclic NAP envelope")
+      if (seen.has(value)) throw napError("cyclic NAP envelope", "invalid-request")
       seen.add(value)
       const out = []
       for (const item of value) out.push(await dehydrate(item, seen))
@@ -110,7 +114,7 @@
       return out
     }
     if (value && typeof value === "object") {
-      if (seen.has(value)) throw new Error("cyclic NAP envelope")
+      if (seen.has(value)) throw napError("cyclic NAP envelope", "invalid-request")
       seen.add(value)
       const out = {}
       for (const key of Object.keys(value)) out[key] = await dehydrate(value[key], seen)
@@ -183,7 +187,7 @@
   let pending = 0
   const enqueue = (task, trusted = false) => {
     if (!trusted) {
-      if (pending >= MAX_PENDING) return Promise.reject(new Error("too many pending NAP envelopes"))
+      if (pending >= MAX_PENDING) return Promise.reject(napError("too many pending NAP envelopes", "rate-limited"))
       pending++
     }
     const run = outbound.then(task)
@@ -207,9 +211,15 @@
     // before answering, so the wait is short.
     enqueue(async () => {
       const encoded = await dehydrate(data)
-      const json = JSON.stringify(encoded)
+      let json
+      try {
+        json = JSON.stringify(encoded)
+      } catch (err) {
+        throw napError((err && err.message) || "unencodable NAP envelope", "invalid-request")
+      }
+      if (typeof json !== "string") throw napError("unencodable NAP envelope", "invalid-request")
       const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
-      if (!json || json.length > limit) throw new Error("NAP envelope is too large")
+      if (json.length > limit) throw napError("NAP envelope is too large", "too-large")
       return rpc("nap.msg", json)
     }).then(deliver, err => {
       console.error("[napplet-host]", err)
@@ -217,29 +227,182 @@
     })
   })
 
-  // refuse answers a request that never reached Go (too large, unencodable,
-  // too many pending, or the rpc failed). Without an answer the napplet would
-  // wait out the shim's own request timeout. Mirrors napCall.fail in nap.go.
-  const refuse = (data, err) => {
-    if (typeof data.id !== "string" && typeof data.id !== "number") return
-    const error = (err && err.message) || "request failed"
-    const reply = { id: data.id }
-    switch (data.type) {
-      case "config.get":
-        Object.assign(reply, { type: "config.schemaError", code: "internal-error", error })
+  // ── failure shapes ──────────────────────────────────────────────
+  // One entry per NAP request type, mirroring Go's route table
+  // (backend/nap_route.go, exported by napFailShapeTable): the envelope a
+  // request of that type fails with. Go's table is the source of truth; this
+  // copy exists only because this page has no build step, and
+  // TestHostFailShapesMatchGoRoutes keeps the two equal. Strict JSON between
+  // the markers: double quotes, no trailing commas, no comments inside.
+  const FAIL_SHAPES = /* nap-fail-shapes:begin */ {
+    "common.decodeNip19": { "kind": "okFalse" },
+    "common.encodeNip19": { "kind": "okFalse" },
+    "common.follow": { "kind": "okFalse" },
+    "common.follows": { "fields": { "pubkeys": [] }, "kind": "okFalse" },
+    "common.getProfile": { "fields": { "pubkey": "" }, "kind": "okFalse" },
+    "common.react": { "kind": "okFalse" },
+    "common.report": { "kind": "okFalse" },
+    "common.unfollow": { "kind": "okFalse" },
+    "config.get": { "kind": "schemaError" },
+    "config.openSettings": { "kind": "none" },
+    "config.registerSchema": { "kind": "okFalseCode" },
+    "config.subscribe": { "kind": "none" },
+    "config.unsubscribe": { "kind": "none" },
+    "identity.getBadges": { "fields": { "badges": [] }, "kind": "err" },
+    "identity.getBlocked": { "fields": { "pubkeys": [] }, "kind": "err" },
+    "identity.getFollows": { "fields": { "pubkeys": [] }, "kind": "err" },
+    "identity.getList": { "fields": { "entries": [] }, "kind": "err" },
+    "identity.getMutes": { "fields": { "pubkeys": [] }, "kind": "err" },
+    "identity.getProfile": { "fields": { "profile": null }, "kind": "err" },
+    "identity.getPublicKey": { "fields": { "pubkey": "" }, "kind": "default" },
+    "identity.getRelays": { "fields": { "relays": {} }, "kind": "err" },
+    "identity.getZaps": { "fields": { "zaps": [] }, "kind": "err" },
+    "inc.channel.broadcast": { "kind": "none" },
+    "inc.channel.close": { "kind": "none" },
+    "inc.channel.emit": { "kind": "none" },
+    "inc.channel.list": { "fields": { "channels": [] }, "kind": "default" },
+    "inc.channel.open": { "kind": "err" },
+    "inc.emit": { "kind": "none" },
+    "inc.subscribe": { "kind": "err" },
+    "inc.unsubscribe": { "kind": "none" },
+    "intent.available": { "kind": "err" },
+    "intent.handlers": { "kind": "err" },
+    "intent.invoke": { "codes": { "internal-error": "invoke failed", "user-denied": "user cancelled" }, "kind": "intent" },
+    "link.open": { "kind": "link" },
+    "media.capabilities": { "kind": "none" },
+    "media.command": { "kind": "none" },
+    "media.session.create": { "codes": { "user-denied": "source blocked" }, "kind": "err" },
+    "media.session.destroy": { "kind": "none" },
+    "media.session.update": { "kind": "none" },
+    "media.state": { "kind": "none" },
+    "notify.badge": { "kind": "none" },
+    "notify.channel.register": { "kind": "none" },
+    "notify.dismiss": { "kind": "none" },
+    "notify.permission.request": { "kind": "granted" },
+    "notify.send": { "codes": { "rate-limited": "rate limited", "user-denied": "permission denied" }, "kind": "err" },
+    "outbox.close": { "closed": "outbox.closed", "kind": "lifecycle" },
+    "outbox.getEvent": { "kind": "err" },
+    "outbox.publish": { "codes": { "user-denied": "publish denied" }, "kind": "okFalse" },
+    "outbox.query": { "fields": { "events": [] }, "kind": "err" },
+    "outbox.resolveRelays": { "kind": "err" },
+    "outbox.subscribe": { "closed": "outbox.closed", "kind": "lifecycle" },
+    "relay.close": { "kind": "none" },
+    "relay.publish": { "kind": "okFalse" },
+    "relay.publishEncrypted": { "kind": "okFalse" },
+    "relay.query": { "fields": { "events": [] }, "kind": "err" },
+    "relay.subscribe": {
+      "closed": "relay.closed",
+      "codes": {
+        "internal-error": "error: internal-error",
+        "invalid-request": "invalid: invalid-request",
+        "rate-limited": "rate-limited: rate-limited",
+        "too-large": "invalid: too-large",
+        "user-denied": "blocked: user-denied"
+      },
+      "kind": "lifecycle"
+    },
+    "resource.bytes": { "codes": { "rate-limited": "quota-exceeded", "user-denied": "blocked-by-policy" }, "kind": "typedErr" },
+    "resource.bytesMany": { "codes": { "rate-limited": "quota-exceeded", "user-denied": "blocked-by-policy" }, "kind": "typedErr" },
+    "resource.cancel": { "kind": "none" },
+    "resource.info": { "codes": { "rate-limited": "quota-exceeded" }, "kind": "typedErr" },
+    "storage.get": { "kind": "err" },
+    "storage.keys": { "kind": "err" },
+    "storage.remove": { "kind": "err" },
+    "storage.set": { "codes": { "too-large": "quota exceeded" }, "kind": "err" },
+    "theme.get": { "fields": { "theme": { "colors": { "background": "#ffffff", "primary": "#111111", "text": "#111111" } } }, "kind": "default" },
+    "upload.info": { "kind": "err" },
+    "upload.status": { "kind": "err" },
+    "upload.upload": { "codes": { "too-large": "file too large", "user-denied": "policy denied" }, "kind": "err" }
+  } /* nap-fail-shapes:end */
+
+  // the generic failure codes Go uses (D-07); an entry's codes map them to
+  // its spec's own
+  const NAP_CODES = ["internal-error", "user-denied", "rate-limited", "too-large", "invalid-request"]
+  const MAX_ID_BYTES = 128
+  const own = (obj, key) => obj != null && Object.prototype.hasOwnProperty.call(obj, key)
+  const utf8Length = s => new TextEncoder().encode(s).length
+
+  // napCodeOf is the generic code a failure carries; anything untagged is a
+  // failed rpc
+  const napCodeOf = err => (err && NAP_CODES.includes(err.napCode) ? err.napCode : "internal-error")
+
+  // the same id rule as Go's napValidID (D-11): a string of at most 128
+  // UTF-8 bytes, or a finite number whose token is at most 128 characters
+  const validId = id =>
+    (typeof id === "string" && utf8Length(id) <= MAX_ID_BYTES) ||
+    (typeof id === "number" && Number.isFinite(id) && String(id).length <= MAX_ID_BYTES)
+
+  // a subscription id, as Go's napValidSubID: a non-empty string of at most
+  // 128 UTF-8 bytes
+  const validSubId = subId => typeof subId === "string" && subId !== "" && utf8Length(subId) <= MAX_ID_BYTES
+
+  // failureFor builds the envelope Go's napCall.failWith would send for data
+  // failing with code, or null when Go would send nothing: an unknown type
+  // (NIP-5D), a reply-less type (its id may name another request), an id Go
+  // would not echo, or a request without the correlator its answer needs (A16).
+  const failureFor = (data, code) => {
+    const entry = own(FAIL_SHAPES, data.type) ? FAIL_SHAPES[data.type] : null
+    if (!entry || entry.kind === "none") return null
+    // Go drops a request whose id it would not echo, whatever its type
+    if (data.id !== undefined && !validId(data.id)) return null
+    const mapped = own(entry.codes, code) ? entry.codes[code] : code
+
+    if (entry.kind === "lifecycle") {
+      if (!validSubId(data.subId)) return null
+      const closed = { type: entry.closed, subId: data.subId, reason: mapped }
+      if (data.id !== undefined) closed.id = data.id
+      return closed
+    }
+    if (data.id === undefined) return null
+
+    const env = entry.fields ? JSON.parse(JSON.stringify(entry.fields)) : {}
+    const result = data.type + ".result"
+    switch (entry.kind) {
+      case "err":
+        Object.assign(env, { type: result, error: mapped })
         break
-      case "notify.permission.request":
-        Object.assign(reply, { type: "notify.permission.result", granted: false })
+      case "okFalse":
+        Object.assign(env, { type: result, ok: false, error: mapped })
         break
-      case "resource.bytes":
-      case "resource.bytesMany":
-      case "relay.publish":
-        Object.assign(reply, { type: data.type + ".error", ok: false, error })
+      case "okFalseCode":
+        Object.assign(env, { type: result, ok: false, code: mapped, error: mapped })
+        break
+      case "typedErr":
+        Object.assign(env, { type: data.type + ".error", error: mapped })
+        break
+      case "link":
+        Object.assign(env, { type: result, status: "denied", error: mapped })
+        break
+      case "intent": {
+        const req = data.request && typeof data.request === "object" && !Array.isArray(data.request) ? data.request : {}
+        const archetype = typeof req.archetype === "string" ? req.archetype : ""
+        const action = typeof req.action === "string" && req.action !== "" ? req.action : "open"
+        Object.assign(env, { type: result, result: { ok: false, archetype, action, handled: false, error: mapped } })
+        break
+      }
+      case "default":
+        env.type = result
+        break
+      case "schemaError":
+        Object.assign(env, { type: "config.schemaError", code: mapped, error: mapped })
+        break
+      case "granted":
+        Object.assign(env, { type: "notify.permission.result", granted: false })
         break
       default:
-        Object.assign(reply, { type: data.type + ".result", ok: false, error })
+        return null
     }
-    deliver(reply)
+    env.id = data.id
+    return env
+  }
+
+  // refuse answers a request that never reached Go (too large, unencodable,
+  // too many pending, or the rpc failed), in the same shape Go would have
+  // used: it mirrors napCall.failWith. Without an answer the napplet would
+  // wait out the shim's own timeout, and relay.* has none.
+  const refuse = (data, err) => {
+    const env = failureFor(data, napCodeOf(err))
+    if (env) deliver(env)
   }
 
   // ── the launcher's own hooks ────────────────────────────────────

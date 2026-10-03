@@ -340,7 +340,8 @@ for (let i = 0; i < TOTAL; i++) fireMessage(f.contentWindow, { type: "storage.ke
 await flush()
 const inFlight = count("nap.msg")
 const posted = f.contentWindow.posted.slice()
-const refusals = posted.filter(p => p.type === "storage.keys.result" && p.ok === false)
+// refused in storage.keys' own failure shape: an error, no ok key
+const refusals = posted.filter(p => p.type === "storage.keys.result" && p.error === "rate-limited" && !("ok" in p))
 
 // the lane drains once Go answers, and takes envelopes again
 unhold("nap.msg")
@@ -463,7 +464,7 @@ await flush(10)
 const lane = log.filter(e => e === "nap.loaded" || e === "nap.start" || e === "nap.msg")
 return {
   bootText, loaded: count("nap.loaded"), starts: count("nap.start"), appended: appended.length,
-  refusals: f.contentWindow.posted.filter(p => p.ok === false).length,
+  refusals: f.contentWindow.posted.filter(p => typeof p.error === "string").length,
   laneOrder: lane.slice(-3),
 }
 `, &got)
