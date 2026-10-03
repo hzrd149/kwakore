@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
 status: executing
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-10-03T16:43:53.818Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-10-03T17:01:08.903Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: 836828073ee3612a546660b5cb0962dcb0a26019
+state_head: 2d0dd0bec90cd34ddac49e2eac9abeee306370ce
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 13
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 02 execution started
 
@@ -68,6 +68,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 02 P03 | 12min | 3 tasks | 11 files |
 | Phase 02 P04 | 11min | 3 tasks | 9 files |
 | Phase 02 P05 | 7min | 3 tasks | 5 files |
+| Phase 02 P06 | 14min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,10 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-04] nap_guard_test.go bans prompts, raw sinks, keyer/host sink selectors and bare go in every nap_*.go except nap_sink.go and nap_route.go, and Go error text or old prose in reply errors
 - [Phase 02]: [02-05]: host page FAIL_SHAPES is a marker-delimited strict-JSON mirror of the Go route table, looked up by own key only; TestHostFailShapesMatchGoRoutes and the shared fixture nap-fail-envelopes.json hold both builders identical
 - [Phase 02]: [02-05]: NAP-RELAY-respond recorded fixed (Phase 2) with the relay.close reply-less exception owned by Phase 6 RELY-06 (D-21)
+- [Phase 02]: [02-06] Prompts belong to their asker's context: napplet requests use c.promptCtx() (session ctx, route deadline measured on napNow), bridge napps ci.windowPromptCtx(); waitCtx/cancelPrompt dismiss without remembering, a click racing cancellation still runs nothing; teardown only cancels contexts
+- [Phase 02]: [02-06] Window prompts bounded at 3 per window and 32 global (enqueueNappPrompt) plus the prompt bucket for napplets, intent chooser included; launcher prompts exempt; refusal answers rate-limited in the route shape
+- [Phase 02]: [02-06] sessionGrant uses per-permission grantQuestions (grantMu removed): one shared prompt, waiters leave on their own ctx, only explicit answers recorded
+- [Phase 02]: [02-06] intent.invoke charges limitColdLaunch via actionOptions.BeforeLaunch (open windows free); the chooser lives in actionOptions.PromptCtx; notify.send and config.openSettings limits moved to the window limiter
 
 ### Pending Todos
 
@@ -119,10 +124,10 @@ None yet.
 - [Phase 7]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Phase 6]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
 - [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
-- [Phase 2]: Prompts for a closed/replaced session are not cancelled yet (DEC-1, DISP-04); handler synchronous parts must stay short since `nap.start`/`WindowClosed` wait on `dispatchMu` (Android `WindowClosed` runs on the main thread)
 - [Phase 5]: Storage/config file names can collide across `d` values (CONFORMANCE CF-2, KEY-04)
 - [Phase 6]: Address-form INC senders `<kind>:<pubkey>:<d>` can be imitated by a crafted `d` (review IN-06, A5); T-01-21 checklist test should require fixed rows to cite an existing Test func
 - [Rebuild]: Desktop child and Android AAR must be rebuilt after Phase 1 (old builds never send `nap.start`)
+- [Phase 2]: Handler synchronous parts must stay short since nap.start/WindowClosed wait on dispatchMu (Android WindowClosed runs on the main thread); prompt cancellation itself is done (02-06)
 
 ## Deferred Items
 
@@ -134,6 +139,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T16:43:48.809Z
-Stopped at: Completed 02-05-PLAN.md
+Last session: 2026-10-03T17:00:53.729Z
+Stopped at: Completed 02-06-PLAN.md
 Resume file: None

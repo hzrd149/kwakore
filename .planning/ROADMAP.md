@@ -70,7 +70,7 @@ Plans:
   4. A napplet flooding prompts, link opens, intent invokes, uploads, resource fetches or INC opens/emits is rate-limited and its prompt queue stays bounded; its window stays responsive and no other window is affected
   5. No napplet input or filesystem error (including cache setup in `backend/cache.go`) panics the launcher; a panic inside a NAP goroutine is recovered and answered as a failure
 
-**Plans**: 5/7 plans executed
+**Plans**: 6/7 plans executed
 
 Plans:
 **Wave 1**
@@ -86,7 +86,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-06-PLAN.md — Bounded, cancellable prompts (DEC-1/P1), cancellable session grants, intent chooser and cold-launch limits, notify/openSettings buckets (wave 3)
+- [x] 02-06-PLAN.md — Bounded, cancellable prompts (DEC-1/P1), cancellable session grants, intent chooser and cold-launch limits, notify/openSettings buckets (wave 3)
 - [ ] 02-07-PLAN.md — Resource per-URL and in-flight caps, INC channel cap, active upload cap (wave 3)
 
 ### Phase 3: Desktop Process and Secrets Hardening
@@ -192,7 +192,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
-| 2. Gated NAP Dispatcher | 5/7 | In Progress|  |
+| 2. Gated NAP Dispatcher | 6/7 | In Progress|  |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
