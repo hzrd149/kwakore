@@ -154,7 +154,7 @@ Snapshot: [`pinned/NAP-INTENT@a040914b.md`](pinned/NAP-INTENT@a040914b.md)
 
 | ID | Requirement | Level | Status | Reason | Code |
 |----|-------------|-------|--------|--------|------|
-| NAP-INTENT-1 | “The shell MUST deliver `payload` to the resolved handler only after that handler is ready to receive it.” | MUST | fixed (Phase 1) | The pristine shim has no delivery API, so Go waits for the handler's `inc.subscribe` on the convention topic (up to intentHandlerWait) and only then sends `inc.event` (P2) | `backend/window_instances.go` dispatchToNapplet, waitForHandler; tests `backend/nap_test.go` TestIntentDeliveryToNapplet, TestIntentDeliveryReachesOnlyTheHandler |
+| NAP-INTENT-1 | “The shell MUST deliver `payload` to the resolved handler only after that handler is ready to receive it.” | MUST | fixed (Phase 1) | The pristine shim has no delivery API, so Go waits for the handler's `inc.subscribe` on the convention topic (up to intentHandlerWait) and only then sends `inc.event` (P2). The subscription must belong to the session the event is pushed to, so a session restarted in between waits for the new document to subscribe. A frame that reloads itself keeps its session and its subscriptions until Phase 4 (`NIP-5D-reload`) | `backend/window_instances.go` dispatchToNapplet; `backend/nap.go` napPushGen; tests `backend/nap_test.go` TestIntentDeliveryToNapplet, TestIntentDeliveryReachesOnlyTheHandler, TestIntentDeliveryWaitsForTheReceivingSession |
 
 ## NAP-THEME @ a040914b4bbd3a5cd8a14b0f316a723c968ebfb2
 

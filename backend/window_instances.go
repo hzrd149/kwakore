@@ -1106,25 +1106,56 @@ var intentHandlerWait = 20 * time.Second
 //
 // The event goes to the resolved handler alone, never through incPublish,
 // which would hand the payload to every napplet listening on the topic.
+//
+// Readiness and the push are judged against one session: the subscription
+// must belong to the session the event is pushed to. A session that changes
+// in between (nap.start for a reload) cleared its topics, so the loop waits
+// for the new document to subscribe again instead of pushing into a document
+// that is not listening yet. A frame that reloads itself keeps its session
+// and so its subscriptions; that is NIP-5D-reload, owned by Phase 4.
 func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, payload json.RawMessage) (any, error) {
 	if _, _, ok := conventionParts(req.name); !ok {
 		return nil, fmt.Errorf("invalid intent convention %q", req.name)
 	}
-
-	waitCtx, cancel := context.WithTimeout(ctx, intentHandlerWait)
-	_, ok := ci.waitForHandler(waitCtx, req.name)
-	cancel()
-	if !ok {
-		return nil, fmt.Errorf("%w: %s is not listening for %q", errNoHandler, ci.napp.Label(), req.name)
+	s := ci.nap
+	if s == nil {
+		return nil, fmt.Errorf("%w: %s is not a napplet window", errNoHandler, ci.napp.Label())
 	}
-	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
-	notifyState()
 
 	ev := map[string]any{"type": "inc.event", "topic": req.name, "sender": req.sender}
 	if len(payload) > 0 && string(payload) != "null" {
 		ev["payload"] = payload
 	}
-	ci.napPush(ev)
+
+	waitCtx, cancel := context.WithTimeout(ctx, intentHandlerWait)
+	defer cancel()
+	for {
+		// take the change signal before looking, so a subscribe that lands
+		// right after the look still wakes this up (registerAction closes it)
+		ci.actionsMu.Lock()
+		if ci.changed == nil {
+			ci.changed = make(chan struct{})
+		}
+		changed := ci.changed
+		ci.actionsMu.Unlock()
+
+		s.mu.Lock()
+		gen, ready := s.gen, s.established && s.topics[req.name]
+		s.mu.Unlock()
+		if ready && ci.napPushGen(gen, ev) {
+			break
+		}
+
+		select {
+		case <-changed:
+		case <-ci.gone:
+			return nil, fmt.Errorf("%w: %s closed before listening for %q", errNoHandler, ci.napp.Label(), req.name)
+		case <-waitCtx.Done():
+			return nil, fmt.Errorf("%w: %s is not listening for %q", errNoHandler, ci.napp.Label(), req.name)
+		}
+	}
+	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
+	notifyState()
 	return nil, nil
 }
 

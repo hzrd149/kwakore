@@ -1059,6 +1059,61 @@ func TestIntentDeliveryToNapplet(t *testing.T) {
 	}
 }
 
+// WR-02: readiness is judged against the session the event is pushed to. The
+// stale registration below stands in for the interleaving where the wait saw
+// the old document's subscription and nap.start replaced the session before
+// the push: the intent must wait for the new document to subscribe, and reach
+// it in its own session, instead of landing in a document not listening yet.
+func TestIntentDeliveryWaitsForTheReceivingSession(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "handler")
+	ready(t, ci, rec, 1)
+	subscribeTopic(t, ci, rec, "napplet:profile/open", 1)
+
+	// a new session whose window still lists the old subscription
+	ci.nap.mu.Lock()
+	ci.nap.resetLocked()
+	ci.nap.established = true
+	gen := ci.nap.gen
+	ci.nap.mu.Unlock()
+	if _, ok := ci.handlerFor("napplet:profile/open"); !ok {
+		t.Fatal("rig: the stale registration is gone")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := dispatchToNapplet(context.Background(), ci,
+			&actionRequest{name: "napplet:profile/open", sender: "caller"}, json.RawMessage(`{"pubkey":"abc"}`))
+		done <- err
+	}()
+	// an ordinary subscription is the sync point: it wakes the waiting
+	// dispatch, which must still find the convention topic unsubscribed
+	subscribeTopic(t, ci, rec, "chat", 2)
+	select {
+	case err := <-done:
+		t.Fatalf("dispatch finished before the new document subscribed: %v (pushes %v)", err, rec.types())
+	case <-time.After(20 * time.Millisecond):
+	}
+	if got := rec.find("inc.event"); len(got) != 0 {
+		t.Fatalf("pushed into a session that is not listening: %v", got)
+	}
+
+	subscribeTopic(t, ci, rec, "napplet:profile/open", 3)
+	ev := rec.wait(t, "inc.event", 1)
+	if ev["topic"] != "napplet:profile/open" || ev["sender"] != "caller" {
+		t.Errorf("intent event: %v", ev)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("dispatch: %v", err)
+	}
+	rec.mu.Lock()
+	last := rec.gens[len(rec.gens)-1]
+	rec.mu.Unlock()
+	if last != gen {
+		t.Errorf("intent pushed for session %d, want the receiving session %d", last, gen)
+	}
+}
+
 func TestIntentDeliveryTimesOutWithoutSubscriber(t *testing.T) {
 	setupNapTest(t)
 	saved := intentHandlerWait

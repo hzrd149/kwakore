@@ -252,16 +252,17 @@ func (ci *Instance) napPush(envs ...any) {
 	ci.napPushGen(gen, envs...)
 }
 
-// napPushGen pushes only if the session is still the one gen names.
-func (ci *Instance) napPushGen(gen int, envs ...any) {
+// napPushGen pushes only if the session is still the one gen names, and
+// reports whether it did.
+func (ci *Instance) napPushGen(gen int, envs ...any) bool {
 	if ci.nap == nil || len(envs) == 0 {
-		return
+		return false
 	}
 	ci.nap.mu.Lock()
 	live := ci.nap.gen == gen && ci.nap.established
 	ci.nap.mu.Unlock()
 	if !live {
-		return
+		return false
 	}
 	var payload any = envs
 	if len(envs) == 1 {
@@ -270,13 +271,14 @@ func (ci *Instance) napPushGen(gen int, envs ...any) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		log.Error().Err(err).Msg("could not encode a NAP push")
-		return
+		return false
 	}
 	// the check above and the send are not atomic: nap.start can run in
 	// between, and the host page can have the next session's frame up by the
 	// time this lands. So the push names its session, and the host page drops
 	// any push for a session other than the one nap.start gave it.
 	ci.eval("window.__nap_push && window.__nap_push(" + strconv.Itoa(gen) + ", " + jsString(string(raw)) + ")")
+	return true
 }
 
 // ─── the rpcs the host page makes ────────────────────────────────
