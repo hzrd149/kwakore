@@ -70,7 +70,24 @@ Plans:
   4. A napplet flooding prompts, link opens, intent invokes, uploads, resource fetches or INC opens/emits is rate-limited and its prompt queue stays bounded; its window stays responsive and no other window is affected
   5. No napplet input or filesystem error (including cache setup in `backend/cache.go`) panics the launcher; a panic inside a NAP goroutine is recovered and answered as a failure
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Route table: every NAP type declares its gate and failure shape, D-04 deny short-circuit, exactly-one reply, safeGo (wave 1)
+- [ ] 02-02-PLAN.md — Bounded child pipe (24 MiB up, 128 MiB down) with kill-on-overlong, Android inbound cap, panic-free cache setup (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-03-PLAN.md — Go envelope bounds (exact type, case-fold collisions, id rule, per-route caps), x/time/rate limiter, non-blocking queue (wave 2)
+- [ ] 02-04-PLAN.md — Gated sinks behind c.approved, zero-sink deny proof, AST guard over nap_*.go (wave 2)
+- [ ] 02-05-PLAN.md — Host page FAIL_SHAPES equal to the Go route table, shared failure fixture, checklist rows (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-06-PLAN.md — Bounded, cancellable prompts (DEC-1/P1), cancellable session grants, intent chooser and cold-launch limits, notify/openSettings buckets (wave 3)
+- [ ] 02-07-PLAN.md — Resource per-URL and in-flight caps, INC channel cap, active upload cap (wave 3)
 
 ### Phase 3: Desktop Process and Secrets Hardening
 
@@ -175,7 +192,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
-| 2. Gated NAP Dispatcher | 0/TBD | Not started | - |
+| 2. Gated NAP Dispatcher | 0/7 | Planned | - |
 | 3. Desktop Process and Secrets Hardening | 0/TBD | Not started | - |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
