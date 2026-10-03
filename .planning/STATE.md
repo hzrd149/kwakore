@@ -20,10 +20,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-02)
+See: .planning/PROJECT.md (updated 2026-10-03)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 01 — Containment Fix and Canonical Shim Baseline
+**Current focus:** Phase 2 — Gated NAP Dispatcher
 
 ## Current Position
 
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-10-03 — Phase 1 complete, transitioned to Phase 2
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 13% (1/8 phases)
 
 ## Performance Metrics
 
@@ -83,10 +83,12 @@ Recent decisions affecting current work:
 - [Phase 01]: [01-02] Handler coverage oracle: @napplet/conformance 0.17.0 ENVELOPE_SPECS fixture pinned to webview.ShimVersion; 9 unoffered domains N/A, media.command bidirectional
 - [Phase 01]: [01-03] Spec snapshots are byte-exact git blobs under spec/pinned/{spec}@{sha8}.md with front matter and body_sha256, marked -text; pinnedSnapshots in backend/spec_pinned_test.go is the SPEC-PINS order; re-pin = new file
 - [Phase 01]: [01-03] Android PRs run only a read-only gomobile AAR bind (aar job, path-filtered pull_request); APK build on workflow_dispatch and v* tags; Kotlin breakage from backend/mobile API changes remains a residual risk
-- [Phase 01]: [01-04] Napplet sessions start only from the host page's nap.start (after nap.boot, before a fresh iframe, on the same ordered lane); a frame shell.ready is an unknown type, no shell.init, and notify.controls is pushed once per session on nap.loaded (frame load)
+- [Phase 01]: [01-04] Napplet sessions start only from the host page's nap.start (after nap.boot, before a fresh iframe, on the same ordered lane); a frame shell.ready is an unknown type, no shell.init, and notify.controls is pushed on every nap.loaded of the current frame (DEC-2, revised in review)
 - [Phase 01]: [01-04] Pristine prelude runs inside a function scope with its install call, so only window.napplet survives; node-backed scope and host page tests fail instead of skipping under VERDANA_REQUIRE_NODE=1 in CI
 - [Phase 01]: [01-05] spec/CONFORMANCE.md is the audit checklist: conflicts A1-A22 and dropped shim patches P1-P7 have stable IDs; fixed rows must cite code and test, and every curly-quoted passage must be verbatim in spec/pinned (TestConformanceChecklistSkeleton)
 - [Phase 01]: [01-05] A15 settled by the pin (naps master IntentBehavior has focus/newWindow/reuse); a self-reloaded frame keeping its session is open row NIP-5D-reload (Phase 4 SBOX-01); config.get before any schema settles only by shim timeout until Phase 8 MISC-02 (P7/A22)
+- [Phase 01 review]: Launcher intents use a reserved `launcherSender` no `d` can produce; napplet inc.emit on intent topics broadcasts per NAP-INC (A23, user decision); pushes are `__nap_push(gen, json)`; per-session `dispatchMu` keeps old-session handlers out of a new session; relay/outbox subs owned per entry (CR-03)
+- [Phase 01 review]: Legacy napps/{raw-id} dirs stay orphaned on upgrade (CR-01 accepted, D-04 reconfirmed)
 
 ### Pending Todos
 
@@ -98,6 +100,10 @@ None yet.
 - [Phase 7]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Phase 6]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
 - [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
+- [Phase 2]: Prompts for a closed/replaced session are not cancelled yet (DEC-1, DISP-04); handler synchronous parts must stay short since `nap.start`/`WindowClosed` wait on `dispatchMu` (Android `WindowClosed` runs on the main thread)
+- [Phase 5]: Storage/config file names can collide across `d` values (CONFORMANCE CF-2, KEY-04)
+- [Phase 6]: Address-form INC senders `<kind>:<pubkey>:<d>` can be imitated by a crafted `d` (review IN-06, A5); T-01-21 checklist test should require fixed rows to cite an existing Test func
+- [Rebuild]: Desktop child and Android AAR must be rebuilt after Phase 1 (old builds never send `nap.start`)
 
 ## Deferred Items
 
@@ -109,6 +115,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T23:55:25.875Z
+Last session: 2026-10-03T14:05:40Z
 Stopped at: Phase 1 complete, ready to plan Phase 2
 Resume file: None

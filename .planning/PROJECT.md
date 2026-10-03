@@ -20,26 +20,25 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - ✓ Login via nsec, NIP-46 nostrconnect/bunker, and Amber (NIP-55) — existing
 - ✓ Napp/napplet discovery, install (sha256-verified blobs), updates, detail pages, and opening by `naddr`/coordinate — existing
 - ✓ Both napplet manifest shapes read: NIP-5D (`path` tags, 35129/15129) and naps WEB-NAPPLET (single blob, `x` hash) — existing
-- ✓ Napplet runtime: sandboxed iframe without `allow-same-origin`, NIP-5D CSP, vendored `@napplet/shim` 0.29.2, trusted srcdoc wrapper, per-window binding token on desktop — existing
+- ✓ Napplet runtime: sandboxed iframe without `allow-same-origin`, NIP-5D CSP, vendored `@napplet/shim` 0.30.0 (byte-identical, function-scoped so only `window.napplet` survives), host-page session start (`nap.start`), trusted srcdoc wrapper, per-window binding token on desktop — existing
 - ✓ NAP domains implemented: `shell`, `relay`, `identity`, `storage`, `theme`, `link`, `common`, `inc`, `intent`, `resource`, `upload`, `media`, `outbox`, `notify`, `config` — existing
 - ✓ Permission prompts and stored grants per napp; public-internet guard (`netguard`) for resource fetches — existing
 - ✓ Dev tab: load, reload, and publish folder napps/napplets — existing
+- ✓ A napp/napplet `d` tag can never escape the data directory: napp dirs are `napps/{sha256(id)}` behind one containment check (`nappBaseDir`/`nappAssetPath`), raw `d` unchanged — Phase 1
+- ✓ Vendored `@napplet/shim` 0.30.0 byte-identical with a hash test; NIP-5D presence detection, no shell handshake; intents delivered over INC per NAP-INTENT master — Phase 1
+- ✓ Pinned spec texts snapshotted under `spec/pinned/`, audit checklist skeleton `spec/CONFORMANCE.md` with Conflicts A1–A23, Android AAR bind on pull requests — Phase 1
 
 ### Active
 
 <!-- This milestone: hardening + strict spec conformance, desktop first. -->
 
 **Conformance**
-- [ ] Vendor `@napplet/shim` 0.30.0 byte-identical to upstream, with a hash test, before auditing (today the file is a hand-patched 0.29.2 build labelled `0.30.0+verdana.2`, and the README sha256 doesn't match it); follow upstream on capability detection (NIP-5D presence, no shell handshake) and merged NAP-INTENT
 - [ ] Audit checklist covering every MUST and SHOULD in the pinned specs, each marked conforming, fixed, or N/A with reason, with spec commit SHAs recorded
 - [ ] All implemented NAP domains (including `notify` and `config`) conform strictly to their specs
 - [ ] NIP-5D runtime contract (sandbox, CSP, boot, envelope handling) conforms strictly
 - [ ] Both manifest shapes conform to their own specs: NIP-5D and WEB-NAPPLET (the future event schema)
 - [ ] Finish NAP-STORAGE artifact-hash keying (started in `18f8f81`): no address-only fallback when the hash is empty, storage cleaned up on update and uninstall, and the update UI says updating resets napplet data
 - [ ] `NAPPLETS.md` domain table reflects what is actually implemented
-
-**Critical (fix first)**
-- [ ] A napp/napplet `d` tag can never escape the data directory: `nappBaseDir` (`backend/backend.go`) joins the raw `d` from `nappletID`/`nappFromNappEvent` into a path, so `d = "../../.."` is an arbitrary file write on install and an arbitrary `RemoveAll` on failed install. Encode `d` only where filesystem paths are built (WEB-NAPPLET forbids normalizing `d` itself)
 
 **Napplet sandbox hardening**
 - [ ] Permission gating enforced centrally in the NAP dispatcher, so a handler cannot be registered without declaring its permission
@@ -95,10 +94,10 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | Conformance measured against NIP-5D + naps (`napplet/naps`), WEB-NAPPLET from `hzrd149/naps` | NIP-5D defines the runtime contract, naps the per-domain messages; WEB-NAPPLET is the future event schema | — Pending |
-| Pin specs to upstream heads by SHA | Reproducible audit against a moving target | — Pending |
+| Pin specs to upstream heads by SHA | Reproducible audit against a moving target | ✓ Good — Phase 1 (`spec/pinned/`) |
 | Conform strictly, including storage keyed by artifact hash | Public release as a spec-correct runtime; accept one-time data reset with a notice | — Pending |
 | Support both manifest shapes | WEB-NAPPLET will become the event schema | — Pending |
-| Upstream `napplet/web` shim is canonical, vendored unmodified | Upstream follows NIP-5D presence detection and merged NAP-INTENT; Verdana follows it and records the NAP-SHELL conflict | — Pending |
+| Upstream `napplet/web` shim is canonical, vendored unmodified | Upstream follows NIP-5D presence detection and merged NAP-INTENT; Verdana follows it and records the NAP-SHELL conflict | ✓ Good — Phase 1 (A18) |
 | NAP-INTENT pinned to naps master; NAP-RESOURCE to PR #80 (also accepting the shim's server-hint shape) | Match the canonical shim; #13 was reverted and replaced by #80 | — Pending |
 | Decrypt events addressed to the user for napplets; never sign napplet ciphertext | NAP-RELAY decrypt MUST and NIP-5D Security #7 | — Pending |
 | No data migrations | Nothing deployed yet | — Pending |
@@ -107,6 +106,9 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Audit depth: MUST + SHOULD; ambiguities recorded, not upstreamed | Traceable checklist without blocking on spec changes | — Pending |
 | Robustness via limits + tests, no fuzzing | Enough for release; keeps CI simple | — Pending |
 | Desktop first | Primary release target; Android hardening later | — Pending |
+| Legacy `napps/{raw-id}` dirs orphaned on upgrade, never swept | Sweeping would reintroduce raw-id paths; reconfirmed despite a `v0.0.0` release (users reinstall) | ✓ Good — Phase 1 (D-04) |
+| Napplet `inc.emit` on intent convention topics broadcasts per NAP-INC (Conflict A23) | Strict spec fidelity; launcher forgery closed instead by a reserved `launcherSender` | ✓ Good — Phase 1 |
+| Napplet sessions start only from the host page (`nap.start`), pushes tagged with session gen, per-session dispatch lock | Frame cannot start/forge sessions; stale-document envelopes and handlers cannot touch the new session | ✓ Good — Phase 1 |
 
 ## Evolution
 
@@ -126,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-02 after initialization*
+*Last updated: 2026-10-03 after Phase 1*
