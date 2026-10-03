@@ -143,8 +143,19 @@ func napIncSubscribe(c *napCall) {
 		c.reply(map[string]any{"error": "invalid topic"})
 		return
 	}
+	// a topic is kept for the session and registered on the window, so its
+	// length and the window's count of them are bounded (WR-06)
+	if len(r.Topic) > incMaxTopicBytes {
+		c.failWith(napErrTooLarge)
+		return
+	}
 	s := c.ci.nap
 	s.mu.Lock()
+	if !s.topics[r.Topic] && len(s.topics) >= incMaxTopics {
+		s.mu.Unlock()
+		c.failWith(napErrRateLimited)
+		return
+	}
 	s.topics[r.Topic] = true
 	s.mu.Unlock()
 	c.ci.registerAction(r.Topic, incActionIdx)

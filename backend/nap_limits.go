@@ -88,6 +88,18 @@ const (
 	// end (I-3). Enforced by napIncChannelOpen (nap_inc.go) for the opener
 	// and the peer.
 	incMaxChannels = 32
+	// incMaxTopics bounds the INC topics a window listens on, and
+	// incMaxTopicBytes the length of one, in bytes: each is kept in the
+	// session and registered as an action on the window. Enforced by
+	// napIncSubscribe (nap_inc.go); a re-subscribe to a topic already held
+	// costs nothing (WR-06).
+	incMaxTopics     = 64
+	incMaxTopicBytes = 256
+	// notifyMaxChannels bounds the notification channels a window registers
+	// (each id and label is already length-capped). Enforced by
+	// napNotifyRegisterChannel (nap_notify.go); re-registering an existing
+	// channel id replaces it and costs nothing (WR-06).
+	notifyMaxChannels = 32
 	// uploadMaxActive bounds the uploads pending or uploading per window
 	// (U-4). Enforced by napUpload (nap_upload.go), before the server lookup
 	// and again when the pending entry is stored.

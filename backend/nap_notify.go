@@ -191,9 +191,15 @@ func napNotifyRegisterChannel(c *napCall) {
 		return
 	}
 	channel.Description = cleanNotificationText(channel.Description, 500)
-	c.ci.nap.mu.Lock()
-	c.ci.nap.notifyChannels[channel.ChannelID] = channel
-	c.ci.nap.mu.Unlock()
+	s := c.ci.nap
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// reply-less: a window already holding notifyMaxChannels other channels
+	// has a new one dropped (WR-06)
+	if _, known := s.notifyChannels[channel.ChannelID]; !known && len(s.notifyChannels) >= notifyMaxChannels {
+		return
+	}
+	s.notifyChannels[channel.ChannelID] = channel
 }
 
 // validateNotification's two refusals; each answers its own fixed string

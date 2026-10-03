@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -666,6 +667,66 @@ func TestIncChannelCap(t *testing.T) {
 		t.Fatalf("an open after a close: %v", got)
 	}
 	recB.wait(t, "inc.channel.opened", incMaxChannels+1)
+}
+
+// TestIncTopicAndNotifyChannelCaps: a window listens on at most
+// incMaxTopics topics of at most incMaxTopicBytes each, and registers at most
+// notifyMaxChannels notification channels; past that inc.subscribe answers
+// in its error shape and notify.channel.register (reply-less) is dropped,
+// while renewing one already held still works (WR-06).
+func TestIncTopicAndNotifyChannelCaps(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "topic-caps")
+	ready(t, ci, rec, 1)
+	settle := func(id string) {
+		t.Helper()
+		post(t, ci, map[string]any{"type": "storage.keys", "id": id})
+		waitID(t, rec, "storage.keys.result", id)
+	}
+
+	long := strings.Repeat("t", incMaxTopicBytes+1)
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "long", "topic": long})
+	if got := waitID(t, rec, "inc.subscribe.result", "long"); got["error"] != napErrTooLarge {
+		t.Fatalf("a topic over %d bytes: %v", incMaxTopicBytes, got)
+	}
+	for i := range incMaxTopics {
+		id := "sub" + strconv.Itoa(i)
+		topic := "topic-" + strconv.Itoa(i)
+		if i == 0 {
+			topic = strings.Repeat("t", incMaxTopicBytes)
+		}
+		post(t, ci, map[string]any{"type": "inc.subscribe", "id": id, "topic": topic})
+		if got := waitID(t, rec, "inc.subscribe.result", id); got["error"] != nil {
+			t.Fatalf("topic %d within the cap: %v", i, got)
+		}
+	}
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "over", "topic": "one-too-many"})
+	if got := waitID(t, rec, "inc.subscribe.result", "over"); got["error"] != napErrRateLimited {
+		t.Fatalf("a topic past the cap: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "again", "topic": "topic-1"})
+	if got := waitID(t, rec, "inc.subscribe.result", "again"); got["error"] != nil {
+		t.Fatalf("re-subscribing a held topic: %v", got)
+	}
+	if _, ok := ci.handlerFor("one-too-many"); ok {
+		t.Fatal("a refused topic was registered on the window")
+	}
+
+	for i := range notifyMaxChannels + 1 {
+		post(t, ci, map[string]any{"type": "notify.channel.register", "channelId": "ch" + strconv.Itoa(i), "label": "Channel"})
+	}
+	post(t, ci, map[string]any{"type": "notify.channel.register", "channelId": "ch0", "label": "Renamed"})
+	settle("after-channels")
+	ci.nap.mu.Lock()
+	n, renamed := len(ci.nap.notifyChannels), ci.nap.notifyChannels["ch0"].Label
+	_, extra := ci.nap.notifyChannels["ch"+strconv.Itoa(notifyMaxChannels)]
+	ci.nap.mu.Unlock()
+	if n != notifyMaxChannels || extra {
+		t.Fatalf("%d channels registered (the one past the cap: %v), want %d", n, extra, notifyMaxChannels)
+	}
+	if renamed != "Renamed" {
+		t.Fatalf("re-registering a held channel: label %q", renamed)
+	}
 }
 
 // holdUploads stores uploads in a window's session as if they were running.
