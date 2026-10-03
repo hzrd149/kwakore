@@ -137,7 +137,7 @@ func TestIdentityFetchPanicStillAnswers(t *testing.T) {
 		panic("boom")
 	})
 	got := identityResult("pubkeys", []string{}, v, err)
-	if !errors.Is(err, errIdentityInternal) || got["error"] != "internal error" || len(got["pubkeys"].([]string)) != 0 {
+	if !errors.Is(err, errIdentityInternal) || got["error"] != napErrInternal || len(got["pubkeys"].([]string)) != 0 {
 		t.Fatalf("result = %v", got)
 	}
 	if got := identityResult("profile", nil, nil, nil); len(got) != 1 || got["profile"] != nil {

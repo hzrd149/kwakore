@@ -39,7 +39,7 @@ func napConfigRegisterSchema(c *napCall) {
 		Version *float64        `json:"version"`
 	}
 	if err := c.decode(&r); err != nil {
-		c.reply(map[string]any{"ok": false, "code": napconfig.CodeInvalidSchema, "error": "invalid request"})
+		c.reply(map[string]any{"ok": false, "code": napconfig.CodeInvalidSchema, "error": napErrInvalid})
 		return
 	}
 	var version *uint64
@@ -131,11 +131,12 @@ func napConfigOpenSettings(c *napCall) {
 		}
 	}
 	nappID := c.ci.napp.ID
-	go func() {
+	// config.openSettings is reply-less: a panic here has nobody to answer
+	safeGo(nil, "open settings", func() {
 		if err := openSettings(nappID, section); err != nil {
 			log.Warn().Err(err).Str("napplet", nappID).Msg("could not open napplet settings")
 		}
-	}()
+	})
 }
 
 // pushConfigValues gives every subscribed window of a napp its values.

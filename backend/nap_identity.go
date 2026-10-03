@@ -37,11 +37,13 @@ func init() {
 	})
 }
 
-// The error strings NAP-IDENTITY names for results the shell can't fulfill.
+// The errors identity reads fail with. The first two are NAP-IDENTITY's own
+// example strings for results the shell can't fulfill; the third is the
+// generic internal failure code (D-07).
 var (
 	errIdentityTimeout  = errors.New("relay timeout")
 	errUnknownListType  = errors.New("unsupported list type")
-	errIdentityInternal = errors.New("internal error")
+	errIdentityInternal = errors.New("internal-error")
 )
 
 // currentUser is the signed-in pubkey, if there is one.
@@ -428,14 +430,15 @@ func identityBadges(ctx context.Context, pk nostr.PubKey) (any, error) {
 	var wg sync.WaitGroup
 	for i, aw := range awards {
 		wg.Add(1)
-		go func() {
+		safeGo(nil, "badge definition", func() {
 			defer wg.Done()
+			// stored first, so a panic in the lookup still leaves the award
 			b := map[string]any{"id": aw.addr, "awardedBy": aw.issuer.Hex()}
+			out[i] = b
 			if def := fetchAddressable(ctx, 30009, aw.issuer, aw.d); def != nil {
 				badgeDefinition(b, def)
 			}
-			out[i] = b
-		}()
+		})
 	}
 	wg.Wait()
 	for _, b := range out {

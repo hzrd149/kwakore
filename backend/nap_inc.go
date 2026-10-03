@@ -293,7 +293,11 @@ func incForget(ci *Instance, reason string) {
 	incMu.Unlock()
 	for _, ch := range gone {
 		peer, id := ch.other(ci), ch.id
-		go peer.napPush(map[string]any{"type": "inc.channel.closed", "channelId": id, "reason": reason})
+		// this window's session lock is held: the peer is told from a
+		// goroutine, never inline
+		safeGo(nil, "inc channel closed", func() {
+			peer.napPush(map[string]any{"type": "inc.channel.closed", "channelId": id, "reason": reason})
+		})
 	}
 	for topic := range ci.nap.topics {
 		ci.unregisterAction(topic)
