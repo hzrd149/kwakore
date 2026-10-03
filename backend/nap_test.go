@@ -28,6 +28,7 @@ import (
 	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/nipb7/blossom"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 	"verdana/backend/napconfig"
 	"verdana/backend/webview"
 )
@@ -1811,6 +1812,11 @@ func (h *napLinkTestHost) OpenLink(url string) error {
 func TestNapLinkResultsAndLabelSanitizing(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "link-results")
+	// more link.opens than the default link bucket holds: this test is about
+	// result shapes, not rate limits (TestNapCategoryLimitRateLimits)
+	withLimits(t, ci, limitsWith(napEnvelopeLimit, map[napLimitClass]napLimitSpec{
+		limitLink: {rate.Every(time.Second), 100},
+	}))
 	ready(t, ci, rec, 1)
 	key := RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}
 	t.Cleanup(func() { clearSessionRule(key) })

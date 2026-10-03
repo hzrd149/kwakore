@@ -219,6 +219,10 @@ type napRoute struct {
 	// deadline is how long a prompt this type raises may stay open; 0 means
 	// napDeadlineDefault (D-20)
 	deadline time.Duration
+	// limit is the category bucket napDispatch charges one token per request
+	// (D-14); limitNone charges only the envelope bucket. Prompts, cold
+	// launches, notifications and openSettings are charged by their handlers.
+	limit napLimitClass
 }
 
 // maxBytes is the largest envelope this route accepts; one byte more is
@@ -292,7 +296,7 @@ var napRouteSpecs = map[string]napRoute{
 	"storage.remove": {gate: napGateStorage, fail: failShape(failErr), deadline: napDeadlineStorage},
 	"storage.keys":   {gate: napGateStorage, fail: failShape(failErr), deadline: napDeadlineStorage},
 
-	"link.open": {gate: perCallGate(PermOpenLink), fail: failShape(failLink)},
+	"link.open": {gate: perCallGate(PermOpenLink), fail: failShape(failLink), limit: limitLink},
 
 	"config.registerSchema": {gate: openGate("schema declaration; reply shapes MISC-02 Phase 8"), fail: failShape(failOkFalseCode), maxRaw: napMaxRawRegisterSchema},
 	"config.get":            {gate: openGate("config read; reply shape MISC-02 Phase 8 (A22)"), fail: failShape(failSchemaError)},
@@ -313,10 +317,10 @@ var napRouteSpecs = map[string]napRoute{
 	"common.decodeNip19": {gate: napGateNip19, fail: failShape(failOkFalse)},
 	"common.getProfile":  {gate: openGate("public profile read"), fail: failShape(failOkFalse).withFields(map[string]any{"pubkey": ""})},
 	"common.follows":     {gate: openGate("user's public follow list; consent MISC-03 Phase 8"), fail: failShape(failOkFalse).withFields(map[string]any{"pubkeys": []any{}})},
-	"common.follow":      {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
-	"common.unfollow":    {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
-	"common.react":       {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
-	"common.report":      {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
+	"common.follow":      {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), limit: limitPublish},
+	"common.unfollow":    {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), limit: limitPublish},
+	"common.react":       {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), limit: limitPublish},
+	"common.report":      {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), limit: limitPublish},
 
 	// relay.closed reasons carry NIP-01's machine-readable prefixes
 	"relay.subscribe": {gate: napGateRelayRead, fail: lifecycleShape("relay.closed").withCodes(map[string]string{
@@ -329,8 +333,8 @@ var napRouteSpecs = map[string]napRoute{
 	"relay.close": {gate: openGate("own subscription; relay.closed push decided in RELY-06 Phase 6 (D-21)"), fail: failShape(failNone)},
 	"relay.query": {gate: napGateRelayRead, fail: failShape(failErr).withFields(map[string]any{"events": []any{}})},
 	// publishing has no shim timeout, so its prompt keeps the launcher's own
-	"relay.publish":          {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout},
-	"relay.publishEncrypted": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout},
+	"relay.publish":          {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout, limit: limitPublish},
+	"relay.publishEncrypted": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout, limit: limitPublish},
 
 	"outbox.getEvent":      {gate: napGateOutboxRead, fail: failShape(failErr)},
 	"outbox.resolveRelays": {gate: napGateOutboxRead, fail: failShape(failErr)},
@@ -338,7 +342,7 @@ var napRouteSpecs = map[string]napRoute{
 	"outbox.subscribe":     {gate: napGateOutboxRead, fail: lifecycleShape("outbox.closed")},
 	"outbox.close":         {gate: napGateOutboxRead, fail: lifecycleShape("outbox.closed")},
 	"outbox.publish": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse).withCodes(map[string]string{napErrDenied: "publish denied"}),
-		maxRaw: napMaxRawPublish},
+		maxRaw: napMaxRawPublish, limit: limitPublish},
 
 	// NAP-IDENTITY: getPublicKey MUST always succeed, so it fails with the
 	// signed-out answer and no error
@@ -354,17 +358,17 @@ var napRouteSpecs = map[string]napRoute{
 
 	"intent.invoke": {gate: openGate("PermDispatch routing; handler authorization INTN-01 Phase 6"), fail: failShape(failIntent).withCodes(map[string]string{
 		napErrDenied: "user cancelled", napErrInternal: "invoke failed",
-	})},
+	}), limit: limitIntent},
 	"intent.available": {gate: napGateIntentFind, fail: failShape(failErr)},
 	"intent.handlers":  {gate: napGateIntentFind, fail: failShape(failErr)},
 
-	"inc.emit":              {gate: openGate("INC broadcast; consent INTN-03 Phase 6"), fail: failShape(failNone)},
+	"inc.emit":              {gate: openGate("INC broadcast; consent INTN-03 Phase 6"), fail: failShape(failNone), limit: limitIncEmit},
 	"inc.subscribe":         {gate: openGate("INC topic subscription; INTN-03 Phase 6"), fail: failShape(failErr)},
 	"inc.unsubscribe":       {gate: napGateIncOwn, fail: failShape(failNone)},
-	"inc.channel.emit":      {gate: napGateIncOwn, fail: failShape(failNone)},
-	"inc.channel.broadcast": {gate: napGateIncOwn, fail: failShape(failNone)},
+	"inc.channel.emit":      {gate: napGateIncOwn, fail: failShape(failNone), limit: limitIncEmit},
+	"inc.channel.broadcast": {gate: napGateIncOwn, fail: failShape(failNone), limit: limitIncEmit},
 	"inc.channel.close":     {gate: napGateIncOwn, fail: failShape(failNone)},
-	"inc.channel.open":      {gate: openGate("INC channel consent INTN-03 Phase 6"), fail: failShape(failErr)},
+	"inc.channel.open":      {gate: openGate("INC channel consent INTN-03 Phase 6"), fail: failShape(failErr), limit: limitIncOpen},
 	// the shim drops an inc.channel.list answer without a channels list
 	"inc.channel.list": {gate: openGate("own INC channels; INTN-03 Phase 6"), fail: failShape(failDefault).withFields(map[string]any{"channels": []any{}})},
 
@@ -372,7 +376,7 @@ var napRouteSpecs = map[string]napRoute{
 	"upload.status": {gate: napGateUploadOwn, fail: failShape(failErr)},
 	"upload.upload": {gate: perCallGate(PermUpload), fail: failShape(failErr).withCodes(map[string]string{
 		napErrDenied: "policy denied", napErrTooLarge: "file too large",
-	}), maxRaw: napMaxRawUpload, deadline: promptTimeout},
+	}), maxRaw: napMaxRawUpload, deadline: promptTimeout, limit: limitUpload},
 
 	"media.session.create": {
 		gate: dynamicGate("napplet-owned sessions are bookkeeping; shell-owned playback needs PermMedia; MDIA-01..03 Phase 7", PermMedia),
@@ -387,10 +391,10 @@ var napRouteSpecs = map[string]napRoute{
 	"resource.info": {gate: openGate("resource capability"), fail: failShape(failTypedErr).withCodes(map[string]string{napErrRateLimited: "quota-exceeded"})},
 	"resource.bytes": {gate: napGateFetch, fail: failShape(failTypedErr).withCodes(map[string]string{
 		napErrRateLimited: "quota-exceeded", napErrDenied: "blocked-by-policy",
-	})},
+	}), limit: limitResource},
 	"resource.bytesMany": {gate: napGateFetch, fail: failShape(failTypedErr).withCodes(map[string]string{
 		napErrRateLimited: "quota-exceeded", napErrDenied: "blocked-by-policy",
-	})},
+	}), limit: limitResource},
 	// its id names the request it cancels, so it is never answered
 	"resource.cancel": {gate: openGate("cancels the napplet's own request; its id names another request"), fail: failShape(failNone)},
 }

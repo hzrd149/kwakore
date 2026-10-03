@@ -112,6 +112,11 @@ type napSession struct {
 	configSubscribed bool
 	configOpenedAt   time.Time
 
+	// limits are the window's rate limits (nap_limits.go). Created once
+	// with the session and never reset: a reload must not refill them, the
+	// same reason configOpenedAt survives resets.
+	limits *napLimiter
+
 	// queue serializes envelopes; started lazily by the first one
 	queue chan *napCall
 	once  sync.Once
@@ -138,7 +143,7 @@ type napSub struct {
 }
 
 func newNapSession() *napSession {
-	s := &napSession{}
+	s := &napSession{limits: newNapLimiter()}
 	s.resetLocked()
 	return s
 }
@@ -405,7 +410,12 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 // bound itself after decoding, whatever the host page did. What cannot be
 // answered (not an envelope, an unknown type, a bad id, a missing correlator)
 // is dropped without a word: unknown input must never tell a napplet anything
-// (NIP-5D). What can be answered but is refused gets its route's failure.
+// (NIP-5D). What can be answered but is refused (colliding keys, too large,
+// over the envelope bucket, a full queue) gets its route's failure.
+//
+// It runs inline on the window's reader, which also carries prompt answers
+// (HandleMessage), so nothing in it may block: a flood that fills the queue
+// is answered rate-limited instead of waiting for room (D-16).
 func (ci *Instance) napEnqueue(params string) {
 	s := ci.nap
 	if s == nil {
@@ -454,7 +464,7 @@ func (ci *Instance) napEnqueue(params string) {
 	}
 
 	s.once.Do(func() {
-		s.queue = make(chan *napCall, 256)
+		s.queue = make(chan *napCall, napQueueSlots)
 		go ci.napWorker()
 	})
 
@@ -475,10 +485,24 @@ func (ci *Instance) napEnqueue(params string) {
 		c.failWith(napErrTooLarge)
 		return
 	}
+	// every envelope counts against the window's bucket, whatever its type
+	// (D-14); a reply-less one over it is simply dropped
+	if !s.limits.allowEnvelope() {
+		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("NAP envelope over the window's rate limit")
+		c.failWith(napErrRateLimited)
+		return
+	}
 
 	select {
-	case s.queue <- c:
 	case <-ci.gone:
+		return
+	default:
+	}
+	select {
+	case s.queue <- c:
+	default:
+		napSampled().Warn().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("NAP queue full, answering rate-limited")
+		c.failWith(napErrRateLimited)
 	}
 }
 
@@ -531,6 +555,13 @@ func (ci *Instance) napDispatch(c *napCall) {
 			c.failWith(napErrInternal)
 		}
 	}()
+	// the route's category bucket (D-14), charged before anything else
+	// about the request is looked at; a reply-less type over it is dropped
+	if !s.limits.allow(route.limit, 1) {
+		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("NAP request over its category rate limit")
+		c.failWith(napErrRateLimited)
+		return
+	}
 	// the gate step (D-04): a stored denial answers in the route's denial
 	// shape and the handler never runs. It only reads what the user already
 	// decided, never asks: this runs under dispatchMu.
