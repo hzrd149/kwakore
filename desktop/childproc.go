@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -10,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"verdana/backend"
+
+	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
 
 // On the desktop a napp window is its own process: a small webview shell
@@ -126,19 +130,29 @@ func (ct *childTransport) Close() {
 func (ct *childTransport) Focus() {}
 
 // readChild hands everything the child says to the backend, until it exits.
+// The child renders untrusted napplet content, so each line it writes is
+// capped at backend.MaxInboundWireMsg; one that is longer ends the window.
 func readChild(ct *childTransport, stdout io.ReadCloser) {
-	dec := json.NewDecoder(stdout)
-	for {
+	err := wireline.Read(stdout, backend.MaxInboundWireMsg, func(line []byte) {
 		var m backend.WireMsg
-		if err := dec.Decode(&m); err != nil {
-			log.Debug().Str("instance", ct.instance).Err(err).Msg("child stdout ended")
-			break
+		if err := json.Unmarshal(line, &m); err != nil {
+			log.Debug().Str("instance", ct.instance).Err(err).Msg("skipping unreadable line from child")
+			return
 		}
 		if ct.settings {
 			backend.HandleSettingsMessage(ct.instance, m)
 		} else {
 			backend.HandleMessage(ct.instance, m)
 		}
+	})
+	if errors.Is(err, bufio.ErrTooLong) {
+		// we stop reading here, so the child may block forever writing to
+		// a full pipe and cmd.Wait below would never return (the window
+		// would stay on screen): kill it before anything waits on it
+		log.Error().Str("instance", ct.instance).Msg("child sent an overlong line; closing its window")
+		ct.cmd.Process.Kill()
+	} else {
+		log.Debug().Str("instance", ct.instance).Err(err).Msg("child stdout ended")
 	}
 
 	if ct.settings {
