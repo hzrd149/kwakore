@@ -334,21 +334,24 @@ func TestNapTheme(t *testing.T) {
 // so an unanswered request would leave the napplet waiting for good.
 func TestNapPanickingHandlerStillReplies(t *testing.T) {
 	setupNapTest(t)
-	napHandlers["test.boom"] = func(*napCall) { panic("boom") }
-	napHandlers["test.asyncBoom"] = func(c *napCall) { c.async(func(context.Context) { panic("boom") }) }
-	t.Cleanup(func() {
-		delete(napHandlers, "test.boom")
-		delete(napHandlers, "test.asyncBoom")
+	withTestRoute(t, "test.boom", napRoute{
+		h:    func(*napCall) { panic("boom") },
+		gate: openGate("test"), fail: failShape(failOkFalse),
+	})
+	withTestRoute(t, "test.asyncBoom", napRoute{
+		h:    func(c *napCall) { c.async(func(context.Context) { panic("boom") }) },
+		gate: openGate("test"), fail: failShape(failOkFalse),
 	})
 	ci, rec := openNapplet(t, "boom")
 	ready(t, ci, rec, 1)
 
+	// both answer in the route's own failure shape, with the generic code
 	post(t, ci, map[string]any{"type": "test.boom", "id": "b1"})
-	if got := rec.wait(t, "test.boom.result", 1); got["id"] != "b1" || got["error"] == nil {
+	if got := rec.wait(t, "test.boom.result", 1); got["id"] != "b1" || got["ok"] != false || got["error"] != napErrInternal {
 		t.Fatalf("sync panic: %v", got)
 	}
 	post(t, ci, map[string]any{"type": "test.asyncBoom", "id": "b2"})
-	if got := rec.wait(t, "test.asyncBoom.result", 1); got["id"] != "b2" || got["error"] == nil {
+	if got := rec.wait(t, "test.asyncBoom.result", 1); got["id"] != "b2" || got["ok"] != false || got["error"] != napErrInternal {
 		t.Fatalf("async panic: %v", got)
 	}
 }
@@ -887,7 +890,7 @@ func TestNapStartDropsEnvelopesFromThePreviousDocument(t *testing.T) {
 	ready(t, ci, rec, 2)
 
 	// an envelope the outgoing document queued before the restart
-	ci.napDispatch(napCall{
+	ci.napDispatch(&napCall{
 		ci: ci, gen: oldGen, ctx: oldCtx, Type: "storage.keys",
 		ID: json.RawMessage(`"old"`), raw: json.RawMessage(`{"type":"storage.keys","id":"old"}`),
 	})

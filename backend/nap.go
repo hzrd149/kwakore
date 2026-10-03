@@ -111,7 +111,7 @@ type napSession struct {
 	configOpenedAt   time.Time
 
 	// queue serializes envelopes; started lazily by the first one
-	queue chan napCall
+	queue chan *napCall
 	once  sync.Once
 
 	// beforeHandler, when set, runs on the worker after the gen check and
@@ -186,6 +186,9 @@ type napCall struct {
 	ci  *Instance
 	gen int
 	ctx context.Context
+	// route is the declared route napDispatch found for Type (nap_route.go);
+	// nil until then
+	route *napRoute
 
 	Type string
 	// ID is echoed back verbatim: the shim's ids are uuid strings, but
@@ -199,19 +202,10 @@ type napCall struct {
 // part also runs under dispatchMu.RLock, so napStart and napClosed wait for
 // it: a handler that prompts or fetches inline would stall the host page's
 // nap.start and WindowClosed (on Android, the main thread in onDestroy).
+//
+// Handlers are registered through handleNap (nap_route.go), which joins each
+// with its declared route: the gate it needs and the shape it fails in.
 type napHandler func(c *napCall)
-
-var napHandlers = map[string]napHandler{}
-
-// handleNap registers handlers; each nap_*.go file does it in its init.
-func handleNap(types map[string]napHandler) {
-	for t, h := range types {
-		if _, dup := napHandlers[t]; dup {
-			panic("duplicate NAP handler for " + t)
-		}
-		napHandlers[t] = h
-	}
-}
 
 func (c *napCall) decode(v any) error { return json.Unmarshal(c.raw, v) }
 
@@ -238,26 +232,6 @@ func (c *napCall) replyAs(typ string, fields map[string]any) {
 	c.ci.napPushGen(c.gen, c.envelope(typ, fields))
 }
 
-// fail answers a request whose handler broke. The shim gives up on its own
-// after its per-request timeout (30 s, 5 s for storage); answering a broken
-// request at once keeps the napplet from waiting that out. A second answer
-// after a real one is harmless: the shim has already settled that id.
-func (c *napCall) fail() {
-	if len(c.ID) == 0 {
-		return
-	}
-	switch c.Type {
-	case "config.get":
-		c.replyAs("config.schemaError", map[string]any{"code": "internal-error", "error": "internal error"})
-	case "notify.permission.request":
-		c.replyAs("notify.permission.result", map[string]any{"granted": false})
-	case "resource.bytes", "resource.bytesMany", "relay.publish":
-		c.replyAs(c.Type+".error", map[string]any{"ok": false, "error": "internal-error"})
-	default:
-		c.reply(map[string]any{"ok": false, "error": "internal error"})
-	}
-}
-
 // async runs fn off the queue, on the session's context: a reset or a closed
 // window cancels it, and whatever it replies after that is dropped.
 func (c *napCall) async(fn func(ctx context.Context)) {
@@ -265,7 +239,7 @@ func (c *napCall) async(fn func(ctx context.Context)) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error().Interface("panic", r).Str("type", c.Type).Msg("NAP handler panicked")
-				c.fail()
+				c.failWith(napErrInternal)
 			}
 		}()
 		fn(c.ctx)
@@ -374,12 +348,12 @@ func (ci *Instance) napEnqueue(params string) {
 	}
 
 	s.once.Do(func() {
-		s.queue = make(chan napCall, 256)
+		s.queue = make(chan *napCall, 256)
 		go ci.napWorker()
 	})
 
 	s.mu.Lock()
-	call := napCall{ci: ci, gen: s.gen, ctx: s.ctx, Type: head.Type, ID: head.ID, raw: raw}
+	call := &napCall{ci: ci, gen: s.gen, ctx: s.ctx, Type: head.Type, ID: head.ID, raw: raw}
 	s.mu.Unlock()
 
 	select {
@@ -404,7 +378,7 @@ func (ci *Instance) napWorker() {
 // starts only through nap.start, so a frame-sent shell.ready (or anything
 // else the shim does not define) is an unknown type like any other, dropped
 // silently (NIP-5D).
-func (ci *Instance) napDispatch(c napCall) {
+func (ci *Instance) napDispatch(c *napCall) {
 	s := ci.nap
 	// held until the handler returns, so no session starts or ends between
 	// the gen check and the handler's writes to session state
@@ -420,22 +394,48 @@ func (ci *Instance) napDispatch(c napCall) {
 		return
 	}
 
-	h := napHandlers[c.Type]
-	if h == nil {
+	route := napRoutes[c.Type]
+	if route == nil {
 		// unknown types are dropped silently, never answered
 		log.Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
 		return
 	}
+	c.route = route
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error().Interface("panic", r).Str("type", c.Type).Msg("NAP handler panicked")
-			c.fail()
+			c.failWith(napErrInternal)
 		}
 	}()
-	if s.beforeHandler != nil {
-		s.beforeHandler(&c)
+	// the gate step (D-04): a stored denial answers in the route's denial
+	// shape and the handler never runs. It only reads what the user already
+	// decided, never asks: this runs under dispatchMu.
+	if ci.napDeniedUpFront(route.gate) {
+		c.failWith(napErrDenied)
+		return
 	}
-	h(&c)
+	if s.beforeHandler != nil {
+		s.beforeHandler(c)
+	}
+	route.h(c)
+}
+
+// napDeniedUpFront says whether the user already refused what a Session or
+// PerCall route needs: a stored "deny" rule for the napp, or this session's
+// answer of no. Open routes need nothing, and Dynamic ones depend on the
+// payload, so they are never refused here.
+func (ci *Instance) napDeniedUpFront(g napGate) bool {
+	if g.kind != napGateSession && g.kind != napGatePerCall {
+		return false
+	}
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: g.perm}); ok && rule.Decision == DecisionDeny {
+		return true
+	}
+	s := ci.nap
+	s.mu.Lock()
+	granted, decided := s.grants[g.perm]
+	s.mu.Unlock()
+	return decided && !granted
 }
 
 // napStart answers nap.start: the host page is about to create a fresh frame

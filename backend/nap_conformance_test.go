@@ -135,7 +135,7 @@ func envelopeKeyOrder(raw []byte) ([]string, error) {
 
 // conformanceProblems is everything wrong with the launcher's handler table
 // against the fixture, each group sorted so failures read the same every run.
-func conformanceProblems(fx conformanceFixture, handlers map[string]napHandler, domains []string, shimVersion string) []string {
+func conformanceProblems(fx conformanceFixture, handlers map[string]*napRoute, domains []string, shimVersion string) []string {
 	regen := "regenerate the conformance fixture for shim " + shimVersion
 	var problems []string
 	if fx.Package != "@napplet/conformance" {
@@ -226,9 +226,9 @@ func conformanceProblems(fx conformanceFixture, handlers map[string]napHandler, 
 
 // TestNAPHandlersCoverReferenceEnvelopes fails when the vendored shim can send
 // a request type that the launcher neither handles nor explicitly marks N/A.
-// It must never run in parallel: TestNapPanickingHandlerStillReplies adds
-// test.* handlers to napHandlers for its duration, and this test only reads
-// napHandlers, napDomains and the fixture.
+// It must never run in parallel: tests add test.* routes to napRoutes for
+// their duration (withTestRoute), and this test only reads napRoutes,
+// napDomains and the fixture.
 func TestNAPHandlersCoverReferenceEnvelopes(t *testing.T) {
 	fx, raw := loadConformanceFixture(t)
 
@@ -240,16 +240,16 @@ func TestNAPHandlersCoverReferenceEnvelopes(t *testing.T) {
 		t.Errorf("fixture envelope keys are not stored sorted; regenerate the conformance fixture for shim %s", webview.ShimVersion)
 	}
 
-	for _, p := range conformanceProblems(fx, napHandlers, napDomains, webview.ShimVersion) {
+	for _, p := range conformanceProblems(fx, napRoutes, napDomains, webview.ShimVersion) {
 		t.Error(p)
 	}
 
 	// the oracle itself: each way the table or the fixture can go wrong is
 	// caught, so a passing run means something
-	mutate := func(name, want string, edit func(fx *conformanceFixture, handlers map[string]napHandler, domains *[]string)) {
+	mutate := func(name, want string, edit func(fx *conformanceFixture, handlers map[string]*napRoute, domains *[]string)) {
 		t.Run(name, func(t *testing.T) {
 			fx2, _ := loadConformanceFixture(t)
-			handlers := maps.Clone(napHandlers)
+			handlers := maps.Clone(napRoutes)
 			domains := slices.Clone(napDomains)
 			edit(&fx2, handlers, &domains)
 			problems := conformanceProblems(fx2, handlers, domains, webview.ShimVersion)
@@ -262,23 +262,23 @@ func TestNAPHandlersCoverReferenceEnvelopes(t *testing.T) {
 		})
 	}
 	mutate("missing handler", "relay.publish but it has no handler",
-		func(_ *conformanceFixture, h map[string]napHandler, _ *[]string) { delete(h, "relay.publish") })
+		func(_ *conformanceFixture, h map[string]*napRoute, _ *[]string) { delete(h, "relay.publish") })
 	mutate("missing bidirectional handler", "media.command but it has no handler",
-		func(_ *conformanceFixture, h map[string]napHandler, _ *[]string) { delete(h, "media.command") })
+		func(_ *conformanceFixture, h map[string]*napRoute, _ *[]string) { delete(h, "media.command") })
 	mutate("shim drift", "regenerate the conformance fixture for shim "+webview.ShimVersion,
-		func(fx *conformanceFixture, _ map[string]napHandler, _ *[]string) { fx.Shim = "0.29.2" })
+		func(fx *conformanceFixture, _ map[string]*napRoute, _ *[]string) { fx.Shim = "0.29.2" })
 	mutate("version drift", "fixture version",
-		func(fx *conformanceFixture, _ map[string]napHandler, _ *[]string) { fx.Version = "0.16.0" })
+		func(fx *conformanceFixture, _ map[string]*napRoute, _ *[]string) { fx.Version = "0.16.0" })
 	mutate("empty fixture", "no napplet -> shell (out) envelopes",
-		func(fx *conformanceFixture, _ map[string]napHandler, _ *[]string) { fx.Envelopes = nil })
+		func(fx *conformanceFixture, _ map[string]*napRoute, _ *[]string) { fx.Envelopes = nil })
 	mutate("stray handler", "handler test.stray answers a type the shim never sends",
-		func(_ *conformanceFixture, h map[string]napHandler, _ *[]string) {
-			h["test.stray"] = func(*napCall) {}
+		func(_ *conformanceFixture, h map[string]*napRoute, _ *[]string) {
+			h["test.stray"] = &napRoute{h: func(*napCall) {}, gate: openGate("test"), fail: failShape(failErr)}
 		})
 	mutate("N/A domain offered", "domain dm is both offered",
-		func(_ *conformanceFixture, _ map[string]napHandler, d *[]string) { *d = append(*d, "dm") })
+		func(_ *conformanceFixture, _ map[string]*napRoute, d *[]string) { *d = append(*d, "dm") })
 	mutate("unknown domain", "fixture domain relay is neither",
-		func(_ *conformanceFixture, _ map[string]napHandler, d *[]string) {
+		func(_ *conformanceFixture, _ map[string]*napRoute, d *[]string) {
 			*d = slices.DeleteFunc(*d, func(s string) bool { return s == "relay" })
 		})
 }
