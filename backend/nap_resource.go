@@ -184,6 +184,14 @@ func napResourceBytes(c *napCall) {
 	c.async(func(context.Context) {
 		defer done()
 		res, err := fetchResource(ctx, c, r.URL, r.Servers)
+		if ctx.Err() != nil {
+			// cancelled (resource.cancel, or the session ended): a late
+			// terminal envelope for a cancelled id MUST be dropped
+			// (NAP-RESOURCE), whether the fetch failed for it or finished
+			// in the race, the same as resource.bytesMany (WR-03)
+			c.drop()
+			return
+		}
 		if err != nil {
 			c.replyAs("resource.bytes.error", resourceErrFields(err))
 			return

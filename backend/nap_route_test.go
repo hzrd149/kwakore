@@ -513,6 +513,40 @@ func TestNapRepliesExactlyOnce(t *testing.T) {
 			t.Fatalf("a cancelled bulk fetch was answered: %v", got)
 		}
 	})
+
+	t.Run("cancelled resource.bytes is never answered", func(t *testing.T) {
+		started := make(chan struct{}, 1)
+		returned := make(chan struct{})
+		prev := resourceClient
+		resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			started <- struct{}{}
+			<-r.Context().Done()
+			defer close(returned)
+			return nil, r.Context().Err()
+		})}
+		t.Cleanup(func() { resourceClient = prev })
+		ci.nap.mu.Lock()
+		ci.nap.grants[PermFetch] = true
+		ci.nap.mu.Unlock()
+
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "one", "url": "https://8.8.8.8/blob"})
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("the fetch never started")
+		}
+		post(t, ci, map[string]any{"type": "resource.cancel", "id": "one"})
+		select {
+		case <-returned:
+		case <-time.After(3 * time.Second):
+			t.Fatal("the cancelled fetch never returned")
+		}
+		napSettled(t, ci, rec)
+		time.Sleep(100 * time.Millisecond)
+		if got := append(rec.find("resource.bytes.result"), rec.find("resource.bytes.error")...); len(got) != 0 {
+			t.Fatalf("a cancelled fetch was answered: %v", got)
+		}
+	})
 }
 
 type napRoundTripFunc func(*http.Request) (*http.Response, error)
