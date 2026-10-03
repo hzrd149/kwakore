@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 )
 
 // The NAP route table (D-01). A request type runs only through a declared
@@ -206,11 +207,49 @@ func (f napFailShape) code(generic string) string {
 	return generic
 }
 
-// napRoute is one request type: its handler, its gate and its failure shape.
+// napRoute is one request type: its handler, its gate, its failure shape,
+// and its bounds.
 type napRoute struct {
 	h    napHandler
 	gate napGate
 	fail napFailShape
+	// maxRaw caps the envelope's bytes for this type; 0 means
+	// napDefaultMaxRaw (D-09, nap_limits.go)
+	maxRaw int
+	// deadline is how long a prompt this type raises may stay open; 0 means
+	// napDeadlineDefault (D-20)
+	deadline time.Duration
+}
+
+// maxBytes is the largest envelope this route accepts; one byte more is
+// answered too-large.
+func (r *napRoute) maxBytes() int {
+	if r.maxRaw > 0 {
+		return r.maxRaw
+	}
+	return napDefaultMaxRaw
+}
+
+// promptDeadline is how long a prompt raised for this route may stay open.
+func (r *napRoute) promptDeadline() time.Duration {
+	if r.deadline > 0 {
+		return r.deadline
+	}
+	return napDeadlineDefault
+}
+
+// correlator names the envelope key a failure has to echo: "subId" for a
+// subscription (its closed push names it), "" for a type that is never
+// answered, "id" for everything else. A request that needs one and carries
+// none cannot be answered at all, so napEnqueue drops it (A16).
+func (r *napRoute) correlator() string {
+	switch r.fail.kind {
+	case failLifecycle:
+		return "subId"
+	case failNone:
+		return ""
+	}
+	return "id"
 }
 
 // autoFails says whether a request the handler left unanswered is failed for
@@ -246,14 +285,16 @@ var napRouteSpecs = map[string]napRoute{
 		"theme": map[string]any{"colors": map[string]any{"background": "#ffffff", "text": "#111111", "primary": "#111111"}},
 	})},
 
-	"storage.get":    {gate: napGateStorage, fail: failShape(failErr)},
-	"storage.set":    {gate: napGateStorage, fail: failShape(failErr).withCodes(map[string]string{napErrTooLarge: "quota exceeded"})},
-	"storage.remove": {gate: napGateStorage, fail: failShape(failErr)},
-	"storage.keys":   {gate: napGateStorage, fail: failShape(failErr)},
+	// storage's shim times out after 5 s, so its prompts may not outlive that
+	"storage.get": {gate: napGateStorage, fail: failShape(failErr), deadline: napDeadlineStorage},
+	"storage.set": {gate: napGateStorage, fail: failShape(failErr).withCodes(map[string]string{napErrTooLarge: "quota exceeded"}),
+		maxRaw: napMaxRawStorageSet, deadline: napDeadlineStorage},
+	"storage.remove": {gate: napGateStorage, fail: failShape(failErr), deadline: napDeadlineStorage},
+	"storage.keys":   {gate: napGateStorage, fail: failShape(failErr), deadline: napDeadlineStorage},
 
 	"link.open": {gate: perCallGate(PermOpenLink), fail: failShape(failLink)},
 
-	"config.registerSchema": {gate: openGate("schema declaration; reply shapes MISC-02 Phase 8"), fail: failShape(failOkFalseCode)},
+	"config.registerSchema": {gate: openGate("schema declaration; reply shapes MISC-02 Phase 8"), fail: failShape(failOkFalseCode), maxRaw: napMaxRawRegisterSchema},
 	"config.get":            {gate: openGate("config read; reply shape MISC-02 Phase 8 (A22)"), fail: failShape(failSchemaError)},
 	"config.subscribe":      {gate: napGateConfigSub, fail: failShape(failNone)},
 	"config.unsubscribe":    {gate: napGateConfigSub, fail: failShape(failNone)},
@@ -285,17 +326,19 @@ var napRouteSpecs = map[string]napRoute{
 		napErrRateLimited: "rate-limited: rate-limited",
 		napErrDenied:      "blocked: user-denied",
 	})},
-	"relay.close":            {gate: openGate("own subscription; relay.closed push decided in RELY-06 Phase 6 (D-21)"), fail: failShape(failNone)},
-	"relay.query":            {gate: napGateRelayRead, fail: failShape(failErr).withFields(map[string]any{"events": []any{}})},
-	"relay.publish":          {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
-	"relay.publishEncrypted": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse)},
+	"relay.close": {gate: openGate("own subscription; relay.closed push decided in RELY-06 Phase 6 (D-21)"), fail: failShape(failNone)},
+	"relay.query": {gate: napGateRelayRead, fail: failShape(failErr).withFields(map[string]any{"events": []any{}})},
+	// publishing has no shim timeout, so its prompt keeps the launcher's own
+	"relay.publish":          {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout},
+	"relay.publishEncrypted": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse), maxRaw: napMaxRawPublish, deadline: promptTimeout},
 
 	"outbox.getEvent":      {gate: napGateOutboxRead, fail: failShape(failErr)},
 	"outbox.resolveRelays": {gate: napGateOutboxRead, fail: failShape(failErr)},
 	"outbox.query":         {gate: napGateOutboxRead, fail: failShape(failErr).withFields(map[string]any{"events": []any{}})},
 	"outbox.subscribe":     {gate: napGateOutboxRead, fail: lifecycleShape("outbox.closed")},
 	"outbox.close":         {gate: napGateOutboxRead, fail: lifecycleShape("outbox.closed")},
-	"outbox.publish":       {gate: perCallGate(PermPublish), fail: failShape(failOkFalse).withCodes(map[string]string{napErrDenied: "publish denied"})},
+	"outbox.publish": {gate: perCallGate(PermPublish), fail: failShape(failOkFalse).withCodes(map[string]string{napErrDenied: "publish denied"}),
+		maxRaw: napMaxRawPublish},
 
 	// NAP-IDENTITY: getPublicKey MUST always succeed, so it fails with the
 	// signed-out answer and no error
@@ -329,7 +372,7 @@ var napRouteSpecs = map[string]napRoute{
 	"upload.status": {gate: napGateUploadOwn, fail: failShape(failErr)},
 	"upload.upload": {gate: perCallGate(PermUpload), fail: failShape(failErr).withCodes(map[string]string{
 		napErrDenied: "policy denied", napErrTooLarge: "file too large",
-	})},
+	}), maxRaw: napMaxRawUpload, deadline: promptTimeout},
 
 	"media.session.create": {
 		gate: dynamicGate("napplet-owned sessions are bookkeeping; shell-owned playback needs PermMedia; MDIA-01..03 Phase 7", PermMedia),
@@ -452,13 +495,19 @@ func (c *napCall) failWith(code string) {
 	case failNone, failUnset:
 		return
 	case failLifecycle:
-		var head struct {
-			SubID *string `json:"subId"`
+		// napEnqueue read the subId from the exact key; a napCall built by
+		// hand (tests) falls back to the payload
+		subID := c.SubID
+		if subID == "" {
+			var head struct {
+				SubID *string `json:"subId"`
+			}
+			if json.Unmarshal(c.raw, &head) != nil || head.SubID == nil {
+				return
+			}
+			subID = *head.SubID
 		}
-		if json.Unmarshal(c.raw, &head) != nil || head.SubID == nil {
-			return
-		}
-		c.send(shape.closed, map[string]any{"subId": *head.SubID, "reason": code})
+		c.send(shape.closed, map[string]any{"subId": subID, "reason": code})
 		return
 	}
 	if len(c.ID) == 0 {

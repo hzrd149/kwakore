@@ -194,9 +194,15 @@ type napCall struct {
 
 	Type string
 	// ID is echoed back verbatim: the shim's ids are uuid strings, but
-	// nothing here needs to know that.
-	ID  json.RawMessage
-	raw json.RawMessage
+	// nothing here needs to know that. napEnqueue only lets through a JSON
+	// string or number of at most napMaxIDBytes bytes (D-11).
+	ID json.RawMessage
+	// SubID is the envelope's exact "subId" when it is a valid string: what
+	// a subscription's failure echoes
+	SubID string
+	raw   json.RawMessage
+	// received is when napEnqueue read the envelope (napNow)
+	received time.Time
 
 	// answered flips on the request's first answer (reply, replyAs, failWith
 	// or drop). Exactly one answer reaches the napplet: a later one is
@@ -394,12 +400,19 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }
 
-// napEnqueue parses one envelope and puts it on the session's queue. Anything
-// that isn't a well-formed envelope is dropped without a word: unknown input
-// must never tell a napplet anything (NIP-5D).
+// napEnqueue reads one envelope and puts it on the session's queue. Go is the
+// authority on what a napplet may send (D-09, D-10, D-11): it checks every
+// bound itself after decoding, whatever the host page did. What cannot be
+// answered (not an envelope, an unknown type, a bad id, a missing correlator)
+// is dropped without a word: unknown input must never tell a napplet anything
+// (NIP-5D). What can be answered but is refused gets its route's failure.
 func (ci *Instance) napEnqueue(params string) {
 	s := ci.nap
 	if s == nil {
+		return
+	}
+	if len(params) > napMaxParams {
+		napSampled().Warn().Str("napplet", ci.napp.ID).Int("len", len(params)).Msg("dropping an oversized NAP message")
 		return
 	}
 	// the host page sends the envelope as a JSON string (rpc params are
@@ -409,12 +422,35 @@ func (ci *Instance) napEnqueue(params string) {
 	if json.Unmarshal(raw, &str) == nil {
 		raw = json.RawMessage(str)
 	}
-	var head struct {
-		Type string          `json:"type"`
-		ID   json.RawMessage `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &head); err != nil || head.Type == "" {
+	if len(raw) > napMaxEnvelope {
+		napSampled().Warn().Str("napplet", ci.napp.ID).Int("len", len(raw)).Msg("dropping an oversized NAP envelope")
 		return
+	}
+	head, ok := parseNapHead(raw)
+	if !ok {
+		return
+	}
+	route := napRoutes[head.typ]
+	if route == nil {
+		// unknown types are dropped silently, never answered (NIP-5D)
+		napSampled().Debug().Str("type", head.typ).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
+		return
+	}
+	// an id that is not a short string or number cannot be echoed (D-11),
+	// and a request whose answer needs a correlator it lacks cannot be
+	// answered at all (A16)
+	if head.badID {
+		return
+	}
+	switch route.correlator() {
+	case "id":
+		if head.id == nil {
+			return
+		}
+	case "subId":
+		if head.subID == "" {
+			return
+		}
 	}
 
 	s.once.Do(func() {
@@ -423,11 +459,25 @@ func (ci *Instance) napEnqueue(params string) {
 	})
 
 	s.mu.Lock()
-	call := &napCall{ci: ci, gen: s.gen, ctx: s.ctx, Type: head.Type, ID: head.ID, raw: raw}
+	c := &napCall{
+		ci: ci, gen: s.gen, ctx: s.ctx, route: route,
+		Type: head.typ, ID: head.id, SubID: head.subID, raw: raw, received: napNow(),
+	}
 	s.mu.Unlock()
 
+	// keys a case-insensitive decode would merge could make the envelope one
+	// type here and another to its handler (D-10)
+	if head.collide {
+		c.failWith(napErrInvalid)
+		return
+	}
+	if len(raw) > route.maxBytes() {
+		c.failWith(napErrTooLarge)
+		return
+	}
+
 	select {
-	case s.queue <- call:
+	case s.queue <- c:
 	case <-ci.gone:
 	}
 }
@@ -464,7 +514,11 @@ func (ci *Instance) napDispatch(c *napCall) {
 		return
 	}
 
-	route := napRoutes[c.Type]
+	// napEnqueue found the route; a call made by hand (tests) looks it up
+	route := c.route
+	if route == nil {
+		route = napRoutes[c.Type]
+	}
 	if route == nil {
 		// unknown types are dropped silently, never answered
 		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
