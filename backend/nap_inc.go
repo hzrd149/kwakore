@@ -186,11 +186,14 @@ func napIncChannelOpen(c *napCall) {
 		c.reply(map[string]any{"error": "invalid target"})
 		return
 	}
-	// a window is an end of at most incMaxChannels channels, counting both
-	// ends, so it cannot hold more by opening them nor be flooded into
-	// holding them by others (D-14, I-3); the open and emit buckets are the
-	// dispatcher's
-	if len(incChannelsOf(c.ci)) >= incMaxChannels {
+	// a window opens at most incMaxChannels channels (D-14, I-3); the open
+	// and emit buckets are the dispatcher's. Channels others opened toward
+	// it do not count here, so they cannot keep it from opening its own
+	// (WR-07)
+	incMu.Lock()
+	opened := incOpenedLocked(c.ci)
+	incMu.Unlock()
+	if opened >= incMaxChannels {
 		c.failWith(napErrRateLimited)
 		return
 	}
@@ -209,8 +212,12 @@ func napIncChannelOpen(c *napCall) {
 	ch := &incChannel{id: randomID(), a: c.ci, b: peer}
 	incMu.Lock()
 	// counted again with the insert: the peer's own worker (and any other
-	// window opening toward it) runs alongside this one
-	if incCountLocked(c.ci) >= incMaxChannels || incCountLocked(peer) >= incMaxChannels {
+	// window opening toward it) runs alongside this one. The opener is
+	// charged for what it opened, in all and toward this peer; the peer
+	// only bounds how many others may open toward it
+	if incOpenedLocked(c.ci) >= incMaxChannels ||
+		incPairLocked(c.ci, peer) >= incMaxChannelsPerPeer ||
+		incInboundLocked(peer) >= incMaxInboundChannels {
 		incMu.Unlock()
 		c.failWith(napErrRateLimited)
 		return
@@ -264,11 +271,35 @@ func napIncChannelBroadcast(c *napCall) {
 	}
 }
 
-// incCountLocked is how many channels ci is an end of. incMu must be held.
-func incCountLocked(ci *Instance) int {
+// incOpenedLocked is how many channels ci opened. incMu must be held.
+func incOpenedLocked(ci *Instance) int {
 	n := 0
 	for _, ch := range incChannels {
-		if ch.other(ci) != nil {
+		if ch.a == ci {
+			n++
+		}
+	}
+	return n
+}
+
+// incInboundLocked is how many channels other windows opened toward ci.
+// incMu must be held.
+func incInboundLocked(ci *Instance) int {
+	n := 0
+	for _, ch := range incChannels {
+		if ch.b == ci {
+			n++
+		}
+	}
+	return n
+}
+
+// incPairLocked is how many channels opener opened toward peer. incMu must
+// be held.
+func incPairLocked(opener, peer *Instance) int {
+	n := 0
+	for _, ch := range incChannels {
+		if ch.a == opener && ch.b == peer {
 			n++
 		}
 	}

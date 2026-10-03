@@ -601,72 +601,123 @@ func TestResourceInFlightCap(t *testing.T) {
 	}
 }
 
-// TestIncChannelCap: a window is an end of at most incMaxChannels channels,
-// counting both ends. An open past that answers rate-limited and the peer
-// hears nothing, and a window that is full cannot be pulled into more by
-// others either; closing one frees its slot (D-14, I-3).
+// TestIncChannelCap: only the opener is charged for a channel (D-14, I-3,
+// WR-07). A window opens at most incMaxChannelsPerPeer channels toward one
+// peer and incMaxChannels in all; past either, the open answers rate-limited
+// and the peer hears nothing. The channels others opened toward a window
+// never keep it from opening its own, nor others from opening toward it,
+// until incMaxInboundChannels of them are open. Closing one frees its slot.
 func TestIncChannelCap(t *testing.T) {
 	setupNapTest(t)
 	freezeNapNow(t)
 	opens := map[napLimitClass]napLimitSpec{limitIncOpen: {rate.Every(time.Hour), 4 * incMaxChannels}}
-	a, recA := openNapplet(t, "cap-a")
-	withLimits(t, a, limitsWith(napEnvelopeLimit, opens))
-	b, recB := openNapplet(t, "cap-b")
-	withLimits(t, b, limitsWith(napEnvelopeLimit, opens))
-	c, recC := openNapplet(t, "cap-c")
-	withLimits(t, c, limitsWith(napEnvelopeLimit, opens))
-	ready(t, a, recA, 1)
-	ready(t, b, recB, 1)
-	ready(t, c, recC, 1)
+	open := func(d string) (*Instance, *recTransport) {
+		ci, rec := openNapplet(t, d)
+		withLimits(t, ci, limitsWith(napEnvelopeLimit, opens))
+		ready(t, ci, rec, 1)
+		return ci, rec
+	}
+	openChannel := func(ci *Instance, rec *recTransport, id, target string) map[string]any {
+		t.Helper()
+		post(t, ci, map[string]any{"type": "inc.channel.open", "id": id, "target": target})
+		return waitID(t, rec, "inc.channel.open.result", id)
+	}
 
+	a, recA := open("cap-a")
+	peers := incMaxChannels / incMaxChannelsPerPeer
+	recPeers := make([]*recTransport, peers)
+	for p := range peers {
+		_, recPeers[p] = open("cap-p" + strconv.Itoa(p))
+	}
+	c, recC := open("cap-c")
+
+	// toward one peer: incMaxChannelsPerPeer, then refused
 	var first string
-	for i := range incMaxChannels {
-		id := "open" + strconv.Itoa(i)
-		post(t, a, map[string]any{"type": "inc.channel.open", "id": id, "target": "cap-b"})
-		got := waitID(t, recA, "inc.channel.open.result", id)
+	for i := range incMaxChannelsPerPeer {
+		got := openChannel(a, recA, "p0-"+strconv.Itoa(i), "cap-p0")
 		channelID, _ := got["channelId"].(string)
 		if channelID == "" {
-			t.Fatalf("channel %d within the cap: %v", i, got)
+			t.Fatalf("channel %d toward one peer: %v", i, got)
 		}
 		if i == 0 {
 			first = channelID
 		}
 	}
-	recB.wait(t, "inc.channel.opened", incMaxChannels)
+	if got := openChannel(a, recA, "p0-over", "cap-p0"); got["error"] != napErrRateLimited || got["channelId"] != nil {
+		t.Fatalf("past the per-peer cap: %v", got)
+	}
+	// the peer a holds channels with still opens its own, and others still
+	// open toward it
+	p0 := lookupPeer(t, "cap-p0")
+	recP0 := recPeers[0]
+	if got := openChannel(p0, recP0, "p0-own", "cap-c"); got["channelId"] == nil {
+		t.Fatalf("a window others opened channels toward could not open its own: %v", got)
+	}
+	if got := openChannel(c, recC, "c-to-p0", "cap-p0"); got["channelId"] == nil {
+		t.Fatalf("opening toward a window others hold channels with: %v", got)
+	}
 
-	post(t, a, map[string]any{"type": "inc.channel.open", "id": "over", "target": "cap-b"})
-	if got := waitID(t, recA, "inc.channel.open.result", "over"); got["error"] != napErrRateLimited || got["channelId"] != nil {
-		t.Fatalf("the opener past the cap: %v", got)
+	// a fills its own cap across the other peers
+	for p := 1; p < peers; p++ {
+		for i := range incMaxChannelsPerPeer {
+			id := "p" + strconv.Itoa(p) + "-" + strconv.Itoa(i)
+			if got := openChannel(a, recA, id, "cap-p"+strconv.Itoa(p)); got["channelId"] == nil {
+				t.Fatalf("%s within the cap: %v", id, got)
+			}
+		}
 	}
-	// b is full too: it cannot open, and c cannot pull it into another one
-	post(t, b, map[string]any{"type": "inc.channel.open", "id": "b-over", "target": "cap-c"})
-	if got := waitID(t, recB, "inc.channel.open.result", "b-over"); got["error"] != napErrRateLimited {
-		t.Fatalf("the peer opening past the cap: %v", got)
-	}
-	post(t, c, map[string]any{"type": "inc.channel.open", "id": "c-to-b", "target": "cap-b"})
-	if got := waitID(t, recC, "inc.channel.open.result", "c-to-b"); got["error"] != napErrRateLimited {
-		t.Fatalf("opening toward a full window: %v", got)
+	if got := openChannel(a, recA, "over", "cap-c"); got["error"] != napErrRateLimited || got["channelId"] != nil {
+		t.Fatalf("the opener past its cap: %v", got)
 	}
 	// a peer hears of a channel before its opener gets the answer, so the
 	// refusals above are final
-	if n := len(recB.find("inc.channel.opened")); n != incMaxChannels {
-		t.Fatalf("the full window heard of %d channels, want %d", n, incMaxChannels)
+	if n := len(recP0.find("inc.channel.opened")); n != incMaxChannelsPerPeer+1 {
+		t.Fatalf("p0 heard of %d channels, want %d", n, incMaxChannelsPerPeer+1)
 	}
-	if got := recC.find("inc.channel.opened"); len(got) != 0 {
-		t.Fatalf("c heard of a refused channel: %v", got)
-	}
-	if n := len(incChannelsOf(a)); n != incMaxChannels {
-		t.Fatalf("a is an end of %d channels, want %d", n, incMaxChannels)
+	for _, got := range recC.find("inc.channel.opened") {
+		if got["peer"] == incSender(a) {
+			t.Fatalf("c heard of a refused channel: %v", got)
+		}
 	}
 
-	// closing one frees a slot on both ends
+	// closing one frees a slot
 	post(t, a, map[string]any{"type": "inc.channel.close", "channelId": first})
 	recA.wait(t, "inc.channel.closed", 1)
-	post(t, a, map[string]any{"type": "inc.channel.open", "id": "again", "target": "cap-b"})
-	if got := waitID(t, recA, "inc.channel.open.result", "again"); got["channelId"] == nil {
+	if got := openChannel(a, recA, "again", "cap-c"); got["channelId"] == nil {
 		t.Fatalf("an open after a close: %v", got)
 	}
-	recB.wait(t, "inc.channel.opened", incMaxChannels+1)
+
+	// the inbound cap: enough openers fill a window's inbound slots, and the
+	// next opener is refused, while the window itself still opens its own
+	target, recT := open("cap-target")
+	for o := range incMaxInboundChannels / incMaxChannelsPerPeer {
+		opener, rec := open("cap-o" + strconv.Itoa(o))
+		for i := range incMaxChannelsPerPeer {
+			id := "in-" + strconv.Itoa(i)
+			if got := openChannel(opener, rec, id, "cap-target"); got["channelId"] == nil {
+				t.Fatalf("opener %d channel %d within the inbound cap: %v", o, i, got)
+			}
+		}
+	}
+	late, recLate := open("cap-late")
+	if got := openChannel(late, recLate, "late", "cap-target"); got["error"] != napErrRateLimited {
+		t.Fatalf("past the inbound cap: %v", got)
+	}
+	if got := openChannel(target, recT, "target-own", "cap-late"); got["channelId"] == nil {
+		t.Fatalf("a full inbound window could not open its own: %v", got)
+	}
+}
+
+// lookupPeer is the open napplet window with that d tag.
+func lookupPeer(t *testing.T, d string) *Instance {
+	t.Helper()
+	for _, ci := range liveNapplets() {
+		if ci.napp.D == d {
+			return ci
+		}
+	}
+	t.Fatalf("no window for %s", d)
+	return nil
 }
 
 // TestIncTopicAndNotifyChannelCaps: a window listens on at most

@@ -84,10 +84,17 @@ const (
 	// resource.bytes and resource.bytesMany. Enforced by resourceAtCapacity
 	// (nap_resource.go).
 	resourceMaxInFlight = 10
-	// incMaxChannels bounds the INC channels a window is an end of, either
-	// end (I-3). Enforced by napIncChannelOpen (nap_inc.go) for the opener
-	// and the peer.
-	incMaxChannels = 32
+	// INC channels (I-3), enforced by napIncChannelOpen (nap_inc.go). Only
+	// the opener is charged for what it opens, so no napplet can use up
+	// another's slots by opening channels toward it (WR-07):
+	// incMaxChannels bounds the channels a window has opened,
+	// incMaxChannelsPerPeer those it has opened toward one peer window, and
+	// incMaxInboundChannels those other windows have opened toward it, which
+	// takes at least incMaxInboundChannels/incMaxChannelsPerPeer openers to
+	// fill and never stops the window opening its own.
+	incMaxChannels        = 32
+	incMaxChannelsPerPeer = 8
+	incMaxInboundChannels = 128
 	// incMaxTopics bounds the INC topics a window listens on, and
 	// incMaxTopicBytes the length of one, in bytes: each is kept in the
 	// session and registered as an action on the window. Enforced by
