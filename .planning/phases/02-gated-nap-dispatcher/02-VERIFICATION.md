@@ -1,7 +1,7 @@
 ---
 phase: 02-gated-nap-dispatcher
 verified: 2026-10-03T18:29:48Z
-status: human_needed
+status: passed
 score: 65/65 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -46,6 +46,7 @@ human_verification:
   - test: "On an Android device, have a napplet upload a blob whose wire message exceeds 25 MiB"
     expected: "The upload call is answered (too-large) instead of hanging, and the app stays up"
     why_human: "Android WebView carrier path; TestHandleWireMessageAnswersOversizedRPC covers the Go side only"
+human_validated: 2026-10-03T23:20:54Z
 ---
 
 # Phase 2: Gated NAP Dispatcher Verification Report
