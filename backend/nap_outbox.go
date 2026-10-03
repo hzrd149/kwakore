@@ -304,8 +304,9 @@ func napOutboxSubscribe(c *napCall) {
 		}
 		r.SubID = id.SubID
 	}
+	// the subscription's one answer: it ends it
 	closed := func(reason string) {
-		c.ci.napPushGen(c.gen, map[string]any{"type": "outbox.closed", "subId": r.SubID, "reason": reason})
+		c.replyAs("outbox.closed", map[string]any{"subId": r.SubID, "reason": reason})
 	}
 	if err != nil {
 		closed("invalid filter")
@@ -412,7 +413,7 @@ func napOutboxClose(c *napCall) {
 	c.ci.nap.closeSub(outboxSubKey(r.SubID))
 	// every request is answered (NAP-OUTBOX); the shim has already dropped
 	// the handle, so this only confirms the end of the stream
-	c.ci.napPushGen(c.gen, map[string]any{"type": "outbox.closed", "subId": r.SubID, "reason": "closed"})
+	c.replyAs("outbox.closed", map[string]any{"subId": r.SubID, "reason": "closed"})
 }
 
 // ─── publish ─────────────────────────────────────────────────────
@@ -470,9 +471,10 @@ func napOutboxPublish(c *napCall) {
 		if err != nil {
 			if err.Error() == "user-denied" {
 				// NAP-OUTBOX's name for it
-				err = errors.New("publish denied")
+				fail("publish denied")
+				return
 			}
-			fail(err.Error())
+			fail(napPublishErrCode(err))
 			return
 		}
 

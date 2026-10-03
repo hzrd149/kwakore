@@ -171,8 +171,9 @@ func napRelaySubscribe(c *napCall) {
 	if err := c.decode(&r); err != nil || r.SubID == "" {
 		return
 	}
+	// the subscription's one answer: it ends it
 	closed := func(reason string) {
-		c.ci.napPushGen(c.gen, map[string]any{"type": "relay.closed", "subId": r.SubID, "reason": reason})
+		c.replyAs("relay.closed", map[string]any{"subId": r.SubID, "reason": reason})
 	}
 	filters, err := napFilters(r.Filters)
 	if err != nil {
@@ -258,7 +259,7 @@ func napRelayPump(ctx context.Context, c *napCall, subID string, filters []nostr
 			relays = napRelaysFor(rctx, f)
 			cancel()
 		}
-		go func(f nostr.Filter, relays []string) {
+		safeGo(c, "relay pump", func() {
 			events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, relays, f,
 				nostr.SubscriptionOptions{Label: "napplet-relay"})
 			for {
@@ -289,7 +290,7 @@ func napRelayPump(ctx context.Context, c *napCall, subID string, filters []nostr
 					}
 				}
 			}
-		}(f, relays)
+		})
 	}
 
 	waiting := len(filters)
@@ -331,7 +332,7 @@ func napRelayClose(c *napCall) {
 func napRelayQuery(c *napCall) {
 	var r napRelayReq
 	if err := c.decode(&r); err != nil {
-		c.reply(map[string]any{"events": []any{}, "error": "invalid request"})
+		c.reply(map[string]any{"events": []any{}, "error": napErrInvalid})
 		return
 	}
 	filters, err := napFilters(r.Filters)
@@ -415,13 +416,14 @@ func napRelayPublish(c *napCall) {
 		Relay string      `json:"relay"`
 	}
 	if err := c.decode(&r); err != nil {
-		c.replyAs("relay.publish.error", map[string]any{"ok": false, "error": "invalid event"})
+		// relay.publish fails in its .result like every other answer (R-2)
+		c.reply(map[string]any{"ok": false, "error": napErrInvalid})
 		return
 	}
 	c.async(func(ctx context.Context) {
 		evt, err := napSignAndPublish(ctx, c, r.Event, "", "", r.Relay)
 		if err != nil {
-			c.reply(map[string]any{"ok": false, "error": err.Error()})
+			c.reply(map[string]any{"ok": false, "error": napPublishErrCode(err)})
 			return
 		}
 		c.reply(map[string]any{"ok": true, "event": evt, "eventId": evt.ID.Hex()})
@@ -435,7 +437,7 @@ func napRelayPublishEncrypted(c *napCall) {
 		Encryption string      `json:"encryption"`
 	}
 	if err := c.decode(&r); err != nil {
-		c.reply(map[string]any{"ok": false, "error": "invalid event"})
+		c.reply(map[string]any{"ok": false, "error": napErrInvalid})
 		return
 	}
 	if r.Encryption == "" {
@@ -448,11 +450,32 @@ func napRelayPublishEncrypted(c *napCall) {
 	c.async(func(ctx context.Context) {
 		evt, err := napSignAndPublish(ctx, c, r.Event, r.Recipient, r.Encryption, "")
 		if err != nil {
-			c.reply(map[string]any{"ok": false, "error": err.Error()})
+			c.reply(map[string]any{"ok": false, "error": napPublishErrCode(err)})
 			return
 		}
 		c.reply(map[string]any{"ok": true, "event": evt, "eventId": evt.ID.Hex()})
 	})
+}
+
+// napPublishErrCode is what a failed napplet publish tells the napplet. The
+// codes napSignAndPublish and napApprovePublish fail with on purpose go out
+// as they are; anything else (the signer's, the context's, the network's own
+// text) is logged and becomes internal-error, so a napplet never reads raw
+// signer or network errors (D-07).
+func napPublishErrCode(err error) string {
+	msg := err.Error()
+	switch msg {
+	case "not-signed-in", "user-denied", "publish-failed", "not ready",
+		"invalid recipient", "no relays to publish to", "invalid relay url":
+		return msg
+	}
+	if strings.HasPrefix(msg, "relay not allowed") {
+		// napExplicitRelay's refusal; the netguard detail stays in the log
+		napSampled().Warn().Err(err).Msg("napplet publish to a refused relay")
+		return "relay not allowed"
+	}
+	napSampled().Warn().Err(err).Msg("napplet publish failed")
+	return napErrInternal
 }
 
 // napSignAndPublish is every napplet write: one prompt that shows exactly

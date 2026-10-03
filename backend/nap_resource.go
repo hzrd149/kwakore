@@ -219,8 +219,10 @@ func napResourceBytesMany(c *napCall) {
 		var wg sync.WaitGroup
 		for i, q := range reqs {
 			wg.Add(1)
-			go func(i int, q req) {
+			safeGo(nil, "resource item", func() {
 				defer wg.Done()
+				// a panicking item still leaves a well-formed one behind
+				items[i] = map[string]any{"url": q.url, "ok": false, "error": napErrInternal}
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				res, err := fetchResource(ctx, c, q.url, q.servers)
@@ -231,11 +233,15 @@ func napResourceBytesMany(c *napCall) {
 					return
 				}
 				items[i] = map[string]any{"url": q.url, "ok": true, "blob": blobField(res), "mime": res.mime}
-			}(i, q)
+			})
 		}
 		wg.Wait()
 		if ctx.Err() != nil {
-			return // cancelled: the napplet stopped waiting
+			// cancelled: the napplet stopped waiting, and a late terminal
+			// envelope for a cancelled id MUST be dropped (NAP-RESOURCE),
+			// so the call is marked answered and nothing is sent
+			c.drop()
+			return
 		}
 		c.reply(map[string]any{"items": items})
 	})

@@ -432,6 +432,11 @@ func validateRoute(typ string, r napRoute) error {
 // its route's shape. Types that are never answered, and requests without an
 // id where the answer needs one, get nothing.
 func (c *napCall) failWith(code string) {
+	// a failure is an answer too: it claims the call even when its shape
+	// sends nothing, and never follows a real answer
+	if !c.answered.CompareAndSwap(false, true) {
+		return
+	}
 	r := c.route
 	if r == nil {
 		r = napRoutes[c.Type]
@@ -453,7 +458,7 @@ func (c *napCall) failWith(code string) {
 		if json.Unmarshal(c.raw, &head) != nil || head.SubID == nil {
 			return
 		}
-		c.replyAs(shape.closed, map[string]any{"subId": *head.SubID, "reason": code})
+		c.send(shape.closed, map[string]any{"subId": *head.SubID, "reason": code})
 		return
 	}
 	if len(c.ID) == 0 {
@@ -462,38 +467,38 @@ func (c *napCall) failWith(code string) {
 	switch shape.kind {
 	case failErr:
 		fields["error"] = code
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failOkFalse:
 		fields["ok"] = false
 		fields["error"] = code
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failOkFalseCode:
 		fields["ok"] = false
 		fields["code"] = code
 		fields["error"] = code
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failTypedErr:
 		fields["error"] = code
-		c.replyAs(c.Type+".error", fields)
+		c.send(c.Type+".error", fields)
 	case failLink:
 		fields["status"] = "denied"
 		fields["error"] = code
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failIntent:
 		archetype, action := napIntentHead(c.raw)
 		fields["result"] = map[string]any{
 			"ok": false, "archetype": archetype, "action": action, "handled": false, "error": code,
 		}
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failDefault:
-		c.reply(fields)
+		c.send(c.Type+".result", fields)
 	case failSchemaError:
 		fields["code"] = code
 		fields["error"] = code
-		c.replyAs("config.schemaError", fields)
+		c.send("config.schemaError", fields)
 	case failGranted:
 		fields["granted"] = false
-		c.replyAs("notify.permission.result", fields)
+		c.send("notify.permission.result", fields)
 	}
 }
 

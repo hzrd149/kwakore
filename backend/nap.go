@@ -12,9 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
+	"github.com/rs/zerolog"
 	"verdana/backend/webview"
 )
 
@@ -195,6 +197,18 @@ type napCall struct {
 	// nothing here needs to know that.
 	ID  json.RawMessage
 	raw json.RawMessage
+
+	// answered flips on the request's first answer (reply, replyAs, failWith
+	// or drop). Exactly one answer reaches the napplet: a later one is
+	// dropped, and a request left unanswered is failed for its handler once
+	// that has returned (napDispatch, c.async). A napCall is only ever passed
+	// by pointer, so the flags are shared by everyone holding the call.
+	answered atomic.Bool
+	// handedOff is set by c.async: the answer is the async closure's job now
+	handedOff atomic.Bool
+	// approved is set once the call passed its declared gate; the gated sinks
+	// refuse a call without it
+	approved atomic.Bool
 }
 
 // napHandler handles one envelope type. It runs on the session's queue, so
@@ -224,17 +238,42 @@ func (c *napCall) envelope(typ string, fields map[string]any) map[string]any {
 
 // reply answers with <type>.result.
 func (c *napCall) reply(fields map[string]any) {
-	c.ci.napPushGen(c.gen, c.envelope(c.Type+".result", fields))
+	if !c.answered.CompareAndSwap(false, true) {
+		c.secondReply(c.Type + ".result")
+		return
+	}
+	c.send(c.Type+".result", fields)
 }
 
-// replyAs answers with an explicit type (the resource and relay error types).
+// replyAs answers with an explicit type (the resource and relay error types,
+// a subscription's closed push).
 func (c *napCall) replyAs(typ string, fields map[string]any) {
+	if !c.answered.CompareAndSwap(false, true) {
+		c.secondReply(typ)
+		return
+	}
+	c.send(typ, fields)
+}
+
+// send pushes an answer that has already claimed the call.
+func (c *napCall) send(typ string, fields map[string]any) {
 	c.ci.napPushGen(c.gen, c.envelope(typ, fields))
 }
 
+func (c *napCall) secondReply(typ string) {
+	napSampled().Warn().Str("type", c.Type).Str("reply", typ).Msg("second reply to a NAP request dropped")
+}
+
+// drop marks the call answered without sending anything: a cancelled
+// request whose late answer NAP-RESOURCE says to drop.
+func (c *napCall) drop() { c.answered.Store(true) }
+
 // async runs fn off the queue, on the session's context: a reset or a closed
-// window cancels it, and whatever it replies after that is dropped.
+// window cancels it, and whatever it replies after that is dropped. A request
+// fn leaves unanswered is failed once fn returns, unless its route is
+// reply-less or a subscription.
 func (c *napCall) async(fn func(ctx context.Context)) {
+	c.handedOff.Store(true)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -243,7 +282,38 @@ func (c *napCall) async(fn func(ctx context.Context)) {
 			}
 		}()
 		fn(c.ctx)
+		if c.route != nil && c.route.autoFails() && !c.answered.Load() {
+			c.failWith(napErrInternal)
+		}
 	}()
+}
+
+// safeGo is the only other way NAP code may start a goroutine (02-04's guard
+// enforces it): fn runs with a recover that logs the panic and, when the
+// goroutine works for a call, fails that call (a no-op once it is answered).
+// Goroutines that are not a call's answer, such as a push to a peer, pass nil.
+func safeGo(c *napCall, what string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Interface("panic", r).Str("in", what).Msg("NAP goroutine panicked")
+				if c != nil {
+					c.failWith(napErrInternal)
+				}
+			}
+		}()
+		fn()
+	}()
+}
+
+// napBurst bounds the log lines a napplet can cause at will (unknown types,
+// second replies, publish failures): a flood must not become a log flood.
+var napBurst = &zerolog.BurstSampler{Burst: 5, Period: time.Minute}
+
+// napSampled is the logger for those lines.
+func napSampled() *zerolog.Logger {
+	l := log.Sample(napBurst)
+	return &l
 }
 
 // ─── pushing into the napplet ────────────────────────────────────
@@ -397,7 +467,7 @@ func (ci *Instance) napDispatch(c *napCall) {
 	route := napRoutes[c.Type]
 	if route == nil {
 		// unknown types are dropped silently, never answered
-		log.Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
+		napSampled().Debug().Str("type", c.Type).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
 		return
 	}
 	c.route = route
@@ -418,6 +488,12 @@ func (ci *Instance) napDispatch(c *napCall) {
 		s.beforeHandler(c)
 	}
 	route.h(c)
+	// a handler that returned without answering, and without handing the
+	// answer to c.async, forgot it: the napplet gets the failure instead of
+	// waiting (relay.* has no shim timeout at all)
+	if route.autoFails() && !c.answered.Load() && !c.handedOff.Load() {
+		c.failWith(napErrInternal)
+	}
 }
 
 // napDeniedUpFront says whether the user already refused what a Session or
