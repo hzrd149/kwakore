@@ -1269,33 +1269,73 @@ func TestIntentDeliveryReachesOnlyTheHandler(t *testing.T) {
 	}
 }
 
-// A peer cannot emit on an intent convention topic: only the launcher
-// delivers there, after resolution, so a handler never mistakes a broadcast
-// for an intent the rules and the user routed to it (CR-02, conflict A23).
-func TestIncEmitRefusedOnIntentConventionTopic(t *testing.T) {
+// A napplet's inc.emit on an intent convention topic is an ordinary NAP-INC
+// broadcast: every listener on the exact topic gets it, stamped with the
+// emitter's own sender. Only the launcher's sender is reserved: no emitter is
+// ever delivered as "launcher", even one whose d tag is that word (conflict
+// A23, CR-02).
+func TestIncEmitBroadcastsOnIntentConventionTopic(t *testing.T) {
 	setupNapTest(t)
+	const topic = "napplet:profile/open"
 	peer, recPeer := openNapplet(t, "peer")
+	impostor, recImpostor := openNapplet(t, launcherSender)
 	handler, rec := openNapplet(t, "profile-handler")
-	ready(t, peer, recPeer, 1)
-	ready(t, handler, rec, 1)
-	subscribeTopic(t, handler, rec, "napplet:profile/open", 1)
-	subscribeTopic(t, handler, rec, "chat", 2)
-
-	post(t, peer, map[string]any{"type": "inc.emit", "topic": "napplet:profile/open", "payload": map[string]any{"pubkey": "forged"}})
-	// envelopes of one session are handled in order: the emit on an
-	// ordinary topic is the sync point for the refused one before it
-	post(t, peer, map[string]any{"type": "inc.emit", "topic": "chat", "payload": "after"})
-	if ev := rec.wait(t, "inc.event", 1); ev["topic"] != "chat" || ev["payload"] != "after" {
-		t.Fatalf("a peer emit reached the intent handler: %v", ev)
+	other, recOther := openNapplet(t, "other-listener")
+	for _, w := range []struct {
+		ci  *Instance
+		rec *recTransport
+	}{{peer, recPeer}, {impostor, recImpostor}, {handler, rec}, {other, recOther}} {
+		ready(t, w.ci, w.rec, 1)
 	}
-	if got := rec.find("inc.event"); len(got) != 1 {
-		t.Errorf("inc.event pushes = %d, want only the chat one: %v", len(got), got)
+	subscribeTopic(t, handler, rec, topic, 1)
+	subscribeTopic(t, other, recOther, topic, 1)
+	// the emitter listens too: NAP-INC routes to the other subscribers
+	subscribeTopic(t, peer, recPeer, topic, 1)
+
+	post(t, peer, map[string]any{"type": "inc.emit", "topic": topic, "payload": map[string]any{"pubkey": "abc"}})
+	post(t, impostor, map[string]any{"type": "inc.emit", "topic": topic, "payload": map[string]any{"pubkey": "def"}})
+
+	for _, l := range []struct {
+		name string
+		rec  *recTransport
+	}{{"handler", rec}, {"other listener", recOther}} {
+		got := map[string]string{}
+		for i := 1; i <= 2; i++ {
+			ev := l.rec.wait(t, "inc.event", i)
+			if ev["topic"] != topic {
+				t.Errorf("%s: event on %v, want %s", l.name, ev["topic"], topic)
+			}
+			sender, _ := ev["sender"].(string)
+			if sender == launcherSender {
+				t.Errorf("%s: a napplet broadcast was delivered as the launcher: %v", l.name, ev)
+			}
+			payload, _ := ev["payload"].(map[string]any)
+			pk, _ := payload["pubkey"].(string)
+			got[pk] = sender
+		}
+		if got["abc"] != incSender(peer) || got["def"] != incSender(impostor) {
+			t.Errorf("%s: senders by payload = %v, want abc=%q def=%q", l.name, got, incSender(peer), incSender(impostor))
+		}
+	}
+	if incSender(impostor) != impostor.napp.Address() {
+		t.Errorf("incSender(d=%q) = %q, want its address", launcherSender, incSender(impostor))
+	}
+
+	// the impostor's broadcast reaches the emitter that listens; its own does not
+	ev := recPeer.wait(t, "inc.event", 1)
+	if ev["sender"] != incSender(impostor) {
+		t.Errorf("peer received %v, want only the impostor's broadcast", ev)
+	}
+	// sync point: the peer's queue is drained once this is answered
+	subscribeTopic(t, peer, recPeer, "chat", 2)
+	if got := recPeer.find("inc.event"); len(got) != 1 {
+		t.Errorf("the emitter heard its own broadcast: %v", got)
 	}
 
 	// listening on the convention topic is still the handler's readiness
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, ok := handler.waitForHandler(ctx, "napplet:profile/open"); !ok {
+	if _, ok := handler.waitForHandler(ctx, topic); !ok {
 		t.Error("the handler's subscription no longer registers the intent")
 	}
 }

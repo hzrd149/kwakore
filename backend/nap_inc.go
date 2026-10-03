@@ -15,8 +15,9 @@ import (
 // A topic subscription doubles as a napplet's "ready for this intent"
 // signal: subscribing to napplet:<role>/<action> registers that action on
 // the window, which is what action dispatch (and so NAP-INTENT) waits for.
-// Napplets may listen on those topics but never emit on them: only the
-// launcher delivers there (napIncEmit).
+// Those topics are ordinary NAP-INC topics too: a napplet's inc.emit on one
+// is broadcast to every listener, as NAP-INC specifies (CONFORMANCE conflict
+// A23). An intent the launcher routes goes only to the resolved handler.
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -108,16 +109,10 @@ func napIncEmit(c *napCall) {
 	if err := c.decode(&r); err != nil || r.Topic == "" {
 		return
 	}
-	// napplet:<archetype>/<action> topics are where accepted intents land
-	// (dispatchToNapplet), and only the launcher delivers there, after
-	// resolution. A peer emit on one would reach every handler as if the user
-	// had routed it, past the PermDispatch rules and the chooser, so it is
-	// refused under NAP-INC's ACL clause (CONFORMANCE conflict A23).
-	if _, _, ok := conventionParts(r.Topic); ok {
-		log.Debug().Str("napplet", c.ci.napp.ID).Str("topic", r.Topic).
-			Msg("inc.emit on an intent convention topic refused")
-		return
-	}
+	// every topic routes the same way, napplet:<archetype>/<action> ones
+	// included: NAP-INC's "Archetype-scoped messages between napplets" are
+	// a broadcast, stamped with the emitter's own sender (CONFORMANCE
+	// conflict A23)
 	incPublish(c.ci, r.Topic, r.Payload)
 }
 
