@@ -37,8 +37,6 @@ const (
 	// the world in one go
 	napMaxFilters = 10
 	napMaxLimit   = 500
-	// napMaxSubs caps open subscriptions per napplet window
-	napMaxSubs = 32
 )
 
 type napRelayReq struct {

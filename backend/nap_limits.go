@@ -73,15 +73,20 @@ const (
 	// Enforced by enqueueNappPrompt (window_prompt.go).
 	napMaxPendingPromptsPerWindow = 3
 	napMaxPendingPromptsGlobal    = 32
+	// napMaxSubs caps open subscriptions per window, relay and outbox
+	// together. Enforced by trackSub (nap_relay.go).
+	napMaxSubs = 32
 	// resourceMaxInFlight is NAP-RESOURCE's "10 in-flight" (RS-5), counting
 	// resource.bytes and resource.bytesMany. Enforced by resourceAtCapacity
 	// (nap_resource.go).
 	resourceMaxInFlight = 10
-	// incMaxChannels bounds the INC channels a window is an end of (I-3).
-	// Enforced by 02-07.
+	// incMaxChannels bounds the INC channels a window is an end of, either
+	// end (I-3). Enforced by napIncChannelOpen (nap_inc.go) for the opener
+	// and the peer.
 	incMaxChannels = 32
 	// uploadMaxActive bounds the uploads pending or uploading per window
-	// (U-4). Enforced by 02-07.
+	// (U-4). Enforced by napUpload (nap_upload.go), before the server lookup
+	// and again when the pending entry is stored.
 	uploadMaxActive = 4
 )
 

@@ -146,6 +146,17 @@ func napUpload(c *napCall) {
 		c.reply(map[string]any{"error": "unsupported media type"})
 		return
 	}
+	// at most uploadMaxActive uploads pending or uploading per window, so a
+	// napplet cannot pile up prompts, signatures and 16 MiB PUTs (D-14, U-4);
+	// refused before any server lookup or prompt
+	s := c.ci.nap
+	s.mu.Lock()
+	full := napActiveUploadsLocked(s) >= uploadMaxActive
+	s.mu.Unlock()
+	if full {
+		c.failWith(napErrRateLimited)
+		return
+	}
 
 	c.async(func(ctx context.Context) {
 		lookupCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -165,7 +176,13 @@ func napUpload(c *napCall) {
 			OK: true, UploadID: uploadID, Status: "pending", Rail: "blossom",
 			BytesTotal: len(data), UpdatedAt: time.Now().Unix(),
 		}
-		napStoreUpload(c, &status)
+		// the pending entry is only stored here, after the lookup, so
+		// requests can race past the check above: count again, in the
+		// same critical section as the store
+		if !napStoreNewUpload(c, &status) {
+			c.failWith(napErrRateLimited)
+			return
+		}
 		c.reply(map[string]any{"result": napUploadPublic(status)})
 
 		detail := fmt.Sprintf("%s (%s, %s) to %d Blossom server(s): %s",
@@ -295,6 +312,36 @@ func napStoreUpload(c *napCall, status *napUploadStatus) {
 		s.uploads[status.UploadID] = &copy
 	}
 	s.mu.Unlock()
+}
+
+// napStoreNewUpload stores a new upload's first status unless the window
+// already has uploadMaxActive uploads pending or uploading. Like
+// napStoreUpload, it stores nothing for a session that has ended.
+func napStoreNewUpload(c *napCall, status *napUploadStatus) bool {
+	s := c.ci.nap
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gen != c.gen {
+		return true
+	}
+	if napActiveUploadsLocked(s) >= uploadMaxActive {
+		return false
+	}
+	copy := *status
+	s.uploads[status.UploadID] = &copy
+	return true
+}
+
+// napActiveUploadsLocked counts the session's uploads still pending or
+// uploading. s.mu must be held.
+func napActiveUploadsLocked(s *napSession) int {
+	n := 0
+	for _, u := range s.uploads {
+		if u.Status == "pending" || u.Status == "uploading" {
+			n++
+		}
+	}
+	return n
 }
 
 func napPushUploadStatus(c *napCall, status napUploadStatus) {

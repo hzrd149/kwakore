@@ -175,6 +175,14 @@ func napIncChannelOpen(c *napCall) {
 		c.reply(map[string]any{"error": "invalid target"})
 		return
 	}
+	// a window is an end of at most incMaxChannels channels, counting both
+	// ends, so it cannot hold more by opening them nor be flooded into
+	// holding them by others (D-14, I-3); the open and emit buckets are the
+	// dispatcher's
+	if len(incChannelsOf(c.ci)) >= incMaxChannels {
+		c.failWith(napErrRateLimited)
+		return
+	}
 	var peer *Instance
 	for _, ci := range liveNapplets() {
 		if ci != c.ci && ci.napp.D == r.Target {
@@ -189,6 +197,13 @@ func napIncChannelOpen(c *napCall) {
 
 	ch := &incChannel{id: randomID(), a: c.ci, b: peer}
 	incMu.Lock()
+	// counted again with the insert: the peer's own worker (and any other
+	// window opening toward it) runs alongside this one
+	if incCountLocked(c.ci) >= incMaxChannels || incCountLocked(peer) >= incMaxChannels {
+		incMu.Unlock()
+		c.failWith(napErrRateLimited)
+		return
+	}
 	incChannels[ch.id] = ch
 	incMu.Unlock()
 
@@ -236,6 +251,17 @@ func napIncChannelBroadcast(c *napCall) {
 			peer.napPush(incChannelEvent(ch.id, c.ci, r.Payload))
 		}
 	}
+}
+
+// incCountLocked is how many channels ci is an end of. incMu must be held.
+func incCountLocked(ci *Instance) int {
+	n := 0
+	for _, ch := range incChannels {
+		if ch.other(ci) != nil {
+			n++
+		}
+	}
+	return n
 }
 
 func incChannelsOf(ci *Instance) []*incChannel {

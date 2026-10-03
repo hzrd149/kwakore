@@ -610,7 +610,8 @@ func TestIncChannelCap(t *testing.T) {
 	if got := waitID(t, recC, "inc.channel.open.result", "c-to-b"); got["error"] != napErrRateLimited {
 		t.Fatalf("opening toward a full window: %v", got)
 	}
-	napSettled(t, b, recB)
+	// a peer hears of a channel before its opener gets the answer, so the
+	// refusals above are final
 	if n := len(recB.find("inc.channel.opened")); n != incMaxChannels {
 		t.Fatalf("the full window heard of %d channels, want %d", n, incMaxChannels)
 	}
