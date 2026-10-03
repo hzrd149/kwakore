@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Gated NAP Dispatcher
 status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-10-03T16:34:20.761Z"
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-10-03T16:43:53.818Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 02 execution started
-state_head: f4df6240d9659e9b77853415e63b671ca64b7149
+state_head: 836828073ee3612a546660b5cb0962dcb0a26019
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 13
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 02 (Gated NAP Dispatcher) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 02 execution started
 
@@ -67,6 +67,7 @@ Progress: [█░░░░░░░░░] 13% (1/8 phases)
 | Phase 02 P02 | 5min | 3 tasks | 13 files |
 | Phase 02 P03 | 12min | 3 tasks | 11 files |
 | Phase 02 P04 | 11min | 3 tasks | 9 files |
+| Phase 02 P05 | 7min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-04] c.approve (PerCall), c.grant (Session) and c.hasGrant (check-only) ask only for the route's declared permission and question kind; anything else is refused without a prompt
 - [Phase 02]: [02-04] c.fetchBlossom is the one unprompted sink, documented in the gate layer; Blossom consent is RES-02 Phase 7
 - [Phase 02]: [02-04] nap_guard_test.go bans prompts, raw sinks, keyer/host sink selectors and bare go in every nap_*.go except nap_sink.go and nap_route.go, and Go error text or old prose in reply errors
+- [Phase 02]: [02-05]: host page FAIL_SHAPES is a marker-delimited strict-JSON mirror of the Go route table, looked up by own key only; TestHostFailShapesMatchGoRoutes and the shared fixture nap-fail-envelopes.json hold both builders identical
+- [Phase 02]: [02-05]: NAP-RELAY-respond recorded fixed (Phase 2) with the relay.close reply-less exception owned by Phase 6 RELY-06 (D-21)
 
 ### Pending Todos
 
@@ -131,6 +134,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-03T16:34:20.728Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-10-03T16:43:48.809Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None

@@ -37,7 +37,7 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 ### NAP dispatcher
 
 - [ ] **DISP-01**: Every NAP handler is registered with a declared permission gate; a handler cannot be registered without one, and a test fails if any handler calls an approval or sensitive sink outside its declared gate
-- [ ] **DISP-02**: Every request gets exactly one reply in the spec-defined shape for its type, including failure and panic paths, in both Go and the host page fallback (X-5; fixes R-2, ID-2, N-6)
+- [x] **DISP-02**: Every request gets exactly one reply in the spec-defined shape for its type, including failure and panic paths, in both Go and the host page fallback (X-5; fixes R-2, ID-2, N-6)
 - [x] **DISP-03**: Every napplet-facing input has Go-side bounds enforced after decoding: envelope size, per-type size, `id` length, rejection of case-colliding JSON keys, and a cap on lines from the child process
 - [ ] **DISP-04**: Each napplet window has a rate limiter and a bounded prompt queue covering prompts, link opens, intent invokes, uploads, resource fetches and INC opens/emits; a flooded queue cannot deadlock a window (X-3)
 - [x] **DISP-05**: No runtime panic is reachable from napplet input or filesystem errors; NAP goroutines recover panics, and cache setup returns errors instead of panicking (`backend/cache.go`)
@@ -159,7 +159,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SBOX-03 | Phase 4 | Pending |
 | SBOX-04 | Phase 4 | Pending |
 | DISP-01 | Phase 2 | Pending |
-| DISP-02 | Phase 2 | Pending |
+| DISP-02 | Phase 2 | Complete |
 | DISP-03 | Phase 2 | Complete |
 | DISP-04 | Phase 2 | Pending |
 | DISP-05 | Phase 2 | Complete |
