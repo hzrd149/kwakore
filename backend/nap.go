@@ -195,7 +195,10 @@ type napCall struct {
 }
 
 // napHandler handles one envelope type. It runs on the session's queue, so
-// it must not block: anything slow goes through c.async.
+// it must not block: anything slow goes through c.async. Its synchronous
+// part also runs under dispatchMu.RLock, so napStart and napClosed wait for
+// it: a handler that prompts or fetches inline would stall the host page's
+// nap.start and WindowClosed (on Android, the main thread in onDestroy).
 type napHandler func(c *napCall)
 
 var napHandlers = map[string]napHandler{}
