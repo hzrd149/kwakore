@@ -62,6 +62,16 @@ func napFilters(raw json.RawMessage) ([]nostr.Filter, error) {
 	return filters, nil
 }
 
+// napRelayRefused is what a napplet is told about a relay it named that
+// napExplicitRelay refused. The reason stays in the log: netguard's error
+// carries resolver output (which internal names resolve, and through which
+// resolver), and a napplet must not be able to probe the user's network
+// through it (WR-08, as the publish path does under D-07).
+func napRelayRefused(err error) string {
+	napSampled().Warn().Err(err).Msg("napplet named a relay that is not allowed")
+	return "blocked: relay not allowed"
+}
+
 // napExplicitRelay validates a relay a napplet named: a public ws(s) relay,
 // never something on the user's machine or network.
 func napExplicitRelay(ctx context.Context, raw string) (string, error) {
@@ -179,7 +189,9 @@ func napRelaySubscribe(c *napCall) {
 	}
 	filters, err := napFilters(r.Filters)
 	if err != nil {
-		closed("invalid: " + err.Error())
+		// the decoder's text stays here: the napplet learns only that its
+		// filters were refused
+		closed("invalid: invalid filters")
 		return
 	}
 	if sys == nil {
@@ -204,7 +216,7 @@ func napRelaySubscribe(c *napCall) {
 		if r.Relay != "" {
 			relay, err := napExplicitRelay(ctx, r.Relay)
 			if err != nil {
-				closed("blocked: " + err.Error())
+				closed(napRelayRefused(err))
 				return
 			}
 			explicit = []string{relay}
@@ -353,7 +365,7 @@ func napRelayQuery(c *napCall) {
 		if r.Relay != "" {
 			relay, err := napExplicitRelay(ctx, r.Relay)
 			if err != nil {
-				c.reply(map[string]any{"events": []any{}, "error": "blocked: " + err.Error()})
+				c.reply(map[string]any{"events": []any{}, "error": napRelayRefused(err)})
 				return
 			}
 			explicit = []string{relay}

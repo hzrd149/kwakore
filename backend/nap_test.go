@@ -1896,6 +1896,30 @@ func TestResourceFetchBlocksLoopback(t *testing.T) {
 	}
 }
 
+// TestNapRelayRefusalHidesDetail: a relay the napplet named that netguard
+// refuses, and filters that do not parse, are reported without the Go or
+// resolver error text, which would let a napplet probe the user's network
+// (WR-08).
+func TestNapRelayRefusalHidesDetail(t *testing.T) {
+	setupNapTest(t)
+	withSystem(t)
+	ci, rec := openNapplet(t, "relay-detail")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "relay.subscribe", "subId": "blocked", "filters": []any{map[string]any{"kinds": []int{1}}}, "relay": "ws://127.0.0.1:7777"})
+	if got := rec.wait(t, "relay.closed", 1); got["subId"] != "blocked" || got["reason"] != "blocked: relay not allowed" {
+		t.Fatalf("refused relay: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "relay.subscribe", "subId": "badfilter", "filters": []any{map[string]any{"kinds": "nope"}}})
+	if got := rec.wait(t, "relay.closed", 2); got["subId"] != "badfilter" || got["reason"] != "invalid: invalid filters" {
+		t.Fatalf("unparseable filters: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "relay.query", "id": "q", "filters": []any{map[string]any{"kinds": []int{1}}}, "relay": "ws://127.0.0.1:7777"})
+	if got := waitID(t, rec, "relay.query.result", "q"); got["error"] != "blocked: relay not allowed" {
+		t.Fatalf("refused relay on query: %v", got)
+	}
+}
+
 func TestNapResourceTrackKeepsRequestIDOwnership(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "resource-tracker")
