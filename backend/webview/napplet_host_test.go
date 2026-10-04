@@ -821,6 +821,88 @@ return { Boots: count("nap.boot"), Resets: count("nap.reset"), Appended: appende
 		}
 	})
 
+	// IN-05: a failed nap.reset is logged; on the halt path, where no
+	// nap.start follows to end the old session, it is retried once, and a
+	// second failure is said in the window
+	t.Run("a failed reset is logged, and retried once on the halt path", func(t *testing.T) {
+		for _, tc := range []struct {
+			name       string
+			fails      int // how many nap.reset calls fail, from the first
+			wantResets int
+			unended    bool
+		}{
+			{"the retry ends the session", 4, 5, false},
+			{"the retry fails too", 99, 5, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var got struct {
+					Resets, Boots, Live int
+					Body                string
+					Errors              []string
+				}
+				runHost(t, reloadLoopSetup+`
+let resetCalls = 0
+handlers["nap.reset"] = () => (++resetCalls <= `+strconv.Itoa(tc.fails)+` ? { __bridge_error: "transport down" } : null)
+`, `
+await flush()
+for (let i = 0; i < 4; i++) await replaceAt(appended[i], 500)
+await flush(6)
+return { Resets: count("nap.reset"), Boots: count("nap.boot"), Live: live().length, Body: document.body.textContent, Errors: errors }
+`, &got)
+				// three rebuilds, each still booting after its failed reset
+				if got.Boots != 4 || got.Live != 0 {
+					t.Errorf("nap.boot %d, live frames %d; want 4, 0", got.Boots, got.Live)
+				}
+				if got.Resets != tc.wantResets {
+					t.Errorf("nap.reset sent %d times, want %d (one per replacement, one retry on the halt)", got.Resets, tc.wantResets)
+				}
+				logged := 0
+				for _, e := range got.Errors {
+					if strings.Contains(e, "nap.reset failed") && strings.Contains(e, "transport down") {
+						logged++
+					}
+				}
+				if want := min(tc.fails, tc.wantResets); logged != want {
+					t.Errorf("%d failed resets logged, want %d: %q", logged, want, got.Errors)
+				}
+				if !strings.Contains(got.Body, "keeps reloading itself") {
+					t.Errorf("window text after the halt = %q", got.Body)
+				}
+				if ended := !strings.Contains(got.Body, "could not be ended"); ended == tc.unended {
+					t.Errorf("window text %q; want the unended notice %v", got.Body, tc.unended)
+				}
+			})
+		}
+	})
+
+	// the retry must never reach a session a dev reload started meanwhile
+	t.Run("no retry after a dev reload", func(t *testing.T) {
+		var got struct {
+			Resets, Starts, Live int
+			Body                 string
+		}
+		runHost(t, reloadLoopSetup, `
+await flush()
+for (let i = 0; i < 3; i++) await replaceAt(appended[i], 500)
+hold("nap.reset")
+await replaceAt(appended[3], 500)
+window.__nap_reload()
+await flush(6)
+release("nap.reset", { __bridge_error: "transport down" })
+await flush(6)
+return { Resets: count("nap.reset"), Starts: count("nap.start"), Live: live().length, Body: document.body.textContent }
+`, &got)
+		if got.Resets != 4 {
+			t.Errorf("nap.reset sent %d times, want 4: no retry once the dev reload booted", got.Resets)
+		}
+		if got.Starts != 5 || got.Live != 1 {
+			t.Errorf("nap.start %d, live frames %d; want 5, 1 (the dev reload's session stands)", got.Starts, got.Live)
+		}
+		if strings.Contains(got.Body, "could not be ended") || strings.Contains(got.Body, "keeps reloading itself") {
+			t.Errorf("window text after the dev reload = %q", got.Body)
+		}
+	})
+
 	t.Run("a dev reload clears the halt and the history", func(t *testing.T) {
 		var got struct {
 			Halted                     bool

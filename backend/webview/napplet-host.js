@@ -595,8 +595,18 @@
   // would halt early, a step forward would miss a loop.
   const REBUILD_LIMIT = 3
   const REBUILD_WINDOW_MS = 10 * 1000
+  const HALTED = "This napplet keeps reloading itself and was stopped."
   let rebuilds = []
   let halted = false
+
+  // resetSession ends the current session in Go on the trusted lane. A
+  // failure is logged and passed on, never swallowed: it means the session
+  // may still hold its subscriptions and grants in Go.
+  const resetSession = () =>
+    enqueue(() => rpc("nap.reset"), true).catch(err => {
+      console.error("[napplet-host] nap.reset failed", err)
+      throw err
+    })
 
   const replaced = f => {
     if (frame !== f) return
@@ -604,21 +614,38 @@
     frame = null
     session = null
     const serial = ++bootSerial
-    const reset = enqueue(() => rpc("nap.reset"), true).catch(() => {})
+    const reset = resetSession()
 
     const now = performance.now()
     rebuilds = rebuilds.filter(t => now - t < REBUILD_WINDOW_MS)
     if (halted || rebuilds.length >= REBUILD_LIMIT) {
       // the serial bump above already made any boot in flight give up
       halted = true
-      document.body.textContent = "This napplet keeps reloading itself and was stopped."
+      document.body.textContent = HALTED
+      // No nap.start follows here to end the old session in Go, so a
+      // failed reset is tried once more, unless a dev reload booted in the
+      // meantime (its nap.start ends the session, and a reset queued after
+      // it would end the new one). If that fails too, the window says so.
+      reset
+        .catch(() => {
+          if (halted && serial === bootSerial) return resetSession()
+        })
+        .catch(() => {
+          if (halted && serial === bootSerial) {
+            document.body.textContent = HALTED + " Its session could not be ended; close this window."
+          }
+        })
       return
     }
     rebuilds.push(now)
-    reset.then(() => {
-      // a dev reload in the meantime booted already
-      if (serial === bootSerial) boot()
-    })
+    // a failed reset was logged; the fresh boot's nap.start ends the old
+    // session in Go all the same
+    reset
+      .catch(() => {})
+      .then(() => {
+        // a dev reload in the meantime booted already
+        if (serial === bootSerial) boot()
+      })
   }
 
   const start = () => {
