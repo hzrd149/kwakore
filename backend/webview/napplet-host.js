@@ -551,18 +551,41 @@
   // fresh boot waits for that, so its nap.boot and nap.start come after the
   // teardown, and a boot already in flight gives up (bootSerial). A frame
   // that is no longer current is ignored, so one replacement rebuilds once.
+  //
+  // A napplet that keeps replacing its document (a reload loop, or one that
+  // rewrites itself with document.open, which is rebuilt and counted like
+  // any other replacement) is stopped: at most REBUILD_LIMIT rebuilds within
+  // REBUILD_WINDOW_MS, and the next replacement still ends its session but
+  // boots nothing and says why in the window. rebuilds and halted live in
+  // this closure, out of the frame's reach; only the launcher's dev reload
+  // (__nap_reload) or a new window clears them. The initial boot and dev
+  // reloads are never counted.
+  const REBUILD_LIMIT = 3
+  const REBUILD_WINDOW_MS = 10 * 1000
+  let rebuilds = []
+  let halted = false
+
   const replaced = f => {
     if (frame !== f) return
     f.remove()
     frame = null
     session = null
     const serial = ++bootSerial
-    enqueue(() => rpc("nap.reset"), true)
-      .catch(() => {})
-      .then(() => {
-        // a dev reload in the meantime booted already
-        if (serial === bootSerial) boot()
-      })
+    const reset = enqueue(() => rpc("nap.reset"), true).catch(() => {})
+
+    const now = Date.now()
+    rebuilds = rebuilds.filter(t => now - t < REBUILD_WINDOW_MS)
+    if (halted || rebuilds.length >= REBUILD_LIMIT) {
+      // the serial bump above already made any boot in flight give up
+      halted = true
+      document.body.textContent = "This napplet keeps reloading itself and was stopped."
+      return
+    }
+    rebuilds.push(now)
+    reset.then(() => {
+      // a dev reload in the meantime booted already
+      if (serial === bootSerial) boot()
+    })
   }
 
   const start = () => {
@@ -570,8 +593,12 @@
     boot()
   }
 
-  // a dev reload: Go has new bytes for us
+  // a dev reload: Go has new bytes for us. It is the launcher's, never the
+  // napplet's, so it starts a halted napplet again with a clean history.
   window.__nap_reload = () => {
+    if (halted) document.body.textContent = ""
+    halted = false
+    rebuilds = []
     boot()
   }
 
