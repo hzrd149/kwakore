@@ -12,6 +12,7 @@ import (
 	"fiatjaf.com/verdana/desktop/internal/instancelock"
 	"fiatjaf.com/verdana/desktop/internal/media"
 	"fiatjaf.com/verdana/desktop/internal/osintegration"
+	"fiatjaf.com/verdana/desktop/internal/secretstore"
 	"fiatjaf.com/verdana/desktop/internal/windowchrome"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
@@ -160,6 +161,7 @@ func main() {
 		DataDir: verdanaDir,
 		Host:    gioHost{},
 		Log:     &log,
+		Secrets: secretstore.New(),
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not start the backend")

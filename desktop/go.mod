@@ -63,6 +63,7 @@ require (
 	github.com/gogpu/systray v0.3.0
 	github.com/jackmordaunt/icns/v3 v3.0.1
 	github.com/sergeymakinen/go-ico v1.0.0-beta.0
+	github.com/zalando/go-keyring v0.2.8
 	verdana/backend v0.0.0
 )
 
@@ -71,6 +72,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-webgpu/goffi v0.6.3 // indirect
