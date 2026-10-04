@@ -50,8 +50,12 @@ const (
 	childUnavailableTitle  = "Napp windows can't open"
 	childUnavailableDetail = "Verdana's window program is missing or was changed on disk, so it was not started. Reinstall Verdana to fix this."
 
+	// the napplet-hardening detail stays neutral about the cause: the same
+	// notice covers a switch that reads back on, a feature that was renamed
+	// in a newer engine, and symbols or a window that could not be reached,
+	// and no single remedy fixes all of them (IN-10)
 	nappletHardeningTitle  = "A napplet was closed before it ran"
-	nappletHardeningDetail = "The web engine on this system could not switch off its direct network access (WebRTC, media capture or link preconnect), so Verdana did not run the napplet. Updating the system web engine (WebKitGTK) may fix this."
+	nappletHardeningDetail = "Verdana couldn't switch off unsafe features of this system's web engine, so it did not run the napplet. Updating Verdana or the system web engine may help."
 
 	// childUnavailableFetchErr is the store's FetchErr line for a launch
 	// that failed closed (lowercase, Go error convention).
