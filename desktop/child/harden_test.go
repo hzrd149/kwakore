@@ -4,7 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestWebView2Args pins the WebView2 browser arguments. Every child of one
@@ -116,4 +118,66 @@ func firstString(fn *ast.FuncDecl, s string) token.Pos {
 		return !pos.IsValid()
 	})
 	return pos
+}
+
+// TestTokenMissLogIsSampled: a forged binding call is refused every time,
+// but logs at most once per interval, with the count it swallowed.
+func TestTokenMissLogIsSampled(t *testing.T) {
+	var m missLog
+	start := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+
+	if log, suppressed := m.note(start); !log || suppressed != 0 {
+		t.Fatalf("first miss: log=%v suppressed=%d, want true 0", log, suppressed)
+	}
+	for i := 1; i <= 100; i++ {
+		at := start.Add(time.Duration(i) * 9 * time.Millisecond) // all within the first second
+		if log, _ := m.note(at); log {
+			t.Fatalf("miss %d at +%v was logged inside the interval", i, at.Sub(start))
+		}
+	}
+	if log, _ := m.note(start.Add(missLogInterval - time.Millisecond)); log {
+		t.Fatal("a miss just before the interval ended was logged")
+	}
+	// that one was swallowed too: 101 since the last log
+	if log, suppressed := m.note(start.Add(missLogInterval)); !log || suppressed != 101 {
+		t.Fatalf("miss after the interval: log=%v suppressed=%d, want true 101", log, suppressed)
+	}
+	// the count starts over from that log
+	if log, _ := m.note(start.Add(missLogInterval + time.Second)); log {
+		t.Fatal("a miss one second after the second log was logged")
+	}
+	if log, suppressed := m.note(start.Add(2 * missLogInterval)); !log || suppressed != 1 {
+		t.Fatalf("third log: log=%v suppressed=%d, want true 1", log, suppressed)
+	}
+}
+
+func TestTokenMissLogIsSampledConcurrent(t *testing.T) {
+	var m missLog
+	now := time.Now()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	logged, swallowed := 0, 0
+	for g := 0; g < 32; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				log, _ := m.note(now)
+				mu.Lock()
+				if log {
+					logged++
+				} else {
+					swallowed++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if logged != 1 || swallowed != 3199 {
+		t.Fatalf("logged=%d swallowed=%d, want 1 and 3199", logged, swallowed)
+	}
+	if _, suppressed := m.note(now.Add(missLogInterval)); suppressed != 3199 {
+		t.Fatalf("suppressed=%d after the interval, want 3199", suppressed)
+	}
 }
