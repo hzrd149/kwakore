@@ -48,7 +48,7 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 - [x] **PROC-02**: `libwebview` is no longer extracted by go-webview's `embedded` package into a shared `/tmp/webview-*` directory; it is extracted with the same per-user verified mechanism as the child binary
 - [x] **PROC-03**: The single-instance channel is a user-only Unix socket (Linux/macOS, peer-uid checked) or an owner-only named pipe (Windows); all TCP code, the port file and the token-only legacy message are removed
 - [x] **PROC-04**: The desktop host's `OpenLink` refuses anything but well-formed http(s) URLs, independently of its callers
-- [ ] **PROC-05**: Desktop CI compiles the desktop module for Windows as well as Linux
+- [x] **PROC-05**: Desktop CI compiles the desktop module for Windows as well as Linux
 
 ### Secrets
 
@@ -167,7 +167,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROC-02 | Phase 3 | Complete |
 | PROC-03 | Phase 3 | Complete |
 | PROC-04 | Phase 3 | Complete |
-| PROC-05 | Phase 3 | Pending |
+| PROC-05 | Phase 3 | Complete |
 | SECR-01 | Phase 3 | Complete |
 | SECR-02 | Phase 3 | Complete |
 | SECR-03 | Phase 3 | Complete |

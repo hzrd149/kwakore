@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
 status: executing
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-04T04:20:20.239Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-10-04T04:28:39.971Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 03 execution started
-state_head: 7e83eedb676f8463a09e43a2178c7325c49554b0
+state_head: 1429298924cc20600d632d2d568f363c1cd97a8c
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
   percent: 25
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 03 execution started
 
@@ -79,6 +79,7 @@ Progress: [███░░░░░░░] 25% (2/8 phases)
 | Phase 03 P04 | 4 min | 3 tasks | 18 files |
 | Phase 03 P08 | 8min | 2 tasks | 4 files |
 | Phase 03 P09 | 6min | 2 tasks | 8 files |
+| Phase 03 P06 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-08: a logout the keyring can't take saves non-secret LogoutPending; while a logout stands (flag, or location=file with an empty file) the keyring login is never resumed and the item is deleted once reachable
 - [Phase 03]: 03-08: RetryKeyring/LoginWithoutKeyring act only from KeyringWait=failed (check-and-reset under ls.mu); the D-21 fresh-key permission is in-memory secretsRecord.freshKeyOK, reset by every load
 - [Phase 03]: 03-09: desktop secretstore runs every go-keyring call on one ordered worker (120 s call, 3 s probe); a retried Get joins the read in flight, a Set/Delete ends the join; only keyring.ErrNotFound is not-found
+- [Phase 03]: 03-06: Windows CI steps run one command each; PowerShell only fails a step on the last command's exit code
+- [Phase 03]: 03-06: initSystem's closer closes the kvstore then the eventstore; the rigs' cleanup order was already right
 
 ### Pending Todos
 
@@ -171,6 +174,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T04:20:20.183Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-10-04T04:28:39.912Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None
