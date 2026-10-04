@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"context"
+	"encoding/json"
 	"math"
 	"path/filepath"
 	"slices"
@@ -8,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // TestHandleWireMessageDropsOverlong pins Android's inbound cap: a message
@@ -212,5 +217,95 @@ func TestWindowFailedRaisesNotice(t *testing.T) {
 	stateMu.Unlock()
 	if persisted {
 		t.Fatal("napplet-hardening dismissal was persisted")
+	}
+}
+
+// TestWindowFailedOnlyFromNapplets: windowFailed is a napplet window's line
+// to send. A napp (35130) window's page writes its own wire JSON on Android
+// (NappWebView.kt __verdanaHost), so from a non-napplet window the message
+// raises no notice and logs nothing past a sampled Debug line (WR-06).
+func TestWindowFailedOnlyFromNapplets(t *testing.T) {
+	setupNapTest(t)
+	withFreshStateDir(t)
+	statePath = filepath.Join(dataDir, "state.json")
+	logged := captureLog(t)
+	saved := windowFailedBurst
+	windowFailedBurst = &zerolog.BurstSampler{Burst: 3, Period: time.Hour}
+	t.Cleanup(func() { windowFailedBurst = saved })
+
+	ci := &Instance{
+		instance:   "napp-page-" + randomID()[:6],
+		napp:       Napp{ID: "napp~0123456789abcdef~forger", D: "forger", Name: "forger", Kind: KindNapp},
+		subs:       map[int]context.CancelFunc{},
+		actions:    map[string]int{},
+		changed:    make(chan struct{}),
+		dispatches: map[int]chan WireMsg{},
+		gone:       make(chan struct{}),
+	}
+	registerInstance(ci)
+	t.Cleanup(func() { WindowClosed(ci.instance) })
+
+	for range 20 {
+		HandleWireMessage(ci.instance, `{"t":"windowFailed","code":"engine-hardening"}`)
+	}
+	if got := Snapshot().Notices; len(got) != 0 {
+		t.Fatalf("a napp window raised notices: %v", noticeIDs(got))
+	}
+	out := logged.String()
+	if strings.Contains(out, `"level":"error"`) || strings.Contains(out, "hardening failed") {
+		t.Fatalf("a napp window's windowFailed was logged as a hardening failure:\n%s", out)
+	}
+	if n := strings.Count(out, "ignoring windowFailed from a non-napplet window"); n != 3 {
+		t.Fatalf("dropped windowFailed logged %d times, want the burst of 3:\n%s", n, out)
+	}
+}
+
+// TestWindowFailedUnknownCodeLog: an unknown code from a napplet window is
+// logged sampled, cut to maxLoggedWireCode bytes and stripped of control
+// characters, with its real length beside it (WR-06).
+func TestWindowFailedUnknownCodeLog(t *testing.T) {
+	setupNapTest(t)
+	withFreshStateDir(t)
+	statePath = filepath.Join(dataDir, "state.json")
+	logged := captureLog(t)
+	saved := windowFailedBurst
+	windowFailedBurst = &zerolog.BurstSampler{Burst: 2, Period: time.Hour}
+	t.Cleanup(func() { windowFailedBurst = saved })
+	ci, _ := openNapplet(t, "unknown-code")
+
+	code := "\x1b[31mspoof\n" + strings.Repeat("x", 1<<20)
+	msg, err := json.Marshal(WireMsg{T: "windowFailed", Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		HandleWireMessage(ci.instance, string(msg))
+	}
+	if got := Snapshot().Notices; len(got) != 0 {
+		t.Fatalf("an unknown code raised notices: %v", noticeIDs(got))
+	}
+	out := logged.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("unknown code logged %d lines, want the burst of 2:\n%.2000s", len(lines), out)
+	}
+	for _, line := range lines {
+		var entry struct {
+			Code    string `json:"code"`
+			CodeLen int    `json:"code_len"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line %q: %v", line, err)
+		}
+		want := "?[31mspoof?" + strings.Repeat("x", maxLoggedWireCode-11)
+		if entry.Code != want {
+			t.Fatalf("logged code = %q, want %q", entry.Code, want)
+		}
+		if entry.CodeLen != 1<<20+11 {
+			t.Fatalf("logged code_len = %d, want %d", entry.CodeLen, 1<<20+11)
+		}
+	}
+	if len(out) > 4096 {
+		t.Fatalf("unknown-code log is %d bytes", len(out))
 	}
 }

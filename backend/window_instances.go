@@ -404,6 +404,15 @@ func HandleMessage(instance string, m WireMsg) {
 		// quicky; the window sends nothing else worth racing on.
 		ci.handlePromptAnswer(m)
 	case "windowFailed":
+		if ci.nap == nil {
+			// only a napplet window fails closed, and only its launcher-run
+			// side (the desktop child, the Android host page) says so. From
+			// any other window the line is page-authored (an Android napp
+			// writes its own wire JSON), so it raises nothing (WR-06).
+			l := log.Sample(windowFailedBurst)
+			l.Debug().Str("instance", instance).Msg("ignoring windowFailed from a non-napplet window")
+			return
+		}
 		ci.windowFailed(m.Code)
 	case "rpc":
 		if ci.nap != nil && m.Method == "nap.msg" {
@@ -424,10 +433,34 @@ func HandleMessage(instance string, m WireMsg) {
 // turned off (desktop/child napplet.go reportWindowFailed).
 const windowFailedEngineHardening = "engine-hardening"
 
-// windowFailed handles a window that says it is about to exit on its own,
-// and why. The window carries only a fixed code: the words the user sees are
-// the launcher's, and an unknown code is logged and shows nothing. The window
-// closes itself right after, so WindowClosed follows as usual.
+// windowFailedBurst bounds the log lines windowFailed messages can cause:
+// the ones dropped from non-napplet windows and the ones with an unknown
+// code. Neither may become a log flood.
+var windowFailedBurst zerolog.Sampler = &zerolog.BurstSampler{Burst: 5, Period: time.Minute}
+
+// maxLoggedWireCode is how much of an unknown windowFailed code reaches the
+// log: the code is sender-chosen and may be as long as a whole message.
+const maxLoggedWireCode = 64
+
+// loggableWireCode is a sender-chosen code cut to maxLoggedWireCode bytes,
+// with every byte that is not printable ASCII replaced by '?', so it cannot
+// smuggle control characters or a megabyte of text into the log.
+func loggableWireCode(code string) string {
+	b := []byte(code[:min(len(code), maxLoggedWireCode)])
+	for i, c := range b {
+		if c < 0x20 || c > 0x7e {
+			b[i] = '?'
+		}
+	}
+	return string(b)
+}
+
+// windowFailed handles a napplet window that says it is about to exit on its
+// own, and why (HandleMessage drops the message from any other window). The
+// window carries only a fixed code: the words the user sees are the
+// launcher's, and an unknown code is logged, sampled and cut short, and shows
+// nothing. The window closes itself right after, so WindowClosed follows as
+// usual.
 func (ci *Instance) windowFailed(code string) {
 	switch code {
 	case windowFailedEngineHardening:
@@ -435,7 +468,9 @@ func (ci *Instance) windowFailed(code string) {
 			Msg("napplet window closed itself: web engine hardening failed")
 		raiseNappletHardening()
 	default:
-		log.Warn().Str("napp", ci.napp.ID).Str("instance", ci.instance).Str("code", code).
+		l := log.Sample(windowFailedBurst)
+		l.Warn().Str("napp", ci.napp.ID).Str("instance", ci.instance).
+			Int("code_len", len(code)).Str("code", loggableWireCode(code)).
 			Msg("window failed with an unknown code")
 	}
 }

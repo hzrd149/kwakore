@@ -37,7 +37,8 @@ const MaxInboundWireMsg = 24<<20 + 1<<20
 //	                                 code says why ("engine-hardening": a
 //	                                 napplet window whose engine hardening
 //	                                 failed), and the launcher shows its own
-//	                                 notice for it
+//	                                 notice for it. Napplet windows only:
+//	                                 from any other window it is dropped
 type WireMsg struct {
 	T      string          `json:"t"`
 	ID     int             `json:"id,omitempty"`
