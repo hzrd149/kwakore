@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -86,7 +87,30 @@ func Ensure(dir string, files []File) error {
 			return err
 		}
 	}
+	collect(dir, files)
 	return nil
+}
+
+// collect removes older child versions and leftover temp files once the
+// current files are in place. Only "child-*" and ".tmp-*" entries are
+// touched, never a name in keep, in whatever order ReadDir gives them.
+// Errors are ignored: Windows refuses to delete a program that is running,
+// and the next collection will get it.
+func collect(dir string, keep []File) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "child-") && !strings.HasPrefix(name, ".tmp-") {
+			continue
+		}
+		if slices.ContainsFunc(keep, func(f File) bool { return f.Name == name }) {
+			continue
+		}
+		os.Remove(filepath.Join(dir, name))
+	}
 }
 
 // checkFile refuses a File Ensure must not write: an empty one (fail closed

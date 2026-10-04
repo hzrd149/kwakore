@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"verdana/backend"
 
 	"fiatjaf.com/verdana/desktop/internal/childbin"
@@ -48,8 +50,7 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_DIR="+spec.Dir,
 		"VERDANA_NAPP_URL="+spec.URL,
@@ -64,12 +65,12 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
 	)
-	ct, err := spawnChild(cmd, spec.Instance, false)
+	ct, err := spawnChild(childCmd(exe, env), spec.Instance, false)
 	if err != nil {
 		return nil, err
 	}
 	log.Info().Str("napp", spec.NappID).Str("instance", spec.Instance).
-		Int("pid", cmd.Process.Pid).Msg("napp window started")
+		Int("pid", ct.cmd.Process.Pid).Msg("napp window started")
 	return ct, nil
 }
 
@@ -80,8 +81,7 @@ func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"VERDANA_WINDOW_KIND=settings",
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_NAME="+spec.Name,
@@ -91,37 +91,63 @@ func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
 	)
-	ct, err := spawnChild(cmd, spec.Window, true)
+	ct, err := spawnChild(childCmd(exe, env), spec.Window, true)
 	if err != nil {
 		return nil, err
 	}
 	log.Info().Str("napp", spec.NappID).Str("window", spec.Window).
-		Int("pid", cmd.Process.Pid).Msg("settings window started")
+		Int("pid", ct.cmd.Process.Pid).Msg("settings window started")
 	return ct, nil
 }
 
-func spawnChild(cmd *exec.Cmd, instance string, settings bool) (*childTransport, error) {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
+// childCmd builds a fresh command for exe on every call.
+func childCmd(exe string, env []string) func() *exec.Cmd {
+	return func() *exec.Cmd {
+		cmd := exec.Command(exe)
+		cmd.Env = env
+		return cmd
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
+}
+
+// cmdStart starts a command; a test seam.
+var cmdStart = (*exec.Cmd).Start
+
+// textBusyRetries is how many times spawnChild starts a child that failed
+// with "text file busy". Right after prepareChild writes a new child, a fork
+// running in another goroutine can still hold the temp file's write
+// descriptor for a moment, and exec then fails with ETXTBSY (golang/go#22315).
+const textBusyRetries = 3
+
+func spawnChild(newCmd func() *exec.Cmd, instance string, settings bool) (*childTransport, error) {
+	for attempt := 1; ; attempt++ {
+		// an exec.Cmd cannot be started twice, and its pipes belong to it
+		cmd := newCmd()
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, err
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, err
+		}
+		cmd.Stderr = os.Stderr
+		if err := cmdStart(cmd); err != nil {
+			if errors.Is(err, syscall.ETXTBSY) && attempt < textBusyRetries {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			return nil, err
+		}
+
+		ct := &childTransport{instance: instance, cmd: cmd, settings: settings, enc: json.NewEncoder(stdin)}
+
+		childrenMu.Lock()
+		children = append(children, ct)
+		childrenMu.Unlock()
+
+		go readChild(ct, stdout)
+		return ct, nil
 	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	ct := &childTransport{instance: instance, cmd: cmd, settings: settings, enc: json.NewEncoder(stdin)}
-
-	childrenMu.Lock()
-	children = append(children, ct)
-	childrenMu.Unlock()
-
-	go readChild(ct, stdout)
-	return ct, nil
 }
 
 func (ct *childTransport) Send(m backend.WireMsg) {
