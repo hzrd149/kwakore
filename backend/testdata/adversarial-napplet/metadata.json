@@ -1,0 +1,6 @@
+{
+  "id": "verdana-adversarial",
+  "title": "Verdana adversarial",
+  "format": "napplet",
+  "description": "Phase 4 sandbox fixture: self-navigation, reload, reload loop, forged bindings, global probing"
+}

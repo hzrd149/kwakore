@@ -1,0 +1,512 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Verdana adversarial</title>
+<style>
+  body { font: 13px/1.4 monospace; margin: 12px; }
+  button { margin: 0 6px 8px 0; }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 0; }
+  .pass { color: #2a7d2a; }
+  .fail { color: #b3261e; }
+  .info { color: #6b6b6b; }
+</style>
+</head>
+<body>
+<!--
+  Phase 4 sandbox fixture (D-13, D-15). Load this folder from the dev tab of
+  a dev build (just run); it is test data, never embedded in any build, and a
+  developer only gets it by loading it on purpose. It is hostile on purpose:
+  it tries every escape the phase research measured and writes one line per
+  result below, PASS (the sandbox held), FAIL (it did not) or INFO (sent, or
+  only observable from outside, such as a TCP listener).
+
+  Steps, in order: scope (frame globals), parent (parent.*, top.*,
+  window.open, a form POST), bindings (forged calls to the webview's native
+  message handlers), network (fetch, image, preconnect, prefetch, WebSocket,
+  EventSource, beacon, font, CSS, RTCPeerConnection, mediaDevices), then the
+  self-navigations nav-http, nav-meta, nav-anchor, nav-blank, nav-data,
+  nav-blob, doc-open, reload and reload-delayed, then the verdict, and last
+  the reload loop, which ends with the launcher's "keeps reloading" stop.
+
+  The host page replaces the frame after each self-navigation, and
+  window.name does not survive that rebuild, so progress lives in
+  window.napplet.storage.instance under adv.* keys: the run picks up after
+  every rebuild in the same window, and starts over in a new window or after
+  Restart. Rebuild-causing steps are adv.pause ms apart (4000 by default) so
+  only the reload loop trips the 3 rebuilds per 10 s cap. Run reload loop
+  starts the loop by hand; adv.auto = "1" starts it after the verdict.
+  adv.target (default https://example.invalid/adversarial/) is where the
+  network and navigation attempts go; the WebKit smoke points it at a
+  loopback listener that must see no connection at all.
+-->
+<div>
+  <button id="restart">Restart</button>
+  <button id="loop">Run reload loop</button>
+</div>
+<pre id="log"></pre>
+<script>
+;(() => {
+  const storage = window.napplet && window.napplet.storage && window.napplet.storage.instance
+
+  // the document a load-delayed reload put in place of the running one (the
+  // reload keeps window.name, a rebuild does not): it tries to get an
+  // envelope to the launcher before its load, holds its load back, and does
+  // nothing else. The launcher's document-start marker must end the old
+  // session first, so adv.leak never arrives (the verdict step checks).
+  // The load is held back the way the research measured it (RESEARCH C2): a
+  // 40 MB data: image keeps the load event pending while the event loop
+  // runs, so the envelope reaches the host page first. A busy wait would
+  // not: it blocks the host page too, and the load lands before the post.
+  if (window.name === "adv-reload-delayed") {
+    if (storage) storage.setItem("adv.leak", "replaced-document").catch(() => {})
+    const img = document.createElement("img")
+    img.src = "data:image/png;base64," + "A".repeat(40 * 1024 * 1024)
+    document.body.appendChild(img)
+    return
+  }
+
+  const out = document.getElementById("log")
+  const line = (text, cls) => {
+    const span = document.createElement("span")
+    if (cls) span.className = cls
+    span.textContent = text + "\n"
+    out.appendChild(span)
+  }
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+  const errText = e => (e && (e.name ? e.name + ": " : "") + (e.message || "")) || String(e)
+
+  line("adversarial napplet loaded")
+  if (!storage) {
+    line("FAIL window.napplet.storage.instance is missing; nothing can run", "fail")
+    return
+  }
+
+  const STEPS = [
+    "scope", "parent", "bindings", "network",
+    "nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob",
+    "doc-open", "reload", "reload-delayed",
+    "verdict", "loop",
+  ]
+  const LOOP = STEPS.indexOf("loop")
+  const FINISHED = STEPS.length
+  // the steps that replace (or try to replace) this document
+  const REBUILDS = new Set([
+    "nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob",
+    "doc-open", "reload", "reload-delayed",
+  ])
+  // the engine may refuse these outright and keep this document
+  const REFUSABLE = new Set(["nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob"])
+  const KEYS = ["adv.step", "adv.pending", "adv.results", "adv.boots", "adv.target", "adv.auto", "adv.pause"]
+  const DEFAULT_TARGET = "https://example.invalid/adversarial/"
+  const LOOP_IDLE_MS = 10500
+
+  const results = []
+  const render = r => {
+    const cls = r.status === "PASS" ? "pass" : r.status === "FAIL" ? "fail" : "info"
+    line(r.status + " " + r.step + ": " + r.detail, cls)
+  }
+  const note = (step, status, detail) => {
+    const r = { step, status, detail }
+    results.push(r)
+    render(r)
+  }
+  const save = () => storage.setItem("adv.results", JSON.stringify(results))
+
+  const tally = () => {
+    const n = { PASS: 0, FAIL: 0, INFO: 0 }
+    for (const r of results) n[r.status] = (n[r.status] || 0) + 1
+    return n
+  }
+
+  // throws runs fn and returns what it threw, or null
+  const throws = fn => {
+    try {
+      fn()
+      return null
+    } catch (e) {
+      return e || new Error("threw")
+    }
+  }
+
+  // within settles p, or gives "timeout" after ms
+  const within = (p, ms) => Promise.race([p, sleep(ms).then(() => "timeout")])
+
+  // a document whose only script posts a storage.set for adv.leak: if an
+  // engine navigates this frame to it, the post must not reach the launcher
+  const leakDoc = value =>
+    "<!doctype html><scr" + "ipt>parent.postMessage({type:\"storage.set\",id:\"adv-" + value +
+    "\",key:\"adv.leak\",value:\"" + value + "\",scope:\"instance\"},\"*\")</scr" + "ipt>"
+
+  let target = DEFAULT_TARGET
+
+  // ── checks that keep this document ──────────────────────────────
+  const checks = {
+    scope: async () => {
+      const names = [
+        "NappletShimPrelude", "nostr", "__verdanaNappletRPC", "__verdana_napplet_rpc",
+        "__verdana_napplet_answer", "__verdana_prompt_answer", "__bridge_rpc",
+      ]
+      for (const name of names) {
+        const type = typeof window[name]
+        note("scope", type === "undefined" ? "PASS" : "FAIL", name + " is " + type)
+      }
+      note("scope", "INFO", "window.__webview__ is " + typeof window.__webview__)
+      const webview = throws(() => window.chrome.webview) === null && window.chrome && window.chrome.webview
+      note("scope", "INFO", webview ? "chrome.webview is present" : "chrome.webview is absent")
+      note("scope", "INFO", "window.napplet: " + Object.keys(window.napplet || {}).join(", "))
+    },
+
+    parent: async step => {
+      let value
+      let err = throws(() => {
+        value = parent.__verdanaNappletRPC
+      })
+      if (err) note("parent", "PASS", "reading parent.__verdanaNappletRPC threw " + errText(err))
+      else if (value === undefined) note("parent", "INFO", "parent.__verdanaNappletRPC reads undefined")
+      else note("parent", "FAIL", "parent.__verdanaNappletRPC is readable (" + typeof value + ")")
+
+      err = throws(() => {
+        value = parent.document
+      })
+      if (err) note("parent", "PASS", "reading parent.document threw " + errText(err))
+      else note("parent", "FAIL", "parent.document is readable (" + typeof value + ")")
+
+      err = throws(() => {
+        top.location = target + "top"
+      })
+      if (err) note("parent", "PASS", "assigning top.location threw " + errText(err))
+      else note("parent", "INFO", "assigning top.location did not throw (the listener sees a navigation)")
+
+      let popup = null
+      err = throws(() => {
+        popup = window.open(target + "popup")
+      })
+      if (err) note("parent", "PASS", "window.open threw " + errText(err))
+      else if (popup === null) note("parent", "PASS", "window.open returned null")
+      else note("parent", "FAIL", "window.open returned a window")
+
+      // a form submission could replace this document on some engine, so
+      // the run moves past this step before it is tried
+      await save()
+      await storage.setItem("adv.step", String(step + 1))
+      err = throws(() => {
+        const form = document.createElement("form")
+        form.method = "post"
+        form.action = target + "form"
+        form.target = "_self"
+        const input = document.createElement("input")
+        input.type = "hidden"
+        input.name = "adv"
+        input.value = "form"
+        form.appendChild(input)
+        document.body.appendChild(form)
+        form.submit()
+      })
+      if (err) note("parent", "INFO", "form POST threw " + errText(err))
+      else note("parent", "INFO", "form POST submitted (the listener counts connections)")
+    },
+
+    bindings: async () => {
+      // libwebview's binding message: JSON text of {id, method, params},
+      // where params are the bound function's arguments. Both carry a
+      // forged token, so the child must refuse them and log that it did.
+      const forged = [
+        { id: "adv-forged-rpc", method: "__verdana_napplet_rpc", params: ["forged-token", "nap.openSettings", "null"] },
+        { id: "adv-forged-answer", method: "__verdana_napplet_answer", params: ["forged-token", 1, true, 0, "once"] },
+      ]
+      let reached = 0
+
+      let handler = null
+      throws(() => {
+        handler = window.webkit.messageHandlers.__webview__
+      })
+      if (handler && typeof handler.postMessage === "function") {
+        for (const call of forged) {
+          const err = throws(() => handler.postMessage(JSON.stringify(call)))
+          if (err) note("bindings", "INFO", "webkit.messageHandlers " + call.method + " threw " + errText(err))
+        }
+        note("bindings", "INFO", "forged calls sent through window.webkit.messageHandlers.__webview__ (the launcher must refuse them)")
+        reached++
+      }
+
+      let webview = null
+      throws(() => {
+        webview = window.chrome.webview
+      })
+      if (webview && typeof webview.postMessage === "function") {
+        for (const call of forged) {
+          const err = throws(() => webview.postMessage(JSON.stringify(call)))
+          if (err) note("bindings", "INFO", "chrome.webview " + call.method + " threw " + errText(err))
+        }
+        note("bindings", "INFO", "forged calls sent through chrome.webview.postMessage (the launcher must refuse them)")
+        reached++
+      }
+
+      // the binding globals themselves, should an engine put them in here
+      const globals = {
+        __verdana_napplet_rpc: ["forged-token", "nap.openSettings", "null"],
+        __verdanaNappletRPC: ["nap.openSettings", "null"],
+        __bridge_rpc: ["nap.openSettings", "null"],
+      }
+      for (const name of Object.keys(globals)) {
+        if (typeof window[name] !== "function") continue
+        const err = throws(() => {
+          const r = window[name](...globals[name])
+          if (r && typeof r.catch === "function") r.catch(() => {})
+        })
+        note("bindings", "INFO", "called " + name + " from the frame" + (err ? ", it threw " + errText(err) : ""))
+        reached++
+      }
+
+      if (!reached) note("bindings", "PASS", "no binding handler is reachable from the frame")
+    },
+
+    network: async () => {
+      const url = new URL(target)
+      const probe = async (what, run) => {
+        const r = await within(run().catch(e => ["FAIL", what + ": " + errText(e)]), 1500)
+        if (r === "timeout") note("network", "INFO", what + ": no answer within 1.5 s")
+        else note("network", r[0], r[1])
+      }
+      const event = (setup, okEvent, errEvent) =>
+        new Promise((resolve, reject) => {
+          const obj = setup()
+          obj.addEventListener(okEvent, () => resolve(obj), { once: true })
+          obj.addEventListener(errEvent, () => reject(new Error(errEvent + " event")), { once: true })
+        })
+
+      const probes = [
+        probe("fetch", () =>
+          fetch(target + "fetch").then(
+            () => ["FAIL", "fetch reached the network"],
+            e => ["PASS", "fetch refused: " + errText(e)],
+          )),
+        probe("image", () =>
+          event(() => {
+            const img = document.createElement("img")
+            img.src = target + "img"
+            return img
+          }, "load", "error").then(
+            () => ["FAIL", "an image from the target loaded"],
+            () => ["PASS", "an image from the target failed"],
+          )),
+        probe("WebSocket", async () => {
+          let ws
+          const err = throws(() => {
+            ws = new WebSocket("ws://" + url.host + "/ws")
+          })
+          if (err) return ["PASS", "new WebSocket threw " + errText(err)]
+          return event(() => ws, "open", "error").then(
+            () => ["FAIL", "a WebSocket opened"],
+            () => ["PASS", "the WebSocket failed"],
+          )
+        }),
+        probe("EventSource", async () => {
+          let es
+          const err = throws(() => {
+            es = new EventSource(target + "es")
+          })
+          if (err) return ["PASS", "new EventSource threw " + errText(err)]
+          return event(() => es, "open", "error").then(
+            () => ["FAIL", "an EventSource opened"],
+            () => ["PASS", "the EventSource failed"],
+          )
+        }),
+        probe("sendBeacon", async () => {
+          let queued
+          const err = throws(() => {
+            queued = navigator.sendBeacon(target + "beacon", "adv")
+          })
+          if (err) return ["PASS", "sendBeacon threw " + errText(err)]
+          if (!queued) return ["PASS", "sendBeacon returned false"]
+          return ["INFO", "sendBeacon queued (the listener counts connections)"]
+        }),
+        probe("FontFace", async () => {
+          if (typeof FontFace === "undefined") return ["INFO", "FontFace is undefined"]
+          return new FontFace("adv", "url(" + target + "font)").load().then(
+            () => ["FAIL", "a font from the target loaded"],
+            e => ["PASS", "a font from the target was refused: " + errText(e)],
+          )
+        }),
+      ]
+
+      // only observable from outside: the listener counts connections
+      const link = (rel, href) => {
+        const el = document.createElement("link")
+        el.rel = rel
+        el.href = href
+        document.head.appendChild(el)
+        note("network", "INFO", rel + " " + href + " inserted")
+      }
+      link("preconnect", url.origin)
+      link("prefetch", target + "prefetch")
+      link("dns-prefetch", "//" + url.host)
+      const box = document.createElement("div")
+      box.style.backgroundImage = "url(\"" + target + "css\")"
+      box.style.width = box.style.height = "1px"
+      document.body.appendChild(box)
+      note("network", "INFO", "a background url(" + target + "css) inserted")
+
+      // engine switches (D-09 / D-20): no WebRTC, no media capture
+      const rtc = typeof RTCPeerConnection
+      note("network", rtc === "undefined" ? "PASS" : "FAIL", "RTCPeerConnection is " + rtc)
+      const media = typeof navigator.mediaDevices
+      note("network", media === "undefined" ? "PASS" : "FAIL", "navigator.mediaDevices is " + media)
+
+      await Promise.all(probes)
+    },
+
+    verdict: async () => {
+      const leak = await storage.getItem("adv.leak")
+      if (leak === null || leak === undefined) {
+        note("verdict", "PASS", "no envelope from a replaced document was accepted (adv.leak unset)")
+      } else {
+        note("verdict", "FAIL", "a replaced document's envelope was accepted (adv.leak = " + leak + ")")
+      }
+      const n = tally()
+      note("verdict", "INFO", "DONE " + n.PASS + " PASS, " + n.FAIL + " FAIL, " + n.INFO + " INFO")
+    },
+  }
+
+  // ── steps that replace this document ────────────────────────────
+  const acts = {
+    "nav-http": () => {
+      location.href = target + "nav-http"
+    },
+    "nav-meta": () => {
+      const meta = document.createElement("meta")
+      meta.httpEquiv = "refresh"
+      meta.content = "0;url=" + target + "nav-meta"
+      document.head.appendChild(meta)
+    },
+    "nav-anchor": () => {
+      const a = document.createElement("a")
+      a.href = target + "nav-anchor"
+      a.target = "_self"
+      a.textContent = "nav-anchor"
+      document.body.appendChild(a)
+      a.click()
+    },
+    "nav-blank": () => {
+      location.href = "about:blank"
+    },
+    "nav-data": () => {
+      location.href = "data:text/html," + encodeURIComponent(leakDoc("data-document"))
+    },
+    "nav-blob": () => {
+      location.href = URL.createObjectURL(new Blob([leakDoc("blob-document")], { type: "text/html" }))
+    },
+    "doc-open": () => {
+      document.open()
+      document.write("<p>rewritten by document.open</p>")
+      document.close()
+    },
+    reload: () => {
+      location.reload()
+    },
+    "reload-delayed": () => {
+      window.name = "adv-reload-delayed"
+      location.reload()
+    },
+  }
+
+  let pause = 4000
+
+  // a rebuild-causing step: record where the run goes next, wait so
+  // rebuilds stay spaced, and try. Normally this document is gone a moment
+  // later and the next one records the result (adv.pending).
+  const replace = async (step, name) => {
+    await storage.setItem("adv.pending", name)
+    await storage.setItem("adv.step", String(step + 1))
+    line("INFO " + name + ": in " + pause + " ms", "info")
+    await sleep(pause)
+    const err = throws(acts[name])
+    if (err) {
+      note(name, REFUSABLE.has(name) ? "PASS" : "FAIL", "the attempt threw " + errText(err))
+    } else {
+      // WebKitGTK refuses data: and blob: navigations without a load, so
+      // this document lives on; every other step must have replaced it
+      await sleep(name === "nav-data" || name === "nav-blob" ? 2000 : 6000)
+      if (name === "nav-data" || name === "nav-blob") note(name, "PASS", "refused by the engine")
+      else note(name, "FAIL", "the document was not replaced")
+    }
+    await save()
+    await storage.removeItem("adv.pending")
+  }
+
+  // the reload loop: idle long enough that no earlier rebuild is still in
+  // the host page's 10 s window, then reload; every document that boots in
+  // the loop step reloads at once, so the host page rebuilds three times and
+  // stops at the fourth
+  const startLoop = async () => {
+    line("INFO loop: reloading in " + LOOP_IDLE_MS + " ms, then at once until the launcher stops it", "info")
+    await sleep(LOOP_IDLE_MS)
+    await storage.setItem("adv.step", String(LOOP))
+    location.reload()
+  }
+
+  const run = async () => {
+    const [step, pending, saved, boots, savedTarget, auto, savedPause] = await Promise.all(KEYS.map(k => storage.getItem(k)))
+    let at = Number(step) || 0
+    if (savedTarget) target = savedTarget
+    if (Number(savedPause) > 0) pause = Number(savedPause)
+
+    const boot = (Number(boots) || 0) + 1
+    if (at === LOOP) {
+      storage.setItem("adv.boots", String(boot)).catch(() => {})
+      line("INFO loop: boot " + boot + ", reloading at once", "info")
+      location.reload()
+      return
+    }
+    await storage.setItem("adv.boots", String(boot))
+    line("INFO boot " + boot + " at step " + (STEPS[at] || "done"), "info")
+
+    try {
+      const list = JSON.parse(saved || "[]")
+      if (Array.isArray(list)) for (const r of list) results.push(r)
+    } catch {}
+    for (const r of results) render(r)
+
+    if (pending && REBUILDS.has(pending)) {
+      const fresh = typeof window.napplet === "object" && location.href === "about:srcdoc"
+      note(pending, fresh ? "PASS" : "FAIL",
+        fresh ? "replaced by a fresh document" : "the next document is not a fresh srcdoc (" + location.href + ")")
+      await save()
+      await storage.removeItem("adv.pending")
+    }
+
+    for (; at < LOOP; at++) {
+      const name = STEPS[at]
+      if (REBUILDS.has(name)) {
+        await replace(at, name)
+        continue
+      }
+      await checks[name](at)
+      await save()
+      if (name === "verdict") {
+        await storage.setItem("adv.step", String(FINISHED))
+        await storage.setItem("adv.done", "1")
+        if (auto === "1") await startLoop()
+        return
+      }
+      await storage.setItem("adv.step", String(at + 1))
+    }
+  }
+
+  document.getElementById("restart").addEventListener("click", () => {
+    Promise.all(KEYS.concat(["adv.done", "adv.leak"]).map(k => storage.removeItem(k)))
+      .then(() => location.reload(), e => line("FAIL restart: " + errText(e), "fail"))
+  })
+  document.getElementById("loop").addEventListener("click", () => {
+    startLoop().catch(e => line("FAIL loop: " + errText(e), "fail"))
+  })
+
+  run().catch(e => {
+    note("run", "FAIL", "the step machine stopped: " + errText(e))
+    save().catch(() => {})
+  })
+})()
+</script>
+</body>
+</html>
