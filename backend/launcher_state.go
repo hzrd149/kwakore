@@ -2,11 +2,16 @@ package backend
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -69,12 +74,26 @@ type AppState struct {
 	// discovery off; nil means on.
 	UserRelays           *userRelayList `json:"user_relays,omitempty"`
 	DiscoverOnUserRelays *bool          `json:"discover_on_user_relays,omitempty"`
+
+	// DismissedNotices are the notice IDs the user dismissed that stay
+	// hidden across restarts: "keyring-fallback" and "state-corrupt:<unix>"
+	// (see launcher_notices.go).
+	DismissedNotices []string `json:"dismissed_notices,omitempty"`
 }
 
 var (
 	state     AppState
 	statePath string
 	stateMu   sync.Mutex
+
+	// stateSaveBlocked is set when a state.json that exists could not be
+	// read or parsed and could not be set aside: saveState then never
+	// writes for the rest of the process, so the user's only copy of their
+	// launcher data is not overwritten with defaults.
+	stateSaveBlocked atomic.Bool
+
+	// renameFile is os.Rename, swappable in tests.
+	renameFile = os.Rename
 )
 
 func loadState() {
@@ -82,10 +101,19 @@ func loadState() {
 	reloadShortcuts()
 	statePath = filepath.Join(dataDir, "state.json")
 	data, err := os.ReadFile(statePath)
-	if err == nil {
-		json.Unmarshal(data, &state)
-	} else {
+	switch {
+	case err == nil:
+		// a 0-byte file (a torn write from an older build) fails here too
+		if perr := json.Unmarshal(data, &state); perr != nil {
+			state = AppState{}
+			keepCorruptState(perr)
+		}
+	case errors.Is(err, fs.ErrNotExist):
 		log.Debug().Err(err).Msg("no existing state file, using defaults")
+	default:
+		// it is there but we can't read it: don't replace it with defaults
+		log.Error().Err(err).Str("path", statePath).Msg("could not read state file, not saving state this run")
+		stateSaveBlocked.Store(true)
 	}
 	if state.ClientKey == (nostr.SecretKey{}) {
 		state.ClientKey = nostr.Generate()
@@ -125,14 +153,107 @@ func loadState() {
 		themeName = ThemeLight
 	}
 	themeMu.Unlock()
+	noticeCorruptState()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
+}
+
+// keepCorruptState moves a state.json that failed to parse to
+// state.json.corrupt-<unix>, so the launcher can start from defaults without
+// destroying the user's data. If the move fails, saving is blocked for the
+// rest of the process and the notice points at state.json where it is.
+func keepCorruptState(parseErr error) {
+	ts := time.Now().Unix()
+	copyPath := corruptStatePath(ts)
+	// never clobber an earlier copy (two corruptions in the same second)
+	for {
+		if _, err := os.Lstat(copyPath); err != nil {
+			break
+		}
+		ts++
+		copyPath = corruptStatePath(ts)
+	}
+	if err := renameFile(statePath, copyPath); err != nil {
+		log.Error().Err(err).AnErr("parse", parseErr).Str("path", statePath).
+			Msg("could not set aside unreadable state file, not saving state this run")
+		stateSaveBlocked.Store(true)
+		addStateCorruptNotice(ts, statePath)
+		return
+	}
+	log.Warn().Err(parseErr).Str("copy", copyPath).
+		Msg("state file could not be parsed, kept it aside and started from defaults")
+}
+
+func corruptStatePath(ts int64) string {
+	return statePath + ".corrupt-" + strconv.FormatInt(ts, 10)
+}
+
+// noticeCorruptState shows the state-corrupt notice for the newest
+// state.json.corrupt-<unix> copy next to state.json, unless the user
+// dismissed that one. It runs on every start, so the notice stays until
+// dismissed.
+func noticeCorruptState() {
+	// keepCorruptState already raised one for a file it could not move,
+	// which is newer than any copy on disk
+	ls.mu.Lock()
+	raised := slices.ContainsFunc(ls.notices, func(n Notice) bool {
+		return strings.HasPrefix(n.ID, noticeStateCorruptPrefix)
+	})
+	ls.mu.Unlock()
+	if raised {
+		return
+	}
+	dir := filepath.Dir(statePath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := filepath.Base(statePath) + ".corrupt-"
+	newest := int64(-1)
+	for _, e := range entries {
+		suffix, ok := strings.CutPrefix(e.Name(), prefix)
+		if !ok {
+			continue
+		}
+		if ts, err := strconv.ParseInt(suffix, 10, 64); err == nil && ts > newest {
+			newest = ts
+		}
+	}
+	if newest < 0 {
+		return
+	}
+	addStateCorruptNotice(newest, corruptStatePath(newest))
+}
+
+func addStateCorruptNotice(ts int64, path string) {
+	id := noticeStateCorruptPrefix + strconv.FormatInt(ts, 10)
+	stateMu.Lock()
+	dismissed := slices.Contains(state.DismissedNotices, id)
+	stateMu.Unlock()
+	if dismissed {
+		return
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	addNotice(Notice{
+		ID:     id,
+		Kind:   noticeKindWarning,
+		Title:  stateCorruptTitle,
+		Detail: stateCorruptDetail,
+		Path:   path,
+	})
+	notifyState()
 }
 
 // saveState must be called with stateMu held. The file is replaced
 // atomically (temp file, fsync, rename), so a crash mid-save leaves either
 // the previous state.json or the new one, never a truncated file.
 func saveState() {
+	if stateSaveBlocked.Load() {
+		log.Warn().Str("path", statePath).Msg("not saving state: the existing state file could not be read")
+		return
+	}
 	data, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal state")

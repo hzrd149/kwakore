@@ -151,6 +151,10 @@ func TestLoadStateCorruptRenameFailureBlocksSave(t *testing.T) {
 	if err := os.WriteFile(path, garbage, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// an older copy on disk must not take the notice's place
+	if err := os.WriteFile(path+".corrupt-100", []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	renameFile = func(string, string) error { return errors.New("injected rename failure") }
 
 	loadState()
@@ -167,7 +171,7 @@ func TestLoadStateCorruptRenameFailureBlocksSave(t *testing.T) {
 	if err != nil || string(got) != string(garbage) {
 		t.Fatalf("state.json = %q (%v), want the original bytes untouched", got, err)
 	}
-	if copies := corruptCopies(t, dir); len(copies) != 0 {
+	if copies := corruptCopies(t, dir); len(copies) != 1 {
 		t.Fatalf("unexpected corrupt copies %v", copies)
 	}
 	// the user is still told, pointing at the file where it stayed

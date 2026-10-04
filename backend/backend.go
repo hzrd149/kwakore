@@ -24,6 +24,7 @@ import (
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
 	"verdana/backend/bunker"
+	"verdana/backend/fileutil"
 	"verdana/backend/napconfig"
 )
 
@@ -66,7 +67,7 @@ func Start(opts Options) (func(), error) {
 	host = opts.Host
 
 	dataDir = opts.DataDir
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := ensureDataDir(); err != nil {
 		return nil, err
 	}
 
@@ -99,6 +100,19 @@ func Start(opts Options) (func(), error) {
 	}
 
 	return closeStores, nil
+}
+
+// ensureDataDir creates the data dir private to the user (0700) and, on
+// Unix, tightens one an older build created 0755. Failing to tighten is
+// logged, not fatal: the launcher still works, only less privately.
+func ensureDataDir() error {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return err
+	}
+	if err := fileutil.TightenDir(dataDir); err != nil {
+		log.Warn().Err(err).Str("dir", dataDir).Msg("could not make the data dir private")
+	}
+	return nil
 }
 
 // startupUpdateCheckDelay is how long after startup the automatic check for

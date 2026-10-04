@@ -46,6 +46,11 @@ type State struct {
 	// FetchErr is the last discovery/install/launch error worth showing.
 	FetchErr string `json:"fetchErr"`
 
+	// Notices are the launcher-level problems to show above the manager
+	// window's content, in display order (child-unavailable, state-corrupt,
+	// keyring-fallback), at most one of each. See launcher_notices.go.
+	Notices []Notice `json:"notices"`
+
 	// Fetching is true while discovery is running.
 	Fetching bool `json:"fetching"`
 
@@ -148,6 +153,9 @@ type launcherState struct {
 	// changed is closed and replaced on every phase change, so a waiter can
 	// block until the launcher is out of PhaseLoading.
 	changed chan struct{}
+
+	// notices are the live launcher notices (launcher_notices.go).
+	notices []Notice
 }
 
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
@@ -198,6 +206,7 @@ func Snapshot() State {
 		DevErr:         ls.devErr,
 		DevLoading:     ls.devLoading,
 		Busy:           make([]string, 0, len(ls.busy)),
+		Notices:        orderedNotices(),
 	}
 	for id := range ls.busy {
 		s.Busy = append(s.Busy, id)
