@@ -51,6 +51,13 @@ type State struct {
 	// keyring-fallback), at most one of each. See launcher_notices.go.
 	Notices []Notice `json:"notices"`
 
+	// KeyringWait is "" normally, "waiting" once a call to the secret store
+	// (the OS keyring) has been in flight for a second (an unlock prompt, a
+	// slow keyring), and "failed" when the saved login lives only in a
+	// keyring that could not be reached: the launcher then stays in
+	// PhaseLoading and nothing is generated in its place.
+	KeyringWait string `json:"keyringWait"`
+
 	// Fetching is true while discovery is running.
 	Fetching bool `json:"fetching"`
 
@@ -156,6 +163,12 @@ type launcherState struct {
 
 	// notices are the live launcher notices (launcher_notices.go).
 	notices []Notice
+
+	// keyringWait is State.KeyringWait; keyringSeq numbers the secret
+	// store calls, so a late timer of a finished call changes nothing
+	// (launcher_secrets.go).
+	keyringWait string
+	keyringSeq  uint64
 }
 
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
@@ -207,6 +220,7 @@ func Snapshot() State {
 		DevLoading:     ls.devLoading,
 		Busy:           make([]string, 0, len(ls.busy)),
 		Notices:        orderedNotices(),
+		KeyringWait:    ls.keyringWait,
 	}
 	for id := range ls.busy {
 		s.Busy = append(s.Busy, id)

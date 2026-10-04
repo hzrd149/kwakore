@@ -1,11 +1,13 @@
 package backend
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 )
@@ -36,8 +38,8 @@ func withFreshSecrets(t *testing.T) *secretsRig {
 		r.mu.Unlock()
 	}
 	ls.mu.Lock()
-	savedPhase := ls.phase
-	ls.phase = PhaseLoading
+	savedPhase, savedWait := ls.phase, ls.keyringWait
+	ls.phase, ls.keyringWait = PhaseLoading, ""
 	ls.mu.Unlock()
 
 	t.Cleanup(func() {
@@ -47,7 +49,7 @@ func withFreshSecrets(t *testing.T) *secretsRig {
 		secretsMu.Unlock()
 		resumeStoredLogin = savedResume
 		ls.mu.Lock()
-		ls.phase = savedPhase
+		ls.phase, ls.keyringWait = savedPhase, savedWait
 		ls.mu.Unlock()
 	})
 	return r
@@ -585,5 +587,347 @@ func TestSecretsRoundTripEveryLocation(t *testing.T) {
 				t.Fatalf("client key = %s, %v; want %s", got.Hex(), err, k.Hex())
 			}
 		})
+	}
+}
+
+// ─── unavailable rows ───────────────────────────────────────────
+
+func keyringWait() string {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.keyringWait
+}
+
+// file has secrets, location "" or file, keyring unavailable: file mode,
+// the login resumes and the user is told.
+func TestSecretsUnavailableFallsBackToFile(t *testing.T) {
+	for _, loc := range []string{"", "file"} {
+		t.Run("loc="+loc, func(t *testing.T) {
+			r := withFreshSecrets(t)
+			r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+testLogin+`","secrets_location":"`+loc+`"}`)
+			store := newFakeStore()
+			store.getErr = fmt.Errorf("%w: no secret service", ErrSecretStoreUnavailable)
+
+			loadState()
+			loadSecrets(store)
+
+			if got := strings.Join(store.callLog(), ","); got != "get" {
+				t.Fatalf("store calls = %s, want get", got)
+			}
+			if got := r.resumes(); len(got) != 1 || got[0] != testLogin {
+				t.Fatalf("resumed %v", got)
+			}
+			if got := secretsLocation(); got != "file" {
+				t.Fatalf("SecretsLocation = %q, want file", got)
+			}
+			if !strings.Contains(r.readState(t), testLogin) {
+				t.Fatal("file copy lost")
+			}
+			if !hasNotice(noticeKeyringFallback) {
+				t.Fatal("no keyring-fallback notice")
+			}
+			if w := keyringWait(); w != "" {
+				t.Fatalf("KeyringWait = %q", w)
+			}
+		})
+	}
+}
+
+// file has secrets, location keyring, keyring unavailable: the file copy is
+// used for this run, the location stays keyring and nothing is deleted.
+func TestSecretsUnavailableKeyringLocationUsesFileCopy(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+testLogin+`","secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.getErr = ErrSecretStoreUnavailable
+
+	loadState()
+	loadSecrets(store)
+
+	if got := strings.Join(store.callLog(), ","); got != "get" {
+		t.Fatalf("store calls = %s, want get", got)
+	}
+	if got := secretsLocation(); got != "keyring" {
+		t.Fatalf("SecretsLocation = %q, want keyring kept", got)
+	}
+	on := r.readState(t)
+	if !strings.Contains(on, testLogin) || !strings.Contains(on, testClientKeyHex) {
+		t.Fatalf("file copy deleted:\n%s", on)
+	}
+	if got := r.resumes(); len(got) != 1 || got[0] != testLogin {
+		t.Fatalf("resumed %v", got)
+	}
+	if k, err := existingClientKey(); err != nil || k.Hex() != testClientKeyHex {
+		t.Fatalf("client key %s, %v", k.Hex(), err)
+	}
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q, want none with a file copy", w)
+	}
+}
+
+// no file secrets, location keyring, keyring unavailable: the secrets live
+// only there. Nothing is generated and the launcher waits on the user.
+func TestSecretsUnavailableKeyringOnlyFails(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.getErr = ErrSecretStoreUnavailable
+
+	loadState()
+	loadSecrets(store)
+
+	if w := keyringWait(); w != "failed" {
+		t.Fatalf("KeyringWait = %q, want failed", w)
+	}
+	if got := Phase(); got != PhaseLoading {
+		t.Fatalf("phase = %q, want loading", got)
+	}
+	if got := r.resumes(); len(got) != 0 {
+		t.Fatalf("resumed %v", got)
+	}
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key while the keyring holding the real one is unreachable")
+	}
+	if got := strings.Join(store.callLog(), ","); got != "get" {
+		t.Fatalf("store calls = %s, want get", got)
+	}
+	if hasNotice(noticeKeyringFallback) {
+		t.Fatal("keyring-fallback notice without a file copy")
+	}
+	if got := Snapshot().KeyringWait; got != "failed" {
+		t.Fatalf("Snapshot().KeyringWait = %q", got)
+	}
+}
+
+// no file secrets, location keyring, not found: logged out. A later user
+// login makes a client key and stores it in the keyring.
+func TestSecretsKeyringNotFoundIsLoggedOut(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+
+	loadState()
+	loadSecrets(store)
+
+	if got := Phase(); got != PhaseLogin {
+		t.Fatalf("phase = %q, want login", got)
+	}
+	k, err := clientKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setStoredLogin("bunker://fresh"); err != nil {
+		t.Fatal(err)
+	}
+	it, ok := store.item(t)
+	if !ok || it.ClientKey != k.Hex() || it.Login != "bunker://fresh" {
+		t.Fatalf("keyring item = %+v, %v", it, ok)
+	}
+	assertGetFirst(t, store)
+	assertNoFileSecrets(t, r.readState(t))
+}
+
+// no file secrets, location "", unavailable: file mode and the login
+// screen; the notice only once there is a login to warn about.
+func TestSecretsUnavailableFreshNoticeOnlyWithLogin(t *testing.T) {
+	r := withFreshSecrets(t)
+	store := newFakeStore()
+	store.getErr = ErrSecretStoreUnavailable
+
+	loadState()
+	loadSecrets(store)
+
+	if got := Phase(); got != PhaseLogin {
+		t.Fatalf("phase = %q, want login", got)
+	}
+	if hasNotice(noticeKeyringFallback) {
+		t.Fatal("notice with no login")
+	}
+	if err := setStoredLogin(testLogin); err != nil {
+		t.Fatal(err)
+	}
+	if !hasNotice(noticeKeyringFallback) {
+		t.Fatal("no notice once a login was saved to the file")
+	}
+	if got := secretsLocation(); got != "file" {
+		t.Fatalf("SecretsLocation = %q", got)
+	}
+	if !strings.Contains(r.readState(t), testLogin) {
+		t.Fatal("login not in the file")
+	}
+	// file mode does not go back to the keyring this run
+	for _, c := range store.callLog() {
+		if c == "set" {
+			t.Fatalf("store calls = %v", store.callLog())
+		}
+	}
+}
+
+// a login too large for the keyring (Pitfall 13) stays in the file.
+func TestSecretsLargeLoginStaysInFile(t *testing.T) {
+	r := withFreshSecrets(t)
+	big := "bunker://" + strings.Repeat("a", 3*1024)
+	r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+big+`"}`)
+	store := newFakeStore()
+	store.setErr = fmt.Errorf("%w: data too big", ErrSecretStoreUnavailable)
+
+	loadState()
+	loadSecrets(store)
+
+	if got := storedLogin(); got != big {
+		t.Fatal("large login lost")
+	}
+	if !strings.Contains(r.readState(t), big) || secretsLocation() != "file" {
+		t.Fatal("large login not kept in the file")
+	}
+	if !hasNotice(noticeKeyringFallback) {
+		t.Fatal("no keyring-fallback notice")
+	}
+}
+
+// with no store there is never a notice and never a wait.
+func TestSecretsNilStoreNeverNotices(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+testLogin+`"}`)
+
+	loadState()
+	loadSecrets(nil)
+	if err := setStoredLogin("bunker://other"); err != nil {
+		t.Fatal(err)
+	}
+
+	if hasNotice(noticeKeyringFallback) || keyringWait() != "" {
+		t.Fatalf("notices %v, KeyringWait %q", noticeIDs(Snapshot().Notices), keyringWait())
+	}
+	if got := secretsLocation(); got != "" {
+		t.Fatalf("SecretsLocation = %q, want untouched", got)
+	}
+}
+
+// a fallback, dismissed by the user, then a successful move on a later
+// start: the notice and its dismissal both go.
+func TestSecretsLaterMigrationClearsNotice(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+testLogin+`"}`)
+	store := newFakeStore()
+	store.getErr = ErrSecretStoreUnavailable
+
+	loadState()
+	loadSecrets(store)
+	if !hasNotice(noticeKeyringFallback) {
+		t.Fatal("no notice on fallback")
+	}
+	DismissNotice(noticeKeyringFallback)
+
+	// next start, keyring back
+	store.mu.Lock()
+	store.getErr = nil
+	store.mu.Unlock()
+	stateMu.Lock()
+	state = AppState{}
+	stateMu.Unlock()
+	loadState()
+	loadSecrets(store)
+
+	if got := secretsLocation(); got != "keyring" {
+		t.Fatalf("SecretsLocation = %q", got)
+	}
+	if hasNotice(noticeKeyringFallback) {
+		t.Fatal("notice still shown after the move")
+	}
+	if strings.Contains(r.readState(t), noticeKeyringFallback) {
+		t.Fatal("dismissal kept after the secrets moved")
+	}
+	assertNoFileSecrets(t, r.readState(t))
+}
+
+// ─── timing and concurrency ─────────────────────────────────────
+
+// KeyringWait turns "waiting" only after a call has been in flight for a
+// second, and Snapshot never waits on the store.
+func TestKeyringWaitTiming(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"client_key":"`+testClientKeyHex+`","login":"`+testLogin+`"}`)
+	store := newFakeStore()
+	gate := make(chan struct{})
+	store.gate = gate
+	openGate := sync.OnceFunc(func() { close(gate) })
+
+	loadState()
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		loadSecrets(store)
+		close(done)
+	}()
+	// a failed assertion must not leave the load holding secretsOpMu
+	t.Cleanup(func() { openGate(); <-done })
+
+	time.Sleep(500 * time.Millisecond)
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q after 0.5 s, want none yet", w)
+	}
+	time.Sleep(time.Until(start.Add(1200 * time.Millisecond)))
+	snapStart := time.Now()
+	snap := Snapshot()
+	if d := time.Since(snapStart); d > 50*time.Millisecond {
+		t.Fatalf("Snapshot took %v while the store blocked", d)
+	}
+	if snap.KeyringWait != "waiting" {
+		t.Fatalf("KeyringWait = %q after 1.2 s, want waiting", snap.KeyringWait)
+	}
+	time.Sleep(time.Until(start.Add(1500 * time.Millisecond)))
+	openGate()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("load did not finish")
+	}
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q after the calls returned", w)
+	}
+	if got := secretsLocation(); got != "keyring" {
+		t.Fatalf("SecretsLocation = %q", got)
+	}
+}
+
+// a second load while one is in flight joins it instead of reading the
+// store again (what RetryKeyring relies on).
+func TestSecretsConcurrentLoadsJoin(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.put(t, testClientKeyHex, testLogin)
+	gate := make(chan struct{})
+	store.gate = gate
+	openGate := sync.OnceFunc(func() { close(gate) })
+
+	loadState()
+	var wg sync.WaitGroup
+	t.Cleanup(func() { openGate(); wg.Wait() })
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		loadSecrets(store)
+	}()
+	// wait for the first load to be inside its Get
+	deadline := time.Now().Add(2 * time.Second)
+	for len(store.callLog()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		loadSecrets(store)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	openGate()
+	wg.Wait()
+
+	if got := strings.Join(store.callLog(), ","); got != "get" {
+		t.Fatalf("store calls = %s, want one get", got)
+	}
+	if got := r.resumes(); len(got) != 1 {
+		t.Fatalf("resumed %v, want once", got)
 	}
 }
