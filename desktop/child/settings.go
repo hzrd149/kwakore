@@ -17,6 +17,10 @@ import (
 // the one binding it has answers only the page's top frame.
 
 func runSettings(w webview.WebView) {
+	// launcher-owned and CSP-confined like a napplet window, so it gets the
+	// same engine switches before anything is bound or loaded
+	hardenEngine(w)
+
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		log.Fatal().Err(err).Msg("no randomness for the settings window token")

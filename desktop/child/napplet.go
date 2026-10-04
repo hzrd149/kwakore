@@ -26,6 +26,9 @@ import (
 var nappletToken string
 
 func runNapplet(w webview.WebView) {
+	// engine switches first, before the page or any binding exists
+	hardenEngine(w)
+
 	nappletToken = newWindowToken()
 	// the host page is the launcher's own, so its top-frame wrapper (which
 	// holds the token) is what the overlay answers through
