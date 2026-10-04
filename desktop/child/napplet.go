@@ -96,26 +96,15 @@ func nappletAnswer(token string, id int, ok bool, index int, scope string) {
 
 // startNappletHostServer serves the host page, and nothing else, on loopback.
 // The napplet's own bytes never come from here: they arrive over nap.boot as
-// a srcdoc, after the backend verified them against the event's hash.
+// a srcdoc, after the backend verified them against the event's hash. The
+// page's policy and why it equals the napplet's plus frame-ancestors are on
+// nappletHostHandler.
 func startNappletHostServer() string {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Error().Err(err).Msg("failed to listen for the napplet host page")
 		return ""
 	}
-	page := []byte(nappbridge.NappletHostHTML())
-	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(wr, r)
-			return
-		}
-		wr.Header().Set("Content-Type", "text/html; charset=utf-8")
-		wr.Header().Set("Cache-Control", "no-store")
-		// the srcdoc frame inherits this page's policy on top of its own, so
-		// this must stay loose on script/style/img; it only pins navigation
-		wr.Header().Set("Content-Security-Policy", "navigate-to 'self'")
-		_, _ = wr.Write(page)
-	})
-	go http.Serve(ln, handler)
+	go http.Serve(ln, nappletHostHandler([]byte(nappbridge.NappletHostHTML())))
 	return "http://" + ln.Addr().String() + "/"
 }

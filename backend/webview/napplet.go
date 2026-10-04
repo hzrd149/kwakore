@@ -21,6 +21,23 @@ const nappletCSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-
 // page can be derived from the same string instead of a copy of it.
 func NappletCSP() string { return nappletCSP }
 
+// NappletHostCSP is the policy the shells send with the napplet host page
+// (D-05 as refined by D-17). The srcdoc frame inherits the host page's policy
+// on top of its own, and a document is held to both, so the host allows
+// exactly what the napplet's own policy allows: anything stricter (a 'self'
+// script policy, say) would stop every napplet's inline scripts (RESEARCH
+// C1), and anything looser would buy the napplet nothing. On top of that it
+// carries what only an HTTP header can carry: frame-ancestors is ignored in a
+// meta element (NIP-5D), so no page may embed the host page.
+//
+// The directives that do the work for the host page are the baseline's own:
+// frame-src and child-src 'none' are what block http(s), meta-refresh and
+// anchor navigations of the napplet frame (D-04, measured on WebKitGTK in
+// RESEARCH H3) while the about:srcdoc document still loads, and form-action
+// 'none' covers form posts (D-11). What an engine still lets through is
+// caught by the host page as a replaced document and rebuilt.
+func NappletHostCSP() string { return nappletCSP + "; frame-ancestors 'none'" }
+
 // DocumentMarker is the type of the one message the launcher's preamble posts
 // to the host page as each napplet document starts (D-18). It is reserved for
 // the launcher and sits outside NAP's domain.action names: every NAP domain
