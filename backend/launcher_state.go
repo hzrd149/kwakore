@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"verdana/backend/fileutil"
 )
 
 // AppState is everything the launcher remembers between runs.
@@ -128,14 +129,16 @@ func loadState() {
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }
 
-// saveState must be called with stateMu held.
+// saveState must be called with stateMu held. The file is replaced
+// atomically (temp file, fsync, rename), so a crash mid-save leaves either
+// the previous state.json or the new one, never a truncated file.
 func saveState() {
 	data, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal state")
 		return
 	}
-	if err := os.WriteFile(statePath, data, 0600); err != nil {
+	if err := fileutil.WriteFileAtomic(statePath, data, 0600); err != nil {
 		log.Error().Err(err).Msg("failed to write state file")
 	}
 }
