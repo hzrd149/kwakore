@@ -3,6 +3,7 @@ package backend
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -615,8 +616,13 @@ func TestLoginWithoutKeyring(t *testing.T) {
 	if !hasNotice(noticeKeyringFallback) {
 		t.Fatal("no keyring-fallback notice for the file login")
 	}
-	if fi, err := os.Stat(filepath.Join(r.dir, "state.json")); err != nil || fi.Mode().Perm() != 0600 {
-		t.Fatalf("state.json mode = %v, %v; want 0600", fi.Mode().Perm(), err)
+	// Windows synthesizes permission bits from the read-only attribute, so
+	// 0600 cannot be read back there; the ACL the data dir inherits from the
+	// user's profile is what keeps other users out
+	if runtime.GOOS != "windows" {
+		if fi, err := os.Stat(filepath.Join(r.dir, "state.json")); err != nil || fi.Mode().Perm() != 0600 {
+			t.Fatalf("state.json mode = %v, %v; want 0600", fi.Mode().Perm(), err)
+		}
 	}
 	calls := store.callsSince(before)
 	if countCalls(calls, "delete") != 0 {
