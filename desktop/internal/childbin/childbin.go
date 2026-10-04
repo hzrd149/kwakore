@@ -94,9 +94,17 @@ func Ensure(dir string, files []File) error {
 
 // EnsureVersion is Ensure in base's subdirectory for these exact files (see
 // Version) and returns that directory. base is verified like the directory
-// itself. The directory's time is refreshed on every call, and version
-// directories nobody refreshed for staleAfter are removed afterwards, so a
-// build never deletes the files another build is about to run.
+// itself. Version directories nobody used for staleAfter are removed
+// afterwards, by whichever build gets there first.
+//
+// Two things keep one build's collection from deleting the directory another
+// build is verifying or about to execute. The directory's time is refreshed
+// before its files are checked, and a refresh that fails fails the call, so
+// once verification passes the directory reads as in use for staleAfter. And
+// base/.lock is held shared from before that refresh until the files are in
+// place, while collection only runs under an exclusive lock taken without
+// waiting: a collector that already judged the directory stale has finished
+// removing it before the refresh, and one that comes later sees it fresh.
 func EnsureVersion(base string, files []File) (string, error) {
 	if err := checkFiles(files); err != nil {
 		return "", err
@@ -110,17 +118,52 @@ func EnsureVersion(base string, files []File) (string, error) {
 	if err := verifyDir(base); err != nil {
 		return "", err
 	}
+	lockPath := filepath.Join(base, lockName)
+	lf, err := openLock(lockPath)
+	if err != nil {
+		return "", fmt.Errorf("childbin: open %s: %w", lockPath, err)
+	}
+	defer lf.Close()
+	if err := lockShared(lf); err != nil {
+		return "", fmt.Errorf("childbin: lock %s: %w", lockPath, err)
+	}
+
 	version := Version(files)
 	dir := filepath.Join(base, version)
-	if err := ensureLocked(dir, files); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		unlock(lf)
+		return "", fmt.Errorf("childbin: create %s: %w", dir, err)
+	}
+	// verified first, so the refresh never follows a symlink
+	if err := verifyDir(dir); err != nil {
+		unlock(lf)
 		return "", err
 	}
-	// in use: another build's collection leaves it alone for staleAfter
 	now := time.Now()
-	os.Chtimes(dir, now, now)
-	collectVersions(base, version, now)
+	if err := os.Chtimes(dir, now, now); err != nil {
+		unlock(lf)
+		return "", fmt.Errorf("childbin: mark %s in use: %w", dir, err)
+	}
+	if err := ensureLocked(dir, files); err != nil {
+		unlock(lf)
+		return "", err
+	}
+	unlock(lf)
+
+	// collect only when no other process is ensuring right now; if one is,
+	// a later spawn will get to it
+	if tryLockExclusive(lf) {
+		collectVersions(base, version, now)
+		unlock(lf)
+	}
 	return dir, nil
 }
+
+// lockName is the lock file in base that EnsureVersion holds shared while it
+// refreshes and verifies a version directory, and exclusive while it collects.
+// It is never collected: removing it while another process holds it would
+// split the lock in two.
+const lockName = ".lock"
 
 // Version names the directory for a set of files: the first 16 hex digits
 // of a sha256 over each file's name and content hash, so any change to
@@ -194,8 +237,9 @@ func collect(dir string, keep []File, now time.Time) {
 // collectVersions removes from base the version directories other than
 // keep, and the files an earlier flat layout left directly in base, once
 // they have gone unused for staleAfter. A version directory a running build
-// refreshed recently is never touched, and neither is anything that is not
-// a plain directory or file. Errors are ignored, as in collect.
+// refreshed recently is never touched, and neither is the lock file or
+// anything that is not a plain directory or file. The caller holds base's
+// lock exclusively. Errors are ignored, as in collect.
 func collectVersions(base, keep string, now time.Time) {
 	entries, err := os.ReadDir(base)
 	if err != nil {
@@ -203,7 +247,7 @@ func collectVersions(base, keep string, now time.Time) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name == keep || !olderThan(e, now, staleAfter) {
+		if name == keep || name == lockName || !olderThan(e, now, staleAfter) {
 			continue
 		}
 		path := filepath.Join(base, name)

@@ -420,6 +420,7 @@ func TestEnsureVersionCollectsOnlyStale(t *testing.T) {
 	mkfile("child-flat", 2*staleAfter)      // the old flat layout
 	mkfile("libwebview.so", 2*staleAfter)
 	mkfile("child-flat-recent", time.Minute) // an old build still running
+	mkfile(lockName, 2*staleAfter)           // the lock is never collected
 
 	exe := newFile("child-new", childData, true)
 	current := Version([]File{exe})
@@ -430,7 +431,7 @@ func TestEnsureVersionCollectsOnlyStale(t *testing.T) {
 	if filepath.Base(dir) != current {
 		t.Fatalf("dir = %s, want %s", dir, current)
 	}
-	want := []string{"child-flat-recent", current, "fedcba9876543210", "not-a-version"}
+	want := []string{lockName, "child-flat-recent", current, "fedcba9876543210", "not-a-version"}
 	slices.Sort(want)
 	if names := dirNames(t, base); !slices.Equal(names, want) {
 		t.Fatalf("base holds %v after collection, want %v", names, want)
@@ -446,6 +447,107 @@ func TestEnsureVersionCollectsOnlyStale(t *testing.T) {
 	// collection, the verified one stayed
 	if names := dirNames(t, dir); !slices.Equal(names, []string{exe.Name}) {
 		t.Fatalf("version dir holds %v", names)
+	}
+}
+
+// holdLock opens base's lock file the way another process would (a second
+// open file, so the OS treats it as a separate owner).
+func holdLock(t *testing.T, base string) *os.File {
+	t.Helper()
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openLock(filepath.Join(base, lockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f
+}
+
+// another process still ensuring (it holds the lock shared, between its
+// refresh and its verification) keeps this build from collecting, even a
+// directory that looks stale; once it is done, collection runs.
+func TestEnsureVersionSkipsCollectionWhileAnotherEnsures(t *testing.T) {
+	base := cacheDir(t)
+	other := holdLock(t, base)
+	if err := lockShared(other); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(base, "0123456789abcdef")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	age(t, stale, 2*staleAfter)
+
+	exe := newFile("child-new", childData, true)
+	mustEnsureVersion(t, base, exe)
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("collected while another process held the lock: %v", err)
+	}
+
+	unlock(other)
+	mustEnsureVersion(t, base, exe)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale dir not collected once the lock was free: %v", err)
+	}
+}
+
+// a collector in another build that judged this build's directory stale
+// (it has not been used for a day) holds the lock exclusively while it
+// removes it. EnsureVersion waits for it, then refreshes and rebuilds the
+// directory, so what it returns is verified, in place and fresh: the
+// collection can no longer land between verification and exec.
+func TestEnsureVersionWaitsForCollector(t *testing.T) {
+	base := cacheDir(t)
+	exe := newFile("child-new", childData, true)
+	lib := newFile("libwebview.so", []byte("library"), false)
+	dir := mustEnsureVersion(t, base, exe, lib)
+	age(t, dir, 2*staleAfter)
+
+	collector := holdLock(t, base)
+	if !tryLockExclusive(collector) {
+		t.Fatal("could not take the lock exclusively")
+	}
+
+	type result struct {
+		dir string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		d, err := EnsureVersion(base, []File{exe, lib})
+		done <- result{d, err}
+	}()
+	select {
+	case r := <-done:
+		t.Fatalf("EnsureVersion returned (%s, %v) while a collection held the lock", r.dir, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// the collection the other build was running
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	unlock(collector)
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("EnsureVersion after the collection: %v", r.err)
+	}
+	assertContent(t, filepath.Join(r.dir, exe.Name), exe.Data)
+	assertContent(t, filepath.Join(r.dir, lib.Name), lib.Data)
+	fi, err := os.Stat(r.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(fi.ModTime()) > time.Minute {
+		t.Fatalf("version dir time %v was not refreshed", fi.ModTime())
+	}
+	// and a collector that runs now leaves it alone
+	collectVersions(base, "", time.Now())
+	if _, err := os.Stat(filepath.Join(r.dir, exe.Name)); err != nil {
+		t.Fatalf("a fresh version dir was collected: %v", err)
 	}
 }
 
