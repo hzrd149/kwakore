@@ -141,8 +141,30 @@ Plans:
   3. An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) runs on WebKitGTK without escaping, with WebView2 and WKWebView results recorded where CI allows
   4. WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the residual risk per engine is recorded under NIP-5D Non-Guarantees in the checklist
 
-**Plans**: TBD
-**Research spike**: yes. Self-navigation and reload of `allow-scripts` srcdoc frames on WebKitGTK, WebView2 and WKWebView; whether `frame-src`/`child-src` is enforced on the host page; go-webview sub-frame navigation policy hooks; engine flags for WebRTC
+**Plans**: 6 plans
+**Research spike**: yes (done in 04-RESEARCH). Self-navigation and reload of `allow-scripts` srcdoc frames on WebKitGTK, WebView2 and WKWebView; whether `frame-src`/`child-src` is enforced on the host page; go-webview sub-frame navigation policy hooks; engine flags for WebRTC
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Replaced documents: second load rebuilds the frame, `nap.reset` ends the session, refusals bound to their frame, 3-per-10 s reload cap (wave 1)
+- [ ] 04-02-PLAN.md — Engine hardening: purego WebKitGTK WebRTC/media-stream/LinkPreconnect off, WebView2 arguments for every kind, sampled token-miss logs (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-03-PLAN.md — Document-start marker in the launcher preamble, single-sourced napplet CSP and srcdoc in `backend/webview` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-04-PLAN.md — Host page policy = NIP-5D baseline + `frame-ancestors 'none'`, loopback header middleware, napp/settings headers, Android parity (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-05-PLAN.md — Adversarial fixture napplet, fake-launcher WebKitGTK smoke with attacker listener, xvfb CI step (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-06-PLAN.md — CONFORMANCE close-out (5D-3, NIP-5D-reload, 5D-8 fixed; 5D-NG per engine; DEC-5, DEC-6) and the end-of-phase smoke list (wave 5)
 
 ### Phase 5: Napplet Artifact Identity and Storage Keying
 
@@ -218,7 +240,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
 | 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
-| 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
+| 4. Frame Sandbox Lifecycle | 0/6 | Planned | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
 | 7. Resource, Upload and Media Policy | 0/TBD | Not started | - |

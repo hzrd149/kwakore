@@ -454,17 +454,17 @@ fireMessage(f0.contentWindow, { type: "storage.keys", id: "late" }); await flush
 
 ## Open Questions
 
-1. **Adopt the document-start marker in `buildSrcdoc` (closes C2)?**
+1. **Adopt the document-start marker in `buildSrcdoc` (closes C2)?** RESOLVED by user decision D-18 (adopt the marker; recorded in CONFORMANCE as DEC-5).
    - What we know: it closes the measured pre-load window. It adds no global, and the shim stays byte-identical.
    - What's unclear: whether a preamble `postMessage` counts as "runtime injection … limited to the `window.napplet` namespace" (NIP-5D Security 5). My reading is that the clause is about the namespace and that this message isn't part of it, but it is behavior the shell injects.
    - Recommendation: adopt it and record it in CONFORMANCE Decisions as a new DEC row citing the clause. If it's rejected, mark `NIP-5D-reload` fixed except for a recorded pre-load residual. **User decision.**
 2. **Replace D-05's `'self'` with the NIP-5D baseline on the host page (C1)?** RESOLVED by measurement: the literal D-05 policy breaks every napplet. The user should confirm the corrected token list (H3).
-3. **Which windows get engine hardening?**
+3. **Which windows get engine hardening?** RESOLVED: D-19 (WebView2 arguments for all window kinds) and DEC-6 in plan 04-06 (WebKitGTK hardening for napplet and settings windows).
    - What we know: WebKitGTK settings are per webview, so the choice is free there. WebView2 args are per browser process (per user data folder), shared by all window kinds of a build.
    - Recommendation: on WebKitGTK, harden napplet and settings windows (napps, 35130, keep WebRTC; they aren't CSP-confined anyway). On Windows, either apply the arg to all kinds or give napplet windows their own `WEBVIEW2_USER_DATA_FOLDER`. **User decision** (it affects napps on Windows).
 4. **Is go-webview's sub-frame navigation policy hook usable?** RESOLVED: go-webview has none, but `decide-policy` on the `WebKitWebView` works through purego. Recommend it only as optional defense in depth (stateless "ignore sub-frame URIs other than host and `about:srcdoc`"). Not required by D-04.
 5. **Is the CI headless fixture (D-14) feasible?** RESOLVED: feasible at low infra cost (xvfb preinstalled; WebKitGTK runtime already installed by `linux-build-deps`). The engineering cost is a fake-parent subprocess harness of about 200 lines. Recommend doing it. If the planner judges the harness too large for this phase, fall back to manual smoke as D-14 allows.
-6. **Where do Non-Guarantee rows live?**
+6. **Where do Non-Guarantee rows live?** RESOLVED by plan 04-06: per-engine `5D-NG-*` rows in the NIP-5D table plus a `5D-8` row.
    - What we know: the checklist test has no Level/Status vocabulary check. Curly quotes must be verbatim. A usable quote: “The protocol does NOT protect against a compromised browser, a malicious shell, side-channel attacks, or social engineering.” [VERIFIED: substring of `spec/pinned/NIP-5D@24711d9c.md`].
    - Recommendation: add rows to the NIP-5D table (IDs like `5D-NG-webkitgtk`, `5D-NG-webview2`, `5D-NG-wkwebview`, `5D-NG-android`), Level `Non-Guarantee`, Status `N/A` with the residual in Reason. Also add a `5D-8` row quoting “A shell that needs to restrict its own embedders MUST set `frame-ancestors` on the shell's HTTP response.” [VERIFIED: substring of the pinned text]. Consider extending the test's required-ID map with the new IDs.
 7. **DEC-2 / P5 / A6 text.** After this phase, `nap.loaded` is sent once per frame, and every new document is a new frame with a new session. DEC-2's "A frame that reloads itself keeps its session until Phase 4" and P5's "a self-reload included" must be rewritten. A6 points at `NIP-5D-reload`, so update its owner cell to the fixed state. `TestNapLoadedPushesControlsOnEveryLoad` stays valid at the Go level.
@@ -496,7 +496,7 @@ fireMessage(f0.contentWindow, { type: "storage.keys", id: "late" }); await flush
 | Config file | none (CI: `.github/workflows/desktop.yml`) |
 | Quick run command | `cd backend && VERDANA_REQUIRE_NODE=1 go test ./webview/ ./ -run 'NappletHost|NapReset|NapStart|Srcdoc|Conformance|Adversarial'` |
 | Full suite command | `cd backend && VERDANA_REQUIRE_NODE=1 go test ./... && cd ../desktop && go generate ./internal/webviewlib && go build -o child/child ./child && go test -tags novulkan ./...` |
-| WebKit smoke | `cd desktop && xvfb-run -a env VERDANA_WEBKIT_SMOKE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 go test ./child -run TestNappletAdversarialWebKit` (locally drop `xvfb-run`) |
+| WebKit smoke | `cd desktop && xvfb-run -a env VERDANA_WEBKIT_SMOKE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 go test ./child -run TestWebKitNappletAdversarial` (locally drop `xvfb-run`) |
 
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
