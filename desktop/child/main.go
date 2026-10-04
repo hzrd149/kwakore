@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/abemedia/go-webview"
 	"github.com/puzpuzpuz/xsync/v3"
@@ -441,7 +442,10 @@ func newWindowToken() string {
 func bridgeAnswer(token string, id int, ok bool, index int, scope string) {
 	if bridgeAnswerToken == "" ||
 		subtle.ConstantTimeCompare([]byte(token), []byte(bridgeAnswerToken)) != 1 {
-		log.Warn().Int("prompt", id).Msg("napp window: prompt answer without the window token, ignored")
+		if logIt, n := tokenMisses.note(time.Now()); logIt {
+			log.Warn().Int("prompt", id).Int("suppressed", n).
+				Msg("napp window: prompt answer without the window token, ignored")
+		}
 		return
 	}
 	promptAnswer(id, ok, index, scope)

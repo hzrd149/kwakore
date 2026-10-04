@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/abemedia/go-webview"
 
@@ -72,7 +73,10 @@ func validToken(token string) bool {
 
 func nappletRPC(token, method, params string) string {
 	if !validToken(token) {
-		log.Warn().Str("method", method).Msg("napplet window: rpc without the window token, ignored")
+		if logIt, n := tokenMisses.note(time.Now()); logIt {
+			log.Warn().Str("method", method).Int("suppressed", n).
+				Msg("napplet window: rpc without the window token, ignored")
+		}
 		wrapped, _ := json.Marshal(map[string]string{"__bridge_error": errors.New("forbidden").Error()})
 		return string(wrapped)
 	}
@@ -81,7 +85,10 @@ func nappletRPC(token, method, params string) string {
 
 func nappletAnswer(token string, id int, ok bool, index int, scope string) {
 	if !validToken(token) {
-		log.Warn().Int("prompt", id).Msg("napplet window: prompt answer without the window token, ignored")
+		if logIt, n := tokenMisses.note(time.Now()); logIt {
+			log.Warn().Int("prompt", id).Int("suppressed", n).
+				Msg("napplet window: prompt answer without the window token, ignored")
+		}
 		return
 	}
 	promptAnswer(id, ok, index, scope)
