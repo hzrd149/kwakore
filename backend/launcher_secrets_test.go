@@ -401,12 +401,13 @@ func TestSecretsReadBackMismatchStaysFile(t *testing.T) {
 	}
 }
 
-// no file secrets, location "" (fresh or after a corrupt reset), keyring
-// found: the item is adopted and never overwritten.
+// no file secrets, location "" (fresh or after a corrupt reset) or
+// keyring, keyring found: the item is adopted and never overwritten.
 func TestSecretsAdoptsFoundItem(t *testing.T) {
 	for _, tc := range []struct{ name, state string }{
 		{"fresh", ""},
 		{"corrupt", "{not json"},
+		{"keyring", `{"secrets_location":"keyring"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := withFreshSecrets(t)
