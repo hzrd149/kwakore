@@ -3,9 +3,11 @@ package backend
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -24,17 +26,19 @@ const adversarialNappletDir = "testdata/adversarial-napplet"
 // adversarialRun runs the launcher's activation script and then the
 // fixture's inline script in one fresh node vm context standing in for the
 // frame. parent.postMessage records every post, window.name is preset from
-// the input, and the document stub has just enough DOM for the fixture's
-// log, its buttons and the elements its steps insert. It prints the posts
-// and the log text, then exits at once: the fixture's storage requests are
-// never answered here, and its timers would keep node alive.
+// the input, the <html> element carries the input's attributes, and the
+// document stub has just enough DOM for the fixture's log, its buttons and
+// the elements its steps insert. It prints the posts, the log text and
+// where the frame was sent (location.href), then exits at once: the
+// fixture's storage requests are never answered here, and its timers would
+// keep node alive.
 const adversarialRun = `
 const vm = require("node:vm")
 let input = ""
 process.stdin.setEncoding("utf8")
 process.stdin.on("data", d => { input += d })
 process.stdin.on("end", () => {
-  const { activation, fixture, name } = JSON.parse(input)
+  const { activation, fixture, name, attrs } = JSON.parse(input)
   const element = () => ({
     textContent: "", className: "", children: [], style: {},
     appendChild(c) { this.children.push(c); return c },
@@ -50,7 +54,11 @@ process.stdin.on("end", () => {
   sandbox.name = name
   sandbox.parent = { postMessage(message, target) { posts.push({ message, target }) } }
   sandbox.addEventListener = () => {}
+  sandbox.location = { href: "about:srcdoc", reload() {} }
+  const root = element()
+  root.getAttribute = key => (attrs && Object.prototype.hasOwnProperty.call(attrs, key) ? attrs[key] : null)
   sandbox.document = {
+    documentElement: root,
     body: element(),
     head: element(),
     createElement: element,
@@ -62,6 +70,7 @@ process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify({
     posts: JSON.parse(JSON.stringify(posts)),
     log: log.children.map(c => c.textContent).join(""),
+    href: sandbox.location.href,
   }))
   process.exit(0)
 })
@@ -70,12 +79,14 @@ process.stdin.on("end", () => {
 type adversarialReport struct {
 	Posts []scopePost `json:"posts"`
 	Log   string      `json:"log"`
+	Href  string      `json:"href"`
 }
 
-// runAdversarial runs the fixture once in the vm with window.name preset.
-func runAdversarial(t *testing.T, node, activation, fixture, name string) adversarialReport {
+// runAdversarial runs the fixture once in the vm with window.name preset
+// and attrs on its <html> element.
+func runAdversarial(t *testing.T, node, activation, fixture, name string, attrs map[string]string) adversarialReport {
 	t.Helper()
-	in, err := json.Marshal(map[string]string{"activation": activation, "fixture": fixture, "name": name})
+	in, err := json.Marshal(map[string]any{"activation": activation, "fixture": fixture, "name": name, "attrs": attrs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +147,7 @@ func TestAdversarialNappletFolderLoads(t *testing.T) {
 	fixture := probeScript(t, html) // exactly one inline <script>
 
 	t.Run("fresh document", func(t *testing.T) {
-		rep := runAdversarial(t, node, activation, fixture, "")
+		rep := runAdversarial(t, node, activation, fixture, "", nil)
 		if len(rep.Posts) < 2 {
 			t.Fatalf("posts = %v, want the marker and then the fixture's storage reads", rep.Posts)
 		}
@@ -158,10 +169,47 @@ func TestAdversarialNappletFolderLoads(t *testing.T) {
 		if strings.Contains(rep.Log, "FAIL") {
 			t.Errorf("the fixture logged a failure before any envelope was answered:\n%s", rep.Log)
 		}
+		if rep.Href != "about:srcdoc" {
+			t.Errorf("a fresh document navigated to %q before any envelope was answered", rep.Href)
+		}
+	})
+
+	// nav-js-early (CR-01 residual): with data-adv-mode on <html>, the
+	// first script replaces the document through a javascript: URL before
+	// the frame's first load and posts nothing itself; the replacing
+	// document reports on the policy it runs under and aims its network
+	// attempts at data-adv-target
+	t.Run("javascript: navigation before the first load", func(t *testing.T) {
+		const target = "http://127.0.0.1:9/"
+		rep := runAdversarial(t, node, activation, fixture, "",
+			map[string]string{"data-adv-mode": "nav-js-early", "data-adv-target": target})
+		if len(rep.Posts) != 1 {
+			t.Fatalf("posts = %v, want only the marker: the navigation must come before any envelope", rep.Posts)
+		}
+		js, ok := strings.CutPrefix(rep.Href, "javascript:")
+		if !ok {
+			t.Fatalf("the frame went to %q, want a javascript: URL", rep.Href)
+		}
+		code, err := url.PathUnescape(js)
+		if err != nil {
+			t.Fatalf("javascript: URL does not decode: %v", err)
+		}
+		var html string
+		if err := json.Unmarshal([]byte(code), &html); err != nil {
+			t.Fatalf("the javascript: URL is not one string literal: %v\n%s", err, code)
+		}
+		for _, want := range []string{`"nav-js-early"`, strconv.Quote(target), `"adv.residual." + step`, `eval("1")`, "new WebSocket", `"stay"`} {
+			if !strings.Contains(html, want) {
+				t.Errorf("the replacing document lacks %s:\n%s", want, html)
+			}
+		}
+		if rep.Log != "" {
+			t.Errorf("the early mode wrote to the log:\n%s", rep.Log)
+		}
 	})
 
 	t.Run("load-delayed reloaded document", func(t *testing.T) {
-		rep := runAdversarial(t, node, activation, fixture, "adv-reload-delayed")
+		rep := runAdversarial(t, node, activation, fixture, "adv-reload-delayed", nil)
 		if len(rep.Posts) != 2 {
 			t.Fatalf("posts = %v, want exactly the marker and one storage.set", rep.Posts)
 		}

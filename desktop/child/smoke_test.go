@@ -547,6 +547,11 @@ type advResult struct {
 //     logs it and the launcher never gets nap.openSettings (D-15)
 //   - RTCPeerConnection and navigator.mediaDevices are undefined in the
 //     frame (D-09, D-20), and the fixture reports no FAIL at all
+//   - the marker-less replacements (nav-js, doc-open-unclosed) ran; their
+//     envelopes reaching the live session is the recorded residual
+//     (CONFORMANCE NIP-5D-reload-residual) and is not asserted either way,
+//     but the policy their document reports must have held and the
+//     attacker must see nothing from them
 func TestWebKitNappletAdversarial(t *testing.T) {
 	needWebKit(t)
 	html, err := os.ReadFile(filepath.Join("..", "..", "backend", "testdata", "adversarial-napplet", "index.html"))
@@ -624,6 +629,19 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 		}
 	}
 
+	// the recorded residual: these ran, and whatever their documents
+	// reported says the inherited policy held
+	for _, step := range []string{"nav-js", "doc-open-unclosed"} {
+		ran := false
+		for _, r := range results {
+			ran = ran || r.Step == step
+		}
+		if !ran {
+			t.Errorf("the residual step %s left no result", step)
+		}
+		checkResidualReport(t, f, step)
+	}
+
 	// the reload loop: idle 10.5 s, then three rebuilds and a stop
 	if !f.waitFor(min(25*time.Second, time.Until(deadline)), func() bool {
 		return f.count("rpc:nap.reset") >= resetsAtDone+4 || f.hasExited()
@@ -690,6 +708,102 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 		t.Errorf("the child never logged refusing the forged nap.openSettings rpc:\n%s", f.childLog())
 	}
 
+	if conns := attacker.connections(); len(conns) != 0 {
+		t.Errorf("the attacker host got %d connections: %q", len(conns), conns)
+	}
+
+	f.close(15 * time.Second)
+	if conns := attacker.connections(); len(conns) != 0 && !t.Failed() {
+		t.Errorf("the attacker host got %d connections by the end: %q", len(conns), conns)
+	}
+}
+
+// residualReport is what a document the napplet made for itself (the
+// fixture's residualProbe) says about the policy it runs under.
+type residualReport struct {
+	Napplet   string `json:"napplet"`
+	Eval      string `json:"eval"`
+	WebSocket string `json:"websocket"`
+}
+
+// checkResidualReport asserts that the report step's replacing document
+// left in instance storage, if it got one there, shows the inherited policy
+// held: eval and WebSocket refused. It returns whether there was one. Its
+// arriving at all is the recorded residual (NIP-5D-reload-residual).
+func checkResidualReport(t *testing.T, f *fakeLauncher, step string) bool {
+	t.Helper()
+	raw, ok := f.stored("instance", "adv.residual."+step)
+	if !ok {
+		t.Logf("residual %s: no report from the replacing document reached the launcher", step)
+		return false
+	}
+	var r residualReport
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		t.Errorf("residual %s: report is not JSON: %v: %q", step, err, raw)
+		return true
+	}
+	t.Logf("residual %s: the replacing document's envelope reached the live session (window.napplet %s, eval %s, WebSocket %s)",
+		step, r.Napplet, r.Eval, r.WebSocket)
+	if r.Eval != "refused" || r.WebSocket != "refused" {
+		t.Errorf("residual %s: the replacing document is not under the napplet policy: eval %s, WebSocket %s", step, r.Eval, r.WebSocket)
+	}
+	return true
+}
+
+// TestWebKitNappletJavascriptBeforeLoad pins the half of the recorded
+// residual (CONFORMANCE NIP-5D-reload-residual) the adversarial step
+// machine cannot reach: the napplet's first script replaces its document
+// through a javascript: URL before the frame's first load. That document
+// posts no marker and its load is the frame's first, so today the host page
+// takes it for the boot, never rebuilds, and its envelope reaches the live
+// session without window.napplet. None of that is asserted, only logged.
+// What is asserted is containment: the report must arrive (nothing races it
+// here), must show the napplet policy inherited (eval and WebSocket
+// refused), and its fetch, image, preconnect and beacon must never reach
+// the attacker's listener.
+func TestWebKitNappletJavascriptBeforeLoad(t *testing.T) {
+	needWebKit(t)
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "backend", "testdata", "adversarial-napplet", "index.html"))
+	if err != nil {
+		t.Fatalf("reading the fixture: %v", err)
+	}
+	bin := buildChild(t)
+	attacker := newAttackerListener(t)
+	target := "http://" + attacker.ln.Addr().String() + "/"
+
+	// the early mode is chosen on <html>, which NappletSrcdoc merges onto
+	// its own <html>: the fixture's script reads it before any envelope
+	html := strings.Replace(string(fixture), "<html>",
+		`<html data-adv-mode="nav-js-early" data-adv-target="`+target+`">`, 1)
+	if html == string(fixture) {
+		t.Fatal("the fixture has no <html> tag to put the early mode on")
+	}
+
+	f := newFakeLauncher(t, []byte(html))
+	f.start(bin)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("attacker connections: %q", attacker.connections())
+		}
+	})
+
+	if !f.waitFor(30*time.Second, func() bool {
+		return f.count("msg:storage.set:adv.residual.nav-js-early") > 0 || f.hasExited()
+	}) || f.hasExited() {
+		t.Fatalf("the replacing document's report never reached the launcher (exited %v); if the engine now "+
+			"stops this, the residual may be closed: update NIP-5D-reload-residual", f.hasExited())
+	}
+	if !checkResidualReport(t, f, "nav-js-early") {
+		t.Error("the report reached the launcher outside a live session")
+	}
+
+	// the network attempts follow the report; give them time to land
+	time.Sleep(4 * time.Second)
+	if f.hasExited() {
+		t.Fatal("the child exited")
+	}
+	t.Logf("observed: %d nap.start, %d nap.loaded, %d nap.reset (today the replacing document keeps the session)",
+		f.count("rpc:nap.start"), f.count("rpc:nap.loaded"), f.count("rpc:nap.reset"))
 	if conns := attacker.connections(); len(conns) != 0 {
 		t.Errorf("the attacker host got %d connections: %q", len(conns), conns)
 	}

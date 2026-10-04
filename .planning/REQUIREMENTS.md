@@ -29,7 +29,7 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Sandbox
 
-- [x] **SBOX-01**: A napplet that reloads or navigates its own frame gets a fresh session with `window.napplet` re-injected and the CSP intact; messages from a replaced document are never accepted under the napplet's identity, and stale subscriptions stop (5D-3, SH-1)
+- [x] **SBOX-01**: A napplet that reloads or navigates its own frame gets a fresh session with `window.napplet` re-injected and the CSP intact; messages from a replaced document are never accepted under the napplet's identity, and stale subscriptions stop (5D-3, SH-1). Recorded residual: a document the napplet writes itself (a `javascript:` URL result, an unclosed `document.open()`) posts no marker and can keep the live session, under the inherited CSP and sandbox (`spec/CONFORMANCE.md` NIP-5D-reload-residual)
 - [x] **SBOX-02**: The napplet host page carries a CSP that engines enforce (`frame-src`/`child-src` instead of the no-op `navigate-to 'self'`), plus `frame-ancestors 'none'` on the loopback response (5D-8)
 - [x] **SBOX-03**: An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) is exercised on WebKitGTK, and on WebView2 and WKWebView where CI allows
 - [x] **SBOX-04**: WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the remaining risk is recorded under NIP-5D Non-Guarantees

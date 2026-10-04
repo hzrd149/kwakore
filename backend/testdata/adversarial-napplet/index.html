@@ -26,8 +26,23 @@
   message handlers), network (fetch, image, preconnect, prefetch, WebSocket,
   EventSource, beacon, font, CSS, RTCPeerConnection, mediaDevices), then the
   self-navigations nav-http, nav-meta, nav-anchor, nav-blank, nav-data,
-  nav-blob, doc-open, reload and reload-delayed, then the verdict, and last
-  the reload loop, which ends with the launcher's "keeps reloading" stop.
+  nav-blob, doc-open, nav-js, doc-open-unclosed, reload and reload-delayed,
+  then the verdict, and last the reload loop, which ends with the launcher's
+  "keeps reloading" stop.
+
+  nav-js (a javascript: URL navigation) and doc-open-unclosed
+  (document.open() and write with no close()) make a document that is not
+  built from the launcher's srcdoc, so it posts no document-start marker:
+  its envelopes reach the session that is still live. That is a recorded
+  residual (spec/CONFORMANCE.md NIP-5D-reload-residual), not something these
+  steps pass or fail on. What they pin is that the replacing document stays
+  under the inherited policy: it reports (adv.residual.<step>) whether eval
+  and a WebSocket were refused, and its fetch, image, preconnect and beacon
+  must never reach adv.target. The same navigation before the first load
+  (nav-js-early) cannot run inside this step machine, whose first envelope
+  is already past that load; it runs in its own window when the <html>
+  element carries data-adv-mode="nav-js-early" (and data-adv-target), which
+  the WebKit smoke sets.
 
   The host page replaces the frame after each self-navigation, and
   window.name does not survive that rebuild, so progress lives in
@@ -48,6 +63,62 @@
 <script>
 ;(() => {
   const storage = window.napplet && window.napplet.storage && window.napplet.storage.instance
+  const DEFAULT_TARGET = "https://example.invalid/adversarial/"
+
+  // residualProbe runs inside a document the napplet made for itself
+  // (nav-js, doc-open-unclosed, nav-js-early), which has no marker and may
+  // have no window.napplet. It reports, with one bare envelope, whether the
+  // inherited policy still holds (eval and WebSocket are refused under the
+  // napplet CSP), then tries the network; the WebKit smoke's listener at
+  // target must see none of it. With then = "reload" it reloads after a
+  // moment, so the step machine resumes in a rebuilt frame even if the
+  // engine never fired this document's load. It is serialized with
+  // toString, so it must stay self-contained.
+  function residualProbe(step, target, then) {
+    var r = { napplet: typeof window.napplet }
+    try {
+      eval("1")
+      r.eval = "ran"
+    } catch (e) {
+      r.eval = "refused"
+    }
+    try {
+      new WebSocket("ws://" + new URL(target).host + "/" + step)
+      r.websocket = "opened"
+    } catch (e) {
+      r.websocket = "refused"
+    }
+    parent.postMessage({
+      type: "storage.set", id: "adv-residual-" + step, key: "adv.residual." + step,
+      value: JSON.stringify(r), scope: "instance",
+    }, "*")
+    try { fetch(target + step + "-fetch").catch(function () {}) } catch (e) {}
+    try { new Image().src = target + step + "-img" } catch (e) {}
+    try {
+      var l = document.createElement("link")
+      l.rel = "preconnect"
+      l.href = new URL(target).origin
+      ;(document.head || document.documentElement).appendChild(l)
+    } catch (e) {}
+    try { navigator.sendBeacon(target + step + "-beacon", "adv") } catch (e) {}
+    if (then === "reload") setTimeout(function () { location.reload() }, 1500)
+  }
+  const residualDoc = (step, target, then) =>
+    "<!doctype html><body><scr" + "ipt>(" + residualProbe.toString() + ")(" +
+    JSON.stringify(step) + "," + JSON.stringify(target) + "," + JSON.stringify(then) + ")</scr" + "ipt></body>"
+  // a javascript: URL whose result is html replaces the document with it
+  const javascriptURL = html => "javascript:" + encodeURIComponent(JSON.stringify(html))
+
+  // nav-js-early: the same javascript: navigation, from the first script
+  // and so before this frame's first load. The replacing document's load is
+  // then the frame's first, so the host page takes it for the boot and
+  // never rebuilds (the recorded residual); this window does nothing else.
+  const root = document.documentElement
+  if (root && typeof root.getAttribute === "function" && root.getAttribute("data-adv-mode") === "nav-js-early") {
+    const earlyTarget = root.getAttribute("data-adv-target") || DEFAULT_TARGET
+    location.href = javascriptURL(residualDoc("nav-js-early", earlyTarget, "stay"))
+    return
+  }
 
   // the document a load-delayed reload put in place of the running one (the
   // reload keeps window.name, a rebuild does not): it tries to get an
@@ -85,7 +156,7 @@
   const STEPS = [
     "scope", "parent", "bindings", "network",
     "nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob",
-    "doc-open", "reload", "reload-delayed",
+    "doc-open", "nav-js", "doc-open-unclosed", "reload", "reload-delayed",
     "verdict", "loop",
   ]
   const LOOP = STEPS.indexOf("loop")
@@ -93,12 +164,16 @@
   // the steps that replace (or try to replace) this document
   const REBUILDS = new Set([
     "nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob",
-    "doc-open", "reload", "reload-delayed",
+    "doc-open", "nav-js", "doc-open-unclosed", "reload", "reload-delayed",
   ])
   // the engine may refuse these outright and keep this document
   const REFUSABLE = new Set(["nav-http", "nav-meta", "nav-anchor", "nav-blank", "nav-data", "nav-blob"])
+  // the marker-less replacements of the recorded residual: their envelopes
+  // may reach the live session, and they are judged only on the policy
+  // their document reports (adv.residual.<step>) and on the listener
+  const RESIDUAL = new Set(["nav-js", "doc-open-unclosed"])
   const KEYS = ["adv.step", "adv.pending", "adv.results", "adv.boots", "adv.target", "adv.auto", "adv.pause"]
-  const DEFAULT_TARGET = "https://example.invalid/adversarial/"
+  const RESIDUAL_KEYS = ["adv.residual.nav-js", "adv.residual.doc-open-unclosed"]
   const LOOP_IDLE_MS = 10500
 
   const results = []
@@ -402,6 +477,14 @@
       document.write("<p>rewritten by document.open</p>")
       document.close()
     },
+    "nav-js": () => {
+      location.href = javascriptURL(residualDoc("nav-js", target, "reload"))
+    },
+    "doc-open-unclosed": () => {
+      // no close(): the document never finishes loading, so no load fires
+      document.open()
+      document.write(residualDoc("doc-open-unclosed", target, "reload"))
+    },
     reload: () => {
       location.reload()
     },
@@ -423,16 +506,39 @@
     await sleep(pause)
     const err = throws(acts[name])
     if (err) {
-      note(name, REFUSABLE.has(name) ? "PASS" : "FAIL", "the attempt threw " + errText(err))
+      if (RESIDUAL.has(name)) note(name, "INFO", "the attempt threw " + errText(err))
+      else note(name, REFUSABLE.has(name) ? "PASS" : "FAIL", "the attempt threw " + errText(err))
     } else {
       // WebKitGTK refuses data: and blob: navigations without a load, so
       // this document lives on; every other step must have replaced it
       await sleep(name === "nav-data" || name === "nav-blob" ? 2000 : 6000)
       if (name === "nav-data" || name === "nav-blob") note(name, "PASS", "refused by the engine")
+      else if (RESIDUAL.has(name)) note(name, "INFO", "this document was not replaced")
       else note(name, "FAIL", "the document was not replaced")
     }
     await save()
     await storage.removeItem("adv.pending")
+  }
+
+  // residualVerdict records what the document a residual step made said
+  // about itself. Its envelope reaching the launcher at all is the recorded
+  // residual, so a missing report is only INFO; a report of a policy that
+  // no longer held is a FAIL.
+  const residualVerdict = async name => {
+    const raw = await storage.getItem("adv.residual." + name)
+    let r = null
+    try {
+      r = raw ? JSON.parse(raw) : null
+    } catch {}
+    if (!r || typeof r !== "object") {
+      note(name, "INFO", "no report from the replacing document reached the launcher")
+      return
+    }
+    const held = r.eval === "refused" && r.websocket === "refused"
+    note(name, held ? "PASS" : "FAIL",
+      (held ? "the replacing document ran under the inherited policy" : "the replacing document escaped the policy") +
+      " (eval " + r.eval + ", WebSocket " + r.websocket + ", window.napplet " + r.napplet + ")")
+    note(name, "INFO", "its envelope reached the live session: the recorded residual (NIP-5D-reload-residual)")
   }
 
   // the reload loop: idle long enough that no earlier rebuild is still in
@@ -472,6 +578,7 @@
       const fresh = typeof window.napplet === "object" && location.href === "about:srcdoc"
       note(pending, fresh ? "PASS" : "FAIL",
         fresh ? "replaced by a fresh document" : "the next document is not a fresh srcdoc (" + location.href + ")")
+      if (RESIDUAL.has(pending)) await residualVerdict(pending)
       await save()
       await storage.removeItem("adv.pending")
     }
@@ -495,7 +602,7 @@
   }
 
   document.getElementById("restart").addEventListener("click", () => {
-    Promise.all(KEYS.concat(["adv.done", "adv.leak"]).map(k => storage.removeItem(k)))
+    Promise.all(KEYS.concat(["adv.done", "adv.leak"], RESIDUAL_KEYS).map(k => storage.removeItem(k)))
       .then(() => location.reload(), e => line("FAIL restart: " + errText(e), "fail"))
   })
   document.getElementById("loop").addEventListener("click", () => {

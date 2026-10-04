@@ -106,6 +106,13 @@ func collapseSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// citedTest is a test name as the checklist cites it; testFuncDecl is its
+// declaration in a _test.go file.
+var (
+	citedTest    = regexp.MustCompile(`\bTest[A-Z][A-Za-z0-9_]*`)
+	testFuncDecl = regexp.MustCompile(`(?m)^func (Test[A-Z][A-Za-z0-9_]*)\(`)
+)
+
 func TestConformanceChecklistSkeleton(t *testing.T) {
 	raw, err := os.ReadFile(conformanceChecklist)
 	if err != nil {
@@ -279,6 +286,36 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		}
 	}
 
+	// the marker-less self-replacement (a javascript: URL result, an
+	// unclosed document.open) is a recorded, open residual, and the rows
+	// that close the reload clause point at it instead of claiming it
+	if tb, ok := tableIn(pinSection["NIP-5D"]); ok {
+		rows := rowsByID(tb)
+		const residual = "NIP-5D-reload-residual"
+		if row, ok := rows[residual]; !ok {
+			t.Errorf("section NIP-5D: row %s is missing", residual)
+		} else {
+			if st := cell(row, tb.col("Status")); st != "open" {
+				t.Errorf("section NIP-5D: row %s has status %q, want open", residual, st)
+			}
+			for _, want := range []string{"javascript:", "document.open()", "0 connections", "not a containment escape"} {
+				if !strings.Contains(cell(row, tb.col("Reason")), want) {
+					t.Errorf("section NIP-5D: row %s Reason does not say %q", residual, want)
+				}
+			}
+		}
+		for _, id := range []string{"5D-3", "NIP-5D-reload", "5D-NG-webkitgtk"} {
+			if row, ok := rows[id]; ok && !strings.Contains(strings.Join(row, " "), "`"+residual+"`") {
+				t.Errorf("section NIP-5D: row %s does not point at %s", id, residual)
+			}
+		}
+	}
+	if tb, ok := tableIn("Decisions"); ok {
+		if row, ok := rowsByID(tb)["DEC-5"]; ok && !strings.Contains(strings.Join(row, " "), "`NIP-5D-reload-residual`") {
+			t.Error("Decisions: DEC-5 does not say which documents post no marker (NIP-5D-reload-residual)")
+		}
+	}
+
 	// every engine's residual risk sits under NIP-5D Non-Guarantees
 	// (SBOX-04): Level Non-Guarantee, Status N/A, and a Reason recording what
 	// was measured on that engine and what was not; one of them quotes the
@@ -325,6 +362,36 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 			if strings.HasPrefix(cell(row, st), "fixed") && cell(row, code) == "" {
 				t.Errorf("%s: row %s is marked fixed but cites no code", tb.section, cell(row, 0))
 			}
+		}
+	}
+
+	// every test the checklist cites exists, so a claim cannot outlive the
+	// test behind it
+	declared := map[string]bool{}
+	for _, root := range []string{".", "../desktop"} {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, m := range testFuncDecl.FindAllStringSubmatch(string(src), -1) {
+				declared[m[1]] = true
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range citedTest.FindAllString(doc, -1) {
+		if !declared[name] {
+			t.Errorf("the checklist cites %s, but no test file declares it", name)
 		}
 	}
 

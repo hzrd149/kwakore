@@ -499,13 +499,21 @@
   // nothing. Any later load of the same frame means the document was
   // replaced: a reload, a navigation the CSP let through, one it blocked
   // while the old document lives on (WebKitGTK still reports that load),
-  // about:blank, about:srcdoc, or document.open. Whatever an engine still
-  // lets through is caught here, every kind the same way: the frame goes,
-  // its session ends, and a fresh frame boots with a fresh session
-  // (replaced, below). A second document-start marker (DOCUMENT_MARKER,
-  // above) does the same, and closes the window before a replacing
-  // document's load, in which its envelopes would otherwise reach the old
-  // session.
+  // about:blank, about:srcdoc, or document.open followed by close. Whatever
+  // an engine still lets through is caught here, every kind the same way:
+  // the frame goes, its session ends, and a fresh frame boots with a fresh
+  // session (replaced, below). A second document-start marker
+  // (DOCUMENT_MARKER, above) does the same, and closes the window before a
+  // reloaded document's load, in which its envelopes would otherwise reach
+  // the old session.
+  //
+  // Not caught: a document the napplet makes itself without a URL load (the
+  // result of a javascript: URL, or document.open with no close). It is not
+  // built from the srcdoc, so it posts no marker; its envelopes before its
+  // own load reach the live session, one made before the first load is
+  // taken for the boot, and an unclosed one never loads. It stays under the
+  // inherited policy and sandbox, and no signal this page gets can tell it
+  // apart (spec/CONFORMANCE.md NIP-5D-reload-residual).
   const showBootError = err => {
     document.body.textContent = "This napplet could not be started: " + ((err && err.message) || err)
   }
@@ -576,8 +584,8 @@
   // that is no longer current is ignored, so one replacement rebuilds once.
   //
   // A napplet that keeps replacing its document (a reload loop, or one that
-  // rewrites itself with document.open, which is rebuilt and counted like
-  // any other replacement) is stopped: at most REBUILD_LIMIT rebuilds within
+  // rewrites itself with document.open and close, which is rebuilt and
+  // counted like any other replacement) is stopped: at most REBUILD_LIMIT rebuilds within
   // REBUILD_WINDOW_MS, and the next replacement still ends its session but
   // boots nothing and says why in the window. rebuilds and halted live in
   // this closure, out of the frame's reach; only the launcher's dev reload
