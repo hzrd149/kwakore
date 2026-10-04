@@ -17,7 +17,7 @@ CONFORMANCE row `NIP-5D-reload-residual` (MUST, open) is not satisfied. A napple
 - a `javascript:` navigation after the first load
 - `document.open()` with no `close()`
 
-Phase 4 detects a replaced document by a second `load` event or a second document-start marker. None of these three cases reliably produces either. The replacing document keeps the existing session but has no `window.napplet`.
+Phase 4 detects a replaced document by a second `load` event or a second document-start marker. None of these three cases reliably produces either. The replacing document keeps the existing session. After a `javascript:` navigation it has no `window.napplet`; after an unclosed `document.open()` the old `window.napplet` object is still present.
 
 Measured on WebKitGTK 2.52.6, the CSP and the sandbox still hold in these cases, and the attacker listener saw 0 connections. So this is the napplet's own code continuing under its own session, not a containment escape. It is still a gap against the NIP-5D reload MUST.
 
