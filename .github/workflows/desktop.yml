@@ -56,6 +56,73 @@ jobs:
         working-directory: desktop
         run: go test -tags novulkan ./...
 
+  # the instance pipe, childbin and keyring code have Windows-only paths that
+  # the linux job never compiles, and the build matrix only builds them. This
+  # job vets the backend and the whole desktop module for Windows and runs the
+  # backend and desktop internal tests on a real Windows machine. Everything
+  # builds without cgo, so no mingw is needed. One command per step: the
+  # default PowerShell shell only fails a step on the last command's exit code
+  test-windows:
+    name: test (windows)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      # Git for Windows may check text files out with CRLF, which would change
+      # fixtures and golden strings; this has to run before the checkout
+      - name: keep LF line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: vet backend
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./...
+
+      # VERDANA_REQUIRE_NODE stays unset here: the node-backed tests run when
+      # node works on the runner and skip instead of failing when it does not
+      - name: test backend
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+
+      # libwebview copies for the launcher to embed (git-ignored). No
+      # GOOS/GOARCH here: go generate runs its copy program on the runner
+      - name: copy libwebview
+        working-directory: desktop
+        run: go generate ./internal/webviewlib
+
+      # embed_prod.go embeds child/child, so the child has to exist before the
+      # desktop package can be vetted
+      - name: build child
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o child/child ./child
+
+      - name: vet desktop
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "0"
+        run: go vet -tags novulkan ./...
+
+      # instanceipc (owner-only named pipe, server SID check), childbin,
+      # wireline, webviewlib, secretstore, osintegration and the rest
+      - name: test desktop internal packages
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/...
+
   build:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.os }}
