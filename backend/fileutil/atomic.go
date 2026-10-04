@@ -15,7 +15,9 @@ import (
 // a temp file in the same directory (so the rename never crosses
 // filesystems), which is chmodded to perm, written, fsynced and closed before
 // it is renamed over path; on Unix the parent directory is fsynced afterwards
-// so the rename itself survives a power loss.
+// so the rename itself survives a power loss. A filesystem that does not
+// support fsync on a directory does not fail the write (see syncDir); a
+// failed file fsync always does.
 //
 // The temp file is named ".tmp-*" and is removed on every failure path. The
 // directory is not created: callers that need it make it themselves.
