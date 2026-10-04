@@ -1,8 +1,12 @@
 package backend
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // ─── test rig ───────────────────────────────────────────────────
@@ -382,5 +386,297 @@ func TestLogoutFileModeOlderKeyringItemNotResumed(t *testing.T) {
 	}
 	if _, ok := store.item(t); ok {
 		t.Fatal("older keyring item kept")
+	}
+}
+
+// ─── keyring-failed screen: Try again / Log in again ────────────
+
+// waitFor polls cond for up to two seconds.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// startKeyringFailed starts a launcher whose secrets live only in a keyring item
+// it cannot reach: the S3 failed state.
+func startKeyringFailed(t *testing.T) (*secretsRig, *fakeStore) {
+	t.Helper()
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.put(t, testClientKeyHex, testLogin)
+	store.setErrs(ErrSecretStoreUnavailable, ErrSecretStoreUnavailable, ErrSecretStoreUnavailable)
+	loadState()
+	loadSecrets(store)
+	if w := keyringWait(); w != keyringFailed {
+		t.Fatalf("KeyringWait = %q, want failed", w)
+	}
+	return r, store
+}
+
+// Try again with the keyring back: the wait clears at once, then the login
+// resumes.
+func TestRetryKeyringResumes(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	store.setErrs(nil, nil, nil)
+	gate := make(chan struct{})
+	store.mu.Lock()
+	store.gate = gate
+	store.mu.Unlock()
+	openGate := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(openGate)
+
+	RetryKeyring()
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q right after RetryKeyring, want \"\"", w)
+	}
+	openGate()
+	waitFor(t, "the login to resume", func() bool { return len(r.resumes()) == 1 })
+	if got := r.resumes(); got[0] != testLogin {
+		t.Fatalf("resumed %v", got)
+	}
+	if k, err := existingClientKey(); err != nil || k.Hex() != testClientKeyHex {
+		t.Fatalf("client key %s, %v; want the keyring's", k.Hex(), err)
+	}
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q", w)
+	}
+}
+
+// Try again while the keyring is still down goes back to failed, and
+// nothing is generated.
+func TestRetryKeyringStillUnavailable(t *testing.T) {
+	_, store := startKeyringFailed(t)
+	before := len(store.callLog())
+
+	RetryKeyring()
+	waitFor(t, "the retry to fail", func() bool {
+		return len(store.callLog()) > before && keyringWait() == keyringFailed
+	})
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key after a failed retry")
+	}
+	if got := strings.Join(store.callsSince(before), ","); got != "get" {
+		t.Fatalf("store calls = %s, want get", got)
+	}
+}
+
+// a second Try again while the first is still waiting on the keyring joins
+// it: one Get, one resume.
+func TestRetryKeyringJoinsInFlight(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	gate := make(chan struct{})
+	store.mu.Lock()
+	store.getErr = nil
+	store.gate = gate
+	store.mu.Unlock()
+	openGate := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(openGate)
+	before := len(store.callLog())
+
+	RetryKeyring()
+	waitFor(t, "the first retry's get", func() bool { return len(store.callLog()) > before })
+	RetryKeyring()
+	RetryKeyring()
+	time.Sleep(50 * time.Millisecond)
+	openGate()
+	waitFor(t, "the login to resume", func() bool { return len(r.resumes()) == 1 })
+	time.Sleep(50 * time.Millisecond)
+
+	if got := countCalls(store.callsSince(before), "get"); got != 1 {
+		t.Fatalf("store calls = %v, want one get for three retries", store.callsSince(before))
+	}
+	if got := r.resumes(); len(got) != 1 {
+		t.Fatalf("resumed %v, want once", got)
+	}
+}
+
+// Try again while the startup load is still in flight is a no-op.
+func TestRetryKeyringDuringStartupLoad(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.put(t, testClientKeyHex, testLogin)
+	gate := make(chan struct{})
+	store.gate = gate
+	openGate := sync.OnceFunc(func() { close(gate) })
+	loadState()
+	done := make(chan struct{})
+	go func() {
+		loadSecrets(store)
+		close(done)
+	}()
+	t.Cleanup(func() { openGate(); <-done })
+	waitFor(t, "the startup get", func() bool { return len(store.callLog()) > 0 })
+
+	RetryKeyring()
+	openGate()
+	<-done
+	time.Sleep(50 * time.Millisecond)
+
+	if got := strings.Join(store.callLog(), ","); got != "get" {
+		t.Fatalf("store calls = %s, want one get", got)
+	}
+	if got := r.resumes(); len(got) != 1 {
+		t.Fatalf("resumed %v, want once", got)
+	}
+}
+
+// with no store there is nothing to retry.
+func TestRetryKeyringNoStore(t *testing.T) {
+	r := withFreshSecrets(t)
+	loadState()
+	loadSecrets(nil)
+
+	RetryKeyring()
+	time.Sleep(20 * time.Millisecond)
+	if got := r.resumes(); len(got) != 0 {
+		t.Fatalf("resumed %v", got)
+	}
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q", w)
+	}
+}
+
+// in the failed state, and without Log in again, no client key is made.
+func TestKeyringFailedRefusesClientKey(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	before := len(store.callLog())
+
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key in the keyring-failed state")
+	}
+	if _, err := existingClientKey(); err == nil {
+		t.Fatal("existingClientKey() returned a key in the keyring-failed state")
+	}
+	if on := r.readState(t); strings.Contains(on, "client_key") {
+		t.Fatalf("a client key reached the file:\n%s", on)
+	}
+	if calls := store.callsSince(before); len(calls) != 0 {
+		t.Fatalf("store calls = %v", calls)
+	}
+}
+
+// Log in again: the login screen, the keyring item untouched, and only now
+// may a login the user starts make a new client key. That login is saved
+// to the file with the fallback notice.
+func TestLoginWithoutKeyring(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	before := len(store.callLog())
+
+	LoginWithoutKeyring()
+
+	if got := Phase(); got != PhaseLogin {
+		t.Fatalf("phase = %q, want login", got)
+	}
+	if w := keyringWait(); w != "" {
+		t.Fatalf("KeyringWait = %q, want \"\"", w)
+	}
+	if calls := store.callsSince(before); len(calls) != 0 {
+		t.Fatalf("LoginWithoutKeyring called the store: %v", calls)
+	}
+	if _, err := existingClientKey(); err == nil {
+		t.Fatal("a resume could use a client key after LoginWithoutKeyring")
+	}
+
+	// the nostrconnect QR code (or a bunker url) asks for a client key
+	k, err := clientKey()
+	if err != nil {
+		t.Fatalf("clientKey() after LoginWithoutKeyring: %v", err)
+	}
+	if k.Hex() == testClientKeyHex {
+		t.Fatal("got the keyring's client key, which was never read")
+	}
+	if again, _ := clientKey(); again != k {
+		t.Fatal("clientKey() changed between calls")
+	}
+	if on := r.readState(t); strings.Contains(on, k.Hex()) {
+		t.Fatal("the new key was persisted before any login was saved")
+	}
+
+	if err := setStoredLogin("bunker://again?relay=wss://r.example"); err != nil {
+		t.Fatal(err)
+	}
+	on := r.readState(t)
+	if !strings.Contains(on, "bunker://again") || !strings.Contains(on, k.Hex()) {
+		t.Fatalf("new login not saved to the file:\n%s", on)
+	}
+	if got := secretsLocation(); got != "file" {
+		t.Fatalf("SecretsLocation = %q, want file", got)
+	}
+	if !hasNotice(noticeKeyringFallback) {
+		t.Fatal("no keyring-fallback notice for the file login")
+	}
+	if fi, err := os.Stat(filepath.Join(r.dir, "state.json")); err != nil || fi.Mode().Perm() != 0600 {
+		t.Fatalf("state.json mode = %v, %v; want 0600", fi.Mode().Perm(), err)
+	}
+	calls := store.callsSince(before)
+	if countCalls(calls, "delete") != 0 {
+		t.Fatalf("store calls = %v: the keyring item was deleted", calls)
+	}
+	it, ok := store.item(t)
+	if !ok || it.Login != testLogin || it.ClientKey != testClientKeyHex {
+		t.Fatalf("keyring item changed: %+v, %v", it, ok)
+	}
+}
+
+// the permission is in memory only: a new process in the failed state
+// refuses again.
+func TestLoginWithoutKeyringNotPersisted(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	LoginWithoutKeyring()
+	if on := r.readState(t); strings.Contains(strings.ToLower(on), "without") || strings.Contains(on, "fresh") {
+		t.Fatalf("the permission reached state.json:\n%s", on)
+	}
+
+	r.restart(t, store)
+
+	if w := keyringWait(); w != keyringFailed {
+		t.Fatalf("KeyringWait = %q, want failed", w)
+	}
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key in a new process without LoginWithoutKeyring")
+	}
+	if got := r.resumes(); len(got) != 0 {
+		t.Fatalf("resumed %v", got)
+	}
+}
+
+// Log in again outside the failed state (a load still in flight) does
+// nothing, so it can never let a new key shadow one being read.
+func TestLoginWithoutKeyringOnlyWhenFailed(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, `{"secrets_location":"keyring"}`)
+	store := newFakeStore()
+	store.put(t, testClientKeyHex, testLogin)
+	gate := make(chan struct{})
+	store.gate = gate
+	openGate := sync.OnceFunc(func() { close(gate) })
+	loadState()
+	done := make(chan struct{})
+	go func() {
+		loadSecrets(store)
+		close(done)
+	}()
+	t.Cleanup(func() { openGate(); <-done })
+	waitFor(t, "the startup get", func() bool { return len(store.callLog()) > 0 })
+
+	LoginWithoutKeyring()
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key while the keyring was still being read")
+	}
+	if got := Phase(); got != PhaseLoading {
+		t.Fatalf("phase = %q, want loading", got)
+	}
+	openGate()
+	<-done
+	if k, err := existingClientKey(); err != nil || k.Hex() != testClientKeyHex {
+		t.Fatalf("client key %s, %v; want the keyring's", k.Hex(), err)
 	}
 }
