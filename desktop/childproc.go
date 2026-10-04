@@ -2,17 +2,21 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/internal/childbin"
 	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
 
@@ -40,7 +44,11 @@ var (
 // process is up: the napp's own readiness is observed later, when it registers
 // its actions.
 func startChild(spec backend.WindowSpec) (backend.Transport, error) {
-	cmd := exec.Command(childExePath())
+	exe, _, err := prepareChild()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe)
 	cmd.Env = append(os.Environ(),
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_DIR="+spec.Dir,
@@ -68,7 +76,11 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 // startSettingsChild spawns the webview process for a napp's settings window:
 // the same child, in its settings mode, serving the launcher's settings page.
 func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
-	cmd := exec.Command(childExePath())
+	exe, _, err := prepareChild()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe)
 	cmd.Env = append(os.Environ(),
 		"VERDANA_WINDOW_KIND=settings",
 		"VERDANA_NAPP_ID="+spec.NappID,
@@ -186,22 +198,49 @@ func killAllChildren() {
 	log.Info().Int("count", len(snapshot)).Msg("killed all child processes")
 }
 
-func childExePath() string {
-	path, err := extractChild()
-	if err == nil && path != "" {
-		return path
+// childCacheDir is the directory prepareChild runs the child from; a test
+// seam.
+var childCacheDir = childbin.CacheDir
+
+// childFiles is the one list of files the child needs next to it in the
+// cache dir. The child program comes first.
+func childFiles(data []byte, sum [32]byte) []childbin.File {
+	name := "child-" + hex.EncodeToString(sum[:])
+	if runtime.GOOS == "windows" {
+		name += ".exe"
 	}
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exe)
-		candidate := filepath.Join(dir, "child", "child")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+	return []childbin.File{{Name: name, Data: data, Sum: sum, Exec: true}}
+}
+
+// prepareChild makes sure the child program in the per-user cache dir holds
+// exactly the bytes this launcher carries (hashed in this call) and returns
+// its path and the directory. It runs before every spawn. In prod every
+// error wraps backend.ErrWindowProgramUnavailable: the window then fails to
+// open and nothing else is executed in its place.
+func prepareChild() (exe, dir string, err error) {
+	defer func() {
+		if err == nil {
+			return
 		}
+		log.Error().Err(err).Str("dir", dir).Str("path", exe).Msg("napp window program unavailable")
+		exe, dir = "", ""
+		if failClosed {
+			err = fmt.Errorf("%w: %v", backend.ErrWindowProgramUnavailable, err)
+		}
+	}()
+
+	data, sum, err := childSource()
+	if err != nil {
+		return "", "", err
 	}
-	try := "./child/child"
-	if _, err := os.Stat(try); err == nil {
-		return try
+	dir, err = childCacheDir()
+	if err != nil {
+		return "", "", err
 	}
-	return "child/child"
+	files := childFiles(data, sum)
+	exe = filepath.Join(dir, files[0].Name)
+	if err := childbin.Ensure(dir, files); err != nil {
+		return exe, dir, err
+	}
+	return exe, dir, nil
 }

@@ -5,43 +5,37 @@ package main
 import (
 	"crypto/sha256"
 	_ "embed"
-	"fmt"
-	"os"
-	"path/filepath"
+	"errors"
+	"sync"
 )
+
+// A prod launcher carries its child program inside itself and runs nothing
+// else: prepareChild extracts these bytes into the per-user cache dir and
+// re-verifies them before every spawn. There is no fallback to a child next
+// to the executable or in the working directory.
 
 //go:embed child/child
 var childBinary []byte
 
-func extractChild() (string, error) {
-	hash := sha256.Sum256(childBinary)
-	name := fmt.Sprintf("%x", hash[:4])
+// failClosed makes prepareChild wrap its errors in
+// backend.ErrWindowProgramUnavailable, so the user sees the child-unavailable
+// notice instead of nothing happening.
+const failClosed = true
 
-	dir := filepath.Join(os.TempDir(), "verdana-child")
-	path := filepath.Join(dir, name)
-
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
+// embeddedChildSum hashes the embedded child once per process (D-02); the
+// bytes cannot change while the launcher runs.
+var embeddedChildSum = sync.OnceValues(func() ([32]byte, error) {
+	if len(childBinary) == 0 {
+		return [32]byte{}, errors.New("no window program was built into this launcher")
 	}
+	return sha256.Sum256(childBinary), nil
+})
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-
-	f, err := os.Create(path)
+// childSource is the child program to run and its sha256.
+func childSource() (data []byte, sum [32]byte, err error) {
+	sum, err = embeddedChildSum()
 	if err != nil {
-		return "", err
+		return nil, sum, err
 	}
-	if _, err := f.Write(childBinary); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Chmod(0755); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	f.Close()
-	return path, nil
+	return childBinary, sum, nil
 }

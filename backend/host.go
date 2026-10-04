@@ -111,6 +111,12 @@ type Host interface {
 	OpenSettings(spec SettingsSpec) (Transport, error)
 }
 
+// ErrWindowProgramUnavailable is what a host wraps (with %w) when OpenWindow
+// or OpenSettings fails closed because the program that draws napp windows
+// is missing or failed verification. The backend answers it with the
+// child-unavailable notice instead of a raw error.
+var ErrWindowProgramUnavailable = errors.New("the napp window program is missing or was modified")
+
 // NotificationRequest is a validated NAP-NOTIFY notification. Text is plain
 // text, Actions has at most three entries, and ID is unique for the lifetime
 // of the owning window.
