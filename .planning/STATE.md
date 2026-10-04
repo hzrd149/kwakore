@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 current_phase: 4
-current_phase_name: Frame Sandbox Lifecycle
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-10-04T17:13:51.901Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-10-04T17:21:22.166Z"
 last_activity: 2026-10-04
-last_activity_desc: Completed 04-01 (replaced-document rebuild and reload-loop cap)
-state_head: cd3d27f31da1b5f3b192406010d10b6322c78601
+last_activity_desc: Completed 04-02 (engine-level channel hardening)
+state_head: e26da1397c938c313f60d86ac40803a4c465e754
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
   percent: 38
+current_phase_name: Frame Sandbox Lifecycle
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 ## Current Position
 
 Phase: 4 — EXECUTING
-Plan: 2 of 6
-Status: Executing (04-01 complete)
-Last activity: 2026-10-04 — Completed 04-01 (replaced-document rebuild and reload-loop cap)
+Plan: 3 of 6
+Status: Executing (04-02 complete)
+Last activity: 2026-10-04 — Completed 04-02 (engine-level WebRTC/media/preconnect hardening, WebView2 args, sampled token-miss logs)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -83,6 +83,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 03 P06 | 6min | 2 tasks | 4 files |
 | Phase 03 P10 | 6min | 2 tasks | 8 files |
 | Phase 04 P01 | 7min | 3 tasks | 5 files |
+| Phase 04 P02 | 9min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,8 @@ Recent decisions affecting current work:
 - [Phase 4]: [04-01] A second load of the napplet frame is a replaced document: host page removes the frame, nulls frame/session synchronously, sends nap.reset on the trusted lane and boots a fresh frame only after the reset settles (no new rpc, D-21)
 - [Phase 4]: [04-01] Reload-loop cap: 3 rebuilds per 10 s per window; the 4th replacement resets but boots nothing and shows the halt text; only the launcher's dev reload clears it
 - [Phase 4]: [04-01] Host-page refusals are bound to the sending frame (defense in depth; the ordered lane already prevents cross-frame refusals)
+- [Phase 4]: 04-02: WebKitGTK hardening via purego (gtk_bin_get_child(w.Window())), napplet and settings windows only; no decide-policy handler (CSP + D-01 rebuild cover navigation)
+- [Phase 4]: 04-02: one WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS value for every window kind, set in prepareEngine() before webview.New
 
 ### Pending Todos
 
@@ -186,6 +189,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T17:13:51.815Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-10-04T17:21:22.084Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
