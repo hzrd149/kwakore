@@ -437,6 +437,122 @@ return {
 	}
 }
 
+// markerSetup defines MARKER, the document-start marker's type, from the Go
+// constant the preamble posts, so the harness never retypes the literal.
+func markerSetup(extra string) string {
+	return "const MARKER = " + strconv.Quote(DocumentMarker) + "\n" + extra
+}
+
+// SBOX-01, D-18 (RESEARCH C2): every document built from the srcdoc posts the
+// document-start marker before any of its scripts run. The first one is the
+// boot; a second one from the same frame means its document was replaced, and
+// the frame is dropped right then, before the replacing document's load and
+// before any envelope it posts behind the marker can reach the old session.
+func TestNappletHostMarkerReplacesFrame(t *testing.T) {
+	var got struct {
+		RebuiltEarly bool     `json:"rebuiltEarly"`
+		Loaded       int      `json:"loaded"`
+		Log          []string `json:"log"`
+		MsgEarly     int      `json:"msgEarly"`
+		Boots        int      `json:"boots"`
+		Resets       int      `json:"resets"`
+		Appended     int      `json:"appended"`
+		Live         int      `json:"live"`
+		Srcdoc1      string   `json:"srcdoc1"`
+		MsgTotal     int      `json:"msgTotal"`
+		MsgParams    []string `json:"msgParams"`
+		Posted0      int      `json:"posted0"`
+		Errors       []string `json:"errors"`
+	}
+	runHost(t, markerSetup(`
+let boots = 0
+handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
+`), `
+await flush()
+const f0 = appended[0]
+// the first document announces itself before its load: that is the boot
+fireMessage(f0.contentWindow, { type: MARKER })
+await flush()
+const rebuiltEarly = count("nap.boot") !== 1 || count("nap.reset") !== 0 || f0.removed
+fireLoad(f0)
+await flush()
+const loaded = count("nap.loaded")
+
+// the napplet reloads itself and holds back its load event: the reloaded
+// document's marker comes first, its first envelope right behind it
+const mark = log.length
+fireMessage(f0.contentWindow, { type: MARKER })
+fireMessage(f0.contentWindow, { type: "storage.keys", id: "early" })
+await flush(6)
+const msgEarly = count("nap.msg")
+// the reloaded document's load finally fires: it changes nothing more
+fireLoad(f0)
+await flush(6)
+const replaceLog = log.slice(mark)
+
+// the rebuilt frame works: its own marker is its boot, its envelopes go to Go
+const f1 = appended[1]
+if (f1) {
+  fireMessage(f1.contentWindow, { type: MARKER })
+  fireLoad(f1)
+  await flush()
+  fireMessage(f1.contentWindow, { type: "storage.keys", id: "new" })
+  await flush()
+}
+return {
+  rebuiltEarly, loaded, log: replaceLog, msgEarly,
+  boots: count("nap.boot"), resets: count("nap.reset"), appended: appended.length, live: live().length,
+  srcdoc1: f1 && f1.srcdoc, msgTotal: count("nap.msg"),
+  msgParams: rpcs.filter(r => r.method === "nap.msg").map(r => r.params),
+  posted0: f0.contentWindow.posted.length,
+  errors,
+}
+`, &got)
+
+	if got.RebuiltEarly {
+		t.Error("the first document's marker, before its load, rebuilt the frame")
+	}
+	if got.Loaded != 1 {
+		t.Errorf("the first load sent nap.loaded %d times, want 1", got.Loaded)
+	}
+	remove := indexOf(got.Log, "remove#0", 0)
+	reset := indexOf(got.Log, "nap.reset", 0)
+	boot := indexOf(got.Log, "nap.boot", 0)
+	start := indexOf(got.Log, "nap.start", 0)
+	appendNew := indexOf(got.Log, "append#1", 0)
+	if remove != 0 || reset < 0 || boot < 0 || start < 0 || appendNew < 0 ||
+		!(remove < reset && reset < boot && boot < start && start < appendNew) {
+		t.Fatalf("replacement order = %v, want remove#0, nap.reset, nap.boot, nap.start, append#1", got.Log)
+	}
+	if indexOf(got.Log, "nap.msg", 0) >= 0 || got.MsgEarly != 0 {
+		t.Errorf("the reloaded document's envelope behind its marker reached Go (log %v)", got.Log)
+	}
+	// one replacement, reported by its marker and then by its load: one rebuild
+	if got.Boots != 2 || got.Resets != 1 || got.Appended != 2 || got.Live != 1 {
+		t.Errorf("nap.boot %d, nap.reset %d, frames %d, live %d; want 2, 1, 2, 1",
+			got.Boots, got.Resets, got.Appended, got.Live)
+	}
+	if got.Srcdoc1 != "doc2" {
+		t.Errorf("rebuilt frame srcdoc = %q, want the second nap.boot answer", got.Srcdoc1)
+	}
+	// a marker is never forwarded: the only nap.msg is the rebuilt frame's own
+	if got.MsgTotal != 1 || len(got.MsgParams) != 1 || !strings.Contains(got.MsgParams[0], `\"new\"`) {
+		t.Errorf("nap.msg params = %v, want only the rebuilt frame's envelope", got.MsgParams)
+	}
+	for _, p := range got.MsgParams {
+		if strings.Contains(p, DocumentMarker) {
+			t.Errorf("a marker reached Go: %s", p)
+		}
+	}
+	// and never answered: no refusal or reply went back into either frame
+	if got.Posted0 != 0 {
+		t.Errorf("the replaced frame was posted %d messages", got.Posted0)
+	}
+	if len(got.Errors) != 0 {
+		t.Errorf("host page errors: %v", got.Errors)
+	}
+}
+
 // SBOX-01, D-02: a refusal the host page builds belongs to the frame that sent
 // the envelope. One whose frame was replaced while the envelope was out is
 // dropped: it never reaches the replaced document or the one rebuilt after it.

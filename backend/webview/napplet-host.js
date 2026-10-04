@@ -210,11 +210,30 @@
     return run
   }
 
+  // The document-start marker (D-18): the launcher's preamble in every
+  // srcdoc (webview.NappletSrcdoc, DocumentMarker in Go, the same literal)
+  // posts it once, after window.napplet is installed and before any napplet
+  // script runs. Same-source messages keep their order, so a reloaded
+  // document's marker arrives ahead of all of its envelopes, even when that
+  // document holds back its load event. markers counts them for the current
+  // frame (boot() resets it), apart from its loads: the first marker may come
+  // after the first load. The second one, like a second load, means the
+  // document was replaced, and whichever comes first rebuilds; replaced()
+  // ignores a frame that is no longer current, so the other changes nothing.
+  // A marker is consumed here, never forwarded to Go or answered; a napplet
+  // that forges one only gets itself rebuilt, under the reload cap.
+  const DOCUMENT_MARKER = "__verdana.document"
+  let markers = 0
+
   window.addEventListener("message", event => {
     // sender binding: only this window's own napplet frame, never anyone else
     if (!frame || event.source !== frame.contentWindow) return
     const data = event.data
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
+    if (data.type === DOCUMENT_MARKER) {
+      if (++markers >= 2) replaced(frame)
+      return
+    }
     // the frame this envelope came from: a refusal is its answer and goes
     // to it only, never to a document that replaced it in the meantime
     const from = frame
@@ -483,7 +502,10 @@
   // about:blank, about:srcdoc, or document.open. Whatever an engine still
   // lets through is caught here, every kind the same way: the frame goes,
   // its session ends, and a fresh frame boots with a fresh session
-  // (replaced, below).
+  // (replaced, below). A second document-start marker (DOCUMENT_MARKER,
+  // above) does the same, and closes the window before a replacing
+  // document's load, in which its envelopes would otherwise reach the old
+  // session.
   const showBootError = err => {
     document.body.textContent = "This napplet could not be started: " + ((err && err.message) || err)
   }
@@ -536,13 +558,14 @@
     })
     f.srcdoc = doc.srcdoc
     frame = f
+    markers = 0
     document.body.appendChild(f)
   }
 
   // ── replaced documents ──────────────────────────────────────────
   // replaced(f) ends a frame whose document was replaced. Everything runs
-  // synchronously in the load handler: with frame null, whatever the
-  // replacing document (or a still-running original, after a blocked
+  // synchronously in the load or marker handler: with frame null, whatever
+  // the replacing document (or a still-running original, after a blocked
   // navigation) posts fails the sender check, and with session null, every
   // push for the old session is dropped. nap.reset then ends the old
   // session in Go on the trusted lane, so the session ends even when no new

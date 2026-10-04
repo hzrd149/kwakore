@@ -213,10 +213,30 @@ func TestBuildSrcdoc(t *testing.T) {
 	scope := strings.Index(doc, "<script>(function(){")
 	shim := strings.Index(doc, webview.ShimPrelude())
 	activate := strings.Index(doc, `NappletShimPrelude.install({"domains":["relay","storage"]})`)
+	// D-18: the document-start marker, posted in the same scope after the
+	// activation, so it precedes every napplet script and adds no global
+	markerStmt := `parent.postMessage({type:"` + webview.DocumentMarker + `"},"*")`
+	marker := strings.Index(doc, markerStmt)
 	closeScope := strings.Index(doc, "})()</script>")
 	end := strings.Index(doc, "</head>")
-	if !(csp >= 0 && csp < scope && scope < shim && shim < activate && activate < closeScope && closeScope < end) {
-		t.Fatalf("preamble out of order: csp=%d scope=%d shim=%d activate=%d close=%d end=%d", csp, scope, shim, activate, closeScope, end)
+	if !(csp >= 0 && csp < scope && scope < shim && shim < activate && activate < marker && marker < closeScope && closeScope < end) {
+		t.Fatalf("preamble out of order: csp=%d scope=%d shim=%d activate=%d marker=%d close=%d end=%d",
+			csp, scope, shim, activate, marker, closeScope, end)
+	}
+	if n := strings.Count(doc, webview.DocumentMarker); n != 1 {
+		t.Errorf("the srcdoc names the document marker %d times, want 1", n)
+	}
+	// the CSP meta carries the single-sourced napplet policy (D-17), which is
+	// still the NIP-5D baseline this test has always pinned
+	const baseline = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; " +
+		"style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; " +
+		"worker-src 'none'; child-src 'none'; frame-src 'none'; media-src 'none'; " +
+		"object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'"
+	if webview.NappletCSP() != baseline {
+		t.Errorf("webview.NappletCSP() = %q, want the NIP-5D baseline %q", webview.NappletCSP(), baseline)
+	}
+	if !strings.Contains(doc, `<meta http-equiv="Content-Security-Policy" content="`+webview.NappletCSP()+`">`) {
+		t.Error("the CSP meta does not carry webview.NappletCSP()")
 	}
 	// no handshake (presence detection) and no global install call
 	rest := strings.Replace(doc, webview.ShimPrelude(), "", 1)

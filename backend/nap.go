@@ -10,11 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 	"verdana/backend/webview"
@@ -755,61 +753,12 @@ func nappletDocument(n Napp) ([]byte, error) {
 	return data, nil
 }
 
-// nappletCSP is NIP-5D's policy for the napplet's frame: inline script and
-// style (the napplet is one file), wasm, data:/blob: images and fonts, and no
-// network, no workers, no frames, no navigation targets of its own.
-const nappletCSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; " +
-	"style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; " +
-	"worker-src 'none'; child-src 'none'; frame-src 'none'; media-src 'none'; " +
-	"object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'"
-
-// buildSrcdoc puts the launcher's preamble in front of everything the
-// napplet's document does: the CSP first, then one script holding the shim
-// and its activation (window.napplet for the given domains).
-//
-// The shim and its activation run inside a function scope. NIP-5D requires
-// that the window.napplet namespace contain only the domain objects the shell
-// exposes; without the scope, the prelude's top-level `var NappletShimPrelude`
-// would be a frame global, and napplet code could call its install to add
-// domains the launcher never granted. Inside the function only napplet, which
-// the shim assigns to window itself, is left behind. The prelude's leading
-// "use strict" becomes the function's directive prologue, so it still runs
-// strict. The newline after the prelude is required: the file ends in a
-// //# sourceMappingURL line comment with no final newline, which would
-// otherwise swallow the install call.
-//
-// The domains are the launcher's policy (napDomains), never the napplet's
-// tags. Nothing is posted to the host page: the napplet detects its domains
-// on window.napplet (NIP-5D presence detection), and the session was already
-// started by the host page before this document existed.
-//
-// The preamble is not spliced into the napplet's HTML (finding "its <head>"
-// in untrusted markup is a parsing contest the napplet can win, with a
-// comment or a script that mentions <head>). Instead the document starts with
-// the launcher's own doctype, <html> and <head>, closed after the preamble,
-// and the napplet's bytes follow verbatim. HTML parsing then does the rest:
-// the napplet's own doctype and <head> tag are ignored, its head elements
-// (meta, title, style, script, link) are moved into this head after the
-// preamble, and its <html> attributes are merged onto this <html>. Nothing
-// the napplet writes can come before the CSP or the shim.
+// buildSrcdoc is the napplet's document as the host page loads it: the
+// launcher's preamble (CSP, shim, activation and the document-start marker)
+// and then the napplet's bytes. webview.NappletSrcdoc builds it and says why
+// it is built that way; it lives beside the host page that reads the marker.
 func buildSrcdoc(html []byte, domains []string) (string, error) {
-	if !utf8.Valid(html) {
-		return "", errors.New("napplet document is not valid UTF-8")
-	}
-	doc := strings.TrimPrefix(string(html), "\uFEFF")
-
-	domainsJSON, err := json.Marshal(map[string]any{"domains": domains})
-	if err != nil {
-		return "", err
-	}
-	// "</script" cannot appear inside an inline script; the prelude has none
-	// today, and this keeps a future one from ending the element early
-	prelude := strings.ReplaceAll(webview.ShimPrelude(), "</script", `<\/script`)
-
-	return "<!doctype html><html><head>" +
-		`<meta http-equiv="Content-Security-Policy" content="` + nappletCSP + `">` +
-		"<script>(function(){" + prelude + "\n;NappletShimPrelude.install(" + string(domainsJSON) + ")\n})()</script>" +
-		"</head>" + doc, nil
+	return webview.NappletSrcdoc(html, domains)
 }
 
 // grantQuestion is a session question in flight: the first request that
