@@ -33,6 +33,16 @@ func newFakeWebKit() *fakeWebKit {
 	}
 }
 
+// gboolean is what the fake's getters answer: any truthy C int, here 0x100
+// for true, whose low byte is 0 (IN-02: a getter read as a Go bool would
+// take it for false).
+func gboolean(on bool) int32 {
+	if on {
+		return 0x100
+	}
+	return 0
+}
+
 // api is the webkitAPI the fake answers through; feature handles are
 // 1-based indexes into ids.
 func (k *fakeWebKit) api() *webkitAPI {
@@ -51,9 +61,9 @@ func (k *fakeWebKit) api() *webkitAPI {
 			return 0
 		},
 		setWebRTC:      func(_ uintptr, on bool) { k.webrtc = on },
-		getWebRTC:      func(uintptr) bool { return k.webrtc || k.stuck["webrtc"] },
+		getWebRTC:      func(uintptr) int32 { return gboolean(k.webrtc || k.stuck["webrtc"]) },
 		setMediaStream: func(_ uintptr, on bool) { k.media = on },
-		getMediaStream: func(uintptr) bool { return k.media || k.stuck["media"] },
+		getMediaStream: func(uintptr) int32 { return gboolean(k.media || k.stuck["media"]) },
 	}
 	if k.features == nil {
 		api.featureErr = errors.New("missing symbol webkit_settings_get_all_features")
@@ -73,7 +83,7 @@ func (k *fakeWebKit) api() *webkitAPI {
 	api.featureAt = func(_ uintptr, i uint) uintptr { return uintptr(i) + 1 }
 	api.featureID = func(f uintptr) string { return ids[f-1] }
 	api.setFeature = func(_ uintptr, f uintptr, on bool) { k.features[ids[f-1]] = on }
-	api.getFeature = func(_ uintptr, f uintptr) bool { return k.features[ids[f-1]] || k.stuck[ids[f-1]] }
+	api.getFeature = func(_ uintptr, f uintptr) int32 { return gboolean(k.features[ids[f-1]] || k.stuck[ids[f-1]]) }
 	return api
 }
 

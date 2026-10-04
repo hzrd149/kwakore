@@ -50,20 +50,25 @@ import (
 
 // webkitAPI is the slice of libgtk-3 and libwebkit2gtk-4.1 the hardening
 // needs. The feature fields are nil when that API is missing.
+//
+// The getters return a gboolean, a C int, so they are read as int32 and
+// compared with 0: purego turns a Go bool return into the low byte only, so
+// a truthy gboolean such as 0x100 would read as false, and these read-backs
+// are the evidence that a channel is off.
 type webkitAPI struct {
 	binGetChild    func(uintptr) uintptr
 	getSettings    func(uintptr) uintptr
 	setWebRTC      func(uintptr, bool)
-	getWebRTC      func(uintptr) bool
+	getWebRTC      func(uintptr) int32
 	setMediaStream func(uintptr, bool)
-	getMediaStream func(uintptr) bool
+	getMediaStream func(uintptr) int32
 
 	allFeatures   func() uintptr
 	featureCount  func(uintptr) uint
 	featureAt     func(uintptr, uint) uintptr
 	featureID     func(uintptr) string
 	setFeature    func(uintptr, uintptr, bool)
-	getFeature    func(uintptr, uintptr) bool
+	getFeature    func(uintptr, uintptr) int32
 	unrefFeatures func(uintptr) // nil when absent: a small leak only
 
 	// featureErr says why link preconnect cannot be turned off, when the
@@ -121,7 +126,7 @@ func loadWebKit() (api *webkitAPI, err error) {
 		at     func(uintptr, uint) uintptr
 		id     func(uintptr) string
 		set    func(uintptr, uintptr, bool)
-		get    func(uintptr, uintptr) bool
+		get    func(uintptr, uintptr) int32
 		unref  func(uintptr)
 		failed error
 	}
@@ -188,7 +193,7 @@ func (api *webkitAPI) disableFeature(settings uintptr, id string) (bool, error) 
 			continue
 		}
 		api.setFeature(settings, f, false)
-		return api.getFeature(settings, f), nil
+		return api.getFeature(settings, f) != 0, nil
 	}
 	return true, fmt.Errorf("%w: webkitgtk has no feature %s", errNoSwitch, id)
 }
@@ -227,8 +232,8 @@ func (api *webkitAPI) harden(win uintptr) (hardening, error) {
 	api.setMediaStream(settings, false)
 	preconnect, featureErr := api.disableFeature(settings, "LinkPreconnect")
 	h.reached = true
-	h.webrtc = api.getWebRTC(settings)
-	h.mediaStream = api.getMediaStream(settings)
+	h.webrtc = api.getWebRTC(settings) != 0
+	h.mediaStream = api.getMediaStream(settings) != 0
 	h.linkPreconnect = preconnect
 
 	var on []string
