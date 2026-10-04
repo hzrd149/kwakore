@@ -629,6 +629,16 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 			t.Errorf("no PASS for %s %q", want.step, want.detail)
 		}
 	}
+	// data: and blob: navigations: WebKitGTK 2.52 fires a load and the
+	// frame is rebuilt, an engine may also refuse them and keep the
+	// document; either is a PASS, no result at all is not. Their documents
+	// hold back their load, so a post they make before it is tested too
+	// (adv.leak, below)
+	for _, step := range []string{"nav-data", "nav-blob"} {
+		if !passed(step, "replaced by a fresh document") && !passed(step, "refused by the engine") {
+			t.Errorf("no PASS for %s (replaced by a fresh document, or refused by the engine)", step)
+		}
+	}
 
 	// the recorded residual: these ran, and whatever their documents
 	// reported says the inherited policy held

@@ -172,7 +172,7 @@
   // may reach the live session, and they are judged only on the policy
   // their document reports (adv.residual.<step>) and on the listener
   const RESIDUAL = new Set(["nav-js", "doc-open-unclosed"])
-  const KEYS = ["adv.step", "adv.pending", "adv.results", "adv.boots", "adv.target", "adv.auto", "adv.pause"]
+  const KEYS = ["adv.step", "adv.pending", "adv.results", "adv.boots", "adv.target", "adv.auto", "adv.pause", "adv.fired"]
   const RESIDUAL_KEYS = ["adv.residual.nav-js", "adv.residual.doc-open-unclosed"]
   const LOOP_IDLE_MS = 10500
 
@@ -207,11 +207,18 @@
   // within settles p, or gives "timeout" after ms
   const within = (p, ms) => Promise.race([p, sleep(ms).then(() => "timeout")])
 
-  // a document whose only script posts a storage.set for adv.leak: if an
-  // engine navigates this frame to it, the post must not reach the launcher
+  // a document whose only script posts a storage.set for adv.leak and then
+  // holds back its load the way the reload-delayed document does (a 40 MB
+  // data: image): if an engine navigates this frame to it, the post reaches
+  // the host page before that load, and must still not reach the launcher.
+  // Without the hold its load could come first and drop the post on its
+  // own, and the step would pass without testing anything.
   const leakDoc = value =>
-    "<!doctype html><scr" + "ipt>parent.postMessage({type:\"storage.set\",id:\"adv-" + value +
-    "\",key:\"adv.leak\",value:\"" + value + "\",scope:\"instance\"},\"*\")</scr" + "ipt>"
+    "<!doctype html><body><scr" + "ipt>parent.postMessage({type:\"storage.set\",id:\"adv-" + value +
+    "\",key:\"adv.leak\",value:\"" + value + "\",scope:\"instance\"},\"*\");" +
+    "var hold=document.createElement(\"img\");" +
+    "hold.src=\"data:image/png;base64,\"+\"A\".repeat(40*1024*1024);" +
+    "document.body.appendChild(hold)</scr" + "ipt></body>"
 
   let target = DEFAULT_TARGET
 
@@ -498,26 +505,34 @@
 
   // a rebuild-causing step: record where the run goes next, wait so
   // rebuilds stay spaced, and try. Normally this document is gone a moment
-  // later and the next one records the result (adv.pending).
+  // later and the next one records the result (adv.pending). adv.fired is
+  // set only once the attempt is about to run, so a rebuild can be credited
+  // to this step only if it came after the attempt: a late rebuild from an
+  // earlier step, landing while this one waits, is not taken for this
+  // step's result.
   const replace = async (step, name) => {
     await storage.setItem("adv.pending", name)
     await storage.setItem("adv.step", String(step + 1))
     line("INFO " + name + ": in " + pause + " ms", "info")
     await sleep(pause)
+    await storage.setItem("adv.fired", name)
     const err = throws(acts[name])
     if (err) {
       if (RESIDUAL.has(name)) note(name, "INFO", "the attempt threw " + errText(err))
       else note(name, REFUSABLE.has(name) ? "PASS" : "FAIL", "the attempt threw " + errText(err))
     } else {
-      // WebKitGTK refuses data: and blob: navigations without a load, so
-      // this document lives on; every other step must have replaced it
-      await sleep(name === "nav-data" || name === "nav-blob" ? 2000 : 6000)
+      // an engine may refuse data: and blob: navigations without a load, so
+      // this document lives on; every other step must have replaced it.
+      // Every step waits as long, so a slow rebuild is not taken for a
+      // refusal.
+      await sleep(6000)
       if (name === "nav-data" || name === "nav-blob") note(name, "PASS", "refused by the engine")
       else if (RESIDUAL.has(name)) note(name, "INFO", "this document was not replaced")
       else note(name, "FAIL", "the document was not replaced")
     }
     await save()
     await storage.removeItem("adv.pending")
+    await storage.removeItem("adv.fired")
   }
 
   // residualVerdict records what the document a residual step made said
@@ -553,7 +568,7 @@
   }
 
   const run = async () => {
-    const [step, pending, saved, boots, savedTarget, auto, savedPause] = await Promise.all(KEYS.map(k => storage.getItem(k)))
+    const [step, pending, saved, boots, savedTarget, auto, savedPause, fired] = await Promise.all(KEYS.map(k => storage.getItem(k)))
     let at = Number(step) || 0
     if (savedTarget) target = savedTarget
     if (Number(savedPause) > 0) pause = Number(savedPause)
@@ -575,12 +590,20 @@
     for (const r of results) render(r)
 
     if (pending && REBUILDS.has(pending)) {
-      const fresh = typeof window.napplet === "object" && location.href === "about:srcdoc"
-      note(pending, fresh ? "PASS" : "FAIL",
-        fresh ? "replaced by a fresh document" : "the next document is not a fresh srcdoc (" + location.href + ")")
-      if (RESIDUAL.has(pending)) await residualVerdict(pending)
+      if (fired === pending) {
+        const fresh = typeof window.napplet === "object" && location.href === "about:srcdoc"
+        note(pending, fresh ? "PASS" : "FAIL",
+          fresh ? "replaced by a fresh document" : "the next document is not a fresh srcdoc (" + location.href + ")")
+        if (RESIDUAL.has(pending)) await residualVerdict(pending)
+      } else {
+        // this rebuild came before the pending step's attempt: a late one
+        // from an earlier step, not this step's result, so it runs again
+        note(pending, "INFO", "a rebuild landed before this step's attempt (a late one from an earlier step); running it again")
+        at = STEPS.indexOf(pending)
+      }
       await save()
       await storage.removeItem("adv.pending")
+      await storage.removeItem("adv.fired")
     }
 
     for (; at < LOOP; at++) {
