@@ -46,6 +46,12 @@ type Options struct {
 
 	// Log is optional; without one, logs go to stderr.
 	Log *zerolog.Logger
+
+	// Secrets is where the login secrets (the NIP-46 client key and the
+	// saved login) are kept, the OS keyring on desktop. nil means state.json
+	// file mode (Android, tests), and then the keyring-fallback notice is
+	// never shown.
+	Secrets SecretStore
 }
 
 // Start brings the backend up: stores open, state loaded, profile index
@@ -93,7 +99,7 @@ func Start(opts Options) (func(), error) {
 	}()
 
 	// load the login secrets, then resume the stored login or ask for one
-	go loadSecrets(nil)
+	go loadSecrets(opts.Secrets)
 
 	return closeStores, nil
 }

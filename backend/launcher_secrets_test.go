@@ -26,8 +26,8 @@ func withFreshSecrets(t *testing.T) *secretsRig {
 	r := &secretsRig{dir: withFreshStateDir(t)}
 
 	secretsMu.Lock()
-	savedSecrets := secrets
-	secrets = secretsRecord{}
+	savedSecrets, savedStore, savedToStore := secrets, secretStore, secretsToStore
+	secrets, secretStore, secretsToStore = secretsRecord{}, nil, false
 	secretsMu.Unlock()
 	savedResume := resumeStoredLogin
 	resumeStoredLogin = func(login string) {
@@ -43,7 +43,7 @@ func withFreshSecrets(t *testing.T) *secretsRig {
 	t.Cleanup(func() {
 		stopNostrConnect()
 		secretsMu.Lock()
-		secrets = savedSecrets
+		secrets, secretStore, secretsToStore = savedSecrets, savedStore, savedToStore
 		secretsMu.Unlock()
 		resumeStoredLogin = savedResume
 		ls.mu.Lock()
