@@ -94,6 +94,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// engine-wide setup (WebView2's browser arguments) happens before the
+	// first view exists and before the window-kind branch: every kind of a
+	// build must start the engine the same way
+	prepareEngine()
+
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
