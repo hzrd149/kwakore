@@ -1,274 +1,202 @@
 ---
 phase: 03-desktop-process-and-secrets-hardening
-reviewed: 2026-10-04T04:49:11Z
+reviewed: 2026-10-04T05:22:43Z
 depth: deep
-files_reviewed: 84
+iteration: 3
+files_reviewed: 12
 files_reviewed_list:
-  - .github/workflows/desktop.yml
-  - .gitignore
-  - backend/auth_login.go
-  - backend/auth_nostrconnect.go
-  - backend/auth_nostrconnect_test.go
-  - backend/backend.go
-  - backend/bridge_files.go
-  - backend/fileutil/atomic.go
-  - backend/fileutil/atomic_test.go
-  - backend/fileutil/dir_unix.go
-  - backend/fileutil/dir_windows.go
-  - backend/host.go
-  - backend/launcher_notices.go
+  - backend/bridge.go
+  - backend/bridge_test.go
   - backend/launcher_secrets.go
-  - backend/launcher_secrets_recovery_test.go
   - backend/launcher_secrets_test.go
   - backend/launcher_state.go
-  - backend/launcher_state_corrupt_test.go
-  - backend/launcher_ui.go
-  - backend/mobile/mobile.go
-  - backend/mobile/mobile_test.go
-  - backend/napconfig/store.go
-  - backend/netguard/link.go
-  - backend/netguard/link_test.go
-  - backend/nostr_system.go
-  - backend/nostr_system_test.go
-  - backend/registry_install.go
-  - backend/window_child_unavailable_test.go
   - backend/window_instances.go
-  - backend/window_settings.go
-  - backend/window_storage.go
-  - desktop/child/libcheck.go
-  - desktop/child/libcheck_test.go
-  - desktop/child/main.go
-  - desktop/childproc.go
-  - desktop/childproc_test.go
-  - desktop/embed_dev.go
-  - desktop/embed_prod.go
-  - desktop/go.mod
-  - desktop/go.sum
-  - desktop/host.go
-  - desktop/host_test.go
   - desktop/internal/childbin/childbin.go
   - desktop/internal/childbin/childbin_test.go
-  - desktop/internal/childbin/owner_unix.go
-  - desktop/internal/childbin/owner_windows.go
-  - desktop/internal/instanceipc/ipc.go
-  - desktop/internal/instanceipc/ipc_unix.go
-  - desktop/internal/instanceipc/ipc_unix_test.go
-  - desktop/internal/instanceipc/ipc_windows.go
-  - desktop/internal/instanceipc/ipc_windows_test.go
-  - desktop/internal/instanceipc/peercred_darwin.go
-  - desktop/internal/instanceipc/peercred_linux.go
-  - desktop/internal/instanceipc/peercred_other.go
-  - desktop/internal/osintegration/appshortcut.go
-  - desktop/internal/osintegration/autostart_darwin.go
-  - desktop/internal/osintegration/autostart_linux.go
-  - desktop/internal/osintegration/shortcutfile_darwin.go
-  - desktop/internal/osintegration/shortcutfile_linux.go
-  - desktop/internal/osintegration/shortcutfile_windows.go
-  - desktop/internal/secretstore/probe_darwin.go
-  - desktop/internal/secretstore/probe_unix.go
-  - desktop/internal/secretstore/probe_windows.go
-  - desktop/internal/secretstore/secretstore.go
-  - desktop/internal/secretstore/secretstore_test.go
-  - desktop/internal/webviewlib/gen/main.go
-  - desktop/internal/webviewlib/lib_darwin_amd64.go
-  - desktop/internal/webviewlib/lib_darwin_arm64.go
-  - desktop/internal/webviewlib/lib_linux_amd64.go
-  - desktop/internal/webviewlib/lib_linux_arm64.go
-  - desktop/internal/webviewlib/lib_other.go
-  - desktop/internal/webviewlib/lib_windows_amd64.go
-  - desktop/internal/webviewlib/lib_windows_arm64.go
-  - desktop/internal/webviewlib/sync_test.go
-  - desktop/internal/webviewlib/webviewlib.go
-  - desktop/layout.go
-  - desktop/lifecycle.go
-  - desktop/login.go
-  - desktop/main.go
-  - desktop/notices.go
-  - desktop/notices_test.go
-  - desktop/singleinstance.go
-  - desktop/startup_test.go
-  - justfile
+  - desktop/internal/childbin/lock_unix.go
+  - desktop/internal/childbin/lock_windows.go
+  - desktop/childproc.go
+  - backend/auth_login.go
 findings:
-  critical: 1
-  warning: 5
-  info: 6
-  total: 12
+  critical: 0
+  warning: 1
+  info: 12
+  total: 13
 status: issues_found
 ---
 
-# Phase 03: Code Review Report
+# Phase 03: Code Review Report (iteration 3)
 
-**Reviewed:** 2026-10-04T04:49:11Z
-**Depth:** deep (standard per-file review plus cross-file tracing of secrets, lock order, spawn and IPC paths)
-**Files Reviewed:** 84
+**Reviewed:** 2026-10-04T05:22:43Z
+**Depth:** deep
+**Files Reviewed:** 12. The primary scope is the iteration-2 fix commits `5915f5f..HEAD` (ef196fe, ceeb8ec, b06a358). I also read the code they interact with: `loadSecretsLocked`/`persistSecrets`/`logoutSecrets`, `prepareChild`/`startChild`, `login`/`Logout`, the other `userKeyer` readers, and the Go 1.26 `os.Chtimes`/`os.OpenFile` implementations on Windows.
 **Status:** issues_found
 
 ## Summary
 
-I reviewed every non-planning file changed between `25c39b9^` and `HEAD`. The review checked the decisions locked in 03-CONTEXT (D-01..D-21) and the PROC-01..05 and SECR-01..03 goals. To trace the secrets state machine (`launcher_secrets.go`), I followed every caller of `clientKey`, `existingClientKey`, `setStoredLogin` and `logoutSecrets` into `auth_login.go` and `auth_nostrconnect.go`. I also checked the lock order across `secretsOpMu`, `secretsMu`, `stateMu`, `ls.mu` and `nc.mu`, and found no inversion. I traced the spawn path from `prepareChild` through `childbin.Ensure` and `libcheck`, and confirmed against go-webview's loader that the library loads lazily. I traced the IPC paths on both platforms, including go-winio's anonymous impersonation level and `Fd()` availability.
+**Status of the iteration-2 warnings:**
 
-I ran these checks:
-- `go test -race` on the secrets, state, notice and child-unavailable tests and on `fileutil` and `netguard`: pass.
-- `go test -race` on `childbin`, `instanceipc` and `secretstore`: pass.
-- `go vet -tags novulkan ./...` on desktop, plus `GOOS=windows CGO_ENABLED=0 go vet ./internal/...`: clean.
-- `GOOS=android go list -deps ./mobile`: no godbus, keyring, winio or wincred dependency reaches the AAR.
+| ID (iter 2) | Status | Notes |
+|---|---|---|
+| WR-01 marker written too late | **Resolved** | `loadState` now sets `SecretsLocation=keyring` before the closing `saveState()`, so the save that replaces a corrupt file already carries the marker. The unreadable-file case sets it in memory, where saving is blocked anyway. When the rename fails, saving is blocked and the corrupt file stays, so the next start is `lost` again. The `lost` branch's own save is gone and the branch falls through to the wait. `TestSecretsLostStateMarkerSurvivesEarlyExit` reproduces the iteration-2 scratch scenario and passes: the next start shows `keyringFailed` and `PhaseLoading`, `clientKey()` refuses, the only store call is `get`, and the item is later resumed unchanged. |
+| WR-02 refresh after verification | **Resolved (one Windows regression, WR-01 below)** | Chtimes now runs before `ensureLocked`, and a failed refresh fails the call. `base/.lock` is held shared from refresh until the files are verified. Collection runs only under a non-blocking exclusive lock. The lock file is excluded from collection by name. I traced the interleavings: a collector holds the lock exclusively for both its stat and its RemoveAll, so a collector that judged the directory stale finishes before the refresh, and a later collector sees an mtime under 24 h old. D-01/D-02 still hold, because every spawn still runs `verifyDir(base)`, `verifyDir(dir)`, and a full re-hash in `ensureLocked`. On the new failure path, the WR-01 regression below makes the refresh error fatal on Windows. |
+| WR-03 identity race | **Minimal fix correct. Redesign deferred (IN-12)** | `rpcResponse` recovers panics and answers `"internal error"`. The recover covers both the `go ci.handleRPC` path and the inline `nap.msg` path. The `getPublicKey`, `signEvent` and `nip04/nip44` handlers now read `userKeyer` once, so the nil-deref crash reported in iteration 2 is gone. `TestHandleRPCRecoversPanic` and `TestSignEventKeepsKeyerAcrossLogout` pass under `-race`. In production, `Logout` runs `CloseAllWindows` first, which cancels the prompt context, so the "approved and then logged out" signature in the test only happens through a direct global write. |
 
-Most of the hardening is sound:
-- The child and the library are verified before every spawn and fail closed.
-- The socket and pipe check the peer's uid or SID on both ends.
-- No `os.WriteFile` writers remain.
-- `ExternalLink` is applied in all three hosts.
-- No secrets reach the logs.
+**Regression checks:**
+- **Fresh install:** no state.json means `ErrNotExist`, so no marker is written, and with the keyring down the user gets `PhaseLogin` in file mode (tested).
+- **Android and file mode (`store == nil`):** behaviour is unchanged, because `loadSecretsLocked` returns before it reads `loc` (tested). The on-disk record changes slightly: after a corruption, state.json keeps `secrets_location: "keyring"` next to file-held secrets, because `persistSecrets` only rewrites the location when `store != nil`. Even if Android gets a store later, that combination resolves safely (the `fileHas` branches migrate or keep both). This is not a finding.
+- **D-10/D-14/D-20/D-21:** no automatic path generates a client key or writes the store. Every `lost` and `loc==keyring` start waits. "Log in again" falls back to `loc=file` when the keyring is still down. The logout table (`loggedOut`) is unaffected, because `loc=keyring` does not mark a logout.
+- **Lock correctness (Unix):**
+  - Go opens with `O_CLOEXEC`, so children never inherit the lock fd.
+  - `O_NOFOLLOW` refuses a symlink, and `base` is verified 0700 and ours, so no other user can plant `.lock`.
+  - flock is per open file description, so the in-process `mu` plus a fresh fd per call cannot self-deadlock.
+  - Shared locks never wait on a pending exclusive, and the exclusive lock is only ever tried without waiting, so collectors cannot starve spawns.
+  - EINTR is retried.
+  - On NFS, where flock is emulated with per-process POSIX locks, there is still only one fd per process at a time, so it still works.
+- **Lock correctness (Windows):**
+  - Handles are synchronous (no `FILE_FLAG_OVERLAPPED`), so a blocking `LockFileEx` waits as intended.
+  - Byte 0 of an empty file is lockable.
+  - The default share mode lets two processes open `.lock`.
+  - Every error path after `lockShared` unlocks explicitly before `Close`.
+  - There is no `O_NOFOLLOW`, but `base` is verified non-reparse and sits under the per-user `%LocalAppData%` ACL, so only the same user could plant a link there. That user is not a trust boundary.
+  - No deadlock: only collectors hold the lock exclusively, and only for a bounded `RemoveAll`.
 
-The serious problem is in the D-21 recovery flow. Choosing "Log in again" and then logging in through the nostrconnect QR code always fails, because the nostrconnect success path calls the resume variant of `login`. The resume variant refuses a key while the secrets are not loaded. The other findings:
-- With a corrupt or unreadable `state.json` and an unreachable keyring, the user gets the login screen instead of the keyring-failed screen, which can lose the keyring-held pairing.
-- A state file that can't be read blocks all saving without telling the user.
-- Different Verdana builds or profiles share files with fixed names in the per-user child directory and race over them.
-- The libwebview generator fails when the module cache is cold.
-- A failed directory fsync is reported as a failed write even though the rename already happened.
-
-## Critical Issues
-
-### CR-01: nostrconnect login after "Log in again" (D-21) always fails with "saved login is still loading"
-
-**File:** `backend/auth_nostrconnect.go:192`, `backend/auth_login.go:101-115`, `backend/launcher_secrets.go:148-158,513-527`
-**Issue:** `LoginWithoutKeyring` sets `secrets.freshKeyOK = true` and leaves `secrets.loaded == false`, as `TestLoginWithoutKeyring` asserts: `existingClientKey()` must fail there. The QR flow then calls `startNostrConnectLocked`, where `clientKey()` creates a key because of `freshKeyOK`. The user's signer approves the pairing. The success goroutine then runs:
-
-```go
-login(nostrConnectBunkerURL(signer, relays), true)   // resume == true
-```
-
-`nostrConnectBunkerURL` returns a `bunker://` URL, so `login` takes the NIP-46 branch, and `resume == true` selects `existingClientKey()`. That function returns `errSecretsNotLoaded` whenever `!secrets.loaded`, so the login stops with `setLoginErr("saved login is still loading")`. The signer has already approved a pairing with the new key, but the launcher never logs in and saves nothing. D-21 names nostrconnect as the flow "Log in again" must support. In the keyring-failed state this leaves the user with no working way to log in through nostrconnect. Pasting a bunker URL still works, because it goes through `Login()` with `resume == false`.
-
-`resume` currently means two different things: "skip `Connect`" (needed by nostrconnect) and "this is an automatic path, never use a fresh key" (needed by startup resume).
-**Fix:** Split those two meanings so the nostrconnect completion counts as a user flow. For example:
-
-```go
-// auth_login.go
-func login(input string, resume bool) { loginWith(input, resume, resume) }
-
-func loginWith(input string, skipConnect, automatic bool) {
-	...
-	if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
-		if automatic {
-			ck, err = existingClientKey()
-		} else {
-			ck, err = clientKey() // returns the key the QR uri was built with
-		}
-		...
-	}
-	... loginBunker(sessionCtx, ck, input, skipConnect, onAuth) ...
-}
-
-// auth_nostrconnect.go
-loginWith(nostrConnectBunkerURL(signer, relays), true /*skipConnect*/, false /*automatic*/)
-```
-
-Even better, pass `ck` itself from `startNostrConnectLocked` into the login, so the key that completes the login is the one the URI advertised. Add a regression test: `startKeyringFailed` → `LoginWithoutKeyring` → the nostrconnect completion path, then assert that it logged in and the login and key landed in the file.
+**Checks run:**
+- backend `go test -count=1 ./...`: pass.
+- backend `go test -race -run 'Secrets|State|HandleRPC|SignEvent|Bridge' .`: pass.
+- backend `go vet .`: clean.
+- desktop `go test -race ./internal/childbin`: pass.
+- desktop `go test -tags novulkan -run 'Child|Prepare' .`: pass.
+- `go vet ./internal/childbin` with GOOS=windows, darwin and freebsd: clean.
+- `gofmt -l`: clean.
+- `golang.org/x/sys` is a direct requirement in `desktop/go.mod`.
 
 ## Warnings
 
-### WR-01: A corrupt or missing state.json with an unreachable keyring shows the login screen and can overwrite the keyring-held pairing
+### WR-01: On Windows, the refresh that WR-02 made fatal opens the version directory without FILE_SHARE_READ, so any concurrent reader of the directory fails the spawn with the "Reinstall Verdana" notice
 
-**File:** `backend/launcher_secrets.go:684-713` (default branch at 708-711), `backend/launcher_state.go:125-129`
-**Issue:** `keepCorruptState` resets `state` to `AppState{}`, so `SecretsLocation` becomes `""` and the file copy is empty. If the keyring `Get` then fails (it is locked or slow, the 3 s probe times out, or the user dismisses the prompt), `secretsUnavailable` falls into its `default` branch. That branch is "nothing saved yet": `adoptSecrets(secretsRecord{}, store, false)` marks the secrets loaded and the phase becomes `PhaseLogin`. The keyring may well hold the user's real login and pairing. The code comment at line 551 says as much: "after a corrupt or missing state.json the keyring item is the only copy". Nothing tells the user. Any bunker or nostrconnect login they start then creates a new client key (`clientKey()` succeeds because `loaded == true`), and the new login is saved to the file with `SecretsLocation=file`. At the next start the keyring answers, the `fileHas` branch runs `migrateSecrets`, and the old item is overwritten, so the original pairing is gone for good. D-14 says the ClientKey is never regenerated over a file that existed but failed to parse, and D-10 says an unavailable keyring must never lead to a new key.
-**Fix:** Record on the launcher (in memory) that `state.json` existed but could not be used: the parse failure in `keepCorruptState`, or the read failure that sets `stateSaveBlocked`. Pass that into `loadSecretsLocked`. When the flag is set, the store is unavailable and there is no file copy, handle it like `loc == secretsInKeyring`: return `false` so the keyring-failed screen (Try again / Log in again) appears instead of a silent login screen. A fresh install, where `state.json` is missing, keeps today's behaviour.
+**File:** `desktop/internal/childbin/childbin.go:142-146`
+**Issue:** `os.Chtimes` on Windows is `syscall.UtimesNano`. In Go 1.26 it calls `CreateFile(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_WRITE, …, FILE_FLAG_BACKUP_SEMANTICS)` (`$GOROOT/src/syscall/syscall_windows.go:737-739`). The share mode omits `FILE_SHARE_READ`. The NT share check therefore returns `ERROR_SHARING_VIOLATION` whenever another handle to the directory is open with read-class access (`FILE_READ_DATA`/`FILE_LIST_DIRECTORY` or `FILE_EXECUTE`/`FILE_TRAVERSE`).
 
-### WR-02: An unreadable state.json blocks every save without telling the user, and logins report success but are never written
+Before this fix the Chtimes error was ignored. Now it fails `EnsureVersion`, `prepareChild` wraps the failure in `ErrWindowProgramUnavailable`, and the user sees the tamper notice (IN-04). The two realistic triggers are:
+- **A second launcher process of the same build** (another data dir or profile: `childbin` is per user and shared by all of them). It can be inside `ensureLocked` → `collect(dir)` → `os.ReadDir(dir)`, which opens the directory with `GENERIC_READ`, at the same moment. Both processes hold `.lock` shared, so the lock does not serialize them. The failure is transient.
+- **Explorer showing the folder, or anything else that watches it** with `ReadDirectoryChangesW` (a `FILE_LIST_DIRECTORY` handle). While such a handle is open, every window open fails.
 
-**File:** `backend/launcher_state.go:133-137`, `backend/launcher_secrets.go:225-235`, `backend/auth_login.go:179-181`
-**Issue:** In the `default:` branch of `loadState` (an `os.ReadFile` error other than not-exist, such as EACCES, EISDIR or EIO), the code sets `stateSaveBlocked` but adds no notice. The rename-failure branch does call `addStateCorruptNotice`. For the rest of the process every setting, install, dismissal and saved login is dropped with only a log line. 03-01-SUMMARY describes the goal as "never overwrite, always show". In file mode, `persistSecrets` calls `saveState()`, which returns early, and then returns `nil`. `login()` therefore treats the login as saved, and it is lost at the next start. `TestLoadStateUnreadableBlocksSave` checks only that saving is blocked, not that a notice appears.
-**Fix:** Raise the same notice in the read-error branch:
-
-```go
-default:
-	log.Error()...
-	stateSaveBlocked.Store(true)
-	addStateCorruptNotice(time.Now().Unix(), statePath)
-```
-
-Also have `saveState` return an error (or a `bool`), so `persistSecrets` can return it and the login path can warn the user that their login won't be remembered.
-
-### WR-03: Different Verdana builds or profiles race over shared fixed-name files in the per-user child directory
-
-**File:** `desktop/childproc.go:240-252`, `desktop/internal/childbin/childbin.go:50-52,94-114,169-178`
-**Issue:** Every launcher writes into the same `os.UserCacheDir()/Verdana/child`. Examples are a `just run` dev build next to an installed prod build, two data dirs, or an old instance still running during an upgrade. The library name is fixed (`libwebview.so`, `libwebview.dylib`, `webview.dll`), and `collect` deletes every `child-*` and `.tmp-*` entry that is not in this process's keep list. `childbin.mu` only serializes within one process. Different builds therefore:
-- delete each other's `child-<hash>` between `Ensure` returning and `exec`, so the spawn fails with ENOENT;
-- delete each other's in-flight `.tmp-*` file, so the rename fails, the window fails closed and the user sees "Reinstall Verdana";
-- keep replacing the shared library, so a child can `dlopen` a library from a different go-webview version than the one its launcher verified.
-
-On Windows, a library loaded by a running child can't be replaced (the rename is refused), so the second build fails closed on every window open until the first build's windows close.
-**Fix:** Give each content version its own directory, so builds never touch each other's files and `collect` only removes whole stale version directories. For example, use `child/<first 16 hex of sha256(childSum||libSum)>/` and set `WEBVIEW_PATH` to it. On Windows the DLL stays next to the exe inside that versioned directory. Also make `collect` skip `.tmp-*` files younger than a minute, or drop the `.tmp-*` sweep.
-
-### WR-04: The libwebview generator fails on a cold module cache, breaking `just run`/`just prod` on a fresh clone and the CI test jobs
-
-**File:** `desktop/internal/webviewlib/gen/main.go:195-204`, `.github/workflows/desktop.yml:41-45` (test job) and `98-101` (test-windows), `justfile` (`webview-libs` recipe)
-**Issue:** `go list -m -f '{{.Dir}}' github.com/abemedia/go-webview` does not download a module, and it prints an empty `Dir` when the module zip is not in the cache. I checked this with a fresh `GOMODCACHE`: the output was `dir=[]` with exit 0. The generator then fails with "module is not downloaded". In both CI test jobs, `go generate` runs before anything in the desktop module downloads go-webview. The backend `go test` only fetches backend dependencies, and `go build ./child` comes after the generate step. Whenever the setup-go cache misses (for example on any `go.sum` change, which this phase made), those jobs fail. `just run`, `just prod` and `just go-install` on a fresh machine fail the same way.
-**Fix:** Have the generator download the module and read its directory in one step:
+Security still holds, because the failure is fail-closed. But this brings back the "a race reads as tampering" failure that WR-02 and the earlier WR-03 set out to remove. Static analysis supports the finding. I could not run it on Windows here.
+**Fix:** On Windows, refresh through a handle that shares everything and does not follow reparse points. Put it in a platform pair next to `lock_*.go`:
 
 ```go
-cmd := exec.Command("go", "mod", "download", "-json", module)
-// decode {"Dir": ...} from stdout
-```
-
-Alternatively, add `go mod download github.com/abemedia/go-webview` before `go generate` in the justfile recipe and in each CI job.
-
-### WR-05: A failed directory fsync after a successful rename or link is reported as a failed write
-
-**File:** `backend/fileutil/atomic.go:28-32,49-52,76`
-**Issue:** `WriteFileAtomic` returns `syncDir(dir)`'s error after `os.Rename` has already replaced the file, and `WriteFileNew` does the same after `os.Link`. Some filesystems refuse fsync on a directory: certain FUSE and network mounts return EINVAL, ENOTSUP or ENOSYS. On those, callers see a failed write for data that is already in place:
-- `gioHost.SaveFile` returns an error for a download that was saved. A napp that retries then creates `file-1.txt`, `file-2.txt`, and so on.
-- `childbin.Ensure` fails closed and raises "Reinstall Verdana" even though the verified binary was written.
-- `storagePersistLocked` and `configPersistLocked` report failures to napps for data that was persisted.
-**Fix:** Treat the directory fsync as best effort. Once the rename or link has succeeded, ignore `EINVAL`, `ENOTSUP` and `ENOSYS` from `syncDir`, or return a sentinel the callers can recognize as "written, durability not guaranteed". For example:
-
-```go
-if err := syncDir(dir); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-	return err
+// touch_windows.go
+func touchDir(dir string, t time.Time) error {
+	p, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	ft := windows.NsecToFiletime(t.UnixNano())
+	return windows.SetFileTime(h, nil, &ft, &ft)
 }
-return nil
+
+// touch_unix.go
+func touchDir(dir string, t time.Time) error { return os.Chtimes(dir, t, t) }
 ```
+
+`FILE_FLAG_OPEN_REPARSE_POINT` also makes the "verified first, so the refresh never follows a symlink" comment true on Windows without relying on the verify-then-use order. A cheaper alternative is to retry Chtimes a few times on `ERROR_SHARING_VIOLATION`, but that still fails while Explorer has the folder open. Add a Windows-only test that holds `os.Open(dir)` during `EnsureVersion` and expects success.
 
 ## Info
 
-### IN-01: `setStoredLogin`/`persistSecrets` never return an error
+### IN-01: A login save that fails for a reason other than "blocked" is still only logged, and the keyring-fallback notice claims a file copy that was not written (carried forward, unchanged)
 
-**File:** `backend/launcher_secrets.go:186-236`, `backend/auth_login.go:50-52,179-181`
-**Issue:** `persistSecrets` always returns `nil`, even when `saveState` fails to write or is blocked (see WR-02). The `if err := setStoredLogin(...); err != nil` checks in `auth_login.go` can never fire, so callers can't tell when a login was not saved.
-**Fix:** Have `saveState` report failure and pass it up through `persistSecrets`, or drop the error return.
+**File:** `backend/auth_login.go:50-52,210-212`, `backend/launcher_secrets.go:226-235`
+**Issue:** Both `persistSecrets` callers only log the save error. ENOSPC, EIO or a read-only data dir give no user-visible signal, so the login is silently forgotten at the next start. `persistSecrets` also calls `setKeyringFallbackNotice(true)` after a `saveState` that failed.
+**Fix:** Raise the fallback notice only when `err == nil`. Surface a failed login save as a notice or a `loginErr`-style warning.
 
-### IN-02: Corrupt state copies keep plaintext secrets indefinitely
+### IN-02: Corrupt state copies keep plaintext secrets indefinitely (carried forward, unchanged)
 
-**File:** `backend/launcher_state.go:180-203`
-**Issue:** In file mode, `state.json.corrupt-<unix>` holds `client_key` and `login` (possibly an nsec) in plaintext. It stays after the secrets move to the keyring and after the notice is dismissed. Its 0600 mode and the 0700 data dir limit the exposure, but SECR-01's "no plaintext secrets at rest once in the keyring" does not hold for these copies.
-**Fix:** Say in the notice detail that the copy may contain the saved login. Optionally, offer to delete it once the user has recovered.
+**File:** `backend/launcher_state.go:205-227` (`keepCorruptState`)
+**Issue:** `state.json.corrupt-<unix>` can hold `client_key` and an nsec `login` in plaintext. The copy is kept after the secrets move to the keyring and after the notice is dismissed.
+**Fix:** Mention it in the notice detail, and optionally offer to delete the copy after recovery.
 
-### IN-03: The keyring account depends on the raw dataDir string
+### IN-03: The keyring account depends on the raw dataDir string (carried forward, unchanged)
 
 **File:** `backend/launcher_secrets.go:58-61`
-**Issue:** `sha256(dataDir)` hashes the path as given. If the same directory is reached through a different path (for example `/home` symlinked to `/var/home` on Fedora Atomic, or a changed `XDG_CONFIG_HOME`), the code computes a new account name. With `loc == keyring`, the resulting `ErrSecretNotFound` is treated as a silent logout (research table, line 396), and the old item is orphaned.
-**Fix:** Hash `filepath.Clean` of `filepath.EvalSymlinks(dataDir)`. Consider a notice when `loc == keyring` but the item is not found.
+**Issue:** `sha256(dataDir)` changes when the same directory is reached through a different path. That orphans the item, and with `loc == keyring` it reads as a silent logout.
+**Fix:** Hash `filepath.Clean(filepath.EvalSymlinks(dataDir))`. Consider a notice when `loc == keyring` and the item is not found.
 
-### IN-04: The child-unavailable notice says "Reinstall Verdana" for any `prepareChild` error
+### IN-04: The child-unavailable notice says "Reinstall Verdana" for any `prepareChild` error (carried forward, unchanged)
 
-**File:** `desktop/childproc.go:261-273`, `backend/launcher_notices.go:49-54`
-**Issue:** `prepareChild` wraps every error in `ErrWindowProgramUnavailable`, including transient ones: ENOSPC, `UserCacheDir` errors, and the WR-03 and WR-05 cases. All of them show "missing or was changed on disk… Reinstall Verdana", which misleads users about transient problems.
-**Fix:** Wrap only tamper or verification failures. Report I/O errors with a generic launch error.
+**File:** `desktop/childproc.go:262-276`, `backend/launcher_notices.go:49-54`
+**Issue:** Every error is shown as tampering, including transient I/O errors, a `lockShared` failure, and the Windows sharing violation in WR-01.
+**Fix:** Wrap only verification failures (hash mismatch, bad owner or mode, symlink) in `ErrWindowProgramUnavailable`. Report other errors as a generic launch error.
 
-### IN-05: A keyring prompt during Logout gives no visible feedback
+### IN-05: A keyring prompt during Logout gives no visible feedback (carried forward, unchanged)
 
-**File:** `backend/auth_login.go:228-246`, `desktop/layout.go:1145-1270`
-**Issue:** `Logout()` closes all windows and then blocks in `logoutSecrets` for up to 120 s on a keyring prompt, with the phase still `PhaseMain`. `KeyringWait == "waiting"` is drawn only on the loading screen and the login screen, so the main screen gives no feedback and a second click starts another `Logout` goroutine.
-**Fix:** Switch to `PhaseLoading` (or `PhaseLogin`) before `logoutSecrets`, or render the wait on the main screen.
+**File:** `backend/auth_login.go:255-270`, `desktop/layout.go:1145-1270`
+**Issue:** `logoutSecrets` can block for up to 120 s while the phase is still `PhaseMain`, and a second click starts a second `Logout`.
+**Fix:** Switch to `PhaseLoading` before `logoutSecrets`, or draw the wait on the main screen.
 
-### IN-06: An oversize value leaks a `security -i` process on macOS
+### IN-06: An oversize value leaks a `security -i` process on macOS (carried forward, unchanged)
 
 **File:** `desktop/internal/secretstore/secretstore.go:73-83`
-**Issue:** On macOS, go-keyring v0.2.8's `Set` starts `security -i` and then returns `ErrSetDataTooBig` without closing stdin or calling `Wait` when the command exceeds 4096 bytes. That is an upstream bug. A long login (for example a bunker URL with many relays) triggers it on every migration attempt and every persist, each time leaving an unreaped process behind.
-**Fix:** In `Store.Set`, reject a value whose base64-encoded form plus overhead exceeds about 3000 bytes before calling the provider, and map that to `ErrSecretStoreUnavailable`.
+**Issue:** go-keyring v0.2.8's darwin `Set` returns `ErrSetDataTooBig` without reaping `security -i`.
+**Fix:** Reject values over about 3000 encoded bytes in `Store.Set` before calling the provider, and map that to `ErrSecretStoreUnavailable`.
+
+### IN-07: `loginClientKey` with `pairedKey` can generate a key just to reject it (carried forward, unchanged)
+
+**File:** `backend/auth_login.go:86-98`
+**Issue:** When the record has no key, `clientKey()` generates one and marks it `keyDirty` before the comparison fails with `errPairedKeyChanged`. The next `setStoredLogin` then persists that key.
+**Fix:** When `pairedKey != nil`, peek at the current key under `secretsMu` without generating one.
+
+### IN-08: Keyring-less desktops get the keyring-failed screen after a corrupt state.json, and the marker now also outlives a reachable-but-empty keyring (carried forward, extended)
+
+**File:** `backend/launcher_state.go:135-145`, `backend/launcher_secrets.go:702-727`, `desktop/main.go:164`
+**Issue:** `secretstore.New()` always returns a store. After a corruption on a system with no Secret Service, every start shows "Try again / Log in again", and "Try again" can never succeed. The iteration-2 fix made the marker unconditional. A corruption on a system whose keyring is reachable but holds no item now also leaves `secrets_location: "keyring"` on disk, unless a login follows, so a later start with the keyring locked waits instead of showing the login screen. This matches the existing "logged out in keyring mode" behaviour and fails safe, so it is not a regression of the D-rules. The `secretsUnavailable` comment ("one that reaches it and finds no item starts fresh") is only true for that run.
+**Fix:** Tell "no secret service" (the probe failed) apart from "locked, timed out or dismissed". Optionally, in `loadSecretsLocked`'s `default` branch (store reachable, nothing anywhere), clear the marker back to `""` when `stateLost` was set.
+
+### IN-09: `childbin.Ensure` is test-only, `prepareChild` computes the version directory a second time, and `EnsureVersion` now creates and verifies `dir` twice (carried forward, extended)
+
+**File:** `desktop/internal/childbin/childbin.go:86-93,133-141,195-200`, `desktop/childproc.go:286-292`
+**Issue:**
+- Production code only calls `EnsureVersion`.
+- `prepareChild` discards the directory `EnsureVersion` returns and rebuilds it with `filepath.Join(base, childbin.Version(files))`.
+- `EnsureVersion` now runs `MkdirAll`+`verifyDir(dir)` itself, and `ensureLocked` repeats both.
+**Fix:** Use the returned `dir` in `prepareChild`. Unexport `Ensure` or move it into the test file. Split `ensureLocked` so the per-file loop can run without re-verifying the directory.
+
+### IN-10: The CR-01 regression test relies on fixed sleeps (carried forward, unchanged)
+
+**File:** `backend/auth_nostrconnect_test.go:123,267,314`
+**Issue:** The 200 ms sleeps assume the relay subscriptions are open, and the 100 ms cleanup sleep assumes `pushIdentityChanged` has finished (see IN-12). Under `-race` or on a loaded CI runner these can flake.
+**Fix:** Wait for a readiness signal (EOSE, or poll the relay). Join the push explicitly once the identity is synchronized.
+
+### IN-11: `syncDir` still reports a failed write when it cannot open the directory after the rename (carried forward, unchanged)
+
+**File:** `backend/fileutil/dir_unix.go:19-22`
+**Issue:** If `os.Open(dir)` fails after the rename or link (for example EACCES on a `-wx` directory), `syncDir` returns an error for a file that is already in place. A `WriteFileNew` caller that retries then creates `name-1.ext`.
+**Fix:** Treat an open failure like the unsupported-fsync errors (log it and return nil), or return a sentinel that callers can tell apart from "not written".
+
+### IN-12: Synchronized identity redesign deferred (was iteration-2 WR-03, minimal fix applied)
+
+**File:** `backend/auth_login.go:17-18,122-127,204-205,264-273`; readers `backend/bridge.go:96,114,138`, `backend/nap_identity.go:51-54`, `backend/nap_upload.go:100-126`, `backend/nap_sink.go:236,254`, `backend/search.go:165-166`, `backend/dev_publish.go:36-44,82,141,205,280`
+**Issue:** The minimal fix is correct: handlers read the keyer once, and `rpcResponse` recovers panics. These parts of the design are still open by choice:
+- The `userKeyer`/`userPubkey` reads and writes are still unsynchronized. A torn read of the two-word interface is undefined behaviour and is not guaranteed to surface as a recoverable panic.
+- `getPublicKey` loads `userKeyer` and `userPubkey` separately, so a concurrent login can pair one identity's keyer with the other's cached pubkey.
+- A captured keyer signs after a `login` has replaced it. `login` does not close windows, unlike `Logout`, so the napp can receive the old account's signature after `identity.changed` announced the new account.
+- An async `pushIdentityChanged` can still land after a newer push.
+- `dev_publish.go` still checks `userKeyer` at line 82 and dereferences it at 141/205/280, outside any `recover`.
+- `sessionCancel` is unsynchronized between concurrent `login` calls.
+
+**Fix (deferred):** Put the identity behind one `atomic.Pointer[identity]{keyer, pk, seq}` and snapshot it once per handler. After an approval prompt, refuse when `seq` changed. Drop identity pushes older than the last one sent. Serialize `login`/`Logout` with a mutex covering `sessionCancel`. Then remove the cleanup sleep in IN-10.
 
 ---
 
-_Reviewed: 2026-10-04T04:49:11Z_
+_Reviewed: 2026-10-04T05:22:43Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+_Iteration: 3_
