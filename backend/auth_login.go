@@ -59,12 +59,47 @@ func loginAmber(input string) {
 // Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
 // signer url, resolves the signer and moves the launcher to its main phase.
 // Blocking: call it from a goroutine.
-func Login(input string) { login(input, false) }
+func Login(input string) { login(input, loginOpts{}) }
 
 // resumeLogin is Login for the input stored by a previous run.
-func resumeLogin(input string) { login(input, true) }
+func resumeLogin(input string) { login(input, loginOpts{skipConnect: true, automatic: true}) }
 
-func login(input string, resume bool) {
+// loginOpts says how a login reaches its signer. skipConnect and automatic
+// are separate questions: a nostrconnect signer that just answered already
+// knows our client key (no "connect"), yet the user started that login and
+// it may use a client key made for it (D-21); a startup resume skips
+// "connect" too, but nobody asked for it, so it never makes a key (D-10).
+type loginOpts struct {
+	// skipConnect: the signer already knows our client key, so no NIP-46
+	// "connect" is sent (a resume, or a nostrconnect signer that answered).
+	skipConnect bool
+	// automatic: nobody started this login (startup resume or "Try
+	// again"): only the saved client key is used, never a new one.
+	automatic bool
+	// pairedKey, when set, is the client key a nostrconnect signer paired
+	// with: the login uses that key or fails, so what is saved is the key
+	// the signer knows.
+	pairedKey *nostr.SecretKey
+}
+
+// loginClientKey picks the NIP-46 client key for a bunker or NIP-05 login.
+func loginClientKey(opts loginOpts) (nostr.SecretKey, error) {
+	if opts.automatic {
+		return existingClientKey()
+	}
+	ck, err := clientKey()
+	if err != nil {
+		return ck, err
+	}
+	if opts.pairedKey != nil && ck != *opts.pairedKey {
+		return nostr.SecretKey{}, errPairedKeyChanged
+	}
+	return ck, nil
+}
+
+var errPairedKeyChanged = errors.New("the signer paired with a client key that is no longer current; connect it again")
+
+func login(input string, opts loginOpts) {
 	if strings.HasPrefix(input, "amber:") {
 		loginAmber(input)
 		return
@@ -104,11 +139,7 @@ func login(input string, resume bool) {
 	var ck nostr.SecretKey
 	if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
 		var err error
-		if resume {
-			ck, err = existingClientKey()
-		} else {
-			ck, err = clientKey()
-		}
+		ck, err = loginClientKey(opts)
 		if err != nil {
 			cancelSession()
 			sessionCancel = nil
@@ -131,7 +162,7 @@ func login(input string, resume bool) {
 	}
 	go func() {
 		if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
-			k, err := loginBunker(sessionCtx, ck, input, resume, onAuth)
+			k, err := loginBunker(sessionCtx, ck, input, opts.skipConnect, onAuth)
 			keyerDone <- keyerResult{k, err}
 			return
 		}
@@ -180,8 +211,11 @@ func login(input string, resume bool) {
 		log.Warn().Err(err).Msg("could not save the login")
 	}
 
-	setProfileFromUser(ctx, pk)
+	finishLogin(ctx, pk)
 }
+
+// finishLogin is setProfileFromUser, swappable in tests.
+var finishLogin = setProfileFromUser
 
 // loginBunker reaches a NIP-46 signer from a bunker:// url or a NIP-05
 // address. The client key is persisted, so on resume the bunker already
@@ -189,7 +223,7 @@ func login(input string, resume bool) {
 // so replaying it on every launch makes a signer like Amber prompt for a new
 // connection (or ignore it) while the login times out. The first RPC
 // (get_public_key) then tells whether the bunker still knows us.
-func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, resume bool, onAuth func(string)) (nostr.Keyer, error) {
+func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, skipConnect bool, onAuth func(string)) (nostr.Keyer, error) {
 	parsed, err := nip46.ParseBunkerInput(ctx, input)
 	if err != nil {
 		return nil, err
@@ -198,7 +232,7 @@ func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, r
 	if err != nil {
 		return nil, err
 	}
-	if !resume {
+	if !skipConnect {
 		if err := b.Connect(ctx, parsed.Secret); err != nil {
 			return nil, err
 		}

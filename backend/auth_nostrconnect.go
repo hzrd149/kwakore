@@ -190,7 +190,10 @@ func startNostrConnectLocked() {
 		cancel()
 
 		log.Info().Str("signer", signer.Hex()).Msg("nostrconnect signer answered")
-		login(nostrConnectBunkerURL(signer, relays), true)
+		// the user started this login (the QR code), so it may use the
+		// client key made for it, even after "Log in again" (D-21); it is
+		// not a resume. The signer knows ck already: no "connect".
+		login(nostrConnectBunkerURL(signer, relays), loginOpts{skipConnect: true, pairedKey: &ck})
 	}()
 }
 

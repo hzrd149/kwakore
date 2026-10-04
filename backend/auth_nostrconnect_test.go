@@ -14,6 +14,7 @@ import (
 	"fiatjaf.com/nostr/nip04"
 	"fiatjaf.com/nostr/nip44"
 	"fiatjaf.com/nostr/nip46"
+	"fiatjaf.com/nostr/sdk"
 )
 
 // connectAnswer is the event a signer sends to accept a nostrconnect uri.
@@ -232,5 +233,151 @@ func TestNostrConnectOnlyOnRequest(t *testing.T) {
 	setPhase(PhaseLoading)
 	if uri := nostrConnectURI(); uri != "" {
 		t.Fatalf("leaving the login phase left %q on offer", uri)
+	}
+}
+
+// D-21: after "Log in again" on the keyring-failed screen, a nostrconnect
+// QR login completes. The signer's answer is not a resume: the login uses
+// the client key the uri advertised (made for it while the keyring is
+// unreachable), skips "connect", and the login and that key are saved to
+// the file. The keyring item is left alone.
+func TestNostrConnectAfterLoginWithoutKeyring(t *testing.T) {
+	r, store := startKeyringFailed(t)
+	srv := httptest.NewServer(khatru.NewRelay())
+	t.Cleanup(srv.Close)
+	relay := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+
+	finished := make(chan nostr.PubKey, 1)
+	oldSys, oldFinish := sys, finishLogin
+	sys = &sdk.System{Pool: nostr.NewPool()}
+	finishLogin = func(_ context.Context, pk nostr.PubKey) { finished <- pk }
+	stateMu.Lock()
+	state.NostrConnectRelay = relay
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		if sessionCancel != nil {
+			sessionCancel()
+			sessionCancel = nil
+		}
+		// login's own "go pushIdentityChanged()" reads the user globals and
+		// then takes instancesMu: let it run, and order this reset after it
+		time.Sleep(100 * time.Millisecond)
+		allInstances()
+		userKeyer, userPubkey = nil, nostr.PubKey{}
+		sys.Pool.Close("test over")
+		sys, finishLogin = oldSys, oldFinish
+	})
+
+	// the remote signer: answers NIP-46 requests addressed to it
+	signerKey := nostr.Generate()
+	signer := nip46.NewStaticKeySigner(signerKey)
+	signerPool := nostr.NewPool()
+	t.Cleanup(func() { signerPool.Close("test over") })
+	requests := signerPool.SubscribeMany(ctx, []string{relay}, nostr.Filter{
+		Kinds: []nostr.Kind{nostr.KindNostrConnect},
+		Tags:  nostr.TagMap{"p": []string{signerKey.Public().Hex()}},
+		Since: nostr.Now() - 5,
+	}, nostr.SubscriptionOptions{})
+	go func() {
+		for ie := range requests {
+			_, _, out, err := signer.HandleRequest(ctx, ie.Event)
+			if err != nil {
+				continue
+			}
+			if err := out.Sign(signerKey); err != nil {
+				continue
+			}
+			if rl, err := signerPool.EnsureRelay(relay); err == nil {
+				rl.Publish(ctx, out)
+			}
+		}
+	}()
+
+	before := len(store.callLog())
+	LoginWithoutKeyring()
+	StartNostrConnect()
+	uri := nostrConnectURI()
+	if uri == "" {
+		t.Fatal("no nostrconnect uri on offer after LoginWithoutKeyring")
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := nostr.PubKeyFromHex(u.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // let both subscriptions open
+
+	// the user scans the QR code: the signer accepts with the uri's secret
+	rl, err := signerPool.EnsureRelay(relay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rl.Publish(ctx, connectAnswer(t, signerKey, client, u.Query().Get("secret"), false)); err != nil {
+		t.Fatal(err)
+	}
+
+	loginErr := func() string {
+		ls.mu.Lock()
+		defer ls.mu.Unlock()
+		return ls.loginErr
+	}
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+wait:
+	for {
+		select {
+		case pk := <-finished:
+			if pk != signerKey.Public() {
+				t.Fatalf("logged in as %s, want %s", pk.Hex(), signerKey.Public().Hex())
+			}
+			break wait
+		case <-tick.C:
+			if msg := loginErr(); msg != "" {
+				t.Fatalf("nostrconnect login failed: %s", msg)
+			}
+		case <-ctx.Done():
+			t.Fatalf("nostrconnect login never finished (login error %q)", loginErr())
+		}
+	}
+
+	if !LoggedIn() {
+		t.Fatal("not logged in after the signer answered")
+	}
+	// the login and the key the signer paired with are in the file
+	stateMu.Lock()
+	login, keyHex := state.Login, state.ClientKey
+	stateMu.Unlock()
+	want := nostrConnectBunkerURL(signerKey.Public(), []string{relay})
+	if login == nil || *login != want {
+		t.Fatalf("saved login = %v, want %q", login, want)
+	}
+	if keyHex == nil {
+		t.Fatal("no client key saved with the nostrconnect login")
+	}
+	k, err := nostr.SecretKeyFromHex(*keyHex)
+	if err != nil || k.Public() != client {
+		t.Fatalf("saved client key does not match the one the uri advertised (%v)", err)
+	}
+	if on := r.readState(t); !strings.Contains(on, *keyHex) {
+		t.Fatalf("client key not on disk:\n%s", on)
+	}
+	if got := secretsLocation(); got != "file" {
+		t.Fatalf("SecretsLocation = %q, want file", got)
+	}
+	// still not a resume: an automatic path gets no key
+	if _, err := existingClientKey(); err == nil {
+		t.Fatal("existingClientKey() handed out a key after LoginWithoutKeyring")
+	}
+	if calls := store.callsSince(before); countCalls(calls, "delete") != 0 {
+		t.Fatalf("store calls = %v: the keyring item was deleted", calls)
+	}
+	if it, ok := store.item(t); !ok || it.Login != testLogin || it.ClientKey != testClientKeyHex {
+		t.Fatalf("keyring item changed: %+v, %v", it, ok)
 	}
 }
