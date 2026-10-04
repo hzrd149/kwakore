@@ -9,6 +9,10 @@ import (
 	"verdana/backend/eventdb"
 )
 
+// initSystem opens the event store and the kv store under dataDir and builds
+// the sdk system on them. The returned func closes both, kv store first
+// (reverse open order), and has to run before anything removes dataDir:
+// Windows refuses to delete a file that is still open.
 func initSystem(dataDir string) (func(), error) {
 	log.Info().Str("path", filepath.Join(dataDir, "eventstore")).Msg("init eventstore")
 	db, closeEventStore, err := eventdb.Open(filepath.Join(dataDir, "eventstore"))
@@ -32,7 +36,12 @@ func initSystem(dataDir string) (func(), error) {
 	sys.Pool.DuplicateMiddleware = sys.TrackEventRelaysD
 
 	log.Info().Msg("system initialized")
-	return closeEventStore, nil
+	return func() {
+		if err := kv.Close(); err != nil {
+			log.Warn().Err(err).Msg("closing kvstore failed")
+		}
+		closeEventStore()
+	}, nil
 }
 
 // Sys is the sdk system the backend runs on, for a GUI that needs to reach it
