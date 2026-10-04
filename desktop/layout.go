@@ -266,6 +266,11 @@ func layoutMain(
 	st backend.State,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// launcher notices sit above everything, and stay up while the
+		// shortcut editor is open; the content below keeps the rest
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutNotices(gtx, th, st.Notices)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, storeBtn, themeBtn, settingsBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),

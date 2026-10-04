@@ -111,16 +111,7 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 	}
 	space := func(dp unit.Dp) layout.Widget { return layout.Spacer{Height: dp}.Layout }
 	chip := func(btn *widget.Clickable, label string) layout.Widget {
-		return func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			t := currentTheme()
-			b := material.Button(th, btn, label)
-			b.Background = t.chipBg
-			b.Color = t.chipFg
-			b.TextSize = unit.Sp(13)
-			b.Inset = layout.UniformInset(unit.Dp(8))
-			return b.Layout(gtx)
-		}
+		return chipButton(th, btn, label)
 	}
 
 	title := func(text string) layout.Widget {
@@ -194,10 +185,19 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 			chip(&s.backBtn, "Back"),
 		}
 	}
-	return material.List(th, &s.list).Layout(gtx, len(rows), func(gtx layout.Context, i int) layout.Dimensions {
-		gtx.Constraints.Min.X = 0 // buttons keep their own width
-		return rows[i](gtx)
-	})
+	// launcher notices sit above the title on both views: a corrupt
+	// state.json usually lands the user here
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutNotices(gtx, th, st.Notices)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return material.List(th, &s.list).Layout(gtx, len(rows), func(gtx layout.Context, i int) layout.Dimensions {
+				gtx.Constraints.Min.X = 0 // buttons keep their own width
+				return rows[i](gtx)
+			})
+		}),
+	)
 }
 
 // layoutQR draws the QR code on white, whatever the theme: scanners want
