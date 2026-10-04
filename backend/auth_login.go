@@ -48,7 +48,7 @@ func loginAmber(input string) {
 	go pushIdentityChanged()
 
 	if err := setStoredLogin(input); err != nil {
-		log.Warn().Err(err).Msg("could not save the login")
+		log.Warn().Err(err).Msg("could not save the login, it is not remembered after a restart")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -208,7 +208,7 @@ func login(input string, opts loginOpts) {
 	// saved before setProfileFromUser, so PhaseMain follows the save (the
 	// save may wait on the keyring while the launcher still shows loading)
 	if err := setStoredLogin(input); err != nil {
-		log.Warn().Err(err).Msg("could not save the login")
+		log.Warn().Err(err).Msg("could not save the login, it is not remembered after a restart")
 	}
 
 	finishLogin(ctx, pk)

@@ -209,6 +209,35 @@ func TestLoadStateUnreadableBlocksSave(t *testing.T) {
 	if err != nil || !fi.IsDir() {
 		t.Fatalf("state.json was replaced: %v %v", fi, err)
 	}
+	// the user is told, pointing at the file that could not be read
+	notices := Snapshot().Notices
+	if len(notices) != 1 || !strings.HasPrefix(notices[0].ID, "state-corrupt:") || notices[0].Path != path {
+		t.Fatalf("notices = %+v, want one state-corrupt notice at %s", notices, path)
+	}
+	// and a save reports that it did not happen
+	stateMu.Lock()
+	err = saveState()
+	stateMu.Unlock()
+	if !errors.Is(err, errStateSaveBlocked) {
+		t.Fatalf("saveState() = %v, want errStateSaveBlocked", err)
+	}
+}
+
+// a login saved while state.json can't be written is reported as not
+// saved, so login() does not treat it as remembered.
+func TestSetStoredLoginReportsBlockedSave(t *testing.T) {
+	r := withFreshSecrets(t)
+	if err := os.Mkdir(filepath.Join(r.dir, "state.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	loadState()
+	loadSecrets(nil)
+	if _, err := clientKey(); err != nil {
+		t.Fatal(err)
+	}
+	if err := setStoredLogin(testLogin); !errors.Is(err, errStateSaveBlocked) {
+		t.Fatalf("setStoredLogin() = %v, want errStateSaveBlocked", err)
+	}
 }
 
 func TestCorruptNoticeShowsNewestOnly(t *testing.T) {

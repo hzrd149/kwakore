@@ -197,7 +197,8 @@ func setStoredLogin(login string) error {
 // persistSecrets writes the current record where the secrets live: the
 // keyring item in keyring mode, state.json otherwise. A keyring write that
 // fails falls back to the file (SecretsLocation=file) with the
-// keyring-fallback notice, so a change is never lost.
+// keyring-fallback notice. It returns the file save's error, so a login
+// that could not be written anywhere is not reported as saved.
 func persistSecrets() error {
 	secretsOpMu.Lock()
 	defer secretsOpMu.Unlock()
@@ -227,12 +228,14 @@ func persistSecrets() error {
 	if store != nil {
 		state.SecretsLocation = secretsInFile
 	}
-	saveState()
+	err := saveState()
 	stateMu.Unlock()
 	if store != nil && rec.login != "" {
 		setKeyringFallbackNotice(true)
 	}
-	return nil
+	// a file save that failed or is blocked means the login is not
+	// remembered: the caller hears so instead of treating it as saved
+	return err
 }
 
 // logoutSecrets forgets the stored login and keeps the client key (D-10).

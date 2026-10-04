@@ -142,6 +142,9 @@ func loadState() {
 		log.Error().Err(err).Str("path", statePath).Msg("could not read state file, not saving state this run")
 		stateLost.Store(true)
 		stateSaveBlocked.Store(true)
+		// and tell the user, as when a corrupt file can't be set aside:
+		// nothing they change this run is saved
+		addStateCorruptNotice(time.Now().Unix(), statePath)
 	}
 	// no client key is generated here: loadState also runs after a corrupt
 	// or missing state.json, where the real key may still be in the
@@ -273,22 +276,29 @@ func addStateCorruptNotice(ts int64, path string) {
 	notifyState()
 }
 
+// errStateSaveBlocked is saveState's answer while saving is blocked.
+var errStateSaveBlocked = errors.New("the saved launcher data could not be read, so changes are not saved")
+
 // saveState must be called with stateMu held. The file is replaced
 // atomically (temp file, fsync, rename), so a crash mid-save leaves either
-// the previous state.json or the new one, never a truncated file.
-func saveState() {
+// the previous state.json or the new one, never a truncated file. It logs
+// and returns any failure, errStateSaveBlocked when saving is blocked; most
+// callers only need the log, the login secrets path passes it on.
+func saveState() error {
 	if stateSaveBlocked.Load() {
 		log.Warn().Str("path", statePath).Msg("not saving state: the existing state file could not be read")
-		return
+		return errStateSaveBlocked
 	}
 	data, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal state")
-		return
+		return err
 	}
 	if err := fileutil.WriteFileAtomic(statePath, data, 0600); err != nil {
 		log.Error().Err(err).Msg("failed to write state file")
+		return err
 	}
+	return nil
 }
 
 // ─── relays ──────────────────────────────────────────────────────
