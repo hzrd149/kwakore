@@ -738,12 +738,16 @@ return {
 	}
 }
 
-// reloadLoopSetup stubs the clock the loop cap reads and numbers every
-// nap.boot answer. replaceAt(f, ms) advances the clock and gives f its first
-// load (when it has none yet) and then a second one: a replaced document.
+// reloadLoopSetup stubs the monotonic clock the loop cap reads
+// (performance.now) and numbers every nap.boot answer; the wall clock is
+// stubbed to jump backwards on every read, which must change nothing.
+// replaceAt(f, ms) advances the clock and gives f its first load (when it
+// has none yet) and then a second one: a replaced document.
 const reloadLoopSetup = `
 let now = 0
-Date.now = () => now
+Object.defineProperty(globalThis, "performance", { value: { now: () => now }, configurable: true, writable: true })
+let wall = 1e12
+Date.now = () => (wall -= 60 * 60 * 1000)
 let boots = 0
 handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
 const loadedOnce = new Set()

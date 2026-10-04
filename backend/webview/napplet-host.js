@@ -590,7 +590,9 @@
   // boots nothing and says why in the window. rebuilds and halted live in
   // this closure, out of the frame's reach; only the launcher's dev reload
   // (__nap_reload) or a new window clears them. The initial boot and dev
-  // reloads are never counted.
+  // reloads are never counted. Time is performance.now(), which only moves
+  // forward: the wall clock can step with NTP or by hand, and a step back
+  // would halt early, a step forward would miss a loop.
   const REBUILD_LIMIT = 3
   const REBUILD_WINDOW_MS = 10 * 1000
   let rebuilds = []
@@ -604,7 +606,7 @@
     const serial = ++bootSerial
     const reset = enqueue(() => rpc("nap.reset"), true).catch(() => {})
 
-    const now = Date.now()
+    const now = performance.now()
     rebuilds = rebuilds.filter(t => now - t < REBUILD_WINDOW_MS)
     if (halted || rebuilds.length >= REBUILD_LIMIT) {
       // the serial bump above already made any boot in flight give up
