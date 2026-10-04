@@ -52,8 +52,8 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Secrets
 
-- [ ] **SECR-01**: Desktop login secrets are stored in the OS keyring; when no keyring is available, they stay in the `0600` file and the user sees a warning
-- [ ] **SECR-02**: A locked, slow or unavailable keyring never causes the NIP-46 client key to be regenerated or a login to be lost; keyring calls time out and never block the UI
+- [x] **SECR-01**: Desktop login secrets are stored in the OS keyring; when no keyring is available, they stay in the `0600` file and the user sees a warning
+- [x] **SECR-02**: A locked, slow or unavailable keyring never causes the NIP-46 client key to be regenerated or a login to be lost; keyring calls time out and never block the UI
 - [x] **SECR-03**: `state.json` is written atomically, and a corrupt file is kept aside instead of silently resetting state
 
 ### Identity and storage
@@ -168,8 +168,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROC-03 | Phase 3 | Complete |
 | PROC-04 | Phase 3 | Complete |
 | PROC-05 | Phase 3 | Pending |
-| SECR-01 | Phase 3 | Pending |
-| SECR-02 | Phase 3 | Pending |
+| SECR-01 | Phase 3 | Complete |
+| SECR-02 | Phase 3 | Complete |
 | SECR-03 | Phase 3 | Complete |
 | KEY-01 | Phase 5 | Pending |
 | KEY-02 | Phase 5 | Pending |
