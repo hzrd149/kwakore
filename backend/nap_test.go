@@ -1079,9 +1079,10 @@ func TestNapLoadedPushesControlsOnEveryLoad(t *testing.T) {
 		t.Fatalf("controls = %v", rec.find("notify.controls")[0])
 	}
 
-	// the napplet reloading its own frame keeps the session (NIP-5D-reload,
-	// Phase 4), but the new document registered onControls again and gets
-	// the push too (WR-05)
+	// Go answers every nap.loaded it gets in an established session; the
+	// host page sends one per frame, and a replaced document gets a new
+	// frame and session (Phase 4), so this second load is Go's contract only
+	// (WR-05)
 	loaded(t, ci)
 	if got := rec.find("notify.controls"); len(got) != 2 {
 		t.Fatalf("controls after a self-reload in the same session: %v", got)

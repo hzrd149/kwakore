@@ -215,6 +215,9 @@
     if (!frame || event.source !== frame.contentWindow) return
     const data = event.data
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
+    // the frame this envelope came from: a refusal is its answer and goes
+    // to it only, never to a document that replaced it in the meantime
+    const from = frame
     // one at a time: the desktop binding runs every call on its own thread,
     // so two calls in flight can reach Go in either order, and NAP needs the
     // order kept: nap.start goes ahead of a new document's first envelope,
@@ -236,7 +239,7 @@
       return rpc("nap.msg", json)
     }).then(deliver, err => {
       console.error("[napplet-host]", err)
-      refuse(data, err)
+      if (frame === from) refuse(data, err)
     })
   })
 

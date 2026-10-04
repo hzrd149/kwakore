@@ -632,15 +632,18 @@ func (ci *Instance) napStart() (int, error) {
 	return gen, nil
 }
 
-// napLoaded answers nap.loaded, which the host page sends on every load event
-// of the current frame, and pushes notify.controls. The trigger is the load
-// event because the upstream notify shim keeps no last value: a push before
-// the napplet's top-level scripts registered onControls would be lost, and
-// load fires after them. It is only that trigger, never a session start.
+// napLoaded answers nap.loaded and pushes notify.controls. The host page
+// sends it once per frame, on the frame's first load: the trigger is the
+// load event because the upstream notify shim keeps no last value, so a
+// push before the napplet's top-level scripts registered onControls would be
+// lost, and load fires after them. It is only that trigger, never a session
+// start.
 //
-// A napplet that reloads its own frame keeps its session (NIP-5D-reload,
-// Phase 4), but its new document still registers onControls and needs the
-// push, so every load gets one, not just the session's first.
+// A document that replaces the frame's own (a reload, a navigation) is never
+// loaded into this session: the host page removes that frame, ends the
+// session with nap.reset and boots a new frame with a new session (D-01), so
+// every document still gets exactly one push. Go itself answers every
+// nap.loaded it gets while a session is established.
 func (ci *Instance) napLoaded() {
 	s := ci.nap
 	if s == nil {
