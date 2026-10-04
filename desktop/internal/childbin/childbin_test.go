@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ─── test rig ───────────────────────────────────────────────────
@@ -287,6 +288,8 @@ func TestEnsureCollectsOldVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// a leftover temp file, old enough not to be a write in flight
+	age(t, filepath.Join(dir, ".tmp-123"), 2*tmpGrace)
 	exe := newFile("child-new", childData, true)
 	lib := newFile("libwebview.so", []byte("lib"), false)
 	mustEnsure(t, dir, exe, lib)
@@ -310,5 +313,170 @@ func TestEnsureCollectsOnlyAfterSuccess(t *testing.T) {
 	}
 	if names := dirNames(t, dir); !slices.Equal(names, []string{"child-old"}) {
 		t.Fatalf("a failed Ensure collected files: %v", names)
+	}
+}
+
+// age sets path's modification time d in the past.
+func age(t *testing.T, path string, d time.Duration) {
+	t.Helper()
+	old := time.Now().Add(-d)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// a temp file younger than tmpGrace may be another process writing the
+// same version: it is left alone.
+func TestEnsureKeepsYoungTempFiles(t *testing.T) {
+	dir := cacheDir(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".tmp-inflight"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exe := newFile("child-new", childData, true)
+	mustEnsure(t, dir, exe)
+	if names := dirNames(t, dir); !slices.Equal(names, []string{".tmp-inflight", "child-new"}) {
+		t.Fatalf("dir holds %v, want the in-flight temp file kept", names)
+	}
+}
+
+// ─── per-version directories ────────────────────────────────────
+
+func mustEnsureVersion(t *testing.T, base string, files ...File) string {
+	t.Helper()
+	dir, err := EnsureVersion(base, files)
+	if err != nil {
+		t.Fatalf("EnsureVersion: %v", err)
+	}
+	return dir
+}
+
+// two builds with different contents (a dev build next to an installed
+// one) each get their own directory: neither replaces nor deletes the
+// other's child or its same-named library.
+func TestEnsureVersionBuildsDoNotShareFiles(t *testing.T) {
+	base := cacheDir(t)
+	exeA := newFile("child-aaa", childData, true)
+	libA := newFile("libwebview.so", []byte("library A"), false)
+	exeB := newFile("child-bbb", append(bytes.Clone(childData), 'b'), true)
+	libB := newFile("libwebview.so", []byte("library B, another go-webview"), false)
+
+	dirA := mustEnsureVersion(t, base, exeA, libA)
+	dirB := mustEnsureVersion(t, base, exeB, libB)
+	if dirA == dirB || filepath.Dir(dirA) != base || filepath.Dir(dirB) != base {
+		t.Fatalf("version dirs %s and %s, want two distinct dirs in %s", dirA, dirB, base)
+	}
+	if filepath.Base(dirA) != Version([]File{exeA, libA}) {
+		t.Fatalf("dir %s is not named by Version", dirA)
+	}
+	// A's files are still exactly A's after B ran, and the other way round
+	for _, round := range []string{"after B", "after A again"} {
+		assertContent(t, filepath.Join(dirA, exeA.Name), exeA.Data)
+		assertContent(t, filepath.Join(dirA, libA.Name), libA.Data)
+		assertContent(t, filepath.Join(dirB, exeB.Name), exeB.Data)
+		assertContent(t, filepath.Join(dirB, libB.Name), libB.Data)
+		if round == "after B" {
+			mustEnsureVersion(t, base, exeA, libA)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		for _, d := range []string{base, dirA, dirB} {
+			if fi, err := os.Stat(d); err != nil || fi.Mode().Perm() != 0o700 {
+				t.Fatalf("%s mode = %v, %v; want 0700", d, fi.Mode().Perm(), err)
+			}
+		}
+	}
+}
+
+// only version directories and old-layout files nobody used for staleAfter
+// are collected; the one in use is refreshed so other builds keep it.
+func TestEnsureVersionCollectsOnlyStale(t *testing.T) {
+	base := cacheDir(t)
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mkdir := func(name string, old time.Duration) {
+		p := filepath.Join(base, name)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "child-x"), []byte("x"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		age(t, p, old)
+	}
+	mkfile := func(name string, old time.Duration) {
+		p := filepath.Join(base, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		age(t, p, old)
+	}
+	mkdir("0123456789abcdef", 2*staleAfter) // another build, long unused
+	mkdir("fedcba9876543210", time.Minute)  // another build, in use
+	mkdir("not-a-version", 2*staleAfter)    // not ours to judge
+	mkfile("child-flat", 2*staleAfter)      // the old flat layout
+	mkfile("libwebview.so", 2*staleAfter)
+	mkfile("child-flat-recent", time.Minute) // an old build still running
+
+	exe := newFile("child-new", childData, true)
+	current := Version([]File{exe})
+	// the current version, unused for long: it is refreshed, not collected
+	mkdir(current, 2*staleAfter)
+
+	dir := mustEnsureVersion(t, base, exe)
+	if filepath.Base(dir) != current {
+		t.Fatalf("dir = %s, want %s", dir, current)
+	}
+	want := []string{"child-flat-recent", current, "fedcba9876543210", "not-a-version"}
+	slices.Sort(want)
+	if names := dirNames(t, base); !slices.Equal(names, want) {
+		t.Fatalf("base holds %v after collection, want %v", names, want)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(fi.ModTime()) > time.Minute {
+		t.Fatalf("version dir time %v was not refreshed", fi.ModTime())
+	}
+	// the stale child inside the current dir went with the version's own
+	// collection, the verified one stayed
+	if names := dirNames(t, dir); !slices.Equal(names, []string{exe.Name}) {
+		t.Fatalf("version dir holds %v", names)
+	}
+}
+
+// the base and the version directory are both verified: a symlink at
+// either is refused and nothing is written through it.
+func TestEnsureVersionRefusesSymlinks(t *testing.T) {
+	exe := newFile("child-abc", childData, true)
+
+	real := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedBase := filepath.Join(t.TempDir(), "child")
+	if err := os.Symlink(real, linkedBase); err != nil {
+		t.Skipf("cannot create symlinks here: %v", err)
+	}
+	if _, err := EnsureVersion(linkedBase, []File{exe}); err == nil {
+		t.Fatal("EnsureVersion accepted a symlinked base")
+	}
+
+	base := cacheDir(t)
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(base, Version([]File{exe}))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureVersion(base, []File{exe}); err == nil {
+		t.Fatal("EnsureVersion accepted a symlinked version dir")
+	}
+	if names := dirNames(t, real); len(names) != 0 {
+		t.Fatalf("files written through a symlink: %v", names)
 	}
 }

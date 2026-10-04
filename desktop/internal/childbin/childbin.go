@@ -12,6 +12,15 @@
 // cheap next to starting a webview. A file that does not match is replaced
 // by an atomic rename, never executed.
 //
+// Every Verdana build and profile of the user shares that directory (a dev
+// build next to an installed one, two data dirs, an old instance still
+// running through an upgrade), and the library keeps the fixed name its
+// loader probes for. So EnsureVersion gives each set of contents its own
+// subdirectory, named from their hashes: builds with different contents
+// never write, replace or delete each other's files, and builds with the
+// same contents write the same bytes. Old version directories are removed
+// whole, and only once nobody has used them for a day.
+//
 // On Windows there is no owner or mode check: %LocalAppData% carries an
 // inherited ACL that only gives the user (plus SYSTEM and Administrators)
 // access, so the checks there are "not a symlink or reparse point" and the
@@ -21,6 +30,7 @@ package childbin
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +40,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"verdana/backend/fileutil"
 )
@@ -51,6 +62,15 @@ type File struct {
 // race each other's temp files or garbage collection.
 var mu sync.Mutex
 
+// staleAfter is how long a version directory must go unused (EnsureVersion
+// touches the one it returns) before another build removes it, and
+// tmpGrace how old a temp file must be before it is taken for a leftover
+// rather than another process's write in flight.
+const (
+	staleAfter = 24 * time.Hour
+	tmpGrace   = time.Minute
+)
+
 // CacheDir is the per-user directory the launcher runs its child from.
 func CacheDir() (string, error) {
 	base, err := os.UserCacheDir()
@@ -64,6 +84,58 @@ func CacheDir() (string, error) {
 // one of them was verified (or written from Data) in this call. It never
 // leaves a file at a final name whose content it has not hashed or written.
 func Ensure(dir string, files []File) error {
+	if err := checkFiles(files); err != nil {
+		return err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return ensureLocked(dir, files)
+}
+
+// EnsureVersion is Ensure in base's subdirectory for these exact files (see
+// Version) and returns that directory. base is verified like the directory
+// itself. The directory's time is refreshed on every call, and version
+// directories nobody refreshed for staleAfter are removed afterwards, so a
+// build never deletes the files another build is about to run.
+func EnsureVersion(base string, files []File) (string, error) {
+	if err := checkFiles(files); err != nil {
+		return "", err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("childbin: create %s: %w", base, err)
+	}
+	if err := verifyDir(base); err != nil {
+		return "", err
+	}
+	version := Version(files)
+	dir := filepath.Join(base, version)
+	if err := ensureLocked(dir, files); err != nil {
+		return "", err
+	}
+	// in use: another build's collection leaves it alone for staleAfter
+	now := time.Now()
+	os.Chtimes(dir, now, now)
+	collectVersions(base, version, now)
+	return dir, nil
+}
+
+// Version names the directory for a set of files: the first 16 hex digits
+// of a sha256 over each file's name and content hash, so any change to
+// either gives a new directory.
+func Version(files []File) string {
+	h := sha256.New()
+	for _, f := range files {
+		h.Write([]byte(f.Name))
+		h.Write([]byte{0})
+		h.Write(f.Sum[:])
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+func checkFiles(files []File) error {
 	if len(files) == 0 {
 		return errors.New("childbin: no files to ensure")
 	}
@@ -72,10 +144,11 @@ func Ensure(dir string, files []File) error {
 			return err
 		}
 	}
+	return nil
+}
 
-	mu.Lock()
-	defer mu.Unlock()
-
+// ensureLocked is Ensure with mu held.
+func ensureLocked(dir string, files []File) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("childbin: create %s: %w", dir, err)
 	}
@@ -87,16 +160,18 @@ func Ensure(dir string, files []File) error {
 			return err
 		}
 	}
-	collect(dir, files)
+	collect(dir, files, time.Now())
 	return nil
 }
 
 // collect removes older child versions and leftover temp files once the
 // current files are in place. Only "child-*" and ".tmp-*" entries are
-// touched, never a name in keep, in whatever order ReadDir gives them.
-// Errors are ignored: Windows refuses to delete a program that is running,
-// and the next collection will get it.
-func collect(dir string, keep []File) {
+// touched, never a name in keep, in whatever order ReadDir gives them, and
+// a temp file only once it is tmpGrace old: a younger one may be another
+// process writing the same version right now. Errors are ignored: Windows
+// refuses to delete a program that is running, and the next collection
+// will get it.
+func collect(dir string, keep []File, now time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -109,8 +184,56 @@ func collect(dir string, keep []File) {
 		if slices.ContainsFunc(keep, func(f File) bool { return f.Name == name }) {
 			continue
 		}
+		if strings.HasPrefix(name, ".tmp-") && !olderThan(e, now, tmpGrace) {
+			continue
+		}
 		os.Remove(filepath.Join(dir, name))
 	}
+}
+
+// collectVersions removes from base the version directories other than
+// keep, and the files an earlier flat layout left directly in base, once
+// they have gone unused for staleAfter. A version directory a running build
+// refreshed recently is never touched, and neither is anything that is not
+// a plain directory or file. Errors are ignored, as in collect.
+func collectVersions(base, keep string, now time.Time) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == keep || !olderThan(e, now, staleAfter) {
+			continue
+		}
+		path := filepath.Join(base, name)
+		switch {
+		case e.Type().IsDir() && isVersionName(name):
+			os.RemoveAll(path)
+		case e.Type().IsRegular():
+			os.Remove(path)
+		}
+	}
+}
+
+// isVersionName says whether name is what Version returns.
+func isVersionName(name string) bool {
+	if len(name) != 16 {
+		return false
+	}
+	for _, c := range name {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// olderThan says whether e was last modified more than d before now. An
+// entry that can't be stat'ed counts as recent, so it is left alone.
+func olderThan(e fs.DirEntry, now time.Time, d time.Duration) bool {
+	fi, err := e.Info()
+	return err == nil && now.Sub(fi.ModTime()) > d
 }
 
 // checkFile refuses a File Ensure must not write: an empty one (fail closed

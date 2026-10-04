@@ -230,8 +230,9 @@ func killAllChildren() {
 	log.Info().Int("count", len(snapshot)).Msg("killed all child processes")
 }
 
-// childCacheDir is the directory prepareChild runs the child from; a test
-// seam.
+// childCacheDir is the per-user directory prepareChild keeps the child
+// under, one subdirectory per build contents (childbin.EnsureVersion); a
+// test seam.
 var childCacheDir = childbin.CacheDir
 
 // childFiles is the one list of files the child needs next to it in the
@@ -253,9 +254,11 @@ func childFiles(data []byte, sum [32]byte) []childbin.File {
 
 // prepareChild makes sure the child program in the per-user cache dir holds
 // exactly the bytes this launcher carries (hashed in this call) and returns
-// its path and the directory. It runs before every spawn. In prod every
-// error wraps backend.ErrWindowProgramUnavailable: the window then fails to
-// open and nothing else is executed in its place.
+// its path and the directory, which is this build's own version directory
+// (WEBVIEW_PATH points there), so other builds never touch its files. It
+// runs before every spawn. In prod every error wraps
+// backend.ErrWindowProgramUnavailable: the window then fails to open and
+// nothing else is executed in its place.
 func prepareChild() (exe, dir string, err error) {
 	defer func() {
 		if err == nil {
@@ -276,13 +279,14 @@ func prepareChild() (exe, dir string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	dir, err = childCacheDir()
+	base, err := childCacheDir()
 	if err != nil {
 		return "", "", err
 	}
 	files := childFiles(data, sum)
+	dir = filepath.Join(base, childbin.Version(files))
 	exe = filepath.Join(dir, files[0].Name)
-	if err := childbin.Ensure(dir, files); err != nil {
+	if _, err := childbin.EnsureVersion(base, files); err != nil {
 		return exe, dir, err
 	}
 	return exe, dir, nil

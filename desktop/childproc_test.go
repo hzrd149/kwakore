@@ -15,6 +15,7 @@ import (
 	"time"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/internal/childbin"
 	"fiatjaf.com/verdana/desktop/internal/webviewlib"
 )
 
@@ -111,12 +112,14 @@ func countStarts(t *testing.T) *int {
 }
 
 func TestPrepareChildRunsTheHashedChild(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "Verdana", "child")
-	useChildCacheDir(t, dir)
+	base := filepath.Join(t.TempDir(), "Verdana", "child")
+	useChildCacheDir(t, base)
 	data, sum, err := childSource()
 	if err != nil {
 		t.Skipf("no child built: %v", err)
 	}
+	// this build's own version directory under the per-user dir
+	dir := filepath.Join(base, childbin.Version(childFiles(data, sum)))
 
 	exe, gotDir, err := prepareChild()
 	if err != nil {
@@ -211,8 +214,10 @@ func TestPrepareChildPassesWebviewPath(t *testing.T) {
 	}
 	want := sha256.Sum256(moduleWebviewLib(t))
 
-	dir := filepath.Join(t.TempDir(), "Verdana", "child")
-	useChildCacheDir(t, dir)
+	base := filepath.Join(t.TempDir(), "Verdana", "child")
+	useChildCacheDir(t, base)
+	data, sum, _ := childSource()
+	dir := filepath.Join(base, childbin.Version(childFiles(data, sum)))
 	// an inherited value, as go-webview's old embedded init used to set
 	t.Setenv("WEBVIEW_PATH", filepath.Join(os.TempDir(), "webview-0.12.0"))
 
