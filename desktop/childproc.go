@@ -19,6 +19,7 @@ import (
 	"verdana/backend"
 
 	"fiatjaf.com/verdana/desktop/internal/childbin"
+	"fiatjaf.com/verdana/desktop/internal/webviewlib"
 	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
 
@@ -46,7 +47,7 @@ var (
 // process is up: the napp's own readiness is observed later, when it registers
 // its actions.
 func startChild(spec backend.WindowSpec) (backend.Transport, error) {
-	exe, _, err := prepareChild()
+	exe, dir, err := prepareChild()
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +65,9 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_FORMAT="+spec.Format,
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
+		// last, so it wins over an inherited value (os/exec keeps the last
+		// duplicate): the child loads libwebview only from the verified dir
+		"WEBVIEW_PATH="+dir,
 	)
 	ct, err := spawnChild(childCmd(exe, env), spec.Instance, false)
 	if err != nil {
@@ -77,7 +81,7 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 // startSettingsChild spawns the webview process for a napp's settings window:
 // the same child, in its settings mode, serving the launcher's settings page.
 func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
-	exe, _, err := prepareChild()
+	exe, dir, err := prepareChild()
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +94,8 @@ func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
 		"VERDANA_WINDOW_HEIGHT=720",
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
+		// last, like in startChild
+		"WEBVIEW_PATH="+dir,
 	)
 	ct, err := spawnChild(childCmd(exe, env), spec.Window, true)
 	if err != nil {
@@ -235,7 +241,14 @@ func childFiles(data []byte, sum [32]byte) []childbin.File {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	return []childbin.File{{Name: name, Data: data, Sum: sum, Exec: true}}
+	return []childbin.File{
+		{Name: name, Data: data, Sum: sum, Exec: true},
+		// the webview library the child loads, under the fixed name
+		// go-webview's loader probes for; on Windows it sits next to the
+		// child exe, where LoadLibrary("webview.dll") looks first. A target
+		// without a library has empty Data, which Ensure refuses.
+		{Name: webviewlib.Name, Data: webviewlib.Data, Sum: webviewlib.Sum(), Exec: false},
+	}
 }
 
 // prepareChild makes sure the child program in the per-user cache dir holds

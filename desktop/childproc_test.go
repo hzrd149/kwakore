@@ -3,15 +3,19 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 	"verdana/backend"
+
+	"fiatjaf.com/verdana/desktop/internal/webviewlib"
 )
 
 // TestHelperChildProcess is not a test: TestReadChildKillsOverlongLine runs
@@ -175,6 +179,84 @@ func TestPrepareChildFailsClosedOnSymlinkedDir(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(real); len(entries) != 0 {
 		t.Fatalf("files written through the symlinked dir: %d", len(entries))
+	}
+}
+
+// moduleWebviewLib reads go-webview's own copy of the library for the running
+// target from the module cache.
+func moduleWebviewLib(t *testing.T) []byte {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go tool not on PATH")
+	}
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/abemedia/go-webview").Output()
+	if err != nil {
+		t.Fatalf("go list go-webview: %v", err)
+	}
+	path := filepath.Join(strings.TrimSpace(string(out)), "embedded",
+		runtime.GOOS+"_"+runtime.GOARCH, webviewlib.Name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the module's library: %v", err)
+	}
+	return data
+}
+
+func TestPrepareChildPassesWebviewPath(t *testing.T) {
+	if _, _, err := childSource(); err != nil {
+		t.Skipf("no child built: %v", err)
+	}
+	if webviewlib.Name == "" {
+		t.Skipf("no webview library for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	want := sha256.Sum256(moduleWebviewLib(t))
+
+	dir := filepath.Join(t.TempDir(), "Verdana", "child")
+	useChildCacheDir(t, dir)
+	// an inherited value, as go-webview's old embedded init used to set
+	t.Setenv("WEBVIEW_PATH", filepath.Join(os.TempDir(), "webview-0.12.0"))
+
+	old := cmdStart
+	t.Cleanup(func() { cmdStart = old })
+	var seen []*exec.Cmd
+	cmdStart = func(c *exec.Cmd) error {
+		seen = append(seen, c)
+		return errors.New("not started in tests")
+	}
+	startChild(backend.WindowSpec{NappID: "n", Instance: "i"})
+	startSettingsChild(backend.SettingsSpec{NappID: "n", Window: "w"})
+	if len(seen) != 2 {
+		t.Fatalf("%d commands prepared, want 2", len(seen))
+	}
+	for i, cmd := range seen {
+		last := cmd.Env[len(cmd.Env)-1]
+		if last != "WEBVIEW_PATH="+dir {
+			t.Errorf("command %d: last env entry = %q, want WEBVIEW_PATH=%s", i, last, dir)
+		}
+		if filepath.Dir(cmd.Path) != dir {
+			t.Errorf("command %d runs %s, not from %s", i, cmd.Path, dir)
+		}
+	}
+
+	// the library sits in that dir, holding exactly the module's bytes
+	lib := filepath.Join(dir, webviewlib.Name)
+	got, err := os.ReadFile(lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256.Sum256(got) != want {
+		t.Fatalf("%s does not hold the go-webview module's library", lib)
+	}
+
+	// a planted library is replaced before the next spawn
+	if err := os.WriteFile(lib, []byte("not a library"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepareChild(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(lib); sha256.Sum256(got) != want {
+		t.Fatal("planted library survived prepareChild")
 	}
 }
 

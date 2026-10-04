@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 
 	"github.com/abemedia/go-webview"
-	_ "github.com/abemedia/go-webview/embedded"
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
 
@@ -88,6 +87,12 @@ func main() {
 
 	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Msg("napp process started")
 	outEnc = json.NewEncoder(os.Stdout)
+
+	// before the library is loaded (lazily, by the first webview.New)
+	if err := checkWebviewLibrary(); err != nil {
+		log.Error().Err(err).Msg("webview library is not where the launcher put it")
+		os.Exit(1)
+	}
 
 	runtime.LockOSThread()
 
