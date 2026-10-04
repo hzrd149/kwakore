@@ -29,8 +29,9 @@ func needNode(t *testing.T) string {
 
 // scopeProbe runs the activation script in a fresh node vm context standing in
 // for the napplet frame's global scope (window is the global itself, parent
-// takes posts, addEventListener is a no-op), and reports what it left behind.
-// A second fresh context runs the bare prelude, as a control.
+// records posts, addEventListener is a no-op), and reports what it left behind
+// and what it posted to the host page. A second fresh context runs the bare
+// prelude, as a control.
 const scopeProbe = `
 const vm = require("node:vm")
 let input = ""
@@ -42,7 +43,8 @@ process.stdin.on("end", () => {
     const sandbox = { crypto: globalThis.crypto, setTimeout, clearTimeout, console }
     const ctx = vm.createContext(sandbox)
     sandbox.window = ctx
-    sandbox.parent = { postMessage() {} }
+    const posts = []
+    sandbox.parent = { postMessage(message, target) { posts.push({ message, target }) } }
     sandbox.addEventListener = () => {}
     const before = new Set(vm.runInContext("Object.getOwnPropertyNames(globalThis)", ctx))
     vm.runInContext(code, ctx)
@@ -51,6 +53,7 @@ process.stdin.on("end", () => {
       added: after.filter(name => !before.has(name)).sort(),
       prelude: vm.runInContext("typeof NappletShimPrelude", ctx),
       domains: vm.runInContext("typeof napplet === 'object' && napplet ? Object.keys(napplet) : null", ctx),
+      posts: JSON.parse(JSON.stringify(posts)),
     }
   }
   process.stdout.write(JSON.stringify({ wrapped: frame(script), control: frame(prelude) }))
@@ -58,9 +61,16 @@ process.stdin.on("end", () => {
 `
 
 type scopeReport struct {
-	Added   []string `json:"added"`
-	Prelude string   `json:"prelude"`
-	Domains []string `json:"domains"`
+	Added   []string    `json:"added"`
+	Prelude string      `json:"prelude"`
+	Domains []string    `json:"domains"`
+	Posts   []scopePost `json:"posts"`
+}
+
+// scopePost is one parent.postMessage call the activation made.
+type scopePost struct {
+	Message map[string]any `json:"message"`
+	Target  string         `json:"target"`
 }
 
 // activationScript is the launcher's inline script: the text between the
@@ -131,6 +141,21 @@ func TestSrcdocLeavesOnlyWindowNapplet(t *testing.T) {
 	slices.Sort(have)
 	if !slices.Equal(have, want) {
 		t.Errorf("window.napplet domains = %v, want %v", have, want)
+	}
+
+	// D-18: the activation posts the document-start marker and nothing else,
+	// exactly once, to "*" (the host page is addressed by window, not origin)
+	if len(got.Wrapped.Posts) != 1 {
+		t.Errorf("the activation posted %d messages, want exactly the document marker: %+v", len(got.Wrapped.Posts), got.Wrapped.Posts)
+	} else {
+		post := got.Wrapped.Posts[0]
+		if len(post.Message) != 1 || post.Message["type"] != webview.DocumentMarker || post.Target != "*" {
+			t.Errorf("posted %+v, want {type: %q} to \"*\"", post, webview.DocumentMarker)
+		}
+	}
+	// the bare prelude posts nothing: the marker is the launcher's, not the shim's
+	if len(got.Control.Posts) != 0 {
+		t.Errorf("the bare prelude posted %+v", got.Control.Posts)
 	}
 
 	// the control proves the probe has teeth: unwrapped, the prelude's

@@ -553,6 +553,132 @@ return {
 	}
 }
 
+// D-18 edges: the orderings the spike saw and the messages a napplet or a
+// stranger can forge. Markers count only from the current frame, only when
+// their type is the marker string itself, and never produce a post anywhere.
+func TestNappletHostMarkerEdgeCases(t *testing.T) {
+	t.Run("a first marker after the first load rebuilds nothing", func(t *testing.T) {
+		var got struct {
+			Boots, Resets, Appended, Loaded, Msgs, Posted int
+		}
+		runHost(t, markerSetup(`handlers["nap.boot"] = () => ({ srcdoc: "doc", title: "probe" })`), `
+await flush()
+const f0 = appended[0]
+fireLoad(f0)
+await flush()
+fireMessage(f0.contentWindow, { type: MARKER })
+await flush(6)
+return {
+  Boots: count("nap.boot"), Resets: count("nap.reset"), Appended: appended.length,
+  Loaded: count("nap.loaded"), Msgs: count("nap.msg"), Posted: f0.contentWindow.posted.length,
+}
+`, &got)
+		if got.Boots != 1 || got.Resets != 0 || got.Appended != 1 || got.Loaded != 1 || got.Msgs != 0 || got.Posted != 0 {
+			t.Errorf("load then marker: nap.boot %d, nap.reset %d, frames %d, nap.loaded %d, nap.msg %d, posted %d; want 1, 0, 1, 1, 0, 0",
+				got.Boots, got.Resets, got.Appended, got.Loaded, got.Msgs, got.Posted)
+		}
+	})
+
+	t.Run("forged and foreign markers are not counted", func(t *testing.T) {
+		var got struct {
+			Boots, Resets, Msgs, Posted int
+			Errors                      []string
+			Replaced                    bool
+		}
+		runHost(t, markerSetup(`handlers["nap.boot"] = () => ({ srcdoc: "doc", title: "probe" })`), `
+await flush()
+const f0 = appended[0]
+fireMessage(f0.contentWindow, { type: MARKER })
+fireLoad(f0)
+await flush()
+// a stranger and a sourceless message, however many, are not the frame
+const stranger = { posted: [], postMessage(m) { this.posted.push(m) } }
+for (let i = 0; i < 3; i++) {
+  fireMessage(stranger, { type: MARKER })
+  fireMessage(null, { type: MARKER })
+}
+// the frame's own messages whose type only looks like the marker
+fireMessage(f0.contentWindow, { type: 5 })
+fireMessage(f0.contentWindow, { type: new String(MARKER) })
+fireMessage(f0.contentWindow, { type: MARKER + " " })
+fireMessage(f0.contentWindow, { type: [MARKER] })
+fireMessage(f0.contentWindow, MARKER)
+fireMessage(f0.contentWindow, null)
+await flush(6)
+const before = { boots: count("nap.boot"), resets: count("nap.reset") }
+// the real second marker still replaces: none of the above was counted as
+// the first, and the frame is still current
+fireMessage(f0.contentWindow, { type: MARKER })
+await flush(6)
+return {
+  Boots: before.boots, Resets: before.resets,
+  Msgs: rpcs.filter(r => r.method === "nap.msg" && r.params.includes("__verdana")).length,
+  Posted: f0.contentWindow.posted.length + stranger.posted.length,
+  Errors: errors, Replaced: f0.removed && count("nap.reset") === 1 && count("nap.boot") === 2,
+}
+`, &got)
+		if got.Boots != 1 || got.Resets != 0 {
+			t.Errorf("forged or foreign markers rebuilt the frame: nap.boot %d, nap.reset %d; want 1, 0", got.Boots, got.Resets)
+		}
+		// the near-miss string type is an ordinary envelope Go refuses; the
+		// marker itself and the non-string types never become a nap.msg
+		if got.Msgs != 1 {
+			t.Errorf("%d nap.msg carry the marker name, want 1 (the %q near miss only)", got.Msgs, DocumentMarker+" ")
+		}
+		if !got.Replaced {
+			t.Error("the frame's real second marker did not replace it")
+		}
+		if got.Posted != 0 || len(got.Errors) != 0 {
+			t.Errorf("posts into the frame or the stranger %d, host page errors %v; want none", got.Posted, got.Errors)
+		}
+	})
+
+	t.Run("a marker is never answered", func(t *testing.T) {
+		var got struct{ Posted, Msgs int }
+		runHost(t, markerSetup(`handlers["nap.boot"] = () => ({ srcdoc: "doc", title: "probe" })`), `
+await flush()
+const f0 = appended[0]
+fireMessage(f0.contentWindow, { type: MARKER, id: "m1" })
+fireLoad(f0)
+await flush(6)
+return { Posted: f0.contentWindow.posted.length, Msgs: count("nap.msg") }
+`, &got)
+		if got.Posted != 0 || got.Msgs != 0 {
+			t.Errorf("a marker carrying an id: %d posts into the frame, %d nap.msg; want 0, 0", got.Posted, got.Msgs)
+		}
+	})
+
+	t.Run("an extra marker in a live document counts toward the reload cap", func(t *testing.T) {
+		var got struct {
+			Boots, Resets, Appended, Live int
+			Body                          string
+		}
+		runHost(t, markerSetup(reloadLoopSetup), `
+await flush()
+// each document announces itself and loads; then the napplet posts a second
+// marker on its own, with no reload: alternately by marker and by load, the
+// four quick replacements share one cap
+for (let i = 0; i < 4; i++) {
+  const f = appended[i]
+  now += 500
+  fireMessage(f.contentWindow, { type: MARKER })
+  fireLoad(f)
+  await flush()
+  if (i % 2 === 0) fireMessage(f.contentWindow, { type: MARKER })
+  else fireLoad(f)
+  await flush(6)
+}
+return { Boots: count("nap.boot"), Resets: count("nap.reset"), Appended: appended.length, Live: live().length, Body: document.body.textContent }
+`, &got)
+		if got.Boots != 4 || got.Resets != 4 || got.Appended != 4 || got.Live != 0 {
+			t.Errorf("nap.boot %d, nap.reset %d, frames %d, live %d; want 4, 4, 4, 0", got.Boots, got.Resets, got.Appended, got.Live)
+		}
+		if !strings.Contains(got.Body, "keeps reloading itself") {
+			t.Errorf("window text after the halt = %q", got.Body)
+		}
+	})
+}
+
 // SBOX-01, D-02: a refusal the host page builds belongs to the frame that sent
 // the envelope. One whose frame was replaced while the envelope was out is
 // dropped: it never reaches the replaced document or the one rebuilt after it.
