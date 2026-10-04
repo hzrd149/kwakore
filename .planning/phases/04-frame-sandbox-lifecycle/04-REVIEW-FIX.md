@@ -1,86 +1,65 @@
 ---
 phase: 04-frame-sandbox-lifecycle
-fixed_at: 2026-10-04T19:32:39Z
+fixed_at: 2026-10-04T19:44:50Z
 review_path: .planning/phases/04-frame-sandbox-lifecycle/04-REVIEW.md
-iteration: 2
-findings_in_scope: 5
-fixed: 5
+iteration: 3
+findings_in_scope: 3
+fixed: 3
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 4: Code Review Fix Report
 
-**Fixed at:** 2026-10-04T19:32:39Z
+**Fixed at:** 2026-10-04T19:44:50Z
 **Source review:** .planning/phases/04-frame-sandbox-lifecycle/04-REVIEW.md
-**Iteration:** 2
+**Iteration:** 3 (final pass)
 
 **Summary:**
-- Findings in scope: 5. That is WR-04 and WR-05, plus IN-06, IN-07 and IN-08. IN-01 and IN-04 were left out by the scope.
-- Fixed: 5
+- Findings in scope: 3. That is WR-06, plus IN-10 and IN-09, which were small and safe enough to take.
+- Fixed: 3
 - Skipped: 0
+- Still open, by scope: IN-01 (the lane's success path is not bound to the sending frame, `napplet-host.js:259-262`) and IN-04 (the fake launcher in `smoke_test.go` answers rpcs synchronously and does not bump `gen` on `nap.reset`). Both were carried forward unchanged from iteration 1.
 
 ## Fixed Issues
 
-### WR-04: The `nav-js` step never exercises the residual
+### WR-06: `windowFailed` is accepted from every window kind, including Android napp pages
 
-**Files modified:** `backend/testdata/adversarial-napplet/index.html`, `desktop/child/smoke_test.go`, `spec/CONFORMANCE.md`
-**Commit:** 9a3d8fc
+**Files modified:** `backend/window_instances.go`, `backend/window_instances_test.go`, `backend/wire.go`, `spec/CONFORMANCE.md`
+**Commit:** dc64579
 **Applied fix:**
-- After it posts its report, `residualProbe` now holds back its document's load with the same 40 MB `data:` image as `leakDoc`. The hold was enough: the CONFORMANCE fallback wording was not needed.
-- On WebKitGTK 2.52.6 the post-load `nav-js` report now arrives in every run (8 of 8). It shows `eval` refused, `WebSocket` refused and `window.napplet` undefined. The fixture's tally went from 31 to 32 PASS.
-- `TestWebKitNappletAdversarial` now fails when the report from `nav-js` or `doc-open-unclosed` is missing. `TestWebKitNappletJavascriptBeforeLoad` already required the early report. The early mode is unchanged by the hold: 1 `nap.start`, 1 `nap.loaded`, 0 `nap.reset`.
-- The `NIP-5D-reload-residual` row now states what the fixture pins: each replacing document holds back its load, and the smoke requires the report from all three, with the inherited policy and no connection. It does not assert a rebuild.
+- `HandleMessage` now accepts `windowFailed` only from a window with a NAP session (`ci.nap != nil`, which is set exactly when `napp.IsNapplet()`). From any other window it is dropped and raises no notice. The only log is a Debug line, sampled.
+- A new sampler, `windowFailedBurst` (5 lines per minute), bounds both the drop line and the unknown-code Warn. It is separate from `wireDropBurst` so that tests can swap it out on its own.
+- An unknown code is logged as `loggableWireCode(code)`, with `code_len` beside it. `loggableWireCode` cuts the code to `maxLoggedWireCode` (64) bytes and replaces every byte that is not printable ASCII with `?`.
+- New tests:
+  - `TestWindowFailedOnlyFromNapplets`: 20 forged messages from a 35130 window raise no notice and no Error line, and only the burst of Debug lines is logged.
+  - `TestWindowFailedUnknownCodeLog`: a code of about 1 MiB with an ESC and a newline is logged only as many times as the burst allows. Each line holds the exact cut, sanitized prefix and the real length.
+- I checked that both tests fail on the code as it was before this fix.
+- `wire.go` now documents the message as napplet-only. The CONFORMANCE `5D-NG-webkitgtk` row now says the same and names the two new tests.
 
-### WR-05: A feature API without `LinkPreconnect` opens the napplet with only a Warn
+### IN-10: The notice's advice does not fit the WR-05 failure or the non-switch failures
 
-**Files modified:** `desktop/child/harden_linux.go`, `desktop/child/harden_linux_test.go`, `spec/CONFORMANCE.md`
-**Commit:** aaed4fd
+**Files modified:** `backend/launcher_notices.go`
+**Commit:** c22ac72
 **Applied fix:**
-- `disableFeature` wraps `errNoSwitch` only when the feature API is missing, which means WebKitGTK older than 2.42.
-- If the API exists but has no `LinkPreconnect` id, it now returns a plain error. The napplet window is refused.
-- In `TestHardenWindowFailsClosed`, that case moved to the refused outcomes, and an empty-feature-list case was added.
-- The `5D-NG-webkitgtk` row now lists the missing feature among the fail-closed paths and narrows the residual to "older than 2.42".
-- The review's optional extra (showing the degraded state inside the window) was not done. The pre-2.42 case still only logs a Warn, as before.
+- The title stays "A napplet was closed before it ran".
+- The detail is now a fixed constant: "Verdana couldn't switch off unsafe features of this system's web engine, so it did not run the napplet. Updating Verdana or the system web engine may help."
+- It no longer names WebKitGTK as the fix, or a particular switch as the cause. A comment records why the copy stays neutral.
+- `TestWindowFailedRaisesNotice` compares the notice against the constant, so no test change was needed.
 
-### IN-06: A napplet refused for failed hardening vanishes with no reason
+### IN-09: A trial napplet refused for failed hardening still gets the "Did you like it? Install it" prompt
 
-**Files modified:** `desktop/child/napplet.go`, `desktop/child/harden_test.go`, `backend/window_instances.go`, `backend/launcher_notices.go`, `backend/wire.go`, `backend/window_instances_test.go`, `spec/CONFORMANCE.md`
-**Commit:** 60ef58a
+**Files modified:** `backend/window_instances.go`, `backend/window_instances_test.go`
+**Commit:** 4f66186
 **Applied fix:**
-- Before `os.Exit(1)`, `runNapplet` now writes `{"t":"windowFailed","code":"engine-hardening"}`.
-- `HandleMessage` maps that fixed code to a new launcher notice, using the existing Phase 3 notice stack:
-  - ID `napplet-hardening`, kind error.
-  - Title: "A napplet was closed before it ran".
-  - It is ordered right after child-unavailable, and is session-only like it.
-- No text from the child reaches the user. An unknown code is only logged.
-- Tests:
-  - `TestReportWindowFailed` pins the child's exact line.
-  - `TestEngineSetupOrder` requires `reportWindowFailed` before `os.Exit` in the hardening error branch. A mutation check confirmed that removing the call fails the test.
-  - `TestWindowFailedRaisesNotice` feeds the same line through `HandleWireMessage`. It checks the notice, de-duplication, ordering, a dismissal that is not persisted, and that an unknown code or an unknown window shows nothing.
-- `5D-NG-webkitgtk` cites the new path and tests.
-- The full path was not exercised on screen, because this WebKitGTK hardens successfully. Only the two halves were tested.
-
-### IN-07: The open MUST residual has no owner
-
-**Files modified:** `spec/CONFORMANCE.md`, `backend/spec_conformance_test.go`
-**Commit:** 46fd189
-**Applied fix:**
-- The `NIP-5D-reload-residual` Owner text now names `SEED-002` and its file, `.planning/seeds/SEED-002-napplet-self-replacement-detection.md`.
-- `TestConformanceChecklistSkeleton` now requires the row to keep naming it.
-
-### IN-08: DEC-6 states the settings window's switches as unconditional
-
-**Files modified:** `spec/CONFORMANCE.md`
-**Commit:** 61b8afc
-**Applied fix:**
-- DEC-6 now says that napplet windows fail closed.
-- It also says the settings window is hardened best effort: it runs no napp code and has no untrusted HTML sink, so on a hardening error it logs an Error and still opens.
-- It cites `runNapplet` and `runSettings`. I grepped `napplet-settings.js` and confirmed the "no sink" claim: it has no `innerHTML`, `insertAdjacentHTML`, or `src`/`href` assignment.
+- `Instance` has a new field, `failedClosed atomic.Bool`. `windowFailed` sets it with a CompareAndSwap for the `engine-hardening` code. A repeat from the same window now neither logs nor raises the notice again.
+- When the flag is set, `WindowClosed` skips `finishNappletTrial` and calls `windows.Delete(ci.instance)`, the same way it treats auxiliary windows.
+- This is safe because of ordering. The desktop `readChild` handles `windowFailed` before the `WindowClosed` that follows EOF, and both run on one goroutine. Nothing is lost by skipping the trial step, because the napplet never ran and so wrote no trial storage.
+- New test, `TestWindowFailedClosesQuietly`: two trial napplets close, one after failed hardening and one normally. Only the normal one gets the install prompt, and only the failed one loses its window record. I checked that the test fails without the fix: two prompts are queued.
 
 ## Verification
 
-At the user's request, every gate ran in the main checkout on `master`, with no worktree, at commit 61b8afc. `desktop/child/child` was rebuilt there afterwards.
+As in iteration 2, every gate ran in the main checkout on `master`, with no worktree, at commit 4f66186. `desktop/child/child` was rebuilt there.
 
 **backend**
 - `gofmt -l .` is clean.
@@ -92,21 +71,13 @@ At the user's request, every gate ran in the main checkout on `master`, with no 
 - `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...` passes.
 
 **desktop**
-- `go generate ./internal/webviewlib && go build -o child/child ./child && go test -race -count=1 -tags novulkan ./...` passes.
-- `go vet -tags novulkan ./...` passes.
+- `go generate ./internal/webviewlib && go build -o child/child ./child && go test -race -tags novulkan ./...` passes.
 - `GOOS=windows CGO_ENABLED=0 go vet -tags novulkan ./...` passes.
 
-**WebKit smoke**
-- Command: `VERDANA_WEBKIT_SMOKE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags novulkan -run '^TestWebKit' -v ./child`, on WebKitGTK 2.52.6 with DISPLAY=:0.
-- 3 of 3 idle runs passed (`smoke_idle1..3.log`).
-- 2 of 2 runs passed under 40 busy shell loops on 20 cores (`smoke_load1..2.log`).
-- All five WebKit tests passed in every run.
-- Every run reported `DONE 32 PASS, 0 FAIL, 12 INFO` and the `nav-js` residual report.
-
-**Logs** are in `/tmp/claude-1000/-home-user-Projects-verdana/a09b2a20-a933-474d-991e-339bbba43438/scratchpad/fix2/`: `backend_gates.log`, `desktop_gates.log`, `smoke_idle*.log`, `smoke_load*.log`, `wr04_adv1.log` and `wr04_early1.log`.
+**Not re-run:** the WebKit smoke (`VERDANA_WEBKIT_SMOKE=1`). This iteration changed only backend handling and copy. The child and the host page were not touched.
 
 ---
 
-_Fixed: 2026-10-04T19:32:39Z_
+_Fixed: 2026-10-04T19:44:50Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
