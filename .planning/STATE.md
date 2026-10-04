@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-10-04T03:21:41.649Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-10-04T03:33:54.501Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 03 execution started
-state_head: 515894de9a6bebf65c8c5943876a13b37d80e9dd
+state_head: 8a3fcef7aa6e4b309e9b3326a64aa8491f51499e
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 15
+  completed_plans: 16
   percent: 25
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
-Plan: 4 of 10
+Plan: 5 of 10
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 03 execution started
 
@@ -74,6 +74,7 @@ Progress: [███░░░░░░░] 25% (2/8 phases)
 | Phase 03 P01 | 6min | 3 tasks | 12 files |
 | Phase 03 P05 | 10 min | 3 tasks | 12 files |
 | Phase 03 P02 | 4 min | 3 tasks | 13 files |
+| Phase 03 P03 | 11 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -126,6 +127,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: single-instance channel is a user-only Unix socket (peer uid checked both ends) or owner-only named pipe with server-SID check; v2 one-line protocol, TCP and launcher.port removed
 - [Phase 03]: 03-05: the instance server runs a command only after its ok reply was written, so a retrying sender never gets it run twice
 - [Phase 03]: 03-02: every Host.OpenLink validates with netguard.ExternalLink itself and passes only the normalized url; desktop saveFile uses the exclusive write (WriteFileNew) as its only free-name check
+- [Phase 03]: 03-03: childbin.Ensure keeps a file only if regular, ours, exact mode/size and full sha256 match (open+SameFile); otherwise atomic replace, symlinks replaced not followed; gc of child-*/.tmp-* only after success
+- [Phase 03]: 03-03: child-unavailable notice raised at the single host.OpenWindow call in launchWindow and in openSettings; only store Launch sets the generic reinstall FetchErr; desktop prepareChild calls showManager on fail-closed
+- [Phase 03]: 03-03: dev builds run the on-disk child through the same verified per-user dir but never wrap errors in ErrWindowProgramUnavailable
 
 ### Pending Todos
 
@@ -155,6 +159,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T03:21:41.588Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-10-04T03:33:54.447Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
