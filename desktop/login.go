@@ -50,6 +50,24 @@ func newLoginScreen() *loginScreen {
 	return s
 }
 
+// onLogin is what the Log in button runs, off the frame goroutine. Tests
+// swap it.
+var onLogin = backend.Login
+
+// loginButtonLabel is the Log in button's label. While a login is saving
+// its secrets and the keyring is slow or showing an unlock prompt
+// (03-UI-SPEC S4) the button says so, and its clicks are ignored.
+//
+// Today login() saves while the launcher is in PhaseLoading, so the user
+// sees the loading screen's keyring wait (S3) instead. This state is only
+// reachable if a future change saves secrets while in PhaseLogin (D-19).
+func loginButtonLabel(st backend.State) string {
+	if st.KeyringWait == keyringWaitWaiting {
+		return "Waiting for keyring…"
+	}
+	return "Log in"
+}
+
 // update handles the screen's input and follows the backend's state.
 func (s *loginScreen) update(gtx layout.Context, st backend.State) {
 	submitted := func(ed *widget.Editor) bool {
@@ -64,9 +82,13 @@ func (s *loginScreen) update(gtx layout.Context, st backend.State) {
 		}
 	}
 
-	if submitted(&s.ed) || s.btn.Clicked(gtx) {
+	// both are drained every frame, even while a keyring save is pending
+	// and they are ignored
+	submit := submitted(&s.ed)
+	clicked := s.btn.Clicked(gtx)
+	if (submit || clicked) && st.KeyringWait != keyringWaitWaiting {
 		if input := strings.TrimSpace(s.ed.Text()); input != "" {
-			go backend.Login(input)
+			go onLogin(input)
 		}
 	}
 	if s.connectBtn.Clicked(gtx) {
@@ -121,13 +143,20 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 			return t.Layout(gtx)
 		}
 	}
+	// loginErr is the error line under each view's controls; while a
+	// keyring save is pending it says what the login is waiting for instead
 	loginErr := func(gtx layout.Context) layout.Dimensions {
-		if st.LoginErr == "" {
+		msg, col := st.LoginErr, currentTheme().danger
+		if st.KeyringWait == keyringWaitWaiting {
+			msg = "Unlock your system keyring in the prompt your desktop shows to finish logging in."
+			col = currentTheme().subtle
+		}
+		if msg == "" {
 			return layout.Dimensions{}
 		}
 		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			l := material.Body2(th, st.LoginErr)
-			l.Color = currentTheme().danger
+			l := material.Body2(th, msg)
+			l.Color = col
 			return l.Layout(gtx)
 		})
 	}
@@ -148,7 +177,7 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						return material.Button(th, &s.btn, "Log in").Layout(gtx)
+						return material.Button(th, &s.btn, loginButtonLabel(st)).Layout(gtx)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 					layout.Rigid(subtle("or")),

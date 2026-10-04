@@ -594,9 +594,7 @@ func TestSecretsRoundTripEveryLocation(t *testing.T) {
 // ─── unavailable rows ───────────────────────────────────────────
 
 func keyringWait() string {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	return ls.keyringWait
+	return KeyringWait()
 }
 
 // file has secrets, location "" or file, keyring unavailable: file mode,

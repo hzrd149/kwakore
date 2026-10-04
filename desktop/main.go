@@ -323,6 +323,7 @@ func gioMain() {
 		shortcutEditBtns  []widget.Clickable
 	)
 	loginScr := newLoginScreen()
+	var loadingScr loadingScreen
 	devURLed.SingleLine = true
 	devPathEd.SingleLine = true
 	devList.Axis = layout.Vertical
@@ -575,9 +576,7 @@ func gioMain() {
 						st,
 					)
 				default:
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return material.Body1(th, "Loading\u2026").Layout(gtx)
-					})
+					return layoutLoading(gtx, th, &loadingScr, st.KeyringWait)
 				}
 			})
 

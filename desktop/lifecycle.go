@@ -17,9 +17,13 @@ var desktopLifecycle = struct {
 	store          *app.Window
 	storeStarting  bool
 	primaryPending bool
-	show           chan struct{}
-	quit           chan struct{}
-	once           sync.Once
+	// keyringShown is the KeyringWait the manager was last opened for
+	// while a primary was pending, so a slow keyring raises it once per
+	// state instead of on every state change.
+	keyringShown string
+	show         chan struct{}
+	quit         chan struct{}
+	once         sync.Once
 }{
 	show: make(chan struct{}, 1),
 	quit: make(chan struct{}),
@@ -62,17 +66,41 @@ func showPrimary() {
 	showPendingPrimary()
 }
 
+// currentPhase and currentKeyringWait read the backend for
+// showPendingPrimary; tests swap them. Both only take the backend's ls.mu,
+// so they are safe from a StateChanged callback.
+var (
+	currentPhase       = backend.Phase
+	currentKeyringWait = backend.KeyringWait
+)
+
 func showPendingPrimary() {
-	phase := backend.Phase()
+	phase := currentPhase()
+	wait := ""
 	if phase == backend.PhaseLoading {
-		return
+		wait = currentKeyringWait()
 	}
 	desktopLifecycle.Lock()
 	if !desktopLifecycle.primaryPending {
 		desktopLifecycle.Unlock()
 		return
 	}
+	if phase == backend.PhaseLoading {
+		// A resume can wait up to 2 minutes on a keyring unlock prompt
+		// (D-11). Without a window the user would see nothing, so once the
+		// backend reports a keyring wait the manager opens to show it, and
+		// again if that wait fails (D-19). The primary stays owed: when
+		// loading ends it opens as usual.
+		raise := wait != "" && wait != desktopLifecycle.keyringShown
+		desktopLifecycle.keyringShown = wait
+		desktopLifecycle.Unlock()
+		if raise {
+			showManager()
+		}
+		return
+	}
 	desktopLifecycle.primaryPending = false
+	desktopLifecycle.keyringShown = ""
 	desktopLifecycle.Unlock()
 	if phase == backend.PhaseMain {
 		showStore()

@@ -295,6 +295,15 @@ func Phase() string {
 	return ls.phase
 }
 
+// KeyringWait is State.KeyringWait on its own. Like Phase, it only takes
+// ls.mu, so a GUI can read it from its StateChanged callback without
+// building a whole Snapshot there.
+func KeyringWait() string {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.keyringWait
+}
+
 // waitStartupLogin blocks until the launcher's startup phase is over: the
 // login Start resumed has answered, or there was none to resume. Work that
 // opens napps right after a cold start waits for it, so those windows find a

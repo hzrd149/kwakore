@@ -12,6 +12,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -1142,5 +1143,128 @@ func renderNappCard(
 			call.Add(gtx.Ops)
 			return layout.Dimensions{Size: image.Point{X: sz.X, Y: dims.Size.Y}}
 		})
+	})
+}
+
+// ─── loading screen ─────────────────────────────────────────────────────
+
+// KeyringWait values (backend State.KeyringWait).
+const (
+	keyringWaitWaiting = "waiting"
+	keyringWaitFailed  = "failed"
+)
+
+// loadingScreen is the manager's loading phase widgets: the two ways out of
+// a keyring that could not be reached.
+type loadingScreen struct {
+	retryBtn      widget.Clickable
+	loginAgainBtn widget.Clickable
+}
+
+// onRetryKeyring and onLoginWithoutKeyring are what the failed screen's
+// buttons run, always with go: a keyring call can block for up to 2 minutes
+// and must never run on the frame goroutine. Tests swap them.
+var (
+	onRetryKeyring        = backend.RetryKeyring
+	onLoginWithoutKeyring = backend.LoginWithoutKeyring
+)
+
+// loadingSpec is what the loading screen shows for one KeyringWait value.
+type loadingSpec struct {
+	loader  bool   // the animated spinner, proof that the UI is live
+	title   string // Body1
+	bold    bool   // the title is bold (the failed screen's heading)
+	detail  string // Body2 in subtle, "" for none
+	buttons bool   // Try again and Log in again
+}
+
+func loadingContent(wait string) loadingSpec {
+	switch wait {
+	case keyringWaitWaiting:
+		return loadingSpec{
+			loader: true,
+			title:  "Waiting for your system keyring…",
+			detail: "If your desktop asks you to unlock it, do that to continue. Verdana waits up to 2 minutes.",
+		}
+	case keyringWaitFailed:
+		return loadingSpec{
+			title:   "Couldn't reach your system keyring",
+			bold:    true,
+			detail:  "Your login is still saved in the keyring. Unlock it or start its service, then try again.",
+			buttons: true,
+		}
+	default:
+		return loadingSpec{loader: true, title: "Loading…"}
+	}
+}
+
+// layoutLoading is the manager window while the launcher loads (03-UI-SPEC
+// S3). It only reads the KeyringWait it is given: the keyring calls behind
+// it run in the backend, off this goroutine. When the saved login lives only
+// in a keyring that could not be reached it offers Try again and Log in
+// again; neither deletes the keyring login.
+func layoutLoading(gtx layout.Context, th *material.Theme, s *loadingScreen, wait string) layout.Dimensions {
+	c := loadingContent(wait)
+	retry := s.retryBtn.Clicked(gtx)
+	again := s.loginAgainBtn.Clicked(gtx)
+	if c.buttons {
+		if retry {
+			go onRetryKeyring()
+		}
+		if again {
+			go onLoginWithoutKeyring()
+		}
+	}
+
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(420)))
+		t := currentTheme()
+		var children []layout.FlexChild
+		if c.loader {
+			children = append(children,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					d := gtx.Dp(unit.Dp(24))
+					gtx.Constraints.Min = image.Pt(d, d)
+					return material.Loader(th).Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			)
+		}
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body1(th, c.title)
+			l.Alignment = text.Middle
+			l.Color = t.fg
+			if c.bold {
+				l.Font.Weight = font.Bold
+			}
+			return l.Layout(gtx)
+		}))
+		if c.detail != "" {
+			children = append(children,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := material.Body2(th, c.detail)
+					l.Alignment = text.Middle
+					l.Color = t.subtle
+					return l.Layout(gtx)
+				}),
+			)
+		}
+		if c.buttons {
+			children = append(children,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							return material.Button(th, &s.retryBtn, "Try again").Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Rigid(chipButton(th, &s.loginAgainBtn, "Log in again")),
+					)
+				}),
+			)
+		}
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, children...)
 	})
 }
