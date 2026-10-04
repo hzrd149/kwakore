@@ -1,6 +1,8 @@
 package fileutil
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -112,5 +114,48 @@ func TestWriteFileAtomicInterruptedSaveKeepsOld(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("new content not written in full: got %d bytes, want %d", len(got), len(want))
+	}
+}
+
+func TestWriteFileNewCreates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "download.bin")
+	if err := WriteFileNew(path, []byte("payload"), 0644); err != nil {
+		t.Fatalf("WriteFileNew: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("content = %q (%v)", got, err)
+	}
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0644 {
+			t.Fatalf("mode = %v, want 0644", fi.Mode().Perm())
+		}
+	}
+	if left := tempLeftovers(t, dir); len(left) != 0 {
+		t.Fatalf("temp files left behind: %v", left)
+	}
+}
+
+func TestWriteFileNewNeverClobbers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(path, []byte("the user's file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := WriteFileNew(path, []byte("a napp's download"), 0644)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("err = %v, want fs.ErrExist", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "the user's file" {
+		t.Fatalf("existing file changed: %q (%v)", got, err)
+	}
+	if left := tempLeftovers(t, dir); len(left) != 0 {
+		t.Fatalf("temp files left behind: %v", left)
 	}
 }
