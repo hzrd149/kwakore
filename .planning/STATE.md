@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 current_phase: 4
 status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-10-04T17:55:08.206Z"
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-10-04T18:09:10.865Z"
 last_activity: 2026-10-04
-last_activity_desc: Completed 04-05 (adversarial napplet fixture, fake-launcher WebKitGTK smoke with attacker listener, xvfb CI step)
-state_head: 5a63a273b18e5d22bd3f09d684f6787d1844f070
+last_activity_desc: Completed 04-06 (CONFORMANCE close-out: 5D-3, NIP-5D-reload, 5D-8 fixed; 5D-NG per engine; DEC-5, DEC-6); phase 4 ready for verification
+state_head: 8943fdf9c25f5fda565e53734b81c1b89ea0fe57
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 27
+  completed_plans: 28
   percent: 38
 current_phase_name: Frame Sandbox Lifecycle
 ---
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 
 ## Current Position
 
-Phase: 4 — EXECUTING
+Phase: 4 — EXECUTING (all plans complete, ready for verification)
 Plan: 6 of 6
-Status: Executing (04-05 complete)
-Last activity: 2026-10-04 — Completed 04-05 (adversarial napplet in backend/testdata, fake launcher driving the real child under WebKitGTK with a loopback attacker listener: 0 connections, reset-before-start ordering, loop cap 4 resets / 3 starts, forged bindings refused, no RTCPeerConnection/mediaDevices; webkit smoke step under xvfb in CI)
+Status: Ready for verification (04-06 complete)
+Last activity: 2026-10-04 — Completed 04-06 (CONFORMANCE close-out: 5D-3, NIP-5D-reload and 5D-8 fixed (Phase 4) with code and test citations; 5D-NG-webkitgtk/-webview2/-wkwebview/-android Non-Guarantee rows, unverified engines say so; DEC-5 marker, DEC-6 hardening scope; SBOX-01..04 complete; end-of-phase smoke list in 04-06-SUMMARY)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -87,6 +87,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 04 P03 | 4min | 2 tasks | 7 files |
 | Phase 04 P04 | 6min | 3 tasks | 10 files |
 | Phase 04 P05 | 18min | 3 tasks | 5 files |
+| Phase 04 P06 | 11min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,8 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-04: host page CSP is NappletCSP + frame-ancestors 'none', derived not copied; TestNappletHostCSP compares per directive
 - [Phase 4]: 04-04: every desktop loopback response goes through loopbackHeaders (CSP + X-DNS-Prefetch-Control: off); Android reads the same policies via Mobile accessors
 - [Phase 4]: 04-05: the adversarial fixture's load-delayed document holds its load with a 40 MB data: image (a busy wait never opens the C2 window); the WebKit smoke runs in CI under xvfb
+- [Phase 4]: 04-06: CONFORMANCE Non-Guarantee rows (5D-NG-*) claim nothing for an engine without a recorded run; WebView2/WKWebView/Android say unverified until the end-of-phase smoke
+- [Phase 4]: 04-06: DEC-5 records the document-start marker as a no-global deviation from NIP-5D Security 5; DEC-6 records the engine hardening scope
 
 ### Pending Todos
 
@@ -197,6 +200,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T17:55:08.114Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-10-04T18:09:10.785Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None

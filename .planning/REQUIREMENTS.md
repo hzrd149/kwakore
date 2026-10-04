@@ -29,10 +29,10 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Sandbox
 
-- [ ] **SBOX-01**: A napplet that reloads or navigates its own frame gets a fresh session with `window.napplet` re-injected and the CSP intact; messages from a replaced document are never accepted under the napplet's identity, and stale subscriptions stop (5D-3, SH-1)
-- [ ] **SBOX-02**: The napplet host page carries a CSP that engines enforce (`frame-src`/`child-src` instead of the no-op `navigate-to 'self'`), plus `frame-ancestors 'none'` on the loopback response (5D-8)
-- [ ] **SBOX-03**: An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) is exercised on WebKitGTK, and on WebView2 and WKWebView where CI allows
-- [ ] **SBOX-04**: WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the remaining risk is recorded under NIP-5D Non-Guarantees
+- [x] **SBOX-01**: A napplet that reloads or navigates its own frame gets a fresh session with `window.napplet` re-injected and the CSP intact; messages from a replaced document are never accepted under the napplet's identity, and stale subscriptions stop (5D-3, SH-1)
+- [x] **SBOX-02**: The napplet host page carries a CSP that engines enforce (`frame-src`/`child-src` instead of the no-op `navigate-to 'self'`), plus `frame-ancestors 'none'` on the loopback response (5D-8)
+- [x] **SBOX-03**: An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) is exercised on WebKitGTK, and on WebView2 and WKWebView where CI allows
+- [x] **SBOX-04**: WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the remaining risk is recorded under NIP-5D Non-Guarantees
 
 ### NAP dispatcher
 
@@ -154,10 +154,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SHIM-03 | Phase 1 | Complete |
 | SHIM-04 | Phase 1 | Complete |
 | SHIM-05 | Phase 1 | Complete |
-| SBOX-01 | Phase 4 | Pending |
-| SBOX-02 | Phase 4 | Pending |
-| SBOX-03 | Phase 4 | Pending |
-| SBOX-04 | Phase 4 | Pending |
+| SBOX-01 | Phase 4 | Complete |
+| SBOX-02 | Phase 4 | Complete |
+| SBOX-03 | Phase 4 | Complete |
+| SBOX-04 | Phase 4 | Complete |
 | DISP-01 | Phase 2 | Complete |
 | DISP-02 | Phase 2 | Complete |
 | DISP-03 | Phase 2 | Complete |
