@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 current_phase: 4
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-10-04T17:21:22.166Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-10-04T17:28:27.990Z"
 last_activity: 2026-10-04
-last_activity_desc: Completed 04-02 (engine-level channel hardening)
-state_head: e26da1397c938c313f60d86ac40803a4c465e754
+last_activity_desc: Completed 04-03 (document-start marker, single-sourced napplet CSP)
+state_head: bb2f08b35f84b78b0b0a3f56ab2e76df9624b923
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 24
+  completed_plans: 25
   percent: 38
 current_phase_name: Frame Sandbox Lifecycle
 ---
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 ## Current Position
 
 Phase: 4 — EXECUTING
-Plan: 3 of 6
-Status: Executing (04-02 complete)
-Last activity: 2026-10-04 — Completed 04-02 (engine-level WebRTC/media/preconnect hardening, WebView2 args, sampled token-miss logs)
+Plan: 4 of 6
+Status: Executing (04-03 complete)
+Last activity: 2026-10-04 — Completed 04-03 (D-18 document-start marker in the srcdoc preamble, host page rebuilds on a second marker; NappletCSP/NappletSrcdoc moved to backend/webview)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -84,6 +84,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 03 P10 | 6min | 2 tasks | 8 files |
 | Phase 04 P01 | 7min | 3 tasks | 5 files |
 | Phase 04 P02 | 9min | 3 tasks | 10 files |
+| Phase 04 P03 | 4min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -157,6 +158,8 @@ Recent decisions affecting current work:
 - [Phase 4]: [04-01] Host-page refusals are bound to the sending frame (defense in depth; the ordered lane already prevents cross-frame refusals)
 - [Phase 4]: 04-02: WebKitGTK hardening via purego (gtk_bin_get_child(w.Window())), napplet and settings windows only; no decide-policy handler (CSP + D-01 rebuild cover navigation)
 - [Phase 4]: 04-02: one WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS value for every window kind, set in prepareEngine() before webview.New
+- [Phase 4]: 04-03: napplet CSP and srcdoc builder single-sourced in backend/webview (NappletCSP, NappletSrcdoc, DocumentMarker); buildSrcdoc delegates
+- [Phase 4]: 04-03: D-18 marker __verdana.document posted by the preamble after install; host page counts markers per frame apart from loads, second marker calls replaced()
 
 ### Pending Todos
 
@@ -189,6 +192,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T17:21:22.084Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-10-04T17:28:27.894Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
