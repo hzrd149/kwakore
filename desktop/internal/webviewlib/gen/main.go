@@ -11,6 +11,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,16 +40,9 @@ func main() {
 }
 
 func run() error {
-	var stderr bytes.Buffer
-	cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", module)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	modDir, err := moduleDir()
 	if err != nil {
-		return fmt.Errorf("locate %s: %w: %s", module, err, strings.TrimSpace(stderr.String()))
-	}
-	modDir := strings.TrimSpace(string(out))
-	if modDir == "" {
-		return fmt.Errorf("locate %s: module is not downloaded (run go mod download)", module)
+		return err
 	}
 
 	for _, t := range targets {
@@ -75,4 +69,29 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+// moduleDir is the directory of the go-webview version go.mod selects,
+// downloading it first if the module cache does not have it yet (a fresh
+// clone, a CI cache miss). "go list -m" would not: it prints an empty Dir
+// for a module that is not downloaded. "go mod download" checks the zip
+// against go.sum like any build would.
+func moduleDir() (string, error) {
+	var stderr bytes.Buffer
+	cmd := exec.Command("go", "mod", "download", "-json", module)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	var info struct{ Dir, Error string }
+	if jerr := json.Unmarshal(out, &info); jerr != nil && err == nil {
+		err = jerr
+	}
+	switch {
+	case info.Error != "":
+		return "", fmt.Errorf("download %s: %s", module, info.Error)
+	case err != nil:
+		return "", fmt.Errorf("download %s: %w: %s", module, err, strings.TrimSpace(stderr.String()))
+	case info.Dir == "":
+		return "", fmt.Errorf("download %s: no module directory reported", module)
+	}
+	return info.Dir, nil
 }
