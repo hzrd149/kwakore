@@ -29,6 +29,11 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - ✓ Pinned spec texts snapshotted under `spec/pinned/`, audit checklist skeleton `spec/CONFORMANCE.md` with Conflicts A1–A23, Android AAR bind on pull requests — Phase 1
 - ✓ Every NAP request goes through one route table: declared permission gate per type (init panics otherwise), gated sinks enforced by an AST guard, stored-deny short-circuit — Phase 2
 - ✓ Every napplet request gets exactly one reply in its spec shape (Go and host page in parity), with size, id, case-collision, rate and in-flight bounds, a bounded context-owned prompt queue, and no reachable panics — Phase 2
+- ✓ The desktop child and libwebview run only from a verified per-user directory (owner, 0700, no symlinks, full sha256 before every spawn, per-build version dirs); prod fails closed with a visible notice and never falls back to `./child/child`; `go-webview/embedded` removed — Phase 3
+- ✓ Single-instance channel is a user-only Unix socket (peer uid checked both ends) or an owner-only named pipe with server-SID check; all TCP instance code removed — Phase 3
+- ✓ Every host `OpenLink` validates with `netguard.ExternalLink`; Windows CI job vets and tests the backend and desktop internals — Phase 3
+- ✓ Desktop login secrets live in the OS keyring after a verified read-back; no automatic path regenerates the NIP-46 client key or loses the login; unavailable keyring falls back to the 0600 file with a notice — Phase 3
+- ✓ All state writers are atomic; a corrupt `state.json` is kept aside with a notice, an unreadable one blocks saves — Phase 3
 
 ### Active
 
@@ -44,15 +49,6 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 **Napplet sandbox hardening**
 - [ ] A napplet that reloads or navigates its own frame cannot escape the CSP or keep a live session: the host page resets the session on unexpected frame loads, and its CSP replaces the ineffective `navigate-to 'self'` (`desktop/child/main.go`, `desktop/child/napplet.go`) with directives engines enforce
-
-**Desktop process hardening**
-- [ ] Child webview binary extraction cannot be hijacked by a pre-existing file in a shared temp dir, and prod builds never fall back to a working-directory `./child/child`; the `go-webview/embedded` import (extracts `libwebview` into a shared 0777 `/tmp/webview-*` dir) is removed or made safe
-- [ ] Single-instance listener replaced with a user-only Unix socket (named pipe on Windows); all TCP code removed
-- [ ] `OpenLink` validates the URL scheme inside the desktop host, not only in callers
-
-**Secrets at rest**
-- [ ] Desktop login secrets stored in the OS keyring; when no keyring is available, fall back to the existing `0600` file and warn the user. A locked or unavailable keyring never causes the NIP-46 client key to be regenerated
-- [ ] `state.json` is written atomically and a corrupt file is preserved instead of silently resetting state
 
 **Robustness**
 - [ ] Malformed envelopes, manifests, and relay data are rejected cleanly with regression tests
@@ -100,8 +96,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | NAP-INTENT pinned to naps master; NAP-RESOURCE to PR #80 (also accepting the shim's server-hint shape) | Match the canonical shim; #13 was reverted and replaced by #80 | — Pending |
 | Decrypt events addressed to the user for napplets; never sign napplet ciphertext | NAP-RELAY decrypt MUST and NIP-5D Security #7 | — Pending |
 | No data migrations | Nothing deployed yet | — Pending |
-| Instance listener → Unix socket / named pipe | Filesystem permissions as auth; removes the unauthenticated TCP surface | — Pending |
-| Keyring with plaintext + warning fallback | Don't lock out headless/no-Secret-Service users | — Pending |
+| Instance listener → Unix socket / named pipe | Filesystem permissions as auth; removes the unauthenticated TCP surface | ✓ Good — Phase 3 (plus peer uid / pipe server-SID checks) |
+| Keyring with plaintext + warning fallback | Don't lock out headless/no-Secret-Service users | ✓ Good — Phase 3 (corrupt-state copies may keep plaintext: accepted AR-11) |
 | Audit depth: MUST + SHOULD; ambiguities recorded, not upstreamed | Traceable checklist without blocking on spec changes | — Pending |
 | Robustness via limits + tests, no fuzzing | Enough for release; keeps CI simple | — Pending |
 | Desktop first | Primary release target; Android hardening later | — Pending |
@@ -111,6 +107,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Route table with typed gates (`Open(reason)`/`Session`/`PerCall`/`Dynamic`) and per-route failure shapes; JS table mirrors Go under a parity test | One choke point for consent and reply shape; no toolchain in the webview | ✓ Good — Phase 2 |
 | Size caps split by direction: 24/25 MiB for napplet input, 128 MiB for launcher→child replies, no bytesMany budget yet | Keep large legitimate replies working; oversized replies close only that window (Phase 7 RES-03) | ⚠️ Revisit — Phase 7 (D-17) |
 | Prompts owned by their request: ≤3 per window, ≤32 global, cancelled at the route deadline or session end; answers only from the owning window | DEC-1; closes cross-window consent forgery (review CR-01) | ✓ Good — Phase 2 |
+| libwebview copies generated from the pinned go-webview module at build time, not committed (D-17) | Keep binaries out of git while embedding verified bytes | ✓ Good — Phase 3 (desktop builds need `just webview-libs` first) |
+| Identity globals (`userKeyer`/`userPubkey`) redesign deferred; Phase 3 only recovers RPC panics and reads the keyer once | Keep Phase 3 scoped; full fix belongs with identity conformance | ⚠️ Revisit — Phase 8 (IN-12 / AR-13) |
 
 ## Evolution
 
@@ -130,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-03 after Phase 2*
+*Last updated: 2026-10-04 after Phase 3*

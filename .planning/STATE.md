@@ -20,10 +20,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-03)
+See: .planning/PROJECT.md (updated 2026-10-04)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 03 — Desktop Process and Secrets Hardening
+**Current focus:** Phase 04 — Frame Sandbox Lifecycle
 
 ## Current Position
 
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-10-04 — Phase 03 complete, transitioned to Phase 4
 
-Progress: [███░░░░░░░] 25% (2/8 phases)
+Progress: [████░░░░░░] 38% (3/8 phases)
 
 ## Performance Metrics
 
@@ -163,10 +163,12 @@ None yet.
 - [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
 - [Phase 5]: Storage/config file names can collide across `d` values (CONFORMANCE CF-2, KEY-04)
 - [Phase 6]: Address-form INC senders `<kind>:<pubkey>:<d>` can be imitated by a crafted `d` (review IN-06, A5); T-01-21 checklist test should require fixed rows to cite an existing Test func
-- [Rebuild]: Desktop child and Android AAR must be rebuilt after Phases 1-2 (new host page, wireline readers, bridge answer token)
+- [Rebuild]: Desktop child and Android AAR must be rebuilt after Phases 1-3 (new host page, wireline readers, bridge answer token, secrets accessors); desktop builds now need `just webview-libs` first, and CLAUDE.md test commands should say so (user to update)
 - [Phase 2]: Handler synchronous parts must stay short since nap.start/WindowClosed wait on dispatchMu (Android WindowClosed runs on the main thread); prompt cancellation itself is done (02-06)
 - [Phase 6]: `nap_outbox.go` closures pass sentinel strings that are not spec codes ("too many recipients", "no relays to publish to"), prose "not ready" in relay/outbox; bare intent-delivery goroutine at `window_instances.go:1073` lacks recover
 - [Phase 7]: D-17 — a reply over 128 MiB (e.g. large resource.bytesMany) closes that napplet window; Blossom fetch/HEAD ungated exception (RES-02/03)
+- [Phase 8]: IN-12 / AR-13 — identity globals (`userKeyer`/`userPubkey`, `sessionCancel`) are read unsynchronized; identity pushes can arrive out of order; `dev_publish.go` dereferences outside a recover. Phase 3 added only RPC panic recovery and single keyer reads
+- [Phase 3 residue]: First real Windows CI run not yet observed (124+ commits unpushed); Phase 3 info items IN-01..IN-11 open in 03-REVIEW.md; corrupt-state copies may keep plaintext secrets (AR-11); a downgrade on a migrated data dir must re-pair the bunker (release notes)
 - [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
 
 ## Deferred Items
