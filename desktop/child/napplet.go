@@ -33,6 +33,7 @@ func runNapplet(w webview.WebView) {
 	// launcher sees it close.
 	if err := hardenEngine(w); err != nil {
 		log.Error().Err(err).Msg("napplet window not opened: webkit hardening failed")
+		reportWindowFailed(windowFailedEngineHardening)
 		os.Exit(1)
 	}
 
@@ -70,6 +71,19 @@ func runNapplet(w webview.WebView) {
 	w.Run()
 	w.Destroy()
 	os.Exit(0)
+}
+
+// windowFailedEngineHardening is the code a napplet window reports when it
+// exits because its engine hardening failed (backend HandleMessage,
+// "windowFailed").
+const windowFailedEngineHardening = "engine-hardening"
+
+// reportWindowFailed tells the launcher, just before this process exits on
+// its own, why the window is going away, so the user sees a reason instead
+// of a window that flashes and vanishes. Only a fixed code travels: the
+// launcher owns the words it shows, and the error itself stays in the log.
+func reportWindowFailed(code string) {
+	writeMsg(wireMsg{T: "windowFailed", Code: code})
 }
 
 func validToken(token string) bool {

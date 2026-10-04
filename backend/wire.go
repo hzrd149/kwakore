@@ -33,6 +33,11 @@ const MaxInboundWireMsg = 24<<20 + 1<<20
 //	                                 answered the prompt shown over this
 //	                                 window; scope is how long the answer
 //	                                 holds ("once", "session", "always")
+//	{t:"windowFailed", code}         the window is about to exit on its own;
+//	                                 code says why ("engine-hardening": a
+//	                                 napplet window whose engine hardening
+//	                                 failed), and the launcher shows its own
+//	                                 notice for it
 type WireMsg struct {
 	T      string          `json:"t"`
 	ID     int             `json:"id,omitempty"`

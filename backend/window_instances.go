@@ -403,6 +403,8 @@ func HandleMessage(instance string, m WireMsg) {
 		// inline, not in a goroutine: it mutates the prompt state and
 		// quicky; the window sends nothing else worth racing on.
 		ci.handlePromptAnswer(m)
+	case "windowFailed":
+		ci.windowFailed(m.Code)
 	case "rpc":
 		if ci.nap != nil && m.Method == "nap.msg" {
 			// NAP envelopes are queued in the order the napplet sent them,
@@ -414,6 +416,27 @@ func HandleMessage(instance string, m WireMsg) {
 		go ci.handleRPC(m)
 	default:
 		log.Debug().Str("instance", instance).Str("t", m.T).Msg("ignoring message from napp")
+	}
+}
+
+// windowFailedEngineHardening is the code a desktop napplet window sends
+// when it exits because its web engine's network switches could not be
+// turned off (desktop/child napplet.go reportWindowFailed).
+const windowFailedEngineHardening = "engine-hardening"
+
+// windowFailed handles a window that says it is about to exit on its own,
+// and why. The window carries only a fixed code: the words the user sees are
+// the launcher's, and an unknown code is logged and shows nothing. The window
+// closes itself right after, so WindowClosed follows as usual.
+func (ci *Instance) windowFailed(code string) {
+	switch code {
+	case windowFailedEngineHardening:
+		log.Error().Str("napp", ci.napp.ID).Str("instance", ci.instance).
+			Msg("napplet window closed itself: web engine hardening failed")
+		raiseNappletHardening()
+	default:
+		log.Warn().Str("napp", ci.napp.ID).Str("instance", ci.instance).Str("code", code).
+			Msg("window failed with an unknown code")
 	}
 }
 

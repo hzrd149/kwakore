@@ -30,6 +30,7 @@ type Notice struct {
 const (
 	noticeKeyringFallback    = "keyring-fallback"
 	noticeChildUnavailable   = "child-unavailable"
+	noticeNappletHardening   = "napplet-hardening"
 	noticeStateCorruptPrefix = "state-corrupt:"
 
 	noticeKindWarning = "warning"
@@ -49,23 +50,28 @@ const (
 	childUnavailableTitle  = "Napp windows can't open"
 	childUnavailableDetail = "Verdana's window program is missing or was changed on disk, so it was not started. Reinstall Verdana to fix this."
 
+	nappletHardeningTitle  = "A napplet was closed before it ran"
+	nappletHardeningDetail = "The web engine on this system could not switch off its direct network access (WebRTC, media capture or link preconnect), so Verdana did not run the napplet. Updating the system web engine (WebKitGTK) may fix this."
+
 	// childUnavailableFetchErr is the store's FetchErr line for a launch
 	// that failed closed (lowercase, Go error convention).
 	childUnavailableFetchErr = "launch failed: the napp window program is missing or was modified; reinstall Verdana"
 )
 
-// noticeRank is the fixed display order: the error first, then the
+// noticeRank is the fixed display order: the errors first, then the
 // corrupt-state warning, then the keyring fallback.
 func noticeRank(id string) int {
 	switch {
 	case id == noticeChildUnavailable:
 		return 0
-	case strings.HasPrefix(id, noticeStateCorruptPrefix):
+	case id == noticeNappletHardening:
 		return 1
-	case id == noticeKeyringFallback:
+	case strings.HasPrefix(id, noticeStateCorruptPrefix):
 		return 2
-	default:
+	case id == noticeKeyringFallback:
 		return 3
+	default:
+		return 4
 	}
 }
 
@@ -118,6 +124,22 @@ func raiseChildUnavailable() {
 		Kind:   noticeKindError,
 		Title:  childUnavailableTitle,
 		Detail: childUnavailableDetail,
+	})
+	notifyState()
+}
+
+// raiseNappletHardening shows the error notice for a napplet window that
+// closed itself before running the napplet, because the web engine's
+// network switches could not be turned off (the window reports
+// "windowFailed" with code windowFailedEngineHardening). Like
+// child-unavailable it is session-only: every new failure shows it again,
+// once.
+func raiseNappletHardening() {
+	addNotice(Notice{
+		ID:     noticeNappletHardening,
+		Kind:   noticeKindError,
+		Title:  nappletHardeningTitle,
+		Detail: nappletHardeningDetail,
 	})
 	notifyState()
 }

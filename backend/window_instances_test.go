@@ -2,6 +2,8 @@ package backend
 
 import (
 	"math"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -166,5 +168,49 @@ func TestHandleWireMessageAnswersOversizedRPC(t *testing.T) {
 	defer rt.mu.Unlock()
 	if len(rt.resps) != 1 || rt.resps[0].ID != 7 || rt.resps[0].Error != "too-large" {
 		t.Fatalf("answers %+v, want one too-large for id 7", rt.resps)
+	}
+}
+
+// TestWindowFailedRaisesNotice: a napplet window that closes itself because
+// its engine hardening failed says so on the wire, with the exact line the
+// desktop child writes (desktop/child TestReportWindowFailed), and the
+// launcher shows its own error notice for it (IN-06). An unknown code, or a
+// message for a window that is not open, shows nothing.
+func TestWindowFailedRaisesNotice(t *testing.T) {
+	setupNapTest(t)
+	withFreshStateDir(t)
+	statePath = filepath.Join(dataDir, "state.json")
+	ci, _ := openNapplet(t, "hardening-failed")
+
+	HandleWireMessage(ci.instance, `{"t":"windowFailed","code":"something-else"}`)
+	HandleWireMessage("no-such-window", `{"t":"windowFailed","code":"engine-hardening"}`)
+	if got := Snapshot().Notices; len(got) != 0 {
+		t.Fatalf("notices after an unknown code and an unknown window = %v", noticeIDs(got))
+	}
+
+	HandleWireMessage(ci.instance, `{"t":"windowFailed","code":"engine-hardening"}`)
+	HandleWireMessage(ci.instance, `{"t":"windowFailed","code":"engine-hardening"}`)
+	got := Snapshot().Notices
+	if ids := noticeIDs(got); !slices.Equal(ids, []string{"napplet-hardening"}) {
+		t.Fatalf("notices = %v, want one napplet-hardening", ids)
+	}
+	if n := got[0]; n.Kind != "error" || n.Title != nappletHardeningTitle || n.Detail != nappletHardeningDetail || n.Path != "" {
+		t.Fatalf("napplet-hardening notice = %+v", n)
+	}
+
+	// errors come first, child-unavailable ahead of this one
+	setKeyringFallbackNotice(true)
+	raiseChildUnavailable()
+	if ids := noticeIDs(Snapshot().Notices); !slices.Equal(ids, []string{"child-unavailable", "napplet-hardening", "keyring-fallback"}) {
+		t.Fatalf("notice order = %v", ids)
+	}
+
+	// session-only, like child-unavailable: a dismissal is not remembered
+	DismissNotice("napplet-hardening")
+	stateMu.Lock()
+	persisted := slices.Contains(state.DismissedNotices, "napplet-hardening")
+	stateMu.Unlock()
+	if persisted {
+		t.Fatal("napplet-hardening dismissal was persisted")
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -69,9 +71,17 @@ func TestEngineSetupOrder(t *testing.T) {
 	}
 
 	// WR-02: a napplet window fails closed, so runNapplet must leave when
-	// hardenEngine reports an error
+	// hardenEngine reports an error, and (IN-06) tell the launcher why
+	// first, so the user gets a reason and not just a vanished window
 	if !exitsOnError(funcs["runNapplet"], "hardenEngine") {
 		t.Errorf("runNapplet must call os.Exit when hardenEngine(w) returns an error")
+	}
+	if body := errBranch(funcs["runNapplet"], "hardenEngine"); body != nil {
+		report := firstCallIn(body, "", "reportWindowFailed")
+		exit := firstCallIn(body, "os", "Exit")
+		if !report.IsValid() || !exit.IsValid() || !(report < exit) {
+			t.Errorf("runNapplet must call reportWindowFailed before os.Exit when hardenEngine(w) returns an error")
+		}
 	}
 
 	for _, name := range []string{"runNapplet", "runSettings"} {
@@ -91,8 +101,13 @@ func TestEngineSetupOrder(t *testing.T) {
 // firstCall is the position of the first call in fn to name, or to
 // recv.name when recv is set; NoPos when there is none.
 func firstCall(fn *ast.FuncDecl, recv, name string) token.Pos {
+	return firstCallIn(fn.Body, recv, name)
+}
+
+// firstCallIn is firstCall over any node.
+func firstCallIn(node ast.Node, recv, name string) token.Pos {
 	pos := token.NoPos
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(node, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || pos.IsValid() {
 			return !pos.IsValid()
@@ -115,11 +130,18 @@ func firstCall(fn *ast.FuncDecl, recv, name string) token.Pos {
 // exitsOnError reports whether fn has `if err := name(...); err != nil {
 // ... os.Exit(...) ... }`.
 func exitsOnError(fn *ast.FuncDecl, name string) bool {
-	found := false
+	body := errBranch(fn, name)
+	return body != nil && firstCallIn(body, "os", "Exit").IsValid()
+}
+
+// errBranch is the body of the first `if err := name(...); ... { ... }` in
+// fn, or nil when there is none.
+func errBranch(fn *ast.FuncDecl, name string) *ast.BlockStmt {
+	var body *ast.BlockStmt
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		ifs, ok := n.(*ast.IfStmt)
-		if !ok || found {
-			return !found
+		if !ok || body != nil {
+			return body == nil
 		}
 		assign, ok := ifs.Init.(*ast.AssignStmt)
 		if !ok || len(assign.Rhs) != 1 {
@@ -132,19 +154,26 @@ func exitsOnError(fn *ast.FuncDecl, name string) bool {
 		if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != name {
 			return true
 		}
-		ast.Inspect(ifs.Body, func(n ast.Node) bool {
-			if c, ok := n.(*ast.CallExpr); ok {
-				if sel, ok := c.Fun.(*ast.SelectorExpr); ok {
-					if x, ok := sel.X.(*ast.Ident); ok && x.Name == "os" && sel.Sel.Name == "Exit" {
-						found = true
-					}
-				}
-			}
-			return !found
-		})
-		return !found
+		body = ifs.Body
+		return false
 	})
-	return found
+	return body
+}
+
+// TestReportWindowFailed pins the line a napplet window writes before it
+// exits on a failed hardening (IN-06): the launcher matches the exact type
+// and code (backend TestWindowFailedRaisesNotice sends the same line).
+func TestReportWindowFailed(t *testing.T) {
+	var buf bytes.Buffer
+	saved := outEnc
+	outEnc = json.NewEncoder(&buf)
+	t.Cleanup(func() { outEnc = saved })
+
+	reportWindowFailed(windowFailedEngineHardening)
+	const want = `{"t":"windowFailed","code":"engine-hardening"}` + "\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("reportWindowFailed wrote %q, want %q", got, want)
+	}
 }
 
 // firstString is the position of the first string literal in fn whose value
