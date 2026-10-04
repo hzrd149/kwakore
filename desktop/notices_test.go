@@ -8,6 +8,7 @@ import (
 	"verdana/backend"
 
 	"gioui.org/font/gofont"
+	"gioui.org/io/input"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
@@ -188,5 +189,260 @@ func TestNoticeCopyPathMarksCopied(t *testing.T) {
 	}
 	if len(noticeUI.widgets) != 0 {
 		t.Fatalf("widgets of gone notices were kept: %v", noticeUI.widgets)
+	}
+}
+
+// ─── keyring wait: loading screen (S3) ──────────────────────────────────
+
+// layoutLoadingFrame lays the loading screen out once on a frame driven by
+// an input router and reports whether the frame asked to be redrawn, which
+// only the animated loader does.
+func layoutLoadingFrame(t *testing.T, s *loadingScreen, wait string) (layout.Dimensions, bool) {
+	t.Helper()
+	var r input.Router
+	gtx := noticeTestContext()
+	gtx.Source = r.Source()
+	dims := layoutLoading(gtx, noticeTestTheme(), s, wait)
+	r.Frame(gtx.Ops)
+	_, animating := r.WakeupTime()
+	return dims, animating
+}
+
+func TestNoticeLoadingScreenStates(t *testing.T) {
+	for _, tc := range []struct {
+		wait          string
+		loader        bool
+		title, detail string
+		buttons       bool
+	}{
+		{"", true, "Loading…", "", false},
+		{"waiting", true, "Waiting for your system keyring…", "If your desktop asks you to unlock it, do that to continue. Verdana waits up to 2 minutes.", false},
+		{"failed", false, "Couldn't reach your system keyring", "Your login is still saved in the keyring. Unlock it or start its service, then try again.", true},
+	} {
+		t.Run("wait="+tc.wait, func(t *testing.T) {
+			c := loadingContent(tc.wait)
+			if c.loader != tc.loader || c.title != tc.title || c.detail != tc.detail || c.buttons != tc.buttons {
+				t.Fatalf("loadingContent(%q) = %+v", tc.wait, c)
+			}
+			dims, animating := layoutLoadingFrame(t, new(loadingScreen), tc.wait)
+			if dims.Size.X <= 0 || dims.Size.Y <= 0 {
+				t.Fatalf("loading screen has size %v", dims.Size)
+			}
+			// the loader animates, which proves the UI is live; the failed
+			// screen has no loader and so does not redraw on its own
+			if animating != tc.loader {
+				t.Fatalf("frame asked for a redraw: %v, want %v", animating, tc.loader)
+			}
+		})
+	}
+}
+
+// swapKeyringActions replaces the two failed-screen actions with funcs that
+// report their call and then block until the test ends.
+func swapKeyringActions(t *testing.T) (retried, loggedIn chan struct{}) {
+	t.Helper()
+	retried, loggedIn = make(chan struct{}, 1), make(chan struct{}, 1)
+	release := make(chan struct{})
+	oldRetry, oldLogin := onRetryKeyring, onLoginWithoutKeyring
+	onRetryKeyring = func() { retried <- struct{}{}; <-release }
+	onLoginWithoutKeyring = func() { loggedIn <- struct{}{}; <-release }
+	t.Cleanup(func() {
+		close(release)
+		onRetryKeyring, onLoginWithoutKeyring = oldRetry, oldLogin
+	})
+	return retried, loggedIn
+}
+
+func waitCalled(t *testing.T, ch chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s was never called", what)
+	}
+}
+
+func notCalled(t *testing.T, ch chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+		t.Fatalf("%s was called", what)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestNoticeKeyringFailedButtonsRunOffTheFrame(t *testing.T) {
+	retried, loggedIn := swapKeyringActions(t)
+	s := new(loadingScreen)
+
+	// each call blocks until cleanup, yet the frame returns: they run via go
+	s.retryBtn.Click()
+	layoutLoadingFrame(t, s, "failed")
+	waitCalled(t, retried, "RetryKeyring")
+	notCalled(t, loggedIn, "LoginWithoutKeyring")
+
+	s.loginAgainBtn.Click()
+	layoutLoadingFrame(t, s, "failed")
+	waitCalled(t, loggedIn, "LoginWithoutKeyring")
+	notCalled(t, retried, "RetryKeyring")
+}
+
+func TestNoticeKeyringButtonsIgnoredUnlessFailed(t *testing.T) {
+	retried, loggedIn := swapKeyringActions(t)
+	s := new(loadingScreen)
+	for _, wait := range []string{"", "waiting"} {
+		// a click that lands after the state moved on does nothing
+		s.retryBtn.Click()
+		s.loginAgainBtn.Click()
+		layoutLoadingFrame(t, s, wait)
+	}
+	notCalled(t, retried, "RetryKeyring")
+	notCalled(t, loggedIn, "LoginWithoutKeyring")
+}
+
+// ─── keyring wait: login screen (S4) ────────────────────────────────────
+
+func swapLogin(t *testing.T) chan string {
+	t.Helper()
+	got := make(chan string, 4)
+	old := onLogin
+	onLogin = func(input string) { got <- input }
+	t.Cleanup(func() { onLogin = old })
+	return got
+}
+
+func TestNoticeLoginWaitingIgnoresSubmit(t *testing.T) {
+	got := swapLogin(t)
+	th := noticeTestTheme()
+	s := newLoginScreen()
+	s.ed.SetText("nsec1example")
+	waiting := backend.State{Phase: backend.PhaseLogin, KeyringWait: "waiting"}
+
+	if label := loginButtonLabel(waiting); label != "Waiting for keyring…" {
+		t.Fatalf("waiting button label %q", label)
+	}
+	s.btn.Click()
+	s.layout(noticeTestContext(), th, waiting)
+	select {
+	case in := <-got:
+		t.Fatalf("Login(%q) ran while the keyring was saving", in)
+	case <-time.After(100 * time.Millisecond):
+	}
+	// the editor stays editable while waiting
+	if s.ed.ReadOnly {
+		t.Fatal("the login field turned read-only while waiting")
+	}
+
+	// once the wait is over the same field logs in
+	idle := backend.State{Phase: backend.PhaseLogin}
+	if label := loginButtonLabel(idle); label != "Log in" {
+		t.Fatalf("idle button label %q", label)
+	}
+	s.btn.Click()
+	s.layout(noticeTestContext(), th, idle)
+	select {
+	case in := <-got:
+		if in != "nsec1example" {
+			t.Fatalf("Login(%q), want the typed field", in)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Login never ran after the wait ended")
+	}
+}
+
+// ─── keyring wait: manager window at startup (D-19) ─────────────────────
+
+func swapLifecycle(t *testing.T, phase, wait string) *string {
+	t.Helper()
+	oldPhase, oldWait := currentPhase, currentKeyringWait
+	currentPhase = func() string { return phase }
+	currentKeyringWait = func() string { return wait }
+	desktopLifecycle.Lock()
+	oldPending, oldShown, oldWindow := desktopLifecycle.primaryPending, desktopLifecycle.keyringShown, desktopLifecycle.window
+	desktopLifecycle.primaryPending, desktopLifecycle.keyringShown, desktopLifecycle.window = false, "", nil
+	desktopLifecycle.Unlock()
+	drainShow()
+	t.Cleanup(func() {
+		currentPhase, currentKeyringWait = oldPhase, oldWait
+		desktopLifecycle.Lock()
+		desktopLifecycle.primaryPending, desktopLifecycle.keyringShown, desktopLifecycle.window = oldPending, oldShown, oldWindow
+		desktopLifecycle.Unlock()
+		drainShow()
+	})
+	return &wait
+}
+
+func drainShow() bool {
+	select {
+	case <-desktopLifecycle.show:
+		return true
+	default:
+		return false
+	}
+}
+
+func setPending(v bool) {
+	desktopLifecycle.Lock()
+	desktopLifecycle.primaryPending = v
+	desktopLifecycle.Unlock()
+}
+
+func pending() bool {
+	desktopLifecycle.Lock()
+	defer desktopLifecycle.Unlock()
+	return desktopLifecycle.primaryPending
+}
+
+func TestNoticePendingPrimaryOpensManagerForKeyringWait(t *testing.T) {
+	wait := swapLifecycle(t, backend.PhaseLoading, "")
+	setPending(true)
+
+	// plain loading: still nothing, as before
+	showPendingPrimary()
+	if drainShow() {
+		t.Fatal("manager opened during a plain load")
+	}
+
+	// the keyring is slow: the manager opens so the wait screen is seen
+	*wait = "waiting"
+	showPendingPrimary()
+	if !drainShow() {
+		t.Fatal("manager did not open for the keyring wait")
+	}
+	// later state changes in the same wait do not raise it again
+	showPendingPrimary()
+	if drainShow() {
+		t.Fatal("manager raised again for the same wait")
+	}
+	// a failure is new information: raise again
+	*wait = "failed"
+	showPendingPrimary()
+	if !drainShow() {
+		t.Fatal("manager not raised when the wait failed")
+	}
+	// the primary is still owed once loading ends
+	if !pending() {
+		t.Fatal("the keyring wait consumed the pending primary")
+	}
+}
+
+func TestNoticeNoPendingPrimaryNoManager(t *testing.T) {
+	swapLifecycle(t, backend.PhaseLoading, "waiting")
+	// a background start has no primary pending: nothing opens
+	showPendingPrimary()
+	if drainShow() {
+		t.Fatal("manager opened with no primary pending")
+	}
+}
+
+func TestNoticePendingPrimaryAfterLoadingStillOpens(t *testing.T) {
+	swapLifecycle(t, backend.PhaseLogin, "")
+	setPending(true)
+	showPendingPrimary()
+	if !drainShow() {
+		t.Fatal("login phase did not open the manager")
+	}
+	if pending() {
+		t.Fatal("primary still pending after it was shown")
 	}
 }
