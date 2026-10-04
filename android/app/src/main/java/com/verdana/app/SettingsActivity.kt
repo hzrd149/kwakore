@@ -180,10 +180,9 @@ class SettingsWebView(
                     200,
                     "OK",
                     mapOf(
-                        "Content-Security-Policy" to
-                            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
-                            "img-src data:; frame-src 'none'; base-uri 'none'; form-action 'none'",
+                        "Content-Security-Policy" to Mobile.settingsCSP(),
                         "Cache-Control" to "no-store",
+                        "X-DNS-Prefetch-Control" to "off",
                     ),
                     Mobile.settingsHTML().toByteArray(Charsets.UTF_8).inputStream(),
                 )

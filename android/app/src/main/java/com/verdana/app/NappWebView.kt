@@ -214,11 +214,12 @@ class NappWebView(
 
         return try {
             val stream = f.inputStream()
-            val headers = if (f.name.endsWith(".html")) {
-                mapOf("Content-Security-Policy" to "navigate-to 'self'")
-            } else {
-                emptyMap()
-            }
+            // every file, not only the html, like the desktop child's napp
+            // server: no embedders, no DNS prefetch
+            val headers = mapOf(
+                "Content-Security-Policy" to Mobile.nappPageCSP(),
+                "X-DNS-Prefetch-Control" to "off",
+            )
             WebResourceResponse(mimeFor(f.name), null, 200, "OK", headers, stream)
         } catch (_: IOException) {
             null
@@ -235,9 +236,15 @@ class NappWebView(
             "utf-8",
             200,
             "OK",
-            // the srcdoc frame inherits this policy on top of its own, so it
-            // must stay loose on script/style/img; it only pins navigation
-            mapOf("Content-Security-Policy" to "navigate-to 'self'", "Cache-Control" to "no-store"),
+            // the napplet's own NIP-5D policy plus frame-ancestors 'none': the
+            // srcdoc frame inherits this policy on top of its own, so it allows
+            // exactly what the napplet's does, and its frame-src/child-src
+            // 'none' keep the frame from being navigated away from its srcdoc
+            mapOf(
+                "Content-Security-Policy" to Mobile.nappletHostCSP(),
+                "Cache-Control" to "no-store",
+                "X-DNS-Prefetch-Control" to "off",
+            ),
             page.inputStream(),
         )
     }

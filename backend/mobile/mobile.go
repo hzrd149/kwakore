@@ -257,6 +257,19 @@ func BridgeJS() string { return webview.JS() }
 // NappletHostHTML is the page a napplet window loads as its main frame.
 func NappletHostHTML() string { return webview.NappletHostHTML() }
 
+// NappletHostCSP is the Content-Security-Policy header the napplet host page
+// is served with: the napplet's own NIP-5D policy plus frame-ancestors
+// 'none', the same string the desktop child sends.
+func NappletHostCSP() string { return webview.NappletHostCSP() }
+
+// SettingsCSP is the Content-Security-Policy header the settings page is
+// served with.
+func SettingsCSP() string { return webview.SettingsCSP() }
+
+// NappPageCSP is the Content-Security-Policy header every file of a napp is
+// served with.
+func NappPageCSP() string { return webview.NappPageCSP() }
+
 // NappletHostJS is the host page's script, injected in place of bridge.js in
 // a napplet window: it puts the napplet in its sandboxed iframe and carries
 // NAP envelopes to the backend.
