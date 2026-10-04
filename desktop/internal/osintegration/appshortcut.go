@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"verdana/backend"
+	"verdana/backend/fileutil"
 
 	"fiatjaf.com/verdana/desktop/internal/icon"
 	_ "golang.org/x/image/webp"
@@ -46,26 +47,12 @@ func appShortcutIconDir() string {
 	return filepath.Join(appShortcutDataDir(), "app-shortcut-icons")
 }
 
+// writeAtomic replaces path so a crash leaves the old file or the new one,
+// never a truncated shortcut, creating the parent directory first. Every
+// osintegration file write goes through here.
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".verdana-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return fileutil.WriteFileAtomic(path, data, mode)
 }

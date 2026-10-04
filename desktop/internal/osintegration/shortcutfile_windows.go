@@ -55,7 +55,7 @@ func nameLnkFile(path, name string) error {
 	if string(named) == string(data) {
 		return nil
 	}
-	return os.WriteFile(path, named, 0644)
+	return writeAtomic(path, named, 0644)
 }
 
 func DeleteShortcutFile(path string) error {

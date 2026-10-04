@@ -26,7 +26,7 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 	}
 
 	id := "com.verdana.shortcut." + slug
-	if err := os.WriteFile(filepath.Join(appDir, "Contents", "Info.plist"), []byte(fmt.Sprintf(
+	if err := writeAtomic(filepath.Join(appDir, "Contents", "Info.plist"), []byte(fmt.Sprintf(
 		`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,7 +44,7 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 
 	script := "#!/bin/sh\nexec " + shellQuote(exe) + " " + shellQuote(token) + "\n"
 	elem := filepath.Join(appDir, "Contents", "MacOS", slug)
-	if err := os.WriteFile(elem, []byte(script), 0755); err != nil {
+	if err := writeAtomic(elem, []byte(script), 0755); err != nil {
 		return "", err
 	}
 	RefreshShortcutParent("")

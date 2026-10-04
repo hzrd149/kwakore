@@ -27,7 +27,7 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(applicationsDir(), shortcutPrefix+shortcutSlug(name)+".desktop")
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+	if err := writeAtomic(path, []byte(data), 0644); err != nil {
 		return "", err
 	}
 	RefreshShortcutParent(applicationsDir())
