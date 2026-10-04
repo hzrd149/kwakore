@@ -22,7 +22,7 @@ func dialCtx(t *testing.T) context.Context {
 
 func TestPipeRoundTrip(t *testing.T) {
 	data := t.TempDir()
-	ln, err := Listen(data, nil)
+	ln, err := Listen(data, func(err error) { t.Logf("rejected: %v", err) })
 	if err != nil {
 		t.Fatal(err)
 	}
