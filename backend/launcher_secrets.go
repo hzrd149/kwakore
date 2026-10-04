@@ -96,6 +96,11 @@ type secretsRecord struct {
 	// keyDirty is a client key generated this run that was not persisted
 	// yet: the next setStoredLogin saves it along with the login.
 	keyDirty bool
+	// freshKeyOK lets clientKey generate while the secrets are not loaded
+	// because the keyring holding them is unreachable. Only
+	// LoginWithoutKeyring sets it (D-21); it lives in memory only, and a
+	// load replaces the whole record, so startup and resume never see it.
+	freshKeyOK bool
 }
 
 // Values of AppState.SecretsLocation.
@@ -157,14 +162,15 @@ func existingClientKey() (nostr.SecretKey, error) {
 // is generated here, and only here; it is persisted with the login by
 // setStoredLogin once that login succeeds. It refuses while the secrets are
 // not loaded (still loading, or the keyring holding them is unreachable), so
-// a keyring item we could not read is never shadowed by a new key.
+// a keyring item we could not read is never shadowed by a new key, unless
+// the user chose "Log in again" on the keyring-failed screen.
 func clientKey() (nostr.SecretKey, error) {
 	secretsMu.Lock()
 	defer secretsMu.Unlock()
 	if secrets.hasKey {
 		return secrets.key, nil
 	}
-	if !secrets.loaded {
+	if !secrets.loaded && !secrets.freshKeyOK {
 		return nostr.SecretKey{}, errSecretsNotLoaded
 	}
 	secrets.key = nostr.Generate()
@@ -443,6 +449,9 @@ func loadSecrets(store SecretStore) {
 	close(done)
 
 	if !ok {
+		// only now, with no load in flight: a RetryKeyring that sees
+		// "failed" must start a new load, not join this one
+		setKeyringWait(keyringFailed)
 		return
 	}
 	ls.mu.Lock()
@@ -457,6 +466,64 @@ func loadSecrets(store SecretStore) {
 	} else {
 		setPhase(PhaseLogin)
 	}
+}
+
+// RetryKeyring is "Try again" on the keyring-failed screen: KeyringWait goes
+// back to "" and the keyring is read again, resuming the login it holds if
+// it answers (or failing again). Only the failed state retries: the check
+// and the reset happen under ls.mu, so a second click, or one while the
+// startup load is still in flight, joins the load already running instead
+// of calling the store (and showing an unlock prompt) twice. It returns at
+// once; the load runs in its own goroutine.
+func RetryKeyring() {
+	secretsMu.Lock()
+	store := secretStore
+	secretsMu.Unlock()
+	if store == nil {
+		return
+	}
+	ls.mu.Lock()
+	retry := ls.keyringWait == keyringFailed
+	if retry {
+		ls.keyringWait = ""
+	}
+	ls.mu.Unlock()
+	if !retry {
+		return
+	}
+	notifyState()
+	retryLoads.Add(1)
+	go func() {
+		defer retryLoads.Done()
+		loadSecrets(store)
+	}()
+}
+
+// retryLoads tracks the loads RetryKeyring started, so a test can wait for
+// one to finish before it tears the launcher state down.
+var retryLoads sync.WaitGroup
+
+// LoginWithoutKeyring is "Log in again" on the keyring-failed screen: the
+// login screen, without reading, writing or deleting the keyring item, which
+// keeps the old login until a new one is saved over it. A login the user
+// starts from there may make a new NIP-46 client key (D-21); it is saved by
+// the normal persist path, to the file with the keyring-fallback notice
+// while the keyring stays unreachable. Outside the failed state it does
+// nothing.
+func LoginWithoutKeyring() {
+	ls.mu.Lock()
+	failed := ls.keyringWait == keyringFailed
+	if failed {
+		ls.keyringWait = ""
+	}
+	ls.mu.Unlock()
+	if !failed {
+		return
+	}
+	secretsMu.Lock()
+	secrets.freshKeyOK = true
+	secretsMu.Unlock()
+	setPhase(PhaseLogin)
 }
 
 // loadSecretsLocked runs the load table with secretsOpMu held. It reports
@@ -636,7 +703,6 @@ func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc
 		secretStore = store
 		secretsToStore = true
 		secretsMu.Unlock()
-		setKeyringWait(keyringFailed)
 		return secretsRecord{}, false
 
 	default:

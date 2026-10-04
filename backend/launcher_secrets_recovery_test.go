@@ -408,6 +408,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func startKeyringFailed(t *testing.T) (*secretsRig, *fakeStore) {
 	t.Helper()
 	r := withFreshSecrets(t)
+	// runs before the rig restores the launcher state
+	t.Cleanup(retryLoads.Wait)
 	r.writeState(t, `{"secrets_location":"keyring"}`)
 	store := newFakeStore()
 	store.put(t, testClientKeyHex, testLogin)
@@ -437,8 +439,8 @@ func TestRetryKeyringResumes(t *testing.T) {
 		t.Fatalf("KeyringWait = %q right after RetryKeyring, want \"\"", w)
 	}
 	openGate()
-	waitFor(t, "the login to resume", func() bool { return len(r.resumes()) == 1 })
-	if got := r.resumes(); got[0] != testLogin {
+	retryLoads.Wait()
+	if got := r.resumes(); len(got) != 1 || got[0] != testLogin {
 		t.Fatalf("resumed %v", got)
 	}
 	if k, err := existingClientKey(); err != nil || k.Hex() != testClientKeyHex {
@@ -456,9 +458,10 @@ func TestRetryKeyringStillUnavailable(t *testing.T) {
 	before := len(store.callLog())
 
 	RetryKeyring()
-	waitFor(t, "the retry to fail", func() bool {
-		return len(store.callLog()) > before && keyringWait() == keyringFailed
-	})
+	retryLoads.Wait()
+	if w := keyringWait(); w != keyringFailed {
+		t.Fatalf("KeyringWait = %q after a failed retry, want failed", w)
+	}
 	if _, err := clientKey(); err == nil {
 		t.Fatal("clientKey() generated a key after a failed retry")
 	}
@@ -486,8 +489,7 @@ func TestRetryKeyringJoinsInFlight(t *testing.T) {
 	RetryKeyring()
 	time.Sleep(50 * time.Millisecond)
 	openGate()
-	waitFor(t, "the login to resume", func() bool { return len(r.resumes()) == 1 })
-	time.Sleep(50 * time.Millisecond)
+	retryLoads.Wait()
 
 	if got := countCalls(store.callsSince(before), "get"); got != 1 {
 		t.Fatalf("store calls = %v, want one get for three retries", store.callsSince(before))
@@ -512,7 +514,7 @@ func TestRetryKeyringDuringStartupLoad(t *testing.T) {
 		loadSecrets(store)
 		close(done)
 	}()
-	t.Cleanup(func() { openGate(); <-done })
+	t.Cleanup(func() { openGate(); <-done; retryLoads.Wait() })
 	waitFor(t, "the startup get", func() bool { return len(store.callLog()) > 0 })
 
 	RetryKeyring()
@@ -535,7 +537,7 @@ func TestRetryKeyringNoStore(t *testing.T) {
 	loadSecrets(nil)
 
 	RetryKeyring()
-	time.Sleep(20 * time.Millisecond)
+	retryLoads.Wait()
 	if got := r.resumes(); len(got) != 0 {
 		t.Fatalf("resumed %v", got)
 	}
