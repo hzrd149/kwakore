@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
 status: executing
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-10-04T03:54:13.650Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-10-04T04:00:28.838Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 03 execution started
-state_head: 899496491ced2e525bf50f28b805ada3cc08f2d3
+state_head: 2bc6e05e2012da846052a7374bbbd6f13e56c87b
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 17
+  completed_plans: 18
   percent: 25
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 03 execution started
 
@@ -76,6 +76,7 @@ Progress: [███░░░░░░░] 25% (2/8 phases)
 | Phase 03 P02 | 4 min | 3 tasks | 13 files |
 | Phase 03 P03 | 11 min | 3 tasks | 13 files |
 | Phase 03 P07 | 12min | 3 tasks | 9 files |
+| Phase 03 P04 | 4 min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-07: lazily generated client keys are persisted only with the login (setStoredLogin), never from clientKey(), so no store call runs under ls.mu
 - [Phase 03]: 03-07: resume uses existingClientKey and never generates; an undecodable keyring item is treated as unavailable (never adopted or overwritten)
 - [Phase 03]: 03-07: file secrets + location keyring + keyring unavailable uses the file copy, keeps location keyring and shows keyring-fallback when a login exists
+- [Phase 03]: 03-04: libwebview is extracted 0600 by childbin next to child-<sha256>; the child refuses to start unless it is at an absolute WEBVIEW_PATH (Unix) or next to its exe (Windows)
+- [Phase 03]: 03-04: libwebview copies are generated (just webview-libs / go generate ./internal/webviewlib) into git-ignored desktop/internal/webviewlib/lib/ and guarded by a module byte-equality test; any new CI job compiling desktop needs that step
 
 ### Pending Todos
 
@@ -163,6 +166,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T03:54:13.597Z
-Stopped at: Completed 03-07-PLAN.md
+Last session: 2026-10-04T04:00:28.778Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None

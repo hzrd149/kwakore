@@ -102,7 +102,7 @@ Plans:
   4. Login secrets live in the OS keyring. When no keyring is available they stay in the `0600` file and the desktop UI shows a warning. A locked, slow or missing keyring never regenerates the NIP-46 client key, loses a login or bunker pairing, or freezes the UI
   5. Killing Verdana mid-save never leaves a truncated `state.json`, and a corrupt `state.json` is kept aside instead of being silently replaced with fresh state (atomic writes land before the keyring work)
 
-**Plans**: 5/10 plans executed
+**Plans**: 6/10 plans executed
 
 Plans:
 **Wave 1**
@@ -118,7 +118,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-04-PLAN.md — libwebview copied from go-webview at build time, extracted by childbin, WEBVIEW_PATH (wave 3)
+- [x] 03-04-PLAN.md — libwebview copied from go-webview at build time, extracted by childbin, WEBVIEW_PATH (wave 3)
 - [ ] 03-08-PLAN.md — LogoutPending, Try again / Log in again recovery paths (wave 3)
 - [ ] 03-09-PLAN.md — desktop secretstore adapter on go-keyring with worker and timeouts (wave 3)
 
@@ -217,7 +217,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
-| 3. Desktop Process and Secrets Hardening | 5/10 | In Progress|  |
+| 3. Desktop Process and Secrets Hardening | 6/10 | In Progress|  |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
