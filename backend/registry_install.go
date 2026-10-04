@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"verdana/backend/fileutil"
 )
 
 // backgroundSyncs tracks the shortcut and intent passes that installs,
@@ -277,7 +279,7 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	if err := fileutil.WriteFileAtomic(dest, data, 0644); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}
 	return nil

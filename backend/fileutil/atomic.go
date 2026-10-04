@@ -4,6 +4,8 @@
 package fileutil
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -25,6 +27,52 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) (err error) {
 	}
 	if err = os.Rename(name, path); err != nil {
 		os.Remove(name)
+		return err
+	}
+	return syncDir(dir)
+}
+
+// WriteFileNew creates path with data and fails, leaving whatever is there
+// untouched, when path already exists: the returned error then matches
+// fs.ErrExist. It is for writes a napp or a remote party asks for (saving a
+// download), which must never replace a file the user already has.
+//
+// The data is written and fsynced in a temp file first, then hard-linked
+// into place, so the name either does not appear or appears with the
+// complete contents. On filesystems without hard links it falls back to an
+// O_EXCL create.
+func WriteFileNew(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	name, err := writeTemp(dir, data, perm)
+	if err != nil {
+		return err
+	}
+	linkErr := os.Link(name, path)
+	os.Remove(name)
+	switch {
+	case linkErr == nil:
+		return syncDir(dir)
+	case errors.Is(linkErr, fs.ErrExist):
+		return linkErr
+	}
+
+	// no hard links here: create exclusively and write in place
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
 		return err
 	}
 	return syncDir(dir)

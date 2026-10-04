@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"verdana/backend/fileutil"
 )
 
 // localStorageQuota caps one napp's localStorage, like browsers do (~5MB).
@@ -127,24 +129,8 @@ func storagePersistLocked(nappID string, data map[string]string) error {
 		log.Error().Err(err).Msg("could not marshal napp storage")
 		return err
 	}
-	// write to disk on writes, atomically: temp file + rename
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		log.Error().Err(err).Msg("could not write napp storage")
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, storageFileFor(nappID)); err != nil {
-		os.Remove(tmpName)
+	// write to disk on writes, atomically: temp file, fsync, rename
+	if err := fileutil.WriteFileAtomic(storageFileFor(nappID), raw, 0600); err != nil {
 		log.Error().Err(err).Msg("could not persist napp storage")
 		return err
 	}

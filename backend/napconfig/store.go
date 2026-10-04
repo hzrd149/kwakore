@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
+	"verdana/backend/fileutil"
 )
 
 // The NAP-CONFIG store: per napp, the schema it last registered and the
@@ -86,25 +87,7 @@ func configPersistLocked(nappID string, rec configRecord) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, configFileFor(nappID)); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return fileutil.WriteFileAtomic(configFileFor(nappID), raw, 0600)
 }
 
 // Register checks and stores a schema for a napp. version, when the
