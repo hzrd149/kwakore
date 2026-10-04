@@ -167,6 +167,9 @@ func login(input string, opts loginOpts) {
 			return
 		}
 		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{})
+		if err != nil {
+			err = keyInputError(input)
+		}
 		keyerDone <- keyerResult{k, err}
 	}()
 
@@ -212,6 +215,17 @@ func login(input string, opts loginOpts) {
 	}
 
 	finishLogin(ctx, pk)
+}
+
+// keyInputError replaces what keyer.New says about a key it could not use.
+// Its errors quote the input ("unsupported input '...'"), which is an nsec
+// or a hex key here, maybe a stored one only a character off, and they are
+// logged and shown: so the reason is a fixed message instead.
+func keyInputError(input string) error {
+	if strings.HasPrefix(input, "ncryptsec") {
+		return errors.New("could not decrypt the ncryptsec key")
+	}
+	return errors.New("unreadable key: enter an nsec, a bunker:// url or a NIP-05 address")
 }
 
 // finishLogin is setProfileFromUser, swappable in tests.

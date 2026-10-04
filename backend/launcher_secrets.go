@@ -322,7 +322,9 @@ func fileSecretsLocked() (rec secretsRecord, ok bool) {
 		if k, err := nostr.SecretKeyFromHex(*state.ClientKey); err == nil {
 			rec.key, rec.hasKey = k, true
 		} else {
-			log.Warn().Err(err).Msg("ignoring an unreadable client key in the state file")
+			// never the library error: SecretKeyFromHex quotes its input,
+			// and a key that is one character off is still the key
+			log.Warn().Msg("ignoring an unreadable client key in the state file")
 		}
 	}
 	if state.Login != nil {
@@ -339,12 +341,18 @@ func itemFromRecord(rec secretsRecord) secretsItem {
 	return it
 }
 
+// errUnreadableClientKey is the only error a bad stored client key gives,
+// so its text never reaches a log or the UI.
+var errUnreadableClientKey = errors.New("unreadable client key")
+
 func recordFromItem(it secretsItem) (secretsRecord, error) {
 	rec := secretsRecord{login: strings.TrimSpace(it.Login)}
 	if it.ClientKey != "" {
 		k, err := nostr.SecretKeyFromHex(it.ClientKey)
 		if err != nil {
-			return rec, fmt.Errorf("unreadable client key: %w", err)
+			// a fixed error, not the library's: it quotes the key it was
+			// given, and this one ends up in the log
+			return rec, errUnreadableClientKey
 		}
 		rec.key, rec.hasKey = k, true
 	}
