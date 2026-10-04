@@ -141,7 +141,7 @@ Plans:
   3. An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) runs on WebKitGTK without escaping, with WebView2 and WKWebView results recorded where CI allows
   4. WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the residual risk per engine is recorded under NIP-5D Non-Guarantees in the checklist
 
-**Plans**: 3/6 plans executed
+**Plans**: 4/6 plans executed
 **Research spike**: yes (done in 04-RESEARCH). Self-navigation and reload of `allow-scripts` srcdoc frames on WebKitGTK, WebView2 and WKWebView; whether `frame-src`/`child-src` is enforced on the host page; go-webview sub-frame navigation policy hooks; engine flags for WebRTC
 
 Plans:
@@ -156,7 +156,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md — Host page policy = NIP-5D baseline + `frame-ancestors 'none'`, loopback header middleware, napp/settings headers, Android parity (wave 3)
+- [x] 04-04-PLAN.md — Host page policy = NIP-5D baseline + `frame-ancestors 'none'`, loopback header middleware, napp/settings headers, Android parity (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -240,7 +240,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
 | 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
-| 4. Frame Sandbox Lifecycle | 3/6 | In Progress|  |
+| 4. Frame Sandbox Lifecycle | 4/6 | In Progress|  |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
 | 7. Resource, Upload and Media Policy | 0/TBD | Not started | - |

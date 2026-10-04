@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 current_phase: 4
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-04T17:28:27.990Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-10-04T17:34:09.311Z"
 last_activity: 2026-10-04
-last_activity_desc: Completed 04-03 (document-start marker, single-sourced napplet CSP)
-state_head: bb2f08b35f84b78b0b0a3f56ab2e76df9624b923
+last_activity_desc: Completed 04-04 (enforced loopback page policies, host CSP = napplet baseline + frame-ancestors)
+state_head: 7309a423048de8bdf155469f7b8e23d37f24d9ed
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 25
+  completed_plans: 26
   percent: 38
 current_phase_name: Frame Sandbox Lifecycle
 ---
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 ## Current Position
 
 Phase: 4 — EXECUTING
-Plan: 4 of 6
-Status: Executing (04-03 complete)
-Last activity: 2026-10-04 — Completed 04-03 (D-18 document-start marker in the srcdoc preamble, host page rebuilds on a second marker; NappletCSP/NappletSrcdoc moved to backend/webview)
+Plan: 5 of 6
+Status: Executing (04-04 complete)
+Last activity: 2026-10-04 — Completed 04-04 (napplet host page served with NappletCSP + frame-ancestors 'none'; loopbackHeaders on every desktop loopback response with X-DNS-Prefetch-Control: off; napp/settings policies and Android parity via Mobile accessors)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -85,6 +85,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 04 P01 | 7min | 3 tasks | 5 files |
 | Phase 04 P02 | 9min | 3 tasks | 10 files |
 | Phase 04 P03 | 4min | 2 tasks | 7 files |
+| Phase 04 P04 | 6min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -160,6 +161,8 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-02: one WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS value for every window kind, set in prepareEngine() before webview.New
 - [Phase 4]: 04-03: napplet CSP and srcdoc builder single-sourced in backend/webview (NappletCSP, NappletSrcdoc, DocumentMarker); buildSrcdoc delegates
 - [Phase 4]: 04-03: D-18 marker __verdana.document posted by the preamble after install; host page counts markers per frame apart from loads, second marker calls replaced()
+- [Phase 4]: 04-04: host page CSP is NappletCSP + frame-ancestors 'none', derived not copied; TestNappletHostCSP compares per directive
+- [Phase 4]: 04-04: every desktop loopback response goes through loopbackHeaders (CSP + X-DNS-Prefetch-Control: off); Android reads the same policies via Mobile accessors
 
 ### Pending Todos
 
@@ -192,6 +195,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T17:28:27.894Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-10-04T17:34:09.202Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
