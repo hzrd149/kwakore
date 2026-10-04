@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,8 +168,13 @@ func (f *fakeLauncher) log() []string {
 
 // count is how many times event is in the log.
 func (f *fakeLauncher) count(event string) int {
+	return f.countIn(f.log(), event)
+}
+
+// countIn is how many times event is in events.
+func (f *fakeLauncher) countIn(events []string, event string) int {
 	n := 0
-	for _, e := range f.log() {
+	for _, e := range events {
 		if e == event {
 			n++
 		}
@@ -465,4 +471,231 @@ func TestWebKitNappletBoots(t *testing.T) {
 	}
 
 	f.close(15 * time.Second)
+}
+
+// ─── adversarial smoke ──────────────────────────────────────────
+
+// attackerListener stands in for a host a napplet wants to reach: a
+// loopback TCP listener that counts every connection it accepts (and keeps
+// the first line each one sent, for diagnosis).
+type attackerListener struct {
+	ln    net.Listener
+	mu    sync.Mutex
+	lines []string
+}
+
+func newAttackerListener(t *testing.T) *attackerListener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &attackerListener{ln: ln}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			a.mu.Lock()
+			i := len(a.lines)
+			a.lines = append(a.lines, "(connected, nothing read yet)")
+			a.mu.Unlock()
+			go func() {
+				defer conn.Close()
+				_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+				first, _ := bufio.NewReader(conn).ReadString('\n')
+				a.mu.Lock()
+				a.lines[i] = strings.TrimSpace(first)
+				a.mu.Unlock()
+			}()
+		}
+	}()
+	t.Cleanup(func() { ln.Close() })
+	return a
+}
+
+// connections is every connection so far, by the first line it sent.
+func (a *attackerListener) connections() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.lines)
+}
+
+// advResult is one line of the fixture's results (adv.results).
+type advResult struct {
+	Step   string `json:"step"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+
+// TestWebKitNappletAdversarial runs the committed adversarial napplet
+// (backend/testdata/adversarial-napplet) in the real child under WebKitGTK,
+// with this fake launcher on the wire and a loopback listener as the
+// attacker's host, and re-runs every escape the phase research measured as
+// a regression test (D-14, D-16):
+//
+//   - no navigation, fetch, image, preconnect, prefetch, beacon, form, font
+//     or CSS load ever connects to the attacker (SBOX-02, SBOX-04)
+//   - every replaced document is a nap.reset followed by nap.start before
+//     any envelope, and the load-delayed reloaded document's envelope
+//     (adv.leak) never reaches the launcher (SBOX-01, D-18)
+//   - the first boot is exactly one load before any reset (Pitfall 5)
+//   - the reload loop ends after exactly 4 resets and 3 starts, then the
+//     window stays up and boots nothing more (D-03)
+//   - the forged binding call reached the binding and was refused: the child
+//     logs it and the launcher never gets nap.openSettings (D-15)
+//   - RTCPeerConnection and navigator.mediaDevices are undefined in the
+//     frame (D-09, D-20), and the fixture reports no FAIL at all
+func TestWebKitNappletAdversarial(t *testing.T) {
+	needWebKit(t)
+	html, err := os.ReadFile(filepath.Join("..", "..", "backend", "testdata", "adversarial-napplet", "index.html"))
+	if err != nil {
+		t.Fatalf("reading the fixture: %v", err)
+	}
+	bin := buildChild(t)
+	attacker := newAttackerListener(t)
+	target := "http://" + attacker.ln.Addr().String() + "/"
+
+	f := newFakeLauncher(t, html)
+	f.seed("instance", "adv.target", target)
+	f.seed("instance", "adv.auto", "1")
+	f.seed("instance", "adv.pause", "3500")
+	f.start(bin)
+	deadline := time.Now().Add(180 * time.Second)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("attacker connections: %q", attacker.connections())
+		}
+	})
+
+	// the step machine, through every step to its verdict
+	stored := func(key string) string {
+		v, _ := f.stored("instance", key)
+		return v
+	}
+	done := f.waitFor(min(150*time.Second, time.Until(deadline)), func() bool {
+		return stored("adv.done") == "1" || f.hasExited()
+	})
+	var results []advResult
+	if raw := stored("adv.results"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &results); err != nil {
+			t.Errorf("adv.results is not JSON: %v: %q", err, raw)
+		}
+	}
+	for _, r := range results {
+		t.Logf("%s %s: %s", r.Status, r.Step, r.Detail)
+	}
+	if !done || f.hasExited() {
+		t.Fatalf("the fixture did not reach its verdict (adv.done %q, adv.step %q, exited %v)",
+			stored("adv.done"), stored("adv.step"), f.hasExited())
+	}
+	resetsAtDone, startsAtDone := f.count("rpc:nap.reset"), f.count("rpc:nap.start")
+
+	for _, r := range results {
+		if r.Status == "FAIL" {
+			t.Errorf("the fixture failed a check: %s: %s", r.Step, r.Detail)
+		}
+	}
+	passed := func(step, detail string) bool {
+		for _, r := range results {
+			if r.Status == "PASS" && r.Step == step && strings.Contains(r.Detail, detail) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []struct{ step, detail string }{
+		{"scope", ""},
+		{"parent", ""},
+		{"network", "RTCPeerConnection is undefined"},
+		{"network", "navigator.mediaDevices is undefined"},
+		{"nav-http", "replaced by a fresh document"},
+		{"nav-meta", "replaced by a fresh document"},
+		{"nav-anchor", "replaced by a fresh document"},
+		{"nav-blank", "replaced by a fresh document"},
+		{"doc-open", "replaced by a fresh document"},
+		{"reload", "replaced by a fresh document"},
+		{"reload-delayed", "replaced by a fresh document"},
+		{"verdict", "no envelope from a replaced document"},
+	} {
+		if !passed(want.step, want.detail) {
+			t.Errorf("no PASS for %s %q", want.step, want.detail)
+		}
+	}
+
+	// the reload loop: idle 10.5 s, then three rebuilds and a stop
+	if !f.waitFor(min(25*time.Second, time.Until(deadline)), func() bool {
+		return f.count("rpc:nap.reset") >= resetsAtDone+4 || f.hasExited()
+	}) {
+		t.Errorf("the reload loop never reached its fourth replacement: %d resets, %d starts since the verdict",
+			f.count("rpc:nap.reset")-resetsAtDone, f.count("rpc:nap.start")-startsAtDone)
+	}
+	boots := f.count("rpc:nap.boot")
+	time.Sleep(5 * time.Second)
+	if f.hasExited() {
+		t.Fatal("the child exited during the reload loop")
+	}
+	if n := f.count("rpc:nap.boot"); n != boots {
+		t.Errorf("%d more nap.boot after the loop was stopped", n-boots)
+	}
+	if n := f.count("rpc:nap.reset") - resetsAtDone; n != 4 {
+		t.Errorf("the loop added %d nap.reset, want 4", n)
+	}
+	if n := f.count("rpc:nap.start") - startsAtDone; n != 3 {
+		t.Errorf("the loop added %d nap.start, want 3", n)
+	}
+
+	events := f.log()
+	// Pitfall 5: the initial srcdoc load is one load, never a replacement
+	firstStart := indexOf(events, "rpc:nap.start", 0)
+	firstReset := indexOf(events, "rpc:nap.reset", 0)
+	if firstStart < 0 || firstReset < firstStart {
+		t.Errorf("no nap.start before the first nap.reset: %v", events)
+	} else if n := f.countIn(events[firstStart:firstReset], "rpc:nap.loaded"); n != 1 {
+		t.Errorf("%d nap.loaded between the first nap.start and the first nap.reset, want 1", n)
+	}
+	// every replaced document ends its session before anything else of
+	// the next one reaches the launcher
+	for i, e := range events {
+		if e != "rpc:nap.reset" {
+			continue
+		}
+		start := indexOf(events, "rpc:nap.start", i+1)
+		for j := i + 1; j < len(events); j++ {
+			if strings.HasPrefix(events[j], "msg:") {
+				if start < 0 || start > j {
+					t.Errorf("%s at %d reached the launcher after the nap.reset at %d and before any nap.start", events[j], j, i)
+				}
+				break
+			}
+		}
+	}
+	if n := f.countIn(events, "msg:storage.set:adv.leak"); n != 0 {
+		t.Errorf("a replaced document's adv.leak reached the launcher %d times", n)
+	}
+
+	// the forged binding calls reached the bindings and were refused
+	if n := f.countIn(events, "rpc:nap.openSettings"); n != 0 {
+		t.Errorf("the forged nap.openSettings reached the launcher %d times", n)
+	}
+	// the first forged call is the rpc, so the sampled Warn is its line
+	refused := false
+	for _, line := range strings.Split(f.childLog(), "\n") {
+		if strings.Contains(line, "without the window token") && strings.Contains(line, "nap.openSettings") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Errorf("the child never logged refusing the forged nap.openSettings rpc:\n%s", f.childLog())
+	}
+
+	if conns := attacker.connections(); len(conns) != 0 {
+		t.Errorf("the attacker host got %d connections: %q", len(conns), conns)
+	}
+
+	f.close(15 * time.Second)
+	if conns := attacker.connections(); len(conns) != 0 && !t.Failed() {
+		t.Errorf("the attacker host got %d connections by the end: %q", len(conns), conns)
+	}
 }
