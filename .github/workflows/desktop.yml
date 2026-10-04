@@ -56,6 +56,17 @@ jobs:
         working-directory: desktop
         run: go test -tags novulkan ./...
 
+      # the real child under WebKitGTK with a fake launcher on the wire
+      # protocol (D-14): the adversarial napplet's escapes, the rebuild order,
+      # the reload cap and the forged bindings, on a real engine under xvfb.
+      # With the smoke flag set a missing display fails instead of skipping
+      - name: webkit smoke
+        working-directory: desktop
+        env:
+          VERDANA_WEBKIT_SMOKE: "1"
+          NO_AT_BRIDGE: "1"
+        run: xvfb-run -a go test -tags novulkan ./child -run '^TestWebKit' -count=1 -v -timeout 10m
+
   # the instance pipe, childbin and keyring code have Windows-only paths that
   # the linux job never compiles, and the build matrix only builds them. This
   # job vets the backend and the whole desktop module for Windows and runs the
