@@ -137,8 +137,14 @@ var nc struct {
 // stored relay — and waits for a signer to answer it in the background,
 // replacing whatever uri was on offer. ls.mu must be held.
 func startNostrConnectLocked() {
+	// a user flow: the client key is made here if there is none yet, and
+	// saved with the login once a signer answers
+	ck, err := clientKey()
+	if err != nil {
+		log.Warn().Err(err).Msg("no client key for a nostrconnect uri")
+		return
+	}
 	stateMu.Lock()
-	clientKey := state.ClientKey
 	relay := state.NostrConnectRelay
 	stateMu.Unlock()
 	if relay == "" {
@@ -155,7 +161,7 @@ func startNostrConnectLocked() {
 	if nc.cancel != nil {
 		nc.cancel()
 	}
-	nc.uri = buildNostrConnectURI(clientKey.Public(), relays, secret)
+	nc.uri = buildNostrConnectURI(ck.Public(), relays, secret)
 	nc.cancel = cancel
 	nc.mu.Unlock()
 
@@ -166,7 +172,7 @@ func startNostrConnectLocked() {
 
 	log.Debug().Str("relay", relay).Msg("waiting for a nostrconnect signer")
 	go func() {
-		signer, err := waitNostrConnect(ctx, pool, clientKey, relays, secret)
+		signer, err := waitNostrConnect(ctx, pool, ck, relays, secret)
 		if err != nil {
 			return // replaced, or the login screen went away
 		}

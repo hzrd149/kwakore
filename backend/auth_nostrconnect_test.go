@@ -192,11 +192,19 @@ func TestNostrConnectOnlyOnRequest(t *testing.T) {
 	ls.mu.Lock()
 	oldPhase := ls.phase
 	ls.mu.Unlock()
+	secretsMu.Lock()
+	oldSecrets := secrets
+	// the uri needs a client key, which only loaded secrets hand out
+	secrets = secretsRecord{loaded: true}
+	secretsMu.Unlock()
 	t.Cleanup(func() {
 		stopNostrConnect()
 		ls.mu.Lock()
 		ls.phase = oldPhase
 		ls.mu.Unlock()
+		secretsMu.Lock()
+		secrets = oldSecrets
+		secretsMu.Unlock()
 	})
 
 	setPhase(PhaseLoading)

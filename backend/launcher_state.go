@@ -14,14 +14,27 @@ import (
 	"sync/atomic"
 	"time"
 
-	"fiatjaf.com/nostr"
 	"verdana/backend/fileutil"
 )
 
 // AppState is everything the launcher remembers between runs.
 type AppState struct {
-	ClientKey      nostr.SecretKey `json:"client_key"`
-	Login          string          `json:"login"`
+	// ClientKey (64 hex, the NIP-46 client key) and Login (the nsec, bunker
+	// url, NIP-05 address or amber: login the user gave) are the file copy
+	// of the login secrets. They are written here only in file mode (no
+	// secret store, or the store was unavailable) and are nil once the
+	// secrets live in the OS keyring. Nothing outside launcher_secrets.go
+	// reads them: everything else goes through clientKey() and
+	// storedLogin(). Strings, not nostr.SecretKey, so they can be omitted
+	// (a SecretKey can be neither null nor omitempty).
+	ClientKey *string `json:"client_key,omitempty"`
+	Login     *string `json:"login,omitempty"`
+
+	// SecretsLocation is where the authoritative copy of the login secrets
+	// lives: "" (never decided), "keyring" or "file" (see
+	// launcher_secrets.go).
+	SecretsLocation string `json:"secrets_location,omitempty"`
+
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
@@ -115,10 +128,9 @@ func loadState() {
 		log.Error().Err(err).Str("path", statePath).Msg("could not read state file, not saving state this run")
 		stateSaveBlocked.Store(true)
 	}
-	if state.ClientKey == (nostr.SecretKey{}) {
-		state.ClientKey = nostr.Generate()
-		log.Debug().Msg("generated new client key")
-	}
+	// no client key is generated here: loadState also runs after a corrupt
+	// or missing state.json, where the real key may still be in the
+	// keyring. clientKey() makes one only when the user starts a login.
 	if len(state.Relays) == 0 {
 		state.Relays = []string{
 			"relay.nostrapps.com",
@@ -290,13 +302,6 @@ func SetRelays(relays []string) {
 	saveState()
 	stateMu.Unlock()
 	notifyState()
-}
-
-// ─── login ───────────────────────────────────────────────────────
-
-// StoredLogin is the nsec/bunker input the user logged in with last time.
-func StoredLogin() string {
-	return strings.TrimSpace(state.Login)
 }
 
 // ─── installed napps ─────────────────────────────────────────────

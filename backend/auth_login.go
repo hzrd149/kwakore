@@ -47,12 +47,9 @@ func loginAmber(input string) {
 	sessionCancel = nil
 	go pushIdentityChanged()
 
-	stateMu.Lock()
-	if state.Login != input {
-		state.Login = input
-		saveState()
+	if err := setStoredLogin(input); err != nil {
+		log.Warn().Err(err).Msg("could not save the login")
 	}
-	stateMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -101,7 +98,25 @@ func login(input string, resume bool) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	sessionCancel = cancelSession
 
-	clientKey := state.ClientKey
+	// only a bunker or NIP-05 login needs the NIP-46 client key. A resume
+	// uses the saved one and never makes a new one: that would silently
+	// drop the pairing the bunker knows.
+	var ck nostr.SecretKey
+	if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
+		var err error
+		if resume {
+			ck, err = existingClientKey()
+		} else {
+			ck, err = clientKey()
+		}
+		if err != nil {
+			cancelSession()
+			sessionCancel = nil
+			log.Error().Err(err).Msg("login failed")
+			setLoginErr(err.Error())
+			return
+		}
+	}
 
 	// a fresh bunker login blocks on the bunker's "connect" answer, so race it
 	// against the login deadline instead of handing it a ctx that dies
@@ -116,7 +131,7 @@ func login(input string, resume bool) {
 	}
 	go func() {
 		if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
-			k, err := loginBunker(sessionCtx, clientKey, input, resume, onAuth)
+			k, err := loginBunker(sessionCtx, ck, input, resume, onAuth)
 			keyerDone <- keyerResult{k, err}
 			return
 		}
@@ -159,12 +174,11 @@ func login(input string, resume bool) {
 	userPubkey = pk
 	go pushIdentityChanged()
 
-	stateMu.Lock()
-	if state.Login != input {
-		state.Login = input
-		saveState()
+	// saved before setProfileFromUser, so PhaseMain follows the save (the
+	// save may wait on the keyring while the launcher still shows loading)
+	if err := setStoredLogin(input); err != nil {
+		log.Warn().Err(err).Msg("could not save the login")
 	}
-	stateMu.Unlock()
 
 	setProfileFromUser(ctx, pk)
 }
@@ -225,10 +239,9 @@ func Logout() {
 	pushIdentityChanged()
 	stopUserRelays()
 
-	stateMu.Lock()
-	state.Login = ""
-	saveState()
-	stateMu.Unlock()
+	if err := setStoredLogin(""); err != nil {
+		log.Warn().Err(err).Msg("could not forget the saved login")
+	}
 
 	setProfile("", "", "")
 	setPhase(PhaseLogin)

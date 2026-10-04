@@ -92,12 +92,8 @@ func Start(opts Options) (func(), error) {
 		CheckForUpdates()
 	}()
 
-	// resume the stored login, or ask for one
-	if stored := StoredLogin(); stored != "" {
-		go resumeLogin(stored)
-	} else {
-		setPhase(PhaseLogin)
-	}
+	// load the login secrets, then resume the stored login or ask for one
+	go loadSecrets(nil)
 
 	return closeStores, nil
 }

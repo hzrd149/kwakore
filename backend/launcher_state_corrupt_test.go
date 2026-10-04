@@ -104,8 +104,8 @@ func TestLoadStateCorruptIsKeptAside(t *testing.T) {
 		t.Fatalf("corrupt copy = %q (%v), want the original bytes", kept, err)
 	}
 	// the launcher started from defaults and saved a parseable state.json
-	if state.Login != "" || len(state.Relays) == 0 || state.Relays[0] == "wss://mine.example" {
-		t.Fatalf("state not reset to defaults: login=%q relays=%v", state.Login, state.Relays)
+	if state.Login != nil || len(state.Relays) == 0 || state.Relays[0] == "wss://mine.example" {
+		t.Fatalf("state not reset to defaults: login=%v relays=%v", state.Login, state.Relays)
 	}
 	fresh, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if err != nil {
@@ -171,7 +171,8 @@ func TestLoadStateCorruptRenameFailureBlocksSave(t *testing.T) {
 	}
 	// later saves in the same process never overwrite the unreadable file
 	stateMu.Lock()
-	state.Login = "nsec1something"
+	login := "nsec1something"
+	state.Login = &login
 	saveState()
 	stateMu.Unlock()
 	got, err := os.ReadFile(path)
@@ -375,8 +376,8 @@ func TestStrayTempFileIsNotState(t *testing.T) {
 
 	loadState()
 
-	if state.Login != "bunker://x" || !slices.Equal(state.Relays, []string{"wss://kept.example"}) {
-		t.Fatalf("state = %q %v, want the contents of state.json", state.Login, state.Relays)
+	if state.Login == nil || *state.Login != "bunker://x" || !slices.Equal(state.Relays, []string{"wss://kept.example"}) {
+		t.Fatalf("state = %v %v, want the contents of state.json", state.Login, state.Relays)
 	}
 	if got := Snapshot().Notices; len(got) != 0 {
 		t.Fatalf("notices = %v, want none", noticeIDs(got))
