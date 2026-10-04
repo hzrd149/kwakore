@@ -543,8 +543,9 @@ type advResult struct {
 //   - the first boot is exactly one load before any reset (Pitfall 5)
 //   - the reload loop ends after exactly 4 resets and 3 starts, then the
 //     window stays up and boots nothing more (D-03)
-//   - the forged binding call reached the binding and was refused: the child
-//     logs it and the launcher never gets nap.openSettings (D-15)
+//   - the forged binding calls reached the bindings and were refused: the
+//     child logs a refusal (whichever call won the sampled Warn) and the
+//     launcher never gets nap.openSettings (D-15)
 //   - RTCPeerConnection and navigator.mediaDevices are undefined in the
 //     frame (D-09, D-20), and the fixture reports no FAIL at all
 //   - the marker-less replacements (nav-js, doc-open-unclosed) ran; their
@@ -697,15 +698,22 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 	if n := f.countIn(events, "rpc:nap.openSettings"); n != 0 {
 		t.Errorf("the forged nap.openSettings reached the launcher %d times", n)
 	}
-	// the first forged call is the rpc, so the sampled Warn is its line
+	// The fixture forges the rpc and then the prompt answer, but go-webview
+	// runs every binding call on its own goroutine, so either may be the
+	// first to reach the 5 s sampled Warn, and the other is then counted
+	// as suppressed. Either line is a refusal; the guarantee itself is the
+	// nap.openSettings count above.
 	refused := false
 	for _, line := range strings.Split(f.childLog(), "\n") {
-		if strings.Contains(line, "without the window token") && strings.Contains(line, "nap.openSettings") {
+		if !strings.Contains(line, "without the window token") {
+			continue
+		}
+		if strings.Contains(line, "nap.openSettings") || strings.Contains(line, "prompt answer") {
 			refused = true
 		}
 	}
 	if !refused {
-		t.Errorf("the child never logged refusing the forged nap.openSettings rpc:\n%s", f.childLog())
+		t.Errorf("the child never logged refusing a forged binding call (the nap.openSettings rpc or the prompt answer):\n%s", f.childLog())
 	}
 
 	if conns := attacker.connections(); len(conns) != 0 {
