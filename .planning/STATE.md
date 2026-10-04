@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
-current_phase: 3
+current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
 status: executing
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-10-04T02:54:35.431Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-10-04T03:02:38.108Z"
 last_activity: 2026-10-03
-last_activity_desc: Phase 2 complete, transitioned to Phase 3
-state_head: d881a232a7eef2066bc83d1b8b437477eb074112
+last_activity_desc: Phase 03 execution started
+state_head: 5b7e2ed8cb34d5c84387fa4e1532347a7deb61bb
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 12
+  completed_plans: 13
   percent: 25
 ---
 
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-03)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 3 — Desktop Process and Secrets Hardening
+**Current focus:** Phase 03 — Desktop Process and Secrets Hardening
 
 ## Current Position
 
-Phase: 3 (Desktop Process and Secrets Hardening) — READY TO EXECUTE
-Plan: Not started
+Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
-Last activity: 2026-10-03 — Phase 2 complete, transitioned to Phase 3
+Last activity: 2026-10-03 — Phase 03 execution started
 
-Progress: [██░░░░░░░░] 25% (2/8 phases)
+Progress: [███░░░░░░░] 25% (2/8 phases)
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [██░░░░░░░░] 25% (2/8 phases)
 | Phase 02 P05 | 7min | 3 tasks | 5 files |
 | Phase 02 P06 | 14min | 3 tasks | 13 files |
 | Phase 02 P07 | 5min | 2 tasks | 6 files |
+| Phase 03 P01 | 6min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -117,6 +118,9 @@ Recent decisions affecting current work:
 - [Phase 02]: [02-06] intent.invoke charges limitColdLaunch via actionOptions.BeforeLaunch (open windows free); the chooser lives in actionOptions.PromptCtx; notify.send and config.openSettings limits moved to the window limiter
 - [Phase 02]: [02-07] resource.bytesMany costs one resource token per URL: the dispatcher charges 1 via the route class, the handler takes len(urls)-1 in one AllowN (all or nothing); at most 10 resource requests in flight per window (resourceAtCapacity), refused quota-exceeded
 - [Phase 02]: [02-07] INC channels capped at 32 per window counting both ends, checked for opener and peer under incMu with the insert; uploads capped at 4 pending/uploading per window, before the server lookup and again atomically at store (napStoreNewUpload); napMaxSubs lives in nap_limits.go
+- [Phase 03]: 03-01: an unreadable (not only unparsable) state.json blocks saveState for the run so it is never replaced by defaults
+- [Phase 03]: 03-01: state-corrupt notice shows even when the rename fails, with Path = state.json where the data stayed
+- [Phase 03]: 03-01: notices keep ls.notices under ls.mu and DismissedNotices under stateMu, never both held; addNotice/removeNotice do not notify
 
 ### Pending Todos
 
@@ -146,6 +150,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T02:08:34.914Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-desktop-process-and-secrets-hardening/03-UI-SPEC.md
+Last session: 2026-10-04T03:02:38.054Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
