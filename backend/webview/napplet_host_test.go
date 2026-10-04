@@ -496,6 +496,156 @@ return {
 	}
 }
 
+// reloadLoopSetup stubs the clock the loop cap reads and numbers every
+// nap.boot answer. replaceAt(f, ms) advances the clock and gives f its first
+// load (when it has none yet) and then a second one: a replaced document.
+const reloadLoopSetup = `
+let now = 0
+Date.now = () => now
+let boots = 0
+handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
+const loadedOnce = new Set()
+const replaceAt = async (f, ms) => {
+  now += ms
+  if (!loadedOnce.has(f)) { loadedOnce.add(f); fireLoad(f) }
+  await flush()
+  fireLoad(f)
+  await flush(6)
+}
+`
+
+// D-03: a napplet that keeps replacing its own document is rebuilt at most
+// REBUILD_LIMIT times within REBUILD_WINDOW_MS; the next replacement still
+// ends its session but boots nothing and says why in the window. Only the
+// launcher's dev reload starts it again.
+func TestNappletHostStopsReloadLoop(t *testing.T) {
+	t.Run("halts on the fourth quick replacement", func(t *testing.T) {
+		var got struct {
+			Boots, Starts, Resets, Appended, Live int
+			Body                                  string
+			MsgAfter, ResetsAfter, BootsAfter     int
+		}
+		runHost(t, reloadLoopSetup, `
+await flush()
+for (let i = 0; i < 4; i++) await replaceAt(appended[i], 500)
+const last = appended[appended.length - 1]
+const out = {
+  Boots: count("nap.boot"), Starts: count("nap.start"), Resets: count("nap.reset"),
+  Appended: appended.length, Live: live().length, Body: document.body.textContent,
+}
+// the halted frame is gone: its posts and loads reach nothing
+fireMessage(last.contentWindow, { type: "storage.keys", id: "after" })
+fireLoad(last)
+fireLoad(last)
+await flush(6)
+return Object.assign(out, { MsgAfter: count("nap.msg"), ResetsAfter: count("nap.reset"), BootsAfter: count("nap.boot") })
+`, &got)
+
+		// the initial boot plus three rebuilds; the fourth replacement only resets
+		if got.Boots != 4 || got.Starts != 4 || got.Appended != 4 {
+			t.Errorf("nap.boot %d, nap.start %d, frames %d; want 4, 4, 4", got.Boots, got.Starts, got.Appended)
+		}
+		if got.Resets != 4 {
+			t.Errorf("nap.reset sent %d times, want 4 (the halted replacement still ends its session)", got.Resets)
+		}
+		if got.Live != 0 {
+			t.Errorf("%d live frames after the halt, want 0", got.Live)
+		}
+		if !strings.Contains(got.Body, "keeps reloading itself") {
+			t.Errorf("window text after the halt = %q", got.Body)
+		}
+		if got.MsgAfter != 0 || got.ResetsAfter != 4 || got.BootsAfter != 4 {
+			t.Errorf("after the halt: nap.msg %d, nap.reset %d, nap.boot %d; want 0, 4, 4", got.MsgAfter, got.ResetsAfter, got.BootsAfter)
+		}
+	})
+
+	t.Run("spaced replacements never halt", func(t *testing.T) {
+		var got struct {
+			Boots, Resets, Appended, Live int
+			Body                          string
+		}
+		runHost(t, reloadLoopSetup, `
+await flush()
+for (let i = 0; i < 8; i++) await replaceAt(appended[i], 4000)
+return { Boots: count("nap.boot"), Resets: count("nap.reset"), Appended: appended.length, Live: live().length, Body: document.body.textContent }
+`, &got)
+		if got.Boots != 9 || got.Resets != 8 || got.Appended != 9 || got.Live != 1 || got.Body != "" {
+			t.Errorf("eight replacements 4 s apart: nap.boot %d, nap.reset %d, frames %d, live %d, body %q; want 9, 8, 9, 1, empty",
+				got.Boots, got.Resets, got.Appended, got.Live, got.Body)
+		}
+	})
+
+	t.Run("a dev reload clears the halt and the history", func(t *testing.T) {
+		var got struct {
+			Halted                     bool
+			BootsReload, AppendedAfter int
+			Boots, Appended, Live      int
+			Body                       string
+		}
+		runHost(t, reloadLoopSetup, `
+await flush()
+for (let i = 0; i < 4; i++) await replaceAt(appended[i], 500)
+const halted = document.body.textContent.includes("keeps reloading itself")
+const bootsBefore = count("nap.boot"), appendedBefore = appended.length
+window.__nap_reload()
+await flush(6)
+const bootsReload = count("nap.boot") - bootsBefore
+const appendedAfter = appended.length - appendedBefore
+// three quick replacements right after still rebuild
+for (let i = 0; i < 3; i++) await replaceAt(appended[appended.length - 1], 500)
+return {
+  Halted: halted, BootsReload: bootsReload, AppendedAfter: appendedAfter,
+  Boots: count("nap.boot") - bootsBefore, Appended: appended.length - appendedBefore,
+  Live: live().length, Body: document.body.textContent,
+}
+`, &got)
+		if !got.Halted {
+			t.Fatal("the loop did not halt before the dev reload")
+		}
+		if got.BootsReload != 1 || got.AppendedAfter != 1 {
+			t.Errorf("dev reload after a halt: nap.boot %d, frames %d; want 1, 1", got.BootsReload, got.AppendedAfter)
+		}
+		if got.Boots != 4 || got.Appended != 4 || got.Live != 1 {
+			t.Errorf("three quick replacements after the dev reload: nap.boot %d, frames %d, live %d; want 4, 4, 1",
+				got.Boots, got.Appended, got.Live)
+		}
+		if strings.Contains(got.Body, "keeps reloading itself") {
+			t.Errorf("the halt text survived the dev reload: %q", got.Body)
+		}
+	})
+
+	t.Run("an overtaken boot answering late appends nothing", func(t *testing.T) {
+		var got struct {
+			Halted                   bool
+			LateAppended, LateStarts int
+		}
+		runHost(t, reloadLoopSetup, `
+await flush()
+fireLoad(appended[0])
+loadedOnce.add(appended[0])
+await flush()
+// a dev reload whose nap.boot answer is still out when the loop halts
+hold("nap.boot")
+window.__nap_reload()
+await flush()
+const late = held["nap.boot"].shift()
+unhold("nap.boot")
+for (let i = 0; i < 4; i++) await replaceAt(appended[i], 500)
+const halted = document.body.textContent.includes("keeps reloading itself")
+const appendedBefore = appended.length, startsBefore = count("nap.start")
+late.resolve(JSON.stringify({ srcdoc: "late", title: "late" }))
+await flush(6)
+return { Halted: halted, LateAppended: appended.length - appendedBefore, LateStarts: count("nap.start") - startsBefore }
+`, &got)
+		if !got.Halted {
+			t.Fatal("the loop did not halt")
+		}
+		if got.LateAppended != 0 || got.LateStarts != 0 {
+			t.Errorf("a late nap.boot answer after the halt: %d frames, %d nap.start; want 0, 0", got.LateAppended, got.LateStarts)
+		}
+	})
+}
+
 var maxPendingRE = regexp.MustCompile(`const MAX_PENDING = (\d+)`)
 
 // D-07 queue bound: a napplet that floods the host page gets terminal
