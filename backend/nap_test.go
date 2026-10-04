@@ -1000,6 +1000,65 @@ func TestNapResetEndsTheSession(t *testing.T) {
 	}
 }
 
+// SBOX-01, D-02: nothing the replaced document's session had going survives
+// nap.reset: its relay subscriptions stop, its inc topics no longer route to
+// the window, its grants are gone, and a nap.loaded before the next
+// nap.start pushes nothing.
+func TestNapResetCancelsSessionWork(t *testing.T) {
+	setupNapTest(t)
+	withSystem(t)
+	host = &notifyTestHost{}
+	ci, rec := openNapplet(t, "reset-work")
+	pumps := make(chan context.Context, 1)
+	ci.nap.pumpHook = func(ctx context.Context, subID string) {
+		pumps <- ctx
+		<-ctx.Done()
+	}
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "relay.subscribe", "id": "s1", "subId": "feed",
+		"filters": []any{map[string]any{"kinds": []int{1}}}})
+	var pump context.Context
+	select {
+	case pump = <-pumps:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the relay subscription never started")
+	}
+	subscribeTopic(t, ci, rec, "t", 1)
+	ci.nap.mu.Lock()
+	ci.nap.grants[PermFetch] = true
+	ci.nap.mu.Unlock()
+
+	if _, err := napRPC(ci, "nap.reset", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pump.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the old session's relay subscription outlived nap.reset")
+	}
+	if _, ok := ci.handlerFor("t"); ok {
+		t.Error("the old session's inc topic still routes to this window")
+	}
+	ci.nap.mu.Lock()
+	grants, topics, subs := len(ci.nap.grants), len(ci.nap.topics), len(ci.nap.subs)
+	ci.nap.mu.Unlock()
+	if grants != 0 || topics != 0 || subs != 0 {
+		t.Errorf("session state survived nap.reset: %d grants, %d topics, %d subs", grants, topics, subs)
+	}
+
+	// the replaced frame's load, or one racing the rebuild, pushes nothing
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 0 {
+		t.Fatalf("controls pushed between nap.reset and nap.start: %v", got)
+	}
+	ready(t, ci, rec, 2)
+	loaded(t, ci)
+	if got := rec.find("notify.controls"); len(got) != 1 {
+		t.Fatalf("controls after the rebuilt frame's load: %v", got)
+	}
+}
+
 func TestNapLoadedPushesControlsOnEveryLoad(t *testing.T) {
 	setupNapTest(t)
 	host = &notifyTestHost{}

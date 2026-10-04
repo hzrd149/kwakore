@@ -437,6 +437,65 @@ return {
 	}
 }
 
+// SBOX-01, D-02: a refusal the host page builds belongs to the frame that sent
+// the envelope. One whose frame was replaced while the envelope was out is
+// dropped: it never reaches the replaced document or the one rebuilt after it.
+func TestNappletHostDropsRefusalsForReplacedFrames(t *testing.T) {
+	var got struct {
+		Rebuilt   bool     `json:"rebuilt"`
+		OldPosted []string `json:"oldPosted"`
+		NewPosted []string `json:"newPosted"`
+		Own       []string `json:"own"`
+	}
+	runHost(t, `
+let boots = 0
+handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
+`, `
+await flush()
+const f0 = appended[0]
+fireLoad(f0)
+await flush()
+hold("nap.msg")
+fireMessage(f0.contentWindow, { type: "storage.keys", id: "old" })
+await flush()
+// the document is replaced while its envelope is out, and then Go fails it
+fireLoad(f0)
+await flush()
+unhold("nap.msg")
+release("nap.msg", { __bridge_error: "boom" })
+await flush(10)
+const f1 = appended[1]
+if (!f1) return { rebuilt: false }
+fireLoad(f1)
+await flush()
+const newPosted = f1.contentWindow.posted.map(p => p.type + ":" + p.id)
+
+// the rebuilt frame's own failure still reaches it
+handlers["nap.msg"] = () => ({ __bridge_error: "boom" })
+fireMessage(f1.contentWindow, { type: "storage.keys", id: "new" })
+await flush()
+return {
+  rebuilt: true,
+  oldPosted: f0.contentWindow.posted.map(p => p.type + ":" + p.id),
+  newPosted,
+  own: f1.contentWindow.posted.map(p => p.type + ":" + p.id + ":" + p.error),
+}
+`, &got)
+
+	if !got.Rebuilt {
+		t.Fatal("the replaced frame was not rebuilt")
+	}
+	if len(got.OldPosted) != 0 {
+		t.Errorf("the replaced frame got %v, want nothing", got.OldPosted)
+	}
+	if len(got.NewPosted) != 0 {
+		t.Errorf("the rebuilt frame got %v, the refusal of the document it replaced", got.NewPosted)
+	}
+	if !slices.Equal(got.Own, []string{"storage.keys.result:new:internal-error"}) {
+		t.Errorf("the rebuilt frame's own refusal: %v", got.Own)
+	}
+}
+
 var maxPendingRE = regexp.MustCompile(`const MAX_PENDING = (\d+)`)
 
 // D-07 queue bound: a napplet that floods the host page gets terminal

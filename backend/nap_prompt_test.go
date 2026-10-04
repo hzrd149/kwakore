@@ -460,6 +460,40 @@ func TestPromptCancelledOnSessionEnd(t *testing.T) {
 	}
 }
 
+// TestPromptCancelledOnReset: the host page found its frame's document
+// replaced and sent nap.reset (SBOX-01, D-02). The old session's pending
+// prompt comes down at once, without waiting for the next nap.start; a late
+// click on it remembers nothing, opens nothing and answers nothing.
+func TestPromptCancelledOnReset(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	h := &promptTestHost{}
+	host = h
+	ci, rec := openNapplet(t, "prompt-reset")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "link.open", "id": "r1", "url": "https://example.com/r"})
+	p := waitPromptsFor(t, ci.instance, 1)[0]
+	if _, err := napRPC(ci, "nap.reset", ""); err != nil {
+		t.Fatal(err)
+	}
+	waitPromptsFor(t, ci.instance, 0)
+
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeAlways})
+	// the rebuilt frame's session opens after the click
+	ready(t, ci, rec, 2)
+	time.Sleep(50 * time.Millisecond)
+	if links := h.links(); len(links) != 0 {
+		t.Fatalf("opened %v", links)
+	}
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}); ok {
+		t.Fatalf("a cancelled prompt left a rule: %+v", rule)
+	}
+	if got := rec.find("link.open.result"); len(got) != 0 {
+		t.Fatalf("the old session's request was answered: %v", got)
+	}
+}
+
 // TestBridgePromptCancelledOnWindowClose: a bridge napp's prompt belongs to
 // its window: closing the window takes it down as dismissed.
 func TestBridgePromptCancelledOnWindowClose(t *testing.T) {
