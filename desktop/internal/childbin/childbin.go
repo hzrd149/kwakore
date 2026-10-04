@@ -134,13 +134,14 @@ func EnsureVersion(base string, files []File) (string, error) {
 		unlock(lf)
 		return "", fmt.Errorf("childbin: create %s: %w", dir, err)
 	}
-	// verified first, so the refresh never follows a symlink
+	// verified first, so the refresh never follows a symlink (touchDir also
+	// opens a reparse point itself on Windows)
 	if err := verifyDir(dir); err != nil {
 		unlock(lf)
 		return "", err
 	}
 	now := time.Now()
-	if err := os.Chtimes(dir, now, now); err != nil {
+	if err := touchDir(dir, now); err != nil {
 		unlock(lf)
 		return "", fmt.Errorf("childbin: mark %s in use: %w", dir, err)
 	}
