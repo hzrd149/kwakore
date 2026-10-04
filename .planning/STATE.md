@@ -169,6 +169,7 @@ None yet.
 - [Phase 7]: D-17 — a reply over 128 MiB (e.g. large resource.bytesMany) closes that napplet window; Blossom fetch/HEAD ungated exception (RES-02/03)
 - [Phase 8]: IN-12 / AR-13 — identity globals (`userKeyer`/`userPubkey`, `sessionCancel`) are read unsynchronized; identity pushes can arrive out of order; `dev_publish.go` dereferences outside a recover. Phase 3 added only RPC panic recovery and single keyer reads
 - [Phase 3 residue]: First real Windows CI run not yet observed (124+ commits unpushed); Phase 3 info items IN-01..IN-11 open in 03-REVIEW.md; corrupt-state copies may keep plaintext secrets (AR-11); a downgrade on a migrated data dir must re-pair the bunker (release notes)
+- [Phase 3 UI]: 03-UI-REVIEW 20/24 follow-ups: draw the keyring-waiting Log in button disabled (login.go:89), cap/scroll the notice stack at high display scale (layout.go:273, login.go:220), click feedback for Try again / Log in again / Dismiss (retries already join in-flight loads)
 - [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
 
 ## Deferred Items
