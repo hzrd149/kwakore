@@ -38,6 +38,19 @@ func NappletCSP() string { return nappletCSP }
 // caught by the host page as a replaced document and rebuilt.
 func NappletHostCSP() string { return nappletCSP + "; frame-ancestors 'none'" }
 
+// SettingsCSP is the policy of a napp's settings page, which is the
+// launcher's own: everything it needs is inline or injected, so it gets no
+// network, no frames, no navigation away and no embedders (D-06).
+func SettingsCSP() string {
+	return "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+		"img-src data:; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+}
+
+// NappPageCSP is the policy every file of a napp (kind 35130) is served with.
+// For now it only keeps other pages from embedding the napp; a navigation and
+// network policy for napps is deferred (D-08).
+func NappPageCSP() string { return "frame-ancestors 'none'" }
+
 // DocumentMarker is the type of the one message the launcher's preamble posts
 // to the host page as each napplet document starts (D-18). It is reserved for
 // the launcher and sits outside NAP's domain.action names: every NAP domain

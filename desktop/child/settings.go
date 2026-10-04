@@ -55,21 +55,20 @@ func startSettingsServer() string {
 		log.Error().Err(err).Msg("failed to listen for the settings page")
 		return ""
 	}
-	page := []byte(nappbridge.SettingsHTML())
-	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+	go http.Serve(ln, settingsHandler([]byte(nappbridge.SettingsHTML())))
+	return "http://" + ln.Addr().String() + "/"
+}
+
+// settingsHandler serves the settings page at "/" and nothing else, under
+// SettingsCSP and the other loopback headers, 404s included.
+func settingsHandler(page []byte) http.Handler {
+	return loopbackHeaders(nappbridge.SettingsCSP(), http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(wr, r)
 			return
 		}
 		wr.Header().Set("Content-Type", "text/html; charset=utf-8")
 		wr.Header().Set("Cache-Control", "no-store")
-		// everything the page needs is inline or injected: no network,
-		// no frames, no navigation away
-		wr.Header().Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "+
-				"img-src data:; frame-src 'none'; base-uri 'none'; form-action 'none'")
 		_, _ = wr.Write(page)
-	})
-	go http.Serve(ln, handler)
-	return "http://" + ln.Addr().String() + "/"
+	}))
 }

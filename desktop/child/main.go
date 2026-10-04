@@ -253,11 +253,17 @@ func startNappServer(root string) string {
 		log.Error().Err(err).Str("root", root).Msg("failed to listen for napp server")
 		return ""
 	}
+	go http.Serve(ln, nappHandler(root))
+	return "http://" + ln.Addr().String() + "/"
+}
+
+// nappHandler serves a napp's files from root. A path with no file behind it
+// and no extension (a client-side route) falls back to index.html. Every
+// response, the fallback and a 404 included, carries NappPageCSP (D-08) and
+// the other loopback headers.
+func nappHandler(root string) http.Handler {
 	fs := http.FileServer(http.Dir(root))
-	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
-		// Keep top-level navigation inside this napp origin. External URLs must
-		// be opened through window.napp.link(), which goes through the host.
-		wr.Header().Set("Content-Security-Policy", "navigate-to 'self'")
+	return loopbackHeaders(nappbridge.NappPageCSP(), http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
 		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
 		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
 			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {
@@ -266,9 +272,7 @@ func startNappServer(root string) string {
 			}
 		}
 		fs.ServeHTTP(wr, r)
-	})
-	go http.Serve(ln, handler)
-	return "http://" + ln.Addr().String() + "/"
+	}))
 }
 
 func rpcBound(method string, params string) string {
