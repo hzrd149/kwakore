@@ -143,3 +143,26 @@ func assertNoForbiddenCSP(t *testing.T, name, policy string) {
 		}
 	}
 }
+
+// D-06, D-08: the settings page keeps its strict launcher policy and gains
+// frame-ancestors; napp pages get frame-ancestors and nothing else for now.
+func TestLoopbackPagePolicies(t *testing.T) {
+	const settings = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+		"img-src data:; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	if got := SettingsCSP(); got != settings {
+		t.Errorf("SettingsCSP() = %q, want %q", got, settings)
+	}
+	if got := NappPageCSP(); got != "frame-ancestors 'none'" {
+		t.Errorf("NappPageCSP() = %q, want frame-ancestors 'none'", got)
+	}
+	for name, policy := range map[string]string{
+		"NappletHostCSP": NappletHostCSP(),
+		"SettingsCSP":    SettingsCSP(),
+		"NappPageCSP":    NappPageCSP(),
+	} {
+		assertNoForbiddenCSP(t, name, policy)
+		if got := parseCSP(t, name, policy)["frame-ancestors"]; len(got) != 1 || got[0] != "'none'" {
+			t.Errorf("%s frame-ancestors = %q, want 'none'", name, got)
+		}
+	}
+}
