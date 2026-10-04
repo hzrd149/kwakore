@@ -102,7 +102,19 @@ Plans:
   4. Login secrets live in the OS keyring. When no keyring is available they stay in the `0600` file and the desktop UI shows a warning. A locked, slow or missing keyring never regenerates the NIP-46 client key, loses a login or bunker pairing, or freezes the UI
   5. Killing Verdana mid-save never leaves a truncated `state.json`, and a corrupt `state.json` is kept aside instead of being silently replaced with fresh state (atomic writes land before the keyring work)
 
-**Plans**: TBD
+**Plans**: 10 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — fileutil atomic writes, crash-safe state.json, corrupt-state backup, notice model, 0700 data dir (wave 1)
+- [ ] 03-02-PLAN.md — netguard.ExternalLink in backend, desktop and mobile hosts; reaped opener; desktop writers on fileutil (wave 2)
+- [ ] 03-03-PLAN.md — childbin verified per-user child extraction, prod fail-closed with child-unavailable notice (wave 2)
+- [ ] 03-04-PLAN.md — libwebview copied from go-webview at build time, extracted by childbin, WEBVIEW_PATH (wave 3)
+- [ ] 03-05-PLAN.md — instanceipc Unix socket (peer uid) and owner-only named pipe (server SID check), v2 router (wave 1)
+- [ ] 03-06-PLAN.md — Windows CI job and bbolt test cleanup (wave 4)
+- [ ] 03-07-PLAN.md — SecretStore, accessor-only secrets, verified keyring migration, KeyringWait, fallback notice (wave 2)
+- [ ] 03-08-PLAN.md — LogoutPending, Try again / Log in again recovery paths (wave 3)
+- [ ] 03-09-PLAN.md — desktop secretstore adapter on go-keyring with worker and timeouts (wave 3)
+- [ ] 03-10-PLAN.md — manager-window notice stack, keyring wait/failure screens, login waiting state (wave 4)
 **UI hint**: yes
 
 ### Phase 4: Frame Sandbox Lifecycle
