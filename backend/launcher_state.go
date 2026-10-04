@@ -133,6 +133,15 @@ func loadState() {
 		if perr := json.Unmarshal(data, &state); perr != nil {
 			state = AppState{}
 			stateLost.Store(true)
+			// where the secrets lived is unknown, and a keyring item may be
+			// the only copy of the pairing: record the keyring as their home
+			// in the same save that replaces the corrupt file (below), so a
+			// state.json without the marker is never on disk. Quitting before
+			// the keyring answers then still waits on the next start, instead
+			// of a login screen whose new client key would later be migrated
+			// over the item (D-14, D-10). Inert with no SecretStore:
+			// loadSecretsLocked returns before it reads the location.
+			state.SecretsLocation = secretsInKeyring
 			keepCorruptState(perr)
 		}
 	case errors.Is(err, fs.ErrNotExist):
@@ -142,6 +151,9 @@ func loadState() {
 		log.Error().Err(err).Str("path", statePath).Msg("could not read state file, not saving state this run")
 		stateLost.Store(true)
 		stateSaveBlocked.Store(true)
+		// nothing is saved this run, but the in-memory location must not
+		// say "nothing stored" either (see the parse-failure case above)
+		state.SecretsLocation = secretsInKeyring
 		// and tell the user, as when a corrupt file can't be set aside:
 		// nothing they change this run is saved
 		addStateCorruptNotice(time.Now().Unix(), statePath)

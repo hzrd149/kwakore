@@ -704,16 +704,11 @@ func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc
 		// secrets lived is unknown and the keyring item may be the only copy
 		// of the pairing (D-14, D-10): wait for the keyring like the case
 		// below, instead of a login screen whose next login would make a new
-		// client key and later overwrite that item. The location is recorded
-		// (the reset state.json no longer says it), so a later start that
-		// still can't reach the keyring waits too; one that reaches it and
-		// finds no item starts fresh.
-		stateMu.Lock()
-		if state.SecretsLocation != secretsInKeyring {
-			state.SecretsLocation = secretsInKeyring
-			saveState()
-		}
-		stateMu.Unlock()
+		// client key and later overwrite that item. loadState already
+		// recorded the keyring as the location, in the save that replaced
+		// the corrupt file, so a later start that still can't reach the
+		// keyring waits too, even if this one never got this far; one that
+		// reaches it and finds no item starts fresh.
 		fallthrough
 
 	case loc == secretsInKeyring:

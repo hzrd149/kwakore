@@ -842,6 +842,89 @@ func TestSecretsUnavailableAfterLostStateWaits(t *testing.T) {
 	}
 }
 
+// the process quits after loadState replaced a corrupt state.json but before
+// the keyring read answered (the user quits from the waiting screen, a crash,
+// a session end). The defaults on disk must already say the secrets live in
+// the keyring: otherwise the next start reads a well-formed state.json with
+// no location, shows a plain login screen while the keyring is still down,
+// and the new client key that login makes is later migrated over the item
+// that was the only copy of the pairing.
+func TestSecretsLostStateMarkerSurvivesEarlyExit(t *testing.T) {
+	r := withFreshSecrets(t)
+	r.writeState(t, "{not json")
+	store := newFakeStore()
+	store.put(t, otherClientKeyHex, "bunker://kept")
+	store.setErrs(ErrSecretStoreUnavailable, ErrSecretStoreUnavailable, ErrSecretStoreUnavailable)
+
+	// only loadState: the keyring read never got to decide
+	loadState()
+	if !strings.Contains(r.readState(t), `"secrets_location": "keyring"`) {
+		t.Fatalf("the save that replaced the corrupt file has no location:\n%s", r.readState(t))
+	}
+
+	// next start, keyring still down: wait, and never make a key
+	r.restart(t, store)
+	if w := keyringWait(); w != keyringFailed {
+		t.Fatalf("KeyringWait = %q, want failed", w)
+	}
+	if got := Phase(); got != PhaseLoading {
+		t.Fatalf("phase = %q, want loading", got)
+	}
+	if _, err := clientKey(); err == nil {
+		t.Fatal("clientKey() generated a key while the keyring may hold the only pairing")
+	}
+	if got := strings.Join(store.callLog(), ","); got != "get" {
+		t.Fatalf("store calls = %s, want get", got)
+	}
+
+	// the keyring answers: its pairing is resumed unchanged
+	store.setErrs(nil, nil, nil)
+	r.restart(t, store)
+	if got := r.resumes(); len(got) != 1 || got[0] != "bunker://kept" {
+		t.Fatalf("resumed %v, want the keyring's login", got)
+	}
+	if it, ok := store.item(t); !ok || it.ClientKey != otherClientKeyHex || it.Login != "bunker://kept" {
+		t.Fatalf("keyring item changed: %+v, %v", it, ok)
+	}
+}
+
+// a fresh install (no state.json) is not a lost state: no location is
+// recorded, and with the keyring down it is the login screen in file mode.
+// With no store (Android, file mode) a corrupt state.json is the login
+// screen too: the location marker is never read.
+func TestSecretsLostStateMarkerOnlyAfterCorruption(t *testing.T) {
+	t.Run("fresh install", func(t *testing.T) {
+		r := withFreshSecrets(t)
+		store := newFakeStore()
+		store.setErrs(ErrSecretStoreUnavailable, ErrSecretStoreUnavailable, ErrSecretStoreUnavailable)
+
+		loadState()
+		if strings.Contains(r.readState(t), "secrets_location") {
+			t.Fatalf("fresh state records a location:\n%s", r.readState(t))
+		}
+		loadSecrets(store)
+		if got := Phase(); got != PhaseLogin {
+			t.Fatalf("phase = %q, want login", got)
+		}
+		if w := keyringWait(); w != "" {
+			t.Fatalf("KeyringWait = %q, want none", w)
+		}
+	})
+	t.Run("corrupt, no store", func(t *testing.T) {
+		r := withFreshSecrets(t)
+		r.writeState(t, "{not json")
+
+		loadState()
+		loadSecrets(nil)
+		if got := Phase(); got != PhaseLogin {
+			t.Fatalf("phase = %q, want login", got)
+		}
+		if _, err := clientKey(); err != nil {
+			t.Fatalf("clientKey() in file mode: %v", err)
+		}
+	})
+}
+
 // a login too large for the keyring (Pitfall 13) stays in the file.
 func TestSecretsLargeLoginStaysInFile(t *testing.T) {
 	r := withFreshSecrets(t)
