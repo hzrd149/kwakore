@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"verdana/backend/fileutil"
 )
 
 func autostartPath() string {
@@ -41,7 +43,7 @@ func SetAutostart(enabled bool, exe string) error {
 <key>RunAtLoad</key><true/>
 </dict></plist>
 `, xmlEscapeAutostart(exe))
-	return os.WriteFile(path, []byte(data), 0644)
+	return fileutil.WriteFileAtomic(path, []byte(data), 0644)
 }
 
 func xmlEscapeAutostart(value string) string {

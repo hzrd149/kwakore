@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 	"verdana/backend"
+	"verdana/backend/netguard"
 	"verdana/backend/qrcode"
 	"verdana/backend/webview"
 )
@@ -129,8 +130,18 @@ func (h mobileHost) OpenDiscovery(archetype string)              { h.ui.OpenDisc
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }
 func (h mobileHost) CopyText(text string) error                  { return h.ui.CopyText(text) }
 func (h mobileHost) SaveFileTarget() string                      { return h.ui.SaveFileTarget() }
-func (h mobileHost) OpenLink(url string) error                   { return h.ui.OpenLink(url) }
 func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.SaveFile(n, d) }
+
+// OpenLink validates the link itself, like the desktop host, so the Android
+// side only ever gets a normalized http(s) url no matter who called.
+func (h mobileHost) OpenLink(raw string) error {
+	url, err := netguard.ExternalLink(raw)
+	if err != nil {
+		return err
+	}
+	return h.ui.OpenLink(url)
+}
+
 func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
 	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
 }

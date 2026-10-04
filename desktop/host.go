@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"fiatjaf.com/verdana/desktop/internal/media"
 	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"verdana/backend"
+	"verdana/backend/fileutil"
 	"verdana/backend/netguard"
 )
 
@@ -71,8 +73,15 @@ func (gioHost) CopyText(text string) error {
 	return nil
 }
 
+// writeNewFile creates a download and fails with fs.ErrExist instead of
+// replacing a file. Tests wrap it to simulate a file appearing in between.
+var writeNewFile = fileutil.WriteFileNew
+
 // SaveFile writes into the user's download directory, never clobbering:
-// file.txt, file-1.txt, file-2.txt…
+// file.txt, file-1.txt, file-2.txt… There is no separate "is this name
+// free" check: the exclusive write is the check, so a file that appears
+// under the chosen name just before the write moves the download to the next
+// name instead of being overwritten.
 func (gioHost) SaveFile(name string, data []byte) (string, error) {
 	dir := downloadsDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -83,8 +92,12 @@ func (gioHost) SaveFile(name string, data []byte) (string, error) {
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	for i := 1; ; i++ {
-		if _, err := os.Stat(dest); os.IsNotExist(err) {
+		err := writeNewFile(dest, data, 0644)
+		if err == nil {
 			break
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
 		}
 		if i > 999 {
 			return "", errors.New("could not find a free filename")
@@ -92,9 +105,6 @@ func (gioHost) SaveFile(name string, data []byte) (string, error) {
 		dest = filepath.Join(dir, stem+"-"+strconv.Itoa(i)+ext)
 	}
 
-	if err := os.WriteFile(dest, data, 0644); err != nil {
-		return "", err
-	}
 	log.Info().Str("path", dest).Int("bytes", len(data)).Msg("saved file for napp")
 	return filepath.Base(dest), nil
 }

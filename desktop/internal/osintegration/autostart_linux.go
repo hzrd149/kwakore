@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"verdana/backend/fileutil"
 )
 
 func autostartPath() string {
@@ -44,5 +46,5 @@ Exec=%s --background
 Terminal=false
 X-GNOME-Autostart-enabled=true
 `, quoteExecField(exe))
-	return os.WriteFile(path, []byte(data), 0644)
+	return fileutil.WriteFileAtomic(path, []byte(data), 0644)
 }
