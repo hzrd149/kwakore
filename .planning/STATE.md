@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
-status: executing
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-10-04T04:28:39.971Z"
+status: verifying
+stopped_at: Completed 03-10-PLAN.md
+last_updated: "2026-10-04T04:37:27.099Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 03 execution started
-state_head: 1429298924cc20600d632d2d568f363c1cd97a8c
+state_head: 7d378efbf50e229196a5ac9571df5c6055626014
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 21
+  completed_plans: 22
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 
 Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
 Plan: 10 of 10
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-03 — Phase 03 execution started
 
 Progress: [███░░░░░░░] 25% (2/8 phases)
@@ -80,6 +80,7 @@ Progress: [███░░░░░░░] 25% (2/8 phases)
 | Phase 03 P08 | 8min | 2 tasks | 4 files |
 | Phase 03 P09 | 6min | 2 tasks | 8 files |
 | Phase 03 P06 | 6min | 2 tasks | 4 files |
+| Phase 03 P10 | 6min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -145,6 +146,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-09: desktop secretstore runs every go-keyring call on one ordered worker (120 s call, 3 s probe); a retried Get joins the read in flight, a Set/Delete ends the join; only keyring.ErrNotFound is not-found
 - [Phase 03]: 03-06: Windows CI steps run one command each; PowerShell only fails a step on the last command's exit code
 - [Phase 03]: 03-06: initSystem's closer closes the kvstore then the eventstore; the rigs' cleanup order was already right
+- [Phase 03]: 03-10: the desktop draws notices in backend order and only drops repeat IDs; ordering lives in backend orderedNotices
+- [Phase 03]: 03-10: the keyring wait opens the manager once per KeyringWait value while a primary is pending; the primary stays owed until loading ends
+- [Phase 03]: 03-10: showPendingPrimary reads backend.KeyringWait() (ls.mu only) instead of Snapshot() from the StateChanged callback
 
 ### Pending Todos
 
@@ -174,6 +178,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T04:28:39.912Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-10-04T04:37:27.044Z
+Stopped at: Completed 03-10-PLAN.md
 Resume file: None

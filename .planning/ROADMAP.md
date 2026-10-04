@@ -102,7 +102,7 @@ Plans:
   4. Login secrets live in the OS keyring. When no keyring is available they stay in the `0600` file and the desktop UI shows a warning. A locked, slow or missing keyring never regenerates the NIP-46 client key, loses a login or bunker pairing, or freezes the UI
   5. Killing Verdana mid-save never leaves a truncated `state.json`, and a corrupt `state.json` is kept aside instead of being silently replaced with fresh state (atomic writes land before the keyring work)
 
-**Plans**: 9/10 plans executed
+**Plans**: 10/10 plans executed
 
 Plans:
 **Wave 1**
@@ -125,7 +125,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 03-06-PLAN.md — Windows CI job and bbolt test cleanup (wave 4)
-- [ ] 03-10-PLAN.md — manager-window notice stack, keyring wait/failure screens, login waiting state (wave 4)
+- [x] 03-10-PLAN.md — manager-window notice stack, keyring wait/failure screens, login waiting state (wave 4)
 
 **UI hint**: yes
 
@@ -217,7 +217,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
-| 3. Desktop Process and Secrets Hardening | 9/10 | In Progress|  |
+| 3. Desktop Process and Secrets Hardening | 10/10 | In Progress|  |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |

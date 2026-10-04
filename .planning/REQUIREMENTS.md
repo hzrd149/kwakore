@@ -44,7 +44,7 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Desktop process
 
-- [ ] **PROC-01**: The child webview binary is extracted into a per-user, owner-only directory, verified by hash before every reuse, and written atomically; prod builds fail closed and never fall back to `./child/child`
+- [x] **PROC-01**: The child webview binary is extracted into a per-user, owner-only directory, verified by hash before every reuse, and written atomically; prod builds fail closed and never fall back to `./child/child`
 - [x] **PROC-02**: `libwebview` is no longer extracted by go-webview's `embedded` package into a shared `/tmp/webview-*` directory; it is extracted with the same per-user verified mechanism as the child binary
 - [x] **PROC-03**: The single-instance channel is a user-only Unix socket (Linux/macOS, peer-uid checked) or an owner-only named pipe (Windows); all TCP code, the port file and the token-only legacy message are removed
 - [x] **PROC-04**: The desktop host's `OpenLink` refuses anything but well-formed http(s) URLs, independently of its callers
@@ -163,7 +163,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DISP-03 | Phase 2 | Complete |
 | DISP-04 | Phase 2 | Complete |
 | DISP-05 | Phase 2 | Complete |
-| PROC-01 | Phase 3 | Pending |
+| PROC-01 | Phase 3 | Complete |
 | PROC-02 | Phase 3 | Complete |
 | PROC-03 | Phase 3 | Complete |
 | PROC-04 | Phase 3 | Complete |
