@@ -39,6 +39,13 @@ Out of this phase: per-domain NAP semantics (Phases 5-8), a full navigation poli
 - **D-15:** Forged binding checks: from inside the frame the fixture calls `window.webkit.messageHandlers`, `chrome.webview`, the bridge globals and `parent.*`, and asserts each is absent or refused.
 - **D-16:** Research spike inside phase research: throwaway experiments on WebKitGTK for srcdoc self-reload and navigation, `frame-src`/`child-src` enforcement, go-webview sub-frame navigation policy hooks, and WebRTC settings; WebView2/WKWebView behavior from documentation where no machine is available.
 
+### Post-research decisions (2026-10-04)
+- **D-17:** (user) Refines D-05. The napplet host-page CSP is the NIP-5D napplet baseline (`nappletCSP`) plus `; frame-ancestors 'none'`, not `script-src`/`style-src 'self'`: the srcdoc document inherits the host policy, so a `'self'` script policy would block every napplet's inline scripts (RESEARCH C1, measured). `frame-src`/`child-src` from the baseline still block http, meta-refresh and anchor navigations.
+- **D-18:** (user) Refines D-01. The launcher preamble in `buildSrcdoc` posts one document-start marker (`postMessage`) before any envelope of a new document, adding no global and leaving the shim bytes untouched; the host page treats a marker from the current frame after the first document as a replacement, closing the delayed-`load` gap (RESEARCH C2). Recorded in CONFORMANCE as a deliberate, no-global deviation from NIP-5D Security 5's injection limit.
+- **D-19:** (user) Refines D-10. On Windows, WebView2 hardening goes through `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, set before `webview.New` for all window kinds (napps and settings too), since one browser process is shared per build and mismatched arguments make later windows fail. The flag's effect is recorded as unverified until run on Windows.
+- **D-20:** Refines D-09/D-11. WebKitGTK hardening uses purego (already a dependency), not cgo: `gtk_bin_get_child(w.Window())` → `WebKitWebView*`, then `enable-webrtc=false`, `enable-media-stream=false`, and the `LinkPreconnect` feature disabled (preconnect bypasses `connect-src` on 2.52, RESEARCH C4). A `decide-policy` handler refusing sub-frame navigations is optional defense in depth, at Claude's discretion.
+- **D-21:** D-02's teardown reuses the existing `nap.reset` (`backend/nap.go`), which already bumps the gen, clears `established` and cancels the session; Phase 4 adds tests and updated comments rather than a new RPC.
+
 ### Claude's Discretion
 - RPC naming, exact CSP token list beyond the decisions above, error copy and styling, file split, and test structure, within project conventions (plain JS, no toolchain, no semicolons, IIFE).
 
