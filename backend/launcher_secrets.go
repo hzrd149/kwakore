@@ -1,7 +1,11 @@
 package backend
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -38,6 +42,38 @@ var (
 	ErrSecretNotFound         = errors.New("secret not found")
 	ErrSecretStoreUnavailable = errors.New("secret store unavailable")
 )
+
+// secretsItemAccount names the one keyring item that holds this data dir's
+// login secrets, so two data dirs (two profiles, a dev build) never share
+// one. Only a hash of the path goes into the keyring.
+func secretsItemAccount(dir string) string {
+	sum := sha256.Sum256([]byte(dir))
+	return "login-secrets:" + hex.EncodeToString(sum[:])[:12]
+}
+
+// secretsItem is the value of the keyring item.
+type secretsItem struct {
+	V         int    `json:"v"`
+	ClientKey string `json:"client_key"` // 64 hex, "" for none yet
+	Login     string `json:"login"`
+}
+
+func encodeSecretsItem(it secretsItem) string {
+	it.V = 1
+	data, _ := json.Marshal(it)
+	return string(data)
+}
+
+func decodeSecretsItem(raw string) (secretsItem, error) {
+	var it secretsItem
+	if err := json.Unmarshal([]byte(raw), &it); err != nil {
+		return it, err
+	}
+	if it.V != 1 {
+		return it, fmt.Errorf("unknown secrets item version %d", it.V)
+	}
+	return it, nil
+}
 
 // secretsRecord is the in-memory login secrets.
 type secretsRecord struct {
@@ -145,8 +181,8 @@ func persistSecrets() error {
 func writeFileSecretsLocked(rec secretsRecord) {
 	state.ClientKey, state.Login = nil, nil
 	if rec.hasKey {
-		hex := rec.key.Hex()
-		state.ClientKey = &hex
+		keyHex := rec.key.Hex()
+		state.ClientKey = &keyHex
 	}
 	if rec.login != "" {
 		login := rec.login
