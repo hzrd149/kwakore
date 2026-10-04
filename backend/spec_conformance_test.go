@@ -279,6 +279,42 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		}
 	}
 
+	// every engine's residual risk sits under NIP-5D Non-Guarantees
+	// (SBOX-04): Level Non-Guarantee, Status N/A, and a Reason recording what
+	// was measured on that engine and what was not; one of them quotes the
+	// Non-Guarantees sentence itself
+	if tb, ok := tableIn(pinSection["NIP-5D"]); ok {
+		rows := rowsByID(tb)
+		quoted := false
+		for _, id := range []string{"5D-NG-webkitgtk", "5D-NG-webview2", "5D-NG-wkwebview", "5D-NG-android"} {
+			row, ok := rows[id]
+			if !ok {
+				t.Errorf("section NIP-5D: row %s is missing", id)
+				continue
+			}
+			if lv := cell(row, tb.col("Level")); lv != "Non-Guarantee" {
+				t.Errorf("section NIP-5D: row %s has level %q, want Non-Guarantee", id, lv)
+			}
+			if st := cell(row, tb.col("Status")); st != "N/A" {
+				t.Errorf("section NIP-5D: row %s has status %q, want N/A", id, st)
+			}
+			reason := cell(row, tb.col("Reason"))
+			if reason == "" {
+				t.Errorf("section NIP-5D: row %s has an empty Reason cell", id)
+			}
+			if strings.Contains(cell(row, tb.col("Requirement"))+reason, "“The protocol does NOT protect against") {
+				quoted = true
+			}
+		}
+		if !quoted {
+			t.Error("section NIP-5D: no 5D-NG row quotes the Non-Guarantees sentence")
+		}
+	}
+
+	// DEC-5 records the document-start marker (D-18) and DEC-6 the engine
+	// hardening scope (D-19)
+	requireRows("Decisions", "DEC-", 6, "Decision", "Reason", "Owner")
+
 	// a fixed row is a claim: it cites the code and test behind it
 	for _, tb := range tables {
 		st, code := tb.col("Status"), tb.col("Code")
