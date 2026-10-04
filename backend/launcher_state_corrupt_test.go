@@ -37,8 +37,15 @@ func withFreshStateDir(t *testing.T) string {
 	dataDir = dir
 	log = zerolog.Nop()
 	stateSaveBlocked.Store(false)
+	// Snapshot asks the host for shortcut files: run alone (go test -run),
+	// nothing else has set one yet
+	savedHost := host
+	if host == nil {
+		host = noopHost{}
+	}
 
 	t.Cleanup(func() {
+		host = savedHost
 		stateMu.Lock()
 		state, statePath = savedState, savedPath
 		stateMu.Unlock()

@@ -1,0 +1,174 @@
+package backend
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+)
+
+// childUnavailableHost fails every window open with err, the way the desktop
+// host does when its child program does not verify.
+type childUnavailableHost struct {
+	noopHost
+	mu       sync.Mutex
+	err      error
+	windows  int
+	settings int
+}
+
+func (h *childUnavailableHost) OpenWindow(WindowSpec) (Transport, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.windows++
+	return nil, h.err
+}
+
+func (h *childUnavailableHost) OpenSettings(SettingsSpec) (Transport, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.settings++
+	return nil, h.err
+}
+
+// ─── test rig ───────────────────────────────────────────────────
+
+// setupChildUnavailable installs a classic napp on disk and a host whose
+// opens fail with openErr.
+func setupChildUnavailable(t *testing.T, openErr error) Napp {
+	t.Helper()
+	withFreshStateDir(t)
+	statePath = filepath.Join(dataDir, "state.json")
+
+	oldHost := host
+	host = &childUnavailableHost{err: openErr}
+	ls.mu.Lock()
+	oldFetchErr := ls.fetchErr
+	ls.fetchErr = ""
+	ls.mu.Unlock()
+	t.Cleanup(func() {
+		host = oldHost
+		ls.mu.Lock()
+		ls.fetchErr = oldFetchErr
+		ls.mu.Unlock()
+	})
+
+	n := Napp{ID: "napp~0123456789abcdef~child-test", D: "child-test", Name: "child test"}
+	dir, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>napp</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateMu.Lock()
+	state.InstalledNapps = map[string]Napp{n.ID: n}
+	state.LastLaunched = map[string]time.Time{}
+	stateMu.Unlock()
+	return n
+}
+
+// launchAndWait launches from the store and waits for its error line.
+func launchAndWait(t *testing.T, n Napp) string {
+	t.Helper()
+	SetFetchErr("")
+	Launch(n)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if msg := Snapshot().FetchErr; msg != "" {
+			return msg
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("launch did not report an error within 5s")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func childUnavailableErr() error {
+	return fmt.Errorf("child program: %w", ErrWindowProgramUnavailable)
+}
+
+// ─── tests ──────────────────────────────────────────────────────
+
+func TestChildUnavailableLaunchShowsNoticeOnce(t *testing.T) {
+	n := setupChildUnavailable(t, childUnavailableErr())
+
+	msg := launchAndWait(t, n)
+	if msg != "launch failed: the napp window program is missing or was modified; reinstall Verdana" {
+		t.Fatalf("FetchErr = %q", msg)
+	}
+	notices := Snapshot().Notices
+	if got := noticeIDs(notices); !slices.Equal(got, []string{"child-unavailable"}) {
+		t.Fatalf("notices = %v, want one child-unavailable", got)
+	}
+	if notices[0].Kind != "error" || notices[0].Title != "Napp windows can't open" {
+		t.Fatalf("notice = %+v", notices[0])
+	}
+
+	// a second failed open while it is showing does not add a copy
+	launchAndWait(t, n)
+	if got := noticeIDs(Snapshot().Notices); !slices.Equal(got, []string{"child-unavailable"}) {
+		t.Fatalf("notices after a repeat = %v", got)
+	}
+}
+
+func TestChildUnavailableNoticeReturnsAfterDismissal(t *testing.T) {
+	n := setupChildUnavailable(t, childUnavailableErr())
+
+	launchAndWait(t, n)
+	DismissNotice("child-unavailable")
+	if got := Snapshot().Notices; len(got) != 0 {
+		t.Fatalf("notices after dismissal = %v", noticeIDs(got))
+	}
+	launchAndWait(t, n)
+	if got := noticeIDs(Snapshot().Notices); !slices.Equal(got, []string{"child-unavailable"}) {
+		t.Fatalf("notices after a new failure = %v", got)
+	}
+	stateMu.Lock()
+	persisted := slices.Contains(state.DismissedNotices, "child-unavailable")
+	stateMu.Unlock()
+	if persisted {
+		t.Fatal("child-unavailable dismissal was persisted")
+	}
+}
+
+func TestChildUnavailableOnLauncherSettings(t *testing.T) {
+	setupChildUnavailable(t, childUnavailableErr())
+
+	err := OpenLauncherSettings()
+	if !errors.Is(err, ErrWindowProgramUnavailable) {
+		t.Fatalf("OpenLauncherSettings = %v", err)
+	}
+	if got := noticeIDs(Snapshot().Notices); !slices.Equal(got, []string{"child-unavailable"}) {
+		t.Fatalf("notices = %v, want child-unavailable", got)
+	}
+	// the failed window is forgotten, so the next open tries again
+	settingsMu.Lock()
+	_, stuck := settingsWins[launcherSettingsID]
+	settingsMu.Unlock()
+	if stuck {
+		t.Fatal("a failed settings window is still registered")
+	}
+}
+
+func TestChildUnavailableOnlyForItsError(t *testing.T) {
+	n := setupChildUnavailable(t, errors.New("no display"))
+
+	if msg := launchAndWait(t, n); msg != "launch failed: no display" {
+		t.Fatalf("FetchErr = %q", msg)
+	}
+	if err := OpenLauncherSettings(); err == nil {
+		t.Fatal("OpenLauncherSettings succeeded")
+	}
+	if got := Snapshot().Notices; len(got) != 0 {
+		t.Fatalf("notices for an unrelated error = %v", noticeIDs(got))
+	}
+}
