@@ -249,9 +249,9 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		}
 	}
 
-	// Phase 1's own spec rows, each in its spec's section
+	// the spec rows Phases 1 and 4 own, each in its spec's section
 	for spec, ids := range map[string][]string{
-		"NIP-5D":      {"5D-1", "NIP-5D-presence", "5D-3", "NIP-5D-reload"},
+		"NIP-5D":      {"5D-1", "NIP-5D-presence", "5D-3", "NIP-5D-reload", "5D-8"},
 		"WEB-NAPPLET": {"W-1"},
 		"NAP-SHELL":   {"NAP-SHELL-1"},
 		"NAP-INTENT":  {"NAP-INTENT-1"},
@@ -265,6 +265,16 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		for _, id := range ids {
 			if _, ok := rows[id]; !ok {
 				t.Errorf("section %s: row %s is missing", spec, id)
+			}
+		}
+	}
+
+	// Phase 4 closed the reload and embedding rows (SBOX-01, SBOX-02)
+	if tb, ok := tableIn(pinSection["NIP-5D"]); ok {
+		rows := rowsByID(tb)
+		for _, id := range []string{"5D-3", "NIP-5D-reload", "5D-8"} {
+			if row, ok := rows[id]; ok && !strings.HasPrefix(cell(row, tb.col("Status")), "fixed (Phase 4)") {
+				t.Errorf("section NIP-5D: row %s has status %q, want fixed (Phase 4)", id, cell(row, tb.col("Status")))
 			}
 		}
 	}
