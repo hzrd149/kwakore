@@ -20,13 +20,21 @@
 // backend.ErrSecretStoreUnavailable: the backend must never read "locked" as
 // "empty" and replace the user's login with a fresh one.
 //
+// Before each call a quick probe (probeTimeout) checks that there is a
+// keyring service at all, so a session without one (a bare window manager
+// with no Secret Service, say) falls back to the file at once instead of
+// after a long timeout. The probe never shares go-keyring's D-Bus
+// connection.
+//
 // Errors carry what failed and why, never the value being stored.
 package secretstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -39,9 +47,11 @@ import (
 const service = "Verdana"
 
 // How long a caller waits. A Get may show an unlock prompt, so it gets long
-// enough for a person to type a password.
+// enough for a person to type a password; the probe only asks whether the
+// service exists.
 var (
-	callTimeout = 120 * time.Second
+	callTimeout  = 120 * time.Second
+	probeTimeout = 3 * time.Second
 )
 
 // queueSize bounds the calls waiting for the worker. The backend makes one
@@ -104,29 +114,58 @@ type request struct {
 	err    error
 }
 
+// probeRun is one availability probe; callers that arrive while it runs
+// wait for the same answer.
+type probeRun struct {
+	done chan struct{}
+	ok   bool
+}
+
 // Store is a backend.SecretStore backed by the OS keyring.
 type Store struct {
-	p           provider
-	queue       chan *request
-	callTimeout time.Duration
+	p     provider
+	queue chan *request
+
+	callTimeout  time.Duration
+	probeTimeout time.Duration
 	// probe reports whether a keyring service is there at all, so a
 	// session without one fails at once instead of after a timeout.
 	probe func() bool
+	// onJoin, when set (tests), runs each time a Get joins a read already
+	// in flight.
+	onJoin func()
+
+	mu sync.Mutex
+	// reading holds, per item, the Get that is queued or running, for later
+	// Gets to join. A Set or Delete of the item drops it, so a Get made
+	// after a write queues behind the write and sees it.
+	reading map[string]*request
+	probing *probeRun
 }
 
 var _ backend.SecretStore = (*Store)(nil)
 
 // New starts the worker and returns the store for Options.Secrets.
 func New() backend.SecretStore {
-	return newStore(keyringProvider{})
+	s := newStore(keyringProvider{})
+	s.probe = func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+		defer cancel()
+		return serviceAvailable(ctx)
+	}
+	return s
 }
 
+// newStore starts a store whose probe always reports a keyring; New puts
+// the platform probe in its place.
 func newStore(p provider) *Store {
 	s := &Store{
-		p:           p,
-		queue:       make(chan *request, queueSize),
-		callTimeout: callTimeout,
-		probe:       func() bool { return true },
+		p:            p,
+		queue:        make(chan *request, queueSize),
+		callTimeout:  callTimeout,
+		probeTimeout: probeTimeout,
+		probe:        func() bool { return true },
+		reading:      map[string]*request{},
 	}
 	go s.work()
 	return s
@@ -140,7 +179,7 @@ func (s *Store) work() {
 }
 
 func (s *Store) run(req *request) {
-	defer close(req.done)
+	defer s.finish(req)
 	defer func() {
 		if r := recover(); r != nil {
 			req.result = ""
@@ -160,6 +199,19 @@ func (s *Store) run(req *request) {
 		req.result = ""
 		req.err = mapError(req.op, err, req.value)
 	}
+}
+
+// finish publishes a result: the read stops being joinable, then every
+// waiter is released.
+func (s *Store) finish(req *request) {
+	if req.op == opGet {
+		s.mu.Lock()
+		if s.reading[req.name] == req {
+			delete(s.reading, req.name)
+		}
+		s.mu.Unlock()
+	}
+	close(req.done)
 }
 
 // mapError turns a go-keyring error into one of the backend's two kinds.
@@ -191,16 +243,70 @@ func (s *Store) Delete(name string) error {
 }
 
 func (s *Store) call(op opKind, name, value string) (string, error) {
-	if !s.probe() {
+	if !s.available() {
 		return "", fmt.Errorf("%w: no keyring service", backend.ErrSecretStoreUnavailable)
+	}
+
+	s.mu.Lock()
+	if op == opGet {
+		if req := s.reading[name]; req != nil {
+			s.mu.Unlock()
+			if s.onJoin != nil {
+				s.onJoin()
+			}
+			return s.wait(req)
+		}
+	} else {
+		delete(s.reading, name)
 	}
 	req := &request{op: op, name: name, value: value, done: make(chan struct{})}
 	select {
 	case s.queue <- req:
 	default:
+		s.mu.Unlock()
 		return "", fmt.Errorf("%w: keyring busy", backend.ErrSecretStoreUnavailable)
 	}
+	if op == opGet {
+		s.reading[name] = req
+	}
+	s.mu.Unlock()
 	return s.wait(req)
+}
+
+// available runs the probe on its own goroutine and waits at most
+// probeTimeout for it. A probe already running is joined, so a stuck one
+// never piles up more goroutines behind it.
+func (s *Store) available() bool {
+	s.mu.Lock()
+	run := s.probing
+	if run == nil {
+		run = &probeRun{done: make(chan struct{})}
+		s.probing = run
+		go func() {
+			defer func() {
+				if recover() != nil {
+					run.ok = false
+				}
+				s.mu.Lock()
+				if s.probing == run {
+					s.probing = nil
+				}
+				s.mu.Unlock()
+				close(run.done)
+			}()
+			run.ok = s.probe()
+		}()
+	}
+	s.mu.Unlock()
+
+	timer := time.NewTimer(s.probeTimeout)
+	defer timer.Stop()
+	select {
+	case <-run.done:
+		return run.ok
+	case <-timer.C:
+		return false
+	}
 }
 
 func (s *Store) wait(req *request) (string, error) {

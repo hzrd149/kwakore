@@ -19,7 +19,9 @@ import (
 // run in parallel.
 func TestRoundTripMock(t *testing.T) {
 	keyring.MockInit()
-	s := New()
+	// the real provider, without the platform probe: there may be no
+	// session bus where the tests run
+	s := newStore(keyringProvider{})
 
 	const name = "login-secrets:0123456789ab"
 	const value = `{"v":1,"client_key":"","login":"bunker://x"}`
