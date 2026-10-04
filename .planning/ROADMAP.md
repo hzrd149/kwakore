@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Containment Fix and Canonical Shim Baseline** - Stop `d`-tag path escape, vendor upstream shim 0.30.0 unmodified, snapshot specs, scaffold the audit, run Android CI on PRs (completed 2026-10-03)
 - [x] **Phase 2: Gated NAP Dispatcher** - One route table with declared permission gates, guaranteed spec-shaped replies, Go-side bounds, rate limits and panic recovery (completed 2026-10-03)
-- [ ] **Phase 3: Desktop Process and Secrets Hardening** - Verified per-user binary extraction, user-only instance IPC, OpenLink validation, keyring secrets, atomic state
+- [x] **Phase 3: Desktop Process and Secrets Hardening** - Verified per-user binary extraction, user-only instance IPC, OpenLink validation, keyring secrets, atomic state (completed 2026-10-04)
 - [ ] **Phase 4: Frame Sandbox Lifecycle** - Frame reload/navigation resets the session, enforced host CSP, adversarial fixture, side channels closed where engines allow
 - [ ] **Phase 5: Napplet Artifact Identity and Storage Keying** - Storage/config keyed by address + artifact hash, root-napplet isolation, reclamation, NIP-01 manifest selection and blob verification
 - [ ] **Phase 6: Relay, Outbox, Intent and INC Conformance** - No ciphertext signing, guarded relay dialing, relay hints and termination, authorized intent handlers, INC teardown
@@ -217,7 +217,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 |-------|----------------|--------|-----------|
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
-| 3. Desktop Process and Secrets Hardening | 10/10 | In Progress|  |
+| 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
 | 4. Frame Sandbox Lifecycle | 0/TBD | Not started | - |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |

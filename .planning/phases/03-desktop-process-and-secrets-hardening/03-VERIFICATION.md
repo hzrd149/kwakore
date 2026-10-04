@@ -1,8 +1,8 @@
 ---
 phase: 03-desktop-process-and-secrets-hardening
 verified: 2026-10-04T05:33:39Z
-status: human_needed
-score: 79/82 must-haves verified (5/5 roadmap success criteria, 74/77 plan truths; 3 backstop truths abstained for live evidence)
+status: passed
+score: 82/82 must-haves verified (79 automated + 3 backstop truths confirmed by human UAT 2026-10-04)
 behavior_unverified: 0
 overrides_applied: 0
 decision_coverage:
@@ -269,3 +269,7 @@ There are no gaps. The phase goal is achieved in code: per-user, hash-verified c
 
 _Verified: 2026-10-04T05:33:39Z_
 _Verifier: Claude (gsd-verifier)_
+
+## Human Validation
+
+User ran the 03-UAT.md checklist and reported "all good" (2026-10-04); the 3 backstop truths are confirmed.
