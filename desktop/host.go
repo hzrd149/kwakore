@@ -12,6 +12,7 @@ import (
 	"fiatjaf.com/verdana/desktop/internal/media"
 	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"verdana/backend"
+	"verdana/backend/netguard"
 )
 
 // gioHost is this launcher's answer to everything platform-shaped the backend
@@ -176,7 +177,25 @@ func (gioHost) SetGNOMESearchIntegration(enabled bool) error {
 	return osintegration.SetGNOMESearchIntegration(enabled, exe)
 }
 
-func (gioHost) OpenLink(url string) error {
+// startCommand runs the OS link opener. It reaps the process in the
+// background so a finished opener never lingers as a zombie. Tests swap it
+// for a recorder.
+var startCommand = func(c *exec.Cmd) error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	go c.Wait()
+	return nil
+}
+
+// OpenLink validates the link itself instead of trusting its callers: the
+// OS opener would happily run file:, custom-scheme or argv-looking strings,
+// so only the normalized http(s) form from netguard's ExternalLink is passed.
+func (gioHost) OpenLink(raw string) error {
+	url, err := netguard.ExternalLink(raw)
+	if err != nil {
+		return err
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -186,7 +205,7 @@ func (gioHost) OpenLink(url string) error {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	return cmd.Start()
+	return startCommand(cmd)
 }
 
 // downloadsDir is where saveFile writes: the user's XDG download directory

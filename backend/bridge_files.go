@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+
+	"verdana/backend/netguard"
 )
 
 // ─── JS literal helpers ──────────────────────────────────────────
@@ -97,15 +99,14 @@ func copyTextForNapp(text string) (map[string]any, error) {
 // openExternalLink hands a url to the platform's browser. Napps can't
 // navigate out of their own webview, so this is the only way out — and it is
 // behind an approval prompt in the bridge.
+//
+// The host validates again on its own (see ExternalLink in netguard), so this
+// check is not the only thing between a napp and the OS opener.
 func openExternalLink(url string) error {
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return errors.New("empty url")
+	u, err := netguard.ExternalLink(url)
+	if err != nil {
+		return err
 	}
-	lower := strings.ToLower(url)
-	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-		return errors.New("only http(s) links can be opened")
-	}
-	log.Info().Str("url", url).Msg("opening external link")
-	return host.OpenLink(url)
+	log.Info().Str("url", u).Msg("opening external link")
+	return host.OpenLink(u)
 }
