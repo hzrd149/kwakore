@@ -39,6 +39,13 @@ Out of this phase: NAP/napplet runtime code (Phases 2, 4-8), code signing/notari
 - **D-15:** One `netguard.ExternalLink(raw) (string, error)`: trim; ≤8 KiB; no control characters or whitespace; http/https only; non-empty host; empty opaque; no userinfo; returns the normalized `u.String()`. Called in `openExternalLink`, `gioHost.OpenLink` and `mobileHost.OpenLink`. The desktop launch reaps the opener process (`Wait` in a goroutine) via an injectable `startCommand` for tests. Table tests.
 - **D-16:** Add a Windows CI job on windows-2022 running `go vet` and `go test` for the desktop `internal/...` packages (`instanceipc`, `childbin`, `wireline`, …) and the backend.
 
+### Post-research decisions (2026-10-03)
+- **D-17:** (user) The six libwebview binaries are not committed. A `go generate`/`just` step copies them from the pinned `github.com/abemedia/go-webview` module into a git-ignored directory inside the embedding package before every build (dev, prod and CI); a test fails if the copies differ from the module's files. The embedding file is compiled for both dev and prod builds, and dev builds also set `WEBVIEW_PATH` when starting the child. Refines D-04.
+- **D-18:** `instanceipc` Dial on Windows verifies the pipe server process's owner SID equals ours (`GetNamedPipeServerProcessId` + token SID) to defeat pipe-name squatting by another local user. Extends D-06.
+- **D-19:** Implement UI-SPEC S3 (loading/keyring-wait screen, which is what renders during a login save) and S4 (login-screen waiting state) as written; the desktop opens the manager window when `KeyringWait` becomes non-empty during startup so S3 is visible. S4 is only reachable if a future change saves while in `PhaseLogin` — noted, not forced.
+- **D-20:** A persisted, non-secret `LogoutPending` flag: logging out while the keyring is unavailable records the logout in `state.json`, and the next start honours it (does not resume the keyring login) and deletes the keyring item once reachable.
+- **D-21:** (user) "Log in again" (`LoginWithoutKeyring`) with nostrconnect may generate a new NIP-46 client key while the keyring is unavailable — user-initiated only. It never deletes the keyring item; automatic startup/resume still never regenerates the client key (D-10 unchanged for every automatic path).
+
 ### Claude's Discretion
 - Exact garbage-collection policy for old child/library versions, notice wording and banner styling (match existing Gio layout conventions), helper placement (`backend/fileutil` vs root package), and test structure.
 

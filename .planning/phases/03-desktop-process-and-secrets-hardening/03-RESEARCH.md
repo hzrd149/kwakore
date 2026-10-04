@@ -625,15 +625,20 @@ ln, err := winio.ListenPipe(name, &winio.PipeConfig{
 | A6 | macOS `dlopen` of a bare name may also search the CWD | Pattern 3 child-side check | Low — the child-side existence check removes the bare-name path anyway |
 | A7 | WebView2Loader is statically linked into `webview.dll` (no `WebView2Loader.dll` import found in its strings) and its license notice travels with webview/webview's | Pattern 3 | Low — same bytes Verdana ships today |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where to vendor the six libwebview binaries, and does CLAUDE.md's "do not commit generated binaries" cover them?**
+   - RESOLVED (user): do NOT commit the binaries. A `go generate`/just step copies them from the pinned go-webview module into a git-ignored directory before building (dev, prod, CI); a test checks the copies match the module hashes (CONTEXT D-17).
    - Known: they are third-party prebuilt inputs (MIT), ~706 KB total; vendoring is required to `//go:embed` them (embed cannot cross modules).
    - Recommendation: commit them under `desktop/internal/webviewlib/` with both LICENSE files, `.gitattributes` binary, and the sync test; mention in the PR. If the user objects, fall back to a `just`/CI copy step from the module cache.
 2. **Pipe-squatting client check on Windows** (server-process SID verification) — not in D-06 but cheap. Recommendation: include it in `instanceipc` Dial.
+   - RESOLVED (orchestrator default): include the server-process SID check in `instanceipc` Dial (CONTEXT D-18).
 3. **UI-SPEC S4 reachability** (Pitfall 7). Recommendation: implement S3 (renders during login saves) and S4 as written; note in the plan that S4 shows only if a future change saves while in `PhaseLogin`.
+   - RESOLVED (orchestrator default): implement S3 and S4 as written, with the reachability note (CONTEXT D-19).
 4. **Logout during keyring outage** (Pitfall 16). Recommendation: persisted `LogoutPending` flag.
+   - RESOLVED (orchestrator default): persisted non-secret `LogoutPending` flag (CONTEXT D-20).
 5. **`LoginWithoutKeyring` + nostrconnect needs a ClientKey** while the real one is locked in the keyring: generating a fresh in-memory key for the new login is unavoidable and matches UI-SPEC ("replaces it only when the new login is saved"); the new key is written to the file (keyring still unavailable) and replaces the keyring item at the next successful migration. Confirm this is acceptable (it is a user-initiated re-pair, not a silent one).
+   - RESOLVED (user): allowed, user-initiated only (CONTEXT D-21).
 
 ## Environment Availability
 
