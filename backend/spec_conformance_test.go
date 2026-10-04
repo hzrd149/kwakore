@@ -298,7 +298,8 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 			if st := cell(row, tb.col("Status")); st != "open" {
 				t.Errorf("section NIP-5D: row %s has status %q, want open", residual, st)
 			}
-			for _, want := range []string{"javascript:", "document.open()", "0 connections", "not a containment escape"} {
+			// SEED-002 is its tracker: an open MUST with no owner is forgotten
+			for _, want := range []string{"javascript:", "document.open()", "0 connections", "not a containment escape", "`SEED-002`"} {
 				if !strings.Contains(cell(row, tb.col("Reason")), want) {
 					t.Errorf("section NIP-5D: row %s Reason does not say %q", residual, want)
 				}
