@@ -47,14 +47,14 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 - [ ] **PROC-01**: The child webview binary is extracted into a per-user, owner-only directory, verified by hash before every reuse, and written atomically; prod builds fail closed and never fall back to `./child/child`
 - [ ] **PROC-02**: `libwebview` is no longer extracted by go-webview's `embedded` package into a shared `/tmp/webview-*` directory; it is extracted with the same per-user verified mechanism as the child binary
 - [x] **PROC-03**: The single-instance channel is a user-only Unix socket (Linux/macOS, peer-uid checked) or an owner-only named pipe (Windows); all TCP code, the port file and the token-only legacy message are removed
-- [ ] **PROC-04**: The desktop host's `OpenLink` refuses anything but well-formed http(s) URLs, independently of its callers
+- [x] **PROC-04**: The desktop host's `OpenLink` refuses anything but well-formed http(s) URLs, independently of its callers
 - [ ] **PROC-05**: Desktop CI compiles the desktop module for Windows as well as Linux
 
 ### Secrets
 
 - [ ] **SECR-01**: Desktop login secrets are stored in the OS keyring; when no keyring is available, they stay in the `0600` file and the user sees a warning
 - [ ] **SECR-02**: A locked, slow or unavailable keyring never causes the NIP-46 client key to be regenerated or a login to be lost; keyring calls time out and never block the UI
-- [ ] **SECR-03**: `state.json` is written atomically, and a corrupt file is kept aside instead of silently resetting state
+- [x] **SECR-03**: `state.json` is written atomically, and a corrupt file is kept aside instead of silently resetting state
 
 ### Identity and storage
 
@@ -166,11 +166,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROC-01 | Phase 3 | Pending |
 | PROC-02 | Phase 3 | Pending |
 | PROC-03 | Phase 3 | Complete |
-| PROC-04 | Phase 3 | Pending |
+| PROC-04 | Phase 3 | Complete |
 | PROC-05 | Phase 3 | Pending |
 | SECR-01 | Phase 3 | Pending |
 | SECR-02 | Phase 3 | Pending |
-| SECR-03 | Phase 3 | Pending |
+| SECR-03 | Phase 3 | Complete |
 | KEY-01 | Phase 5 | Pending |
 | KEY-02 | Phase 5 | Pending |
 | KEY-03 | Phase 5 | Pending |
