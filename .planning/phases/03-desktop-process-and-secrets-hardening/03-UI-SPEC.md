@@ -1,7 +1,8 @@
 ---
 phase: 3
 slug: desktop-process-and-secrets-hardening
-status: draft
+status: approved
+reviewed_at: 2026-10-03
 shadcn_initialized: false
 preset: none
 created: 2026-10-03
@@ -109,6 +110,8 @@ Contrast checks (WCAG 2.1 AA for body text, ≥4.5:1):
 
 ## Surfaces and Interaction Contract
 
+**Focal points:** on the main and login screens, an error-severity notice title when present, otherwise the existing content; on the loading screen, the loader, or the failed title and "Try again" when the keyring wait has failed.
+
 ### S1 — Notice stack (manager window)
 
 **Data contract (backend → GUI, pull-based via `Snapshot()`):**
@@ -141,7 +144,7 @@ Contrast checks (WCAG 2.1 AA for body text, ≥4.5:1):
 |-----------|------|------------|-----------|
 | `keyring-fallback` | warning | Desktop only (`Options.Secrets != nil`), a login exists, and secrets are in file mode because the keyring was unavailable or timed out (`SecretsLocation == "file"` after a failed probe, Get or Set). Never on Android, never in tests with nil `Secrets` | Persisted in `DismissedNotices`; stays hidden across restarts while the fallback persists. Cleared when secrets move into the keyring, so a later fallback shows it again |
 | `state-corrupt:<unix>` | warning | A `state.json.corrupt-<unix>` copy was set aside (D-14). Shows on every start until dismissed. If more than one exists, only the newest is shown | Persisted in `DismissedNotices` under its full ID. A new corruption gets a new ID and shows again |
-| `child-unavailable` | error | A napp window, napplet window or settings window failed to open because the prod child binary (or libwebview) is missing or failed hash verification (D-03) | Session only, not persisted. Every new failed open re-adds it even after a dismissal |
+| `child-unavailable` | error | A napp window, napplet window or settings window failed to open because the prod child binary (or libwebview) is missing or failed hash verification (D-03) | Session only, not persisted. Every new failed open re-adds it even after a dismissal; a repeat failure while it is already showing does not add a second copy |
 
 ### S2 — Fail-closed window error (D-03)
 
@@ -217,12 +220,14 @@ Style rules for these strings: sentence case, no exclamation marks, and an ellip
 
 ## UI Considerations
 
-Applicable state considerations resolved: 10 covered, 1 backstop, 0 unresolved.
+Applicable state considerations resolved: 12 covered, 1 backstop, 0 unresolved (post-verification probe added the populated and partial rows; the probe's one unclassified element, a fail-closed window open, is the existing child-unavailable error row).
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
 | empty | Notice stack (list-collection) | ✅ covered | With zero notices the stack draws nothing, with zero height and no 16dp spacer, so the login and main screens look exactly as they do today |
 | zero-one-many | Notice stack (list-collection) | ✅ covered | 1 to 3 notices stack in the fixed order child-unavailable → state-corrupt → keyring-fallback, 8dp apart, at most one per ID |
+| populated | Notice stack (list-collection) | ✅ covered | With one or more notices, each card shows its title (`danger` for error, `fg` for warning), detail, the path box for state-corrupt only, and a Dismiss chip; the content below keeps its current layout |
+| partial | Notice stack (list-collection) | ✅ covered | When some notices are dismissed and others are not, only the undismissed ones render in the same fixed order with no gaps; a repeat child-unavailable failure while that notice is already showing does not stack a duplicate |
 | long-text | Notice title and detail (static-content) | ✅ covered | Titles and details wrap with no `MaxLines` and are never truncated |
 | long-text | Corrupt-state path (static-content) | ✅ covered | The path renders in the code box with `text.WrapGraphemes` and wraps at any character. It is never truncated, and "Copy path" copies the full string |
 | overflow | Notice stack in the 560×640dp manager window (list-collection) | 🧪 backstop | The notice stack is Rigid and the content below is `Flexed(1)`, so with all 3 notices visible at 560×640dp the windows list still scrolls and the profile row stays fully visible. Needs a visual check (screenshot in PR per CLAUDE.md) |
