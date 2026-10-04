@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 current_phase: 4
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-10-04T17:34:09.311Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-10-04T17:55:08.206Z"
 last_activity: 2026-10-04
-last_activity_desc: Completed 04-04 (enforced loopback page policies, host CSP = napplet baseline + frame-ancestors)
-state_head: 7309a423048de8bdf155469f7b8e23d37f24d9ed
+last_activity_desc: Completed 04-05 (adversarial napplet fixture, fake-launcher WebKitGTK smoke with attacker listener, xvfb CI step)
+state_head: 5a63a273b18e5d22bd3f09d684f6787d1844f070
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 26
+  completed_plans: 27
   percent: 38
 current_phase_name: Frame Sandbox Lifecycle
 ---
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 ## Current Position
 
 Phase: 4 — EXECUTING
-Plan: 5 of 6
-Status: Executing (04-04 complete)
-Last activity: 2026-10-04 — Completed 04-04 (napplet host page served with NappletCSP + frame-ancestors 'none'; loopbackHeaders on every desktop loopback response with X-DNS-Prefetch-Control: off; napp/settings policies and Android parity via Mobile accessors)
+Plan: 6 of 6
+Status: Executing (04-05 complete)
+Last activity: 2026-10-04 — Completed 04-05 (adversarial napplet in backend/testdata, fake launcher driving the real child under WebKitGTK with a loopback attacker listener: 0 connections, reset-before-start ordering, loop cap 4 resets / 3 starts, forged bindings refused, no RTCPeerConnection/mediaDevices; webkit smoke step under xvfb in CI)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -86,6 +86,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 04 P02 | 9min | 3 tasks | 10 files |
 | Phase 04 P03 | 4min | 2 tasks | 7 files |
 | Phase 04 P04 | 6min | 3 tasks | 10 files |
+| Phase 04 P05 | 18min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -163,6 +164,7 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-03: D-18 marker __verdana.document posted by the preamble after install; host page counts markers per frame apart from loads, second marker calls replaced()
 - [Phase 4]: 04-04: host page CSP is NappletCSP + frame-ancestors 'none', derived not copied; TestNappletHostCSP compares per directive
 - [Phase 4]: 04-04: every desktop loopback response goes through loopbackHeaders (CSP + X-DNS-Prefetch-Control: off); Android reads the same policies via Mobile accessors
+- [Phase 4]: 04-05: the adversarial fixture's load-delayed document holds its load with a 40 MB data: image (a busy wait never opens the C2 window); the WebKit smoke runs in CI under xvfb
 
 ### Pending Todos
 
@@ -195,6 +197,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T17:34:09.202Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-10-04T17:55:08.114Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
