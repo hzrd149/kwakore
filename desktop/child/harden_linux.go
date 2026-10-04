@@ -36,9 +36,11 @@ import (
 // WebKitGTK this build supports, so when they cannot be reached, set or
 // read back off, the napplet window does not open (runNapplet exits, and
 // the launcher sees the window close). Only link preconnect may stay on, and
-// only when this WebKitGTK has no switch for it at all (no feature API, or no
-// LinkPreconnect feature): a Warn names it, and spec/CONFORMANCE.md records
-// it. A preconnect switch that exists and reads back on fails closed too.
+// only on a WebKitGTK older than 2.42, which has no feature API at all: a
+// Warn names it, and spec/CONFORMANCE.md records it. A feature API without
+// a LinkPreconnect feature, or a preconnect switch that reads back on,
+// fails closed too: on 2.42+ a missing id is a rename or a removal nobody
+// reviewed, not a known old engine.
 //
 // No decide-policy handler is installed to refuse sub-frame navigations.
 // The host page's CSP (frame-src 'none' from the napplet baseline) plus the
@@ -168,13 +170,17 @@ func bindSymbol(lib uintptr, fn any, name string) error {
 	return nil
 }
 
-// errNoSwitch marks a channel this WebKitGTK has no switch for, so there is
-// nothing to set: the one gap a napplet window still opens with.
+// errNoSwitch marks a WebKitGTK with no feature API (older than 2.42), so
+// there is no preconnect switch to set: the one gap a napplet window still
+// opens with.
 var errNoSwitch = errors.New("this webkitgtk has no switch for it")
 
 // disableFeature turns the named WebKit feature off and returns its value
 // read back (true when it stayed on or could not be found). The error wraps
-// errNoSwitch when the feature API or the feature itself is missing.
+// errNoSwitch only when the feature API is missing. When the API exists but
+// has no feature id, the error does not: the feature API exists, so a
+// missing id is a rename or a removal we have not reviewed, and the window
+// is refused rather than guessing the channel is closed.
 func (api *webkitAPI) disableFeature(settings uintptr, id string) (bool, error) {
 	if api.featureErr != nil {
 		return true, fmt.Errorf("%w: %w", errNoSwitch, api.featureErr)
@@ -195,7 +201,7 @@ func (api *webkitAPI) disableFeature(settings uintptr, id string) (bool, error) 
 		api.setFeature(settings, f, false)
 		return api.getFeature(settings, f) != 0, nil
 	}
-	return true, fmt.Errorf("%w: webkitgtk has no feature %s", errNoSwitch, id)
+	return true, fmt.Errorf("webkitgtk has no feature %s", id)
 }
 
 // hardening is what was read back from one window's WebKitSettings: true
@@ -204,7 +210,7 @@ type hardening struct {
 	reached                             bool // the settings were reached and read back
 	webrtc, mediaStream, linkPreconnect bool
 	// degraded is why link preconnect stays on when this WebKitGTK has no
-	// switch for it; nil otherwise
+	// feature API (older than 2.42); nil otherwise
 	degraded error
 }
 
@@ -212,7 +218,8 @@ type hardening struct {
 // WebKitSettings of the web view inside the GtkWindow win, and reads them
 // back. It returns an error, and the window must not run a napplet, when the
 // view or its settings cannot be reached or when a switch that exists reads
-// back on. Link preconnect without a switch only sets degraded.
+// back on, or when the feature API has no LinkPreconnect feature. Link
+// preconnect on a WebKitGTK with no feature API only sets degraded.
 func (api *webkitAPI) harden(win uintptr) (hardening, error) {
 	var h hardening
 	if win == 0 {

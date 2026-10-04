@@ -89,9 +89,11 @@ func (k *fakeWebKit) api() *webkitAPI {
 
 // TestHardenWindowFailsClosed pins which outcomes keep a napplet window
 // from opening (WR-02): every one where WebRTC or media capture may still be
-// on, or where a link preconnect switch exists and reads back on. The only
-// outcome that opens with a channel on is a WebKitGTK with no preconnect
-// switch at all, and it says so.
+// on, where a link preconnect switch exists and reads back on, or where the
+// feature API exists but has no LinkPreconnect feature (WR-05, iteration 2:
+// a rename or removal on 2.42+, not a known old engine). The only outcome
+// that opens with a channel on is a WebKitGTK with no feature API at all
+// (older than 2.42), and it says so.
 func TestHardenWindowFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -130,8 +132,12 @@ func TestHardenWindowFailsClosed(t *testing.T) {
 		{name: "the feature list is NULL", win: 1, setup: func(k *fakeWebKit) { k.nullList = true }, wantErr: "no feature list"},
 		{name: "no feature api (webkitgtk < 2.42)", win: 1, setup: func(k *fakeWebKit) { k.features = nil }, degraded: true},
 		{
-			name: "no LinkPreconnect feature", win: 1, degraded: true,
+			name: "the feature api has no LinkPreconnect feature", win: 1, wantErr: "no feature LinkPreconnect",
 			setup: func(k *fakeWebKit) { k.features = map[string]bool{"Other": true} },
+		},
+		{
+			name: "the feature api has an empty feature list", win: 1, wantErr: "no feature LinkPreconnect",
+			setup: func(k *fakeWebKit) { k.features = map[string]bool{} },
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
