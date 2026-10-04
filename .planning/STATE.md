@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
 current_phase: 4
-current_phase_name: READY TO EXECUTE
+current_phase_name: Frame Sandbox Lifecycle
 status: executing
-stopped_at: Phase 03 complete, ready to plan Phase 4
-last_updated: "2026-10-04T17:04:55.478Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-10-04T17:13:51.901Z"
 last_activity: 2026-10-04
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
-state_head: 2c09a11913f9a753ee2f05bebb9337f6345b4992
+last_activity_desc: Completed 04-01 (replaced-document rebuild and reload-loop cap)
+state_head: cd3d27f31da1b5f3b192406010d10b6322c78601
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 28
-  completed_plans: 22
+  completed_plans: 23
   percent: 38
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 
 ## Current Position
 
-Phase: 4 — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-04 — Phase 03 complete, transitioned to Phase 4
+Phase: 4 — EXECUTING
+Plan: 2 of 6
+Status: Executing (04-01 complete)
+Last activity: 2026-10-04 — Completed 04-01 (replaced-document rebuild and reload-loop cap)
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -82,6 +82,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | Phase 03 P09 | 6min | 2 tasks | 8 files |
 | Phase 03 P06 | 6min | 2 tasks | 4 files |
 | Phase 03 P10 | 6min | 2 tasks | 8 files |
+| Phase 04 P01 | 7min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -150,6 +151,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-10: the desktop draws notices in backend order and only drops repeat IDs; ordering lives in backend orderedNotices
 - [Phase 03]: 03-10: the keyring wait opens the manager once per KeyringWait value while a primary is pending; the primary stays owed until loading ends
 - [Phase 03]: 03-10: showPendingPrimary reads backend.KeyringWait() (ls.mu only) instead of Snapshot() from the StateChanged callback
+- [Phase 4]: [04-01] A second load of the napplet frame is a replaced document: host page removes the frame, nulls frame/session synchronously, sends nap.reset on the trusted lane and boots a fresh frame only after the reset settles (no new rpc, D-21)
+- [Phase 4]: [04-01] Reload-loop cap: 3 rebuilds per 10 s per window; the 4th replacement resets but boots nothing and shows the halt text; only the launcher's dev reload clears it
+- [Phase 4]: [04-01] Host-page refusals are bound to the sending frame (defense in depth; the ordered lane already prevents cross-frame refusals)
 
 ### Pending Todos
 
@@ -182,6 +186,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T04:37:27.044Z
-Stopped at: Phase 03 complete, ready to plan Phase 4
+Last session: 2026-10-04T17:13:51.815Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

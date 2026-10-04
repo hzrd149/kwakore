@@ -141,13 +141,13 @@ Plans:
   3. An adversarial napplet fixture (self-navigation, reload, forged binding calls, global probing) runs on WebKitGTK without escaping, with WebView2 and WKWebView results recorded where CI allows
   4. WebRTC and other channels that bypass `connect-src` are disabled with engine-level settings where available, and the residual risk per engine is recorded under NIP-5D Non-Guarantees in the checklist
 
-**Plans**: 6 plans
+**Plans**: 1/6 plans executed
 **Research spike**: yes (done in 04-RESEARCH). Self-navigation and reload of `allow-scripts` srcdoc frames on WebKitGTK, WebView2 and WKWebView; whether `frame-src`/`child-src` is enforced on the host page; go-webview sub-frame navigation policy hooks; engine flags for WebRTC
 
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Replaced documents: second load rebuilds the frame, `nap.reset` ends the session, refusals bound to their frame, 3-per-10 s reload cap (wave 1)
+- [x] 04-01-PLAN.md — Replaced documents: second load rebuilds the frame, `nap.reset` ends the session, refusals bound to their frame, 3-per-10 s reload cap (wave 1)
 - [ ] 04-02-PLAN.md — Engine hardening: purego WebKitGTK WebRTC/media-stream/LinkPreconnect off, WebView2 arguments for every kind, sampled token-miss logs (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -240,7 +240,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | 1. Containment Fix and Canonical Shim Baseline | 5/5 | Complete    | 2026-10-03 |
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
 | 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
-| 4. Frame Sandbox Lifecycle | 0/6 | Planned | - |
+| 4. Frame Sandbox Lifecycle | 1/6 | In Progress|  |
 | 5. Napplet Artifact Identity and Storage Keying | 0/TBD | Not started | - |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
 | 7. Resource, Upload and Media Policy | 0/TBD | Not started | - |
