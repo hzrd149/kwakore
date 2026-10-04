@@ -548,10 +548,11 @@ type advResult struct {
 //     launcher never gets nap.openSettings (D-15)
 //   - RTCPeerConnection and navigator.mediaDevices are undefined in the
 //     frame (D-09, D-20), and the fixture reports no FAIL at all
-//   - the marker-less replacements (nav-js, doc-open-unclosed) ran; their
-//     envelopes reaching the live session is the recorded residual
-//     (CONFORMANCE NIP-5D-reload-residual) and is not asserted either way,
-//     but the policy their document reports must have held and the
+//   - the marker-less replacements (nav-js, doc-open-unclosed) ran, and
+//     the report each replacing document posts before its (held back) load
+//     reached the launcher: that is the recorded residual (CONFORMANCE
+//     NIP-5D-reload-residual), reproduced on purpose so the policy the
+//     report shows (eval and WebSocket refused) is checked, and the
 //     attacker must see nothing from them
 func TestWebKitNappletAdversarial(t *testing.T) {
 	needWebKit(t)
@@ -640,8 +641,12 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 		}
 	}
 
-	// the recorded residual: these ran, and whatever their documents
-	// reported says the inherited policy held
+	// the recorded residual: these ran, and their documents reported that
+	// the inherited policy held. The report must be there: the probe holds
+	// back its document's load, so the post-load javascript: document's
+	// report reaches the launcher before that load rebuilds the frame (WR-04,
+	// iteration 2: without the hold it never did, and its policy went
+	// unchecked), and the unclosed document.open() fires no load at all.
 	for _, step := range []string{"nav-js", "doc-open-unclosed"} {
 		ran := false
 		for _, r := range results {
@@ -650,7 +655,10 @@ func TestWebKitNappletAdversarial(t *testing.T) {
 		if !ran {
 			t.Errorf("the residual step %s left no result", step)
 		}
-		checkResidualReport(t, f, step)
+		if !checkResidualReport(t, f, step) {
+			t.Errorf("residual %s: the replacing document's report never reached the launcher, so its policy was not "+
+				"checked; if the engine now rebuilds before the report, the residual may be closed: update NIP-5D-reload-residual", step)
+		}
 	}
 
 	// the reload loop: idle 10.5 s, then three rebuilds and a stop
@@ -746,8 +754,9 @@ type residualReport struct {
 
 // checkResidualReport asserts that the report step's replacing document
 // left in instance storage, if it got one there, shows the inherited policy
-// held: eval and WebSocket refused. It returns whether there was one. Its
-// arriving at all is the recorded residual (NIP-5D-reload-residual).
+// held: eval and WebSocket refused. It returns whether there was one, and
+// the callers fail when there was not. Its arriving at all is the recorded
+// residual (NIP-5D-reload-residual).
 func checkResidualReport(t *testing.T, f *fakeLauncher, step string) bool {
 	t.Helper()
 	raw, ok := f.stored("instance", "adv.residual."+step)

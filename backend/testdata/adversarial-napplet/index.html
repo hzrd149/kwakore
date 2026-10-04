@@ -69,11 +69,15 @@
   // (nav-js, doc-open-unclosed, nav-js-early), which has no marker and may
   // have no window.napplet. It reports, with one bare envelope, whether the
   // inherited policy still holds (eval and WebSocket are refused under the
-  // napplet CSP), then tries the network; the WebKit smoke's listener at
-  // target must see none of it. With then = "reload" it reloads after a
-  // moment, so the step machine resumes in a rebuilt frame even if the
-  // engine never fired this document's load. It is serialized with
-  // toString, so it must stay self-contained.
+  // napplet CSP), then holds back its own load the way leakDoc does (a 40 MB
+  // data: image), so the report reaches the host page before that load can
+  // rebuild the frame and drop it: without the hold, the post-load nav-js
+  // document's load always won and its report was never checked. Then it
+  // tries the network; the WebKit smoke's listener at target must see none
+  // of it. With then = "reload" it reloads after a moment, so the step
+  // machine resumes in a rebuilt frame even if the engine never fired this
+  // document's load. It is serialized with toString, so it must stay
+  // self-contained.
   function residualProbe(step, target, then) {
     var r = { napplet: typeof window.napplet }
     try {
@@ -92,6 +96,11 @@
       type: "storage.set", id: "adv-residual-" + step, key: "adv.residual." + step,
       value: JSON.stringify(r), scope: "instance",
     }, "*")
+    try {
+      var hold = document.createElement("img")
+      hold.src = "data:image/png;base64," + "A".repeat(40 * 1024 * 1024)
+      ;(document.body || document.documentElement).appendChild(hold)
+    } catch (e) {}
     try { fetch(target + step + "-fetch").catch(function () {}) } catch (e) {}
     try { new Image().src = target + step + "-img" } catch (e) {}
     try {
