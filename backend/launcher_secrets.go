@@ -229,6 +229,67 @@ func persistSecrets() error {
 	return nil
 }
 
+// logoutSecrets forgets the stored login and keeps the client key (D-10).
+// In keyring mode the item is rewritten with an empty login. If the keyring
+// can't take that write the logout is recorded in state.json instead
+// (LogoutPending, D-20): the item still holds the login, so the next start
+// must not resume it, and deletes the item once the keyring answers. The
+// rest of this run is file mode, so a login made after it goes to the file
+// and is the newer copy at the next start. With no store, or in file mode,
+// the file copy is rewritten as before. It may block on the store, like
+// setStoredLogin.
+func logoutSecrets() {
+	secretsOpMu.Lock()
+	defer secretsOpMu.Unlock()
+
+	secretsMu.Lock()
+	secrets.login = ""
+	secrets.keyDirty = false
+	rec, store, toStore := secrets, secretStore, secretsToStore
+	secretsMu.Unlock()
+
+	if store != nil && toStore {
+		account := secretsItemAccount(dataDir)
+		err := secretCall(func() error { return store.Set(account, encodeSecretsItem(itemFromRecord(rec))) })
+		if err == nil {
+			markSecretsInKeyring()
+			return
+		}
+		log.Warn().Err(err).Str("account", account).Msg("could not record the logout in the keyring, it is removed on a later start")
+		secretsMu.Lock()
+		secretsToStore = false
+		secretsMu.Unlock()
+
+		stateMu.Lock()
+		state.LogoutPending = true
+		// the client key stays in memory for a login made this run, but is
+		// not copied into the file: it lives in the keyring item, which goes
+		writeFileSecretsLocked(secretsRecord{})
+		saveState()
+		stateMu.Unlock()
+		return
+	}
+
+	stateMu.Lock()
+	writeFileSecretsLocked(rec)
+	if store != nil {
+		state.SecretsLocation = secretsInFile
+	}
+	saveState()
+	stateMu.Unlock()
+}
+
+// clearLogoutPending drops the LogoutPending flag once the keyring no longer
+// holds the login the user logged out of.
+func clearLogoutPending() {
+	stateMu.Lock()
+	if state.LogoutPending {
+		state.LogoutPending = false
+		saveState()
+	}
+	stateMu.Unlock()
+}
+
 // ─── file copy and item conversions ──────────────────────────────
 
 // writeFileSecretsLocked puts rec into the file copy of the secrets. stateMu
@@ -405,11 +466,20 @@ func loadSecretsLocked(store SecretStore) (secretsRecord, bool) {
 	stateMu.Lock()
 	file, fileHas := fileSecretsLocked()
 	loc := state.SecretsLocation
+	pending := state.LogoutPending
 	stateMu.Unlock()
 
 	if store == nil {
 		return adoptSecrets(file, nil, false), true
 	}
+
+	// the user logged out and has not logged in since: a logout the keyring
+	// never heard of (LogoutPending), or one made in file mode, where the
+	// file is the home of the secrets and now holds nothing. Either way a
+	// keyring item is a login the user left; it is never resumed, and it
+	// is deleted once the keyring answers. A login in the file is newer
+	// than the logout and goes through the table below.
+	loggedOut := file.login == "" && (pending || (loc == secretsInFile && !fileHas))
 
 	// always read before anything is written: after a corrupt or missing
 	// state.json the keyring item is the only copy of the pairing
@@ -435,12 +505,29 @@ func loadSecretsLocked(store SecretStore) (secretsRecord, bool) {
 		}
 	}
 
-	switch {
-	case err != nil && !errors.Is(err, ErrSecretNotFound):
+	if err != nil && !errors.Is(err, ErrSecretNotFound) {
 		log.Warn().Err(err).Str("account", account).Msg("keyring unavailable")
+		if loggedOut {
+			// nothing to wait for: the login screen, in file mode, and the
+			// flag stays until a start that reaches the keyring
+			return adoptSecrets(file, store, false), true
+		}
 		return secretsUnavailable(store, file, fileHas, loc)
+	}
 
-	case found && (!fileHas || loc == secretsInKeyring):
+	if loggedOut {
+		if found {
+			if derr := secretCall(func() error { return store.Delete(account) }); derr != nil && !errors.Is(derr, ErrSecretNotFound) {
+				log.Warn().Err(derr).Str("account", account).Msg("could not remove the logged-out login from the keyring, trying again on the next start")
+				return adoptSecrets(file, store, false), true
+			}
+			found = false
+		}
+		clearLogoutPending()
+	}
+
+	switch {
+	case found && !pending && (!fileHas || loc == secretsInKeyring):
 		// the keyring copy is authoritative: a fresh or reset state.json,
 		// or a crash between marking the location and clearing the file
 		markSecretsInKeyring()
@@ -495,12 +582,14 @@ func migrateSecrets(store SecretStore, account string, rec secretsRecord) error 
 
 // markSecretsInKeyring records that the keyring holds the secrets and drops
 // the file copy in one atomic save, then withdraws the keyring-fallback
-// notice.
+// notice. The item now holds the current record, so a pending logout is
+// settled too.
 func markSecretsInKeyring() {
 	stateMu.Lock()
-	if state.SecretsLocation != secretsInKeyring || state.ClientKey != nil || state.Login != nil {
+	if state.SecretsLocation != secretsInKeyring || state.ClientKey != nil || state.Login != nil || state.LogoutPending {
 		state.SecretsLocation = secretsInKeyring
 		state.ClientKey, state.Login = nil, nil
+		state.LogoutPending = false
 		saveState()
 	}
 	stateMu.Unlock()

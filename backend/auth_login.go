@@ -239,9 +239,7 @@ func Logout() {
 	pushIdentityChanged()
 	stopUserRelays()
 
-	if err := setStoredLogin(""); err != nil {
-		log.Warn().Err(err).Msg("could not forget the saved login")
-	}
+	logoutSecrets()
 
 	setProfile("", "", "")
 	setPhase(PhaseLogin)

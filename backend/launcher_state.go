@@ -35,6 +35,12 @@ type AppState struct {
 	// launcher_secrets.go).
 	SecretsLocation string `json:"secrets_location,omitempty"`
 
+	// LogoutPending records a logout the keyring could not be told about
+	// (it was unreachable). While it is set the keyring login is never
+	// resumed, and the next start that reaches the keyring deletes the item
+	// and clears it. Not a secret: only that a logout happened.
+	LogoutPending bool `json:"logout_pending,omitempty"`
+
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
