@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"fiatjaf.com/nostr"
 )
@@ -286,21 +287,108 @@ func sameSecrets(a, b secretsRecord) bool {
 
 // ─── load and migrate ────────────────────────────────────────────
 
-// secretCall runs one store call. Callers hold secretsOpMu and no other lock.
+// Values of State.KeyringWait.
+const (
+	keyringWaiting = "waiting"
+	keyringFailed  = "failed"
+)
+
+// setKeyringWait sets State.KeyringWait and tells the GUI if it changed.
+func setKeyringWait(v string) {
+	ls.mu.Lock()
+	changed := ls.keyringWait != v
+	ls.keyringWait = v
+	ls.mu.Unlock()
+	if changed {
+		notifyState()
+	}
+}
+
+// secretCall runs one store call. Callers hold secretsOpMu and no other
+// lock. If the call is still in flight after a second (an unlock prompt, a
+// slow keyring) KeyringWait shows "waiting" until it returns; quicker calls
+// never flicker it.
 func secretCall(call func() error) error {
-	return call()
+	ls.mu.Lock()
+	ls.keyringSeq++
+	seq := ls.keyringSeq
+	ls.mu.Unlock()
+
+	fired := make(chan struct{})
+	timer := time.AfterFunc(time.Second, func() {
+		defer close(fired)
+		ls.mu.Lock()
+		// a timer that fires as its call returns changes nothing
+		changed := ls.keyringSeq == seq && ls.keyringWait == ""
+		if changed {
+			ls.keyringWait = keyringWaiting
+		}
+		ls.mu.Unlock()
+		if changed {
+			notifyState()
+		}
+	})
+	err := call()
+	if !timer.Stop() {
+		// it fired: let it finish, so "waiting" is never set after the
+		// call returned
+		<-fired
+	}
+
+	ls.mu.Lock()
+	ls.keyringSeq++
+	changed := ls.keyringWait == keyringWaiting
+	if changed {
+		ls.keyringWait = ""
+	}
+	ls.mu.Unlock()
+	if changed {
+		notifyState()
+	}
+	return err
+}
+
+// secretsLoad is the load in flight, if any: a second load (a retry) waits
+// for it instead of calling the store again, so a slow keyring never shows
+// two unlock prompts.
+var secretsLoad struct {
+	mu   sync.Mutex
+	done chan struct{}
 }
 
 // loadSecrets decides where the login secrets come from (RESEARCH Pattern 8)
 // and then resumes the stored login or asks for one. Start runs it in its
 // own goroutine; it may block on the store for as long as the store's own
-// timeouts allow.
+// timeouts allow. A call while another load is in flight joins that load
+// and returns when it is done, without resuming a second time.
 func loadSecrets(store SecretStore) {
+	secretsLoad.mu.Lock()
+	if inFlight := secretsLoad.done; inFlight != nil {
+		secretsLoad.mu.Unlock()
+		<-inFlight
+		return
+	}
+	done := make(chan struct{})
+	secretsLoad.done = done
+	secretsLoad.mu.Unlock()
+
 	secretsOpMu.Lock()
 	rec, ok := loadSecretsLocked(store)
 	secretsOpMu.Unlock()
+
+	secretsLoad.mu.Lock()
+	secretsLoad.done = nil
+	secretsLoad.mu.Unlock()
+	close(done)
+
 	if !ok {
 		return
+	}
+	ls.mu.Lock()
+	wasFailed := ls.keyringWait == keyringFailed
+	ls.mu.Unlock()
+	if wasFailed {
+		setKeyringWait("")
 	}
 
 	if rec.login != "" {
@@ -349,8 +437,8 @@ func loadSecretsLocked(store SecretStore) (secretsRecord, bool) {
 
 	switch {
 	case err != nil && !errors.Is(err, ErrSecretNotFound):
-		log.Warn().Err(err).Str("account", account).Msg("keyring unavailable, using the state file")
-		return secretsUnavailable(store, file, fileHas)
+		log.Warn().Err(err).Str("account", account).Msg("keyring unavailable")
+		return secretsUnavailable(store, file, fileHas, loc)
 
 	case found && (!fileHas || loc == secretsInKeyring):
 		// the keyring copy is authoritative: a fresh or reset state.json,
@@ -434,12 +522,39 @@ func fallBackToFile(store SecretStore, file secretsRecord) secretsRecord {
 	return adoptSecrets(file, store, false)
 }
 
-// secretsUnavailable handles a store that could not be read.
-func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool) (secretsRecord, bool) {
-	if fileHas {
+// secretsUnavailable handles a store that could not be read (unavailable,
+// timed out, or an item we cannot decode). It never generates, deletes or
+// writes anything to the store.
+func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc string) (secretsRecord, bool) {
+	switch {
+	case fileHas && loc == secretsInKeyring:
+		// a file copy left next to the keyring (a crash mid-migration):
+		// use it this run and keep both. A change saved this run goes to
+		// the file and marks it the newer copy (persistSecrets).
+		if file.login != "" {
+			setKeyringFallbackNotice(true)
+		}
+		return adoptSecrets(file, store, false), true
+
+	case fileHas:
 		return fallBackToFile(store, file), true
+
+	case loc == secretsInKeyring:
+		// the secrets live only in the keyring we can't reach: never make
+		// a new client key in their place, wait for the user instead
+		secretsMu.Lock()
+		secrets = secretsRecord{}
+		secretStore = store
+		secretsToStore = true
+		secretsMu.Unlock()
+		setKeyringWait(keyringFailed)
+		return secretsRecord{}, false
+
+	default:
+		// nothing saved yet: file mode, and the notice once a login is
+		// saved to the file (persistSecrets)
+		return adoptSecrets(secretsRecord{}, store, false), true
 	}
-	return adoptSecrets(secretsRecord{}, store, false), true
 }
 
 // adoptSecrets makes rec the in-memory secrets and decides where they are
