@@ -89,23 +89,30 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 		switch method {
 		// ─── window.nostr ────────────────────────────────────────
 		case "getPublicKey":
-			// answers from the cached account key and never prompts
-			if userKeyer == nil {
+			// answers from the cached account key and never prompts.
+			// The keyer and pubkey are read once: a logout or another login
+			// may clear them while this runs, and a second read of a nil
+			// keyer would panic
+			keyer, cached := userKeyer, userPubkey
+			if keyer == nil {
 				return "", errors.New("not logged in")
 			}
-			if userPubkey != (nostr.PubKey{}) {
-				return userPubkey.Hex(), nil
+			if cached != (nostr.PubKey{}) {
+				return cached.Hex(), nil
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			pk, err := userKeyer.GetPublicKey(ctx)
+			pk, err := keyer.GetPublicKey(ctx)
 			if err != nil {
 				return "", err
 			}
 			return pk.Hex(), nil
 
 		case "signEvent":
-			if userKeyer == nil {
+			// read once, as in getPublicKey: the approval prompt below can
+			// take as long as the user does
+			keyer := userKeyer
+			if keyer == nil {
 				return nil, errors.New("not logged in")
 			}
 			var evt nostr.Event
@@ -121,13 +128,15 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			if err := userKeyer.SignEvent(ctx, &evt); err != nil {
+			if err := keyer.SignEvent(ctx, &evt); err != nil {
 				return nil, keyerErr(err)
 			}
 			return evt, nil
 
 		case "nip04.encrypt", "nip04.decrypt", "nip44.encrypt", "nip44.decrypt":
-			if userKeyer == nil {
+			// read once, as in signEvent
+			keyer := userKeyer
+			if keyer == nil {
 				return "", errors.New("not logged in")
 			}
 			var p struct {
@@ -160,16 +169,16 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			defer cancel()
 			switch method {
 			case "nip04.encrypt":
-				res, err := userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+				res, err := keyer.Nip04Encrypt(ctx, p.Plaintext, pk)
 				return res, keyerErr(err)
 			case "nip04.decrypt":
-				res, err := userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+				res, err := keyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
 				return res, keyerErr(err)
 			case "nip44.encrypt":
-				res, err := userKeyer.Encrypt(ctx, p.Plaintext, pk)
+				res, err := keyer.Encrypt(ctx, p.Plaintext, pk)
 				return res, keyerErr(err)
 			default:
-				res, err := userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+				res, err := keyer.Decrypt(ctx, p.Ciphertext, pk)
 				return res, keyerErr(err)
 			}
 

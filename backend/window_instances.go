@@ -418,8 +418,23 @@ func HandleMessage(instance string, m WireMsg) {
 }
 
 func (ci *Instance) handleRPC(m WireMsg) {
+	ci.send(rpcResponse(ci, m))
+}
+
+// rpcResponse runs one napp rpc and builds its answer. A handler that panics
+// is logged and answered with an error, like a NAP handler (napCall.async):
+// handleRPC runs on its own goroutine, where an unrecovered panic would take
+// the whole launcher down with it.
+func rpcResponse(ci *Instance, m WireMsg) (resp WireMsg) {
+	resp = WireMsg{T: "resp", ID: m.ID}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Interface("panic", r).Str("method", m.Method).Msg("napp rpc panicked")
+			resp.Result = nil
+			resp.Error = "internal error"
+		}
+	}()
 	result, err := bridgeRPC(ci)(m.Method, m.Params)
-	resp := WireMsg{T: "resp", ID: m.ID}
 	if err != nil {
 		log.Warn().Str("method", m.Method).Err(err).Msg("napp rpc error")
 		resp.Error = err.Error()
@@ -429,7 +444,7 @@ func (ci *Instance) handleRPC(m WireMsg) {
 	} else {
 		resp.Result = raw
 	}
-	ci.send(resp)
+	return resp
 }
 
 // WindowClosed is what a platform calls once a napp's window is really gone.
