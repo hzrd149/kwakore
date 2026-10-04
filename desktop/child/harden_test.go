@@ -68,6 +68,12 @@ func TestEngineSetupOrder(t *testing.T) {
 		t.Errorf("main calls hardenEngine: napp windows keep engine defaults (DEC-6); only runNapplet and runSettings harden")
 	}
 
+	// WR-02: a napplet window fails closed, so runNapplet must leave when
+	// hardenEngine reports an error
+	if !exitsOnError(funcs["runNapplet"], "hardenEngine") {
+		t.Errorf("runNapplet must call os.Exit when hardenEngine(w) returns an error")
+	}
+
 	for _, name := range []string{"runNapplet", "runSettings"} {
 		fn := funcs[name]
 		harden := firstCall(fn, "", "hardenEngine")
@@ -104,6 +110,41 @@ func firstCall(fn *ast.FuncDecl, recv, name string) token.Pos {
 		return !pos.IsValid()
 	})
 	return pos
+}
+
+// exitsOnError reports whether fn has `if err := name(...); err != nil {
+// ... os.Exit(...) ... }`.
+func exitsOnError(fn *ast.FuncDecl, name string) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		ifs, ok := n.(*ast.IfStmt)
+		if !ok || found {
+			return !found
+		}
+		assign, ok := ifs.Init.(*ast.AssignStmt)
+		if !ok || len(assign.Rhs) != 1 {
+			return true
+		}
+		call, ok := assign.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != name {
+			return true
+		}
+		ast.Inspect(ifs.Body, func(n ast.Node) bool {
+			if c, ok := n.(*ast.CallExpr); ok {
+				if sel, ok := c.Fun.(*ast.SelectorExpr); ok {
+					if x, ok := sel.X.(*ast.Ident); ok && x.Name == "os" && sel.Sel.Name == "Exit" {
+						found = true
+					}
+				}
+			}
+			return !found
+		})
+		return !found
+	})
+	return found
 }
 
 // firstString is the position of the first string literal in fn whose value

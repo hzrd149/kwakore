@@ -18,8 +18,11 @@ import (
 
 func runSettings(w webview.WebView) {
 	// launcher-owned and CSP-confined like a napplet window, so it gets the
-	// same engine switches before anything is bound or loaded
-	hardenEngine(w)
+	// same engine switches before anything is bound or loaded. It runs no
+	// napp code, so a failure is logged and the window still opens.
+	if err := hardenEngine(w); err != nil {
+		log.Error().Err(err).Msg("settings window opens without full webkit hardening")
+	}
 
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {

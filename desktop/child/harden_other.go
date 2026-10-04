@@ -9,4 +9,4 @@ import "github.com/abemedia/go-webview"
 // Non-Guarantees in spec/CONFORMANCE.md.
 func prepareEngine() {}
 
-func hardenEngine(webview.WebView) {}
+func hardenEngine(webview.WebView) error { return nil }

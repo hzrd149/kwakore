@@ -20,4 +20,4 @@ func prepareEngine() {
 
 // hardenEngine has nothing to set per view: WebView2 has no per-view
 // WebRTC switch, only the browser arguments prepareEngine sets.
-func hardenEngine(webview.WebView) {}
+func hardenEngine(webview.WebView) error { return nil }

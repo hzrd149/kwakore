@@ -32,6 +32,14 @@ import (
 // API (WebKitGTK 2.42+) is optional, and a WebKitGTK without it only leaves
 // link preconnect on, which is logged.
 //
+// It fails closed. The WebRTC and media-stream switches exist on every
+// WebKitGTK this build supports, so when they cannot be reached, set or
+// read back off, the napplet window does not open (runNapplet exits, and
+// the launcher sees the window close). Only link preconnect may stay on, and
+// only when this WebKitGTK has no switch for it at all (no feature API, or no
+// LinkPreconnect feature): a Warn names it, and spec/CONFORMANCE.md records
+// it. A preconnect switch that exists and reads back on fails closed too.
+//
 // No decide-policy handler is installed to refuse sub-frame navigations.
 // The host page's CSP (frame-src 'none' from the napplet baseline) plus the
 // replaced-document rebuild (D-01) already cover every navigation the
@@ -155,11 +163,16 @@ func bindSymbol(lib uintptr, fn any, name string) error {
 	return nil
 }
 
+// errNoSwitch marks a channel this WebKitGTK has no switch for, so there is
+// nothing to set: the one gap a napplet window still opens with.
+var errNoSwitch = errors.New("this webkitgtk has no switch for it")
+
 // disableFeature turns the named WebKit feature off and returns its value
-// read back (true when it stayed on or could not be found).
+// read back (true when it stayed on or could not be found). The error wraps
+// errNoSwitch when the feature API or the feature itself is missing.
 func (api *webkitAPI) disableFeature(settings uintptr, id string) (bool, error) {
 	if api.featureErr != nil {
-		return true, api.featureErr
+		return true, fmt.Errorf("%w: %w", errNoSwitch, api.featureErr)
 	}
 	list := api.allFeatures()
 	if list == 0 {
@@ -177,7 +190,84 @@ func (api *webkitAPI) disableFeature(settings uintptr, id string) (bool, error) 
 		api.setFeature(settings, f, false)
 		return api.getFeature(settings, f), nil
 	}
-	return true, fmt.Errorf("webkitgtk has no feature %s", id)
+	return true, fmt.Errorf("%w: webkitgtk has no feature %s", errNoSwitch, id)
+}
+
+// hardening is what was read back from one window's WebKitSettings: true
+// means the channel is still on.
+type hardening struct {
+	reached                             bool // the settings were reached and read back
+	webrtc, mediaStream, linkPreconnect bool
+	// degraded is why link preconnect stays on when this WebKitGTK has no
+	// switch for it; nil otherwise
+	degraded error
+}
+
+// harden turns WebRTC, media capture and link preconnect off in the
+// WebKitSettings of the web view inside the GtkWindow win, and reads them
+// back. It returns an error, and the window must not run a napplet, when the
+// view or its settings cannot be reached or when a switch that exists reads
+// back on. Link preconnect without a switch only sets degraded.
+func (api *webkitAPI) harden(win uintptr) (hardening, error) {
+	var h hardening
+	if win == 0 {
+		return h, errors.New("no native window")
+	}
+	view := api.binGetChild(win)
+	if view == 0 {
+		return h, errors.New("the window has no web view")
+	}
+	// on anything but a WebKitWebView this returns NULL (a GLib type check)
+	settings := api.getSettings(view)
+	if settings == 0 {
+		return h, errors.New("the web view has no settings")
+	}
+
+	api.setWebRTC(settings, false)
+	api.setMediaStream(settings, false)
+	preconnect, featureErr := api.disableFeature(settings, "LinkPreconnect")
+	h.reached = true
+	h.webrtc = api.getWebRTC(settings)
+	h.mediaStream = api.getMediaStream(settings)
+	h.linkPreconnect = preconnect
+
+	var on []string
+	if h.webrtc {
+		on = append(on, "webrtc")
+	}
+	if h.mediaStream {
+		on = append(on, "media capture")
+	}
+	if preconnect {
+		if errors.Is(featureErr, errNoSwitch) {
+			h.degraded = featureErr
+		} else {
+			on = append(on, "link preconnect")
+		}
+	}
+	if len(on) > 0 {
+		err := fmt.Errorf("%s still on after hardening", strings.Join(on, ", "))
+		if featureErr != nil && h.degraded == nil {
+			err = fmt.Errorf("%w (link preconnect: %w)", err, featureErr)
+		}
+		return h, err
+	}
+	return h, nil
+}
+
+// hardenWindow resolves the WebKitGTK API with resolve and hardens win. It
+// never panics: a panic from purego is an error like any other.
+func hardenWindow(resolve func() (*webkitAPI, error), win uintptr) (h hardening, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("webkit hardening panicked: %v", r)
+		}
+	}()
+	api, err := resolve()
+	if err != nil {
+		return h, fmt.Errorf("webkit hardening unavailable: %w", err)
+	}
+	return api.harden(win)
 }
 
 // prepareEngine has nothing to do before webview.New on WebKitGTK: its
@@ -188,57 +278,18 @@ func prepareEngine() {}
 // window's WebKitSettings and logs the values read back. It runs on the UI
 // thread, after webview.New and before Navigate, for napplet and settings
 // windows only (napp windows are not CSP-confined; their policy is
-// deferred). It never panics and never stops the window from opening.
-func hardenEngine(w webview.WebView) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error().Interface("panic", r).
-				Msg("webkit hardening panicked; webrtc, media capture and link preconnect stay at engine defaults")
-		}
-	}()
-	api, err := resolveWebKit()
-	if err != nil {
-		log.Warn().Err(err).
-			Msg("webkit hardening unavailable; webrtc, media capture and link preconnect stay at engine defaults")
-		return
+// deferred). It never panics. A non-nil error means a switch every
+// supported WebKitGTK has could not be turned off, and the caller decides
+// whether the window may still open (a napplet window may not).
+func hardenEngine(w webview.WebView) error {
+	h, err := hardenWindow(resolveWebKit, uintptr(w.Window()))
+	if h.reached {
+		log.Info().Bool("webrtc", h.webrtc).Bool("media_stream", h.mediaStream).Bool("link_preconnect", h.linkPreconnect).
+			Msg("webkit hardening applied")
 	}
-	win := uintptr(w.Window())
-	if win == 0 {
-		log.Warn().Msg("webkit hardening: no native window; webrtc, media capture and link preconnect stay at engine defaults")
-		return
+	if h.degraded != nil {
+		log.Warn().Err(h.degraded).Str("still_on", "link preconnect").
+			Msg("webkit hardening incomplete: link preconnect could not be turned off")
 	}
-	view := api.binGetChild(win)
-	if view == 0 {
-		log.Warn().Msg("webkit hardening: window has no web view; webrtc, media capture and link preconnect stay at engine defaults")
-		return
-	}
-	settings := api.getSettings(view)
-	if settings == 0 {
-		log.Warn().Msg("webkit hardening: web view has no settings; webrtc, media capture and link preconnect stay at engine defaults")
-		return
-	}
-
-	api.setWebRTC(settings, false)
-	api.setMediaStream(settings, false)
-	preconnect, featureErr := api.disableFeature(settings, "LinkPreconnect")
-	webrtc := api.getWebRTC(settings)
-	media := api.getMediaStream(settings)
-
-	log.Info().Bool("webrtc", webrtc).Bool("media_stream", media).Bool("link_preconnect", preconnect).
-		Msg("webkit hardening applied")
-
-	var on []string
-	if webrtc {
-		on = append(on, "webrtc")
-	}
-	if media {
-		on = append(on, "media capture")
-	}
-	if preconnect {
-		on = append(on, "link preconnect")
-	}
-	if len(on) > 0 {
-		log.Warn().Err(featureErr).Str("still_on", strings.Join(on, ", ")).
-			Msg("webkit hardening incomplete: " + strings.Join(on, ", ") + " could not be turned off")
-	}
+	return err
 }

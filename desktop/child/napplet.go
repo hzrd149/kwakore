@@ -27,8 +27,14 @@ import (
 var nappletToken string
 
 func runNapplet(w webview.WebView) {
-	// engine switches first, before the page or any binding exists
-	hardenEngine(w)
+	// engine switches first, before the page or any binding exists. It
+	// fails closed: an untrusted napplet never runs with WebRTC or media
+	// capture at the engine's defaults, so the window does not open and the
+	// launcher sees it close.
+	if err := hardenEngine(w); err != nil {
+		log.Error().Err(err).Msg("napplet window not opened: webkit hardening failed")
+		os.Exit(1)
+	}
 
 	nappletToken = newWindowToken()
 	// the host page is the launcher's own, so its top-frame wrapper (which
