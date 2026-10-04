@@ -930,6 +930,76 @@ func TestNapStartTearsDownThePreviousSession(t *testing.T) {
 	}
 }
 
+// SBOX-01, D-02, D-21: the host page sends nap.reset when its frame's
+// document was replaced, before the fresh frame boots. The old session ends
+// there: nothing is established until the next nap.start, so whatever
+// arrives in between is dropped, and no push goes out for either session.
+func TestNapResetEndsTheSession(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "replaced")
+	ready(t, ci, rec, 1)
+
+	ci.nap.mu.Lock()
+	oldGen, oldCtx := ci.nap.gen, ci.nap.ctx
+	ci.nap.mu.Unlock()
+
+	if _, err := napRPC(ci, "nap.reset", ""); err != nil {
+		t.Fatal(err)
+	}
+	ci.nap.mu.Lock()
+	gen, established := ci.nap.gen, ci.nap.established
+	ci.nap.mu.Unlock()
+	if established {
+		t.Fatal("the session is still established after nap.reset")
+	}
+	if gen <= oldGen {
+		t.Fatalf("gen = %d after nap.reset, want more than %d", gen, oldGen)
+	}
+	if oldCtx.Err() == nil {
+		t.Fatal("the old session's context survived nap.reset")
+	}
+	if ci.napPushGen(oldGen, map[string]any{"type": "probe-old"}) {
+		t.Error("a push for the old session went out after nap.reset")
+	}
+	if ci.napPushGen(gen, map[string]any{"type": "probe-between"}) {
+		t.Error("a push went out between nap.reset and nap.start")
+	}
+
+	// the replaced document (or the next one, before nap.start) posts
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "between"})
+	// a call the old document queued before the reset
+	ci.napDispatch(&napCall{
+		ci: ci, gen: oldGen, ctx: oldCtx, Type: "storage.keys",
+		ID: json.RawMessage(`"queued"`), raw: json.RawMessage(`{"type":"storage.keys","id":"queued"}`),
+	})
+
+	ready(t, ci, rec, 2)
+	ci.nap.mu.Lock()
+	newGen := ci.nap.gen
+	ci.nap.mu.Unlock()
+	if ci.napPushGen(oldGen, map[string]any{"type": "probe-old"}) {
+		t.Error("a push for the old session went out after the next nap.start")
+	}
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "after"})
+	rec.wait(t, "storage.keys.result", 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := rec.find("storage.keys.result"); len(got) != 1 || got[0]["id"] != "after" {
+		t.Fatalf("storage.keys answers: %v, want only the new session's", got)
+	}
+	for _, typ := range []string{"probe-old", "probe-between"} {
+		if got := rec.find(typ); len(got) != 0 {
+			t.Errorf("%s pushed: %v", typ, got)
+		}
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, g := range rec.gens {
+		if g != newGen {
+			t.Errorf("a push named session %d, want only %d", g, newGen)
+		}
+	}
+}
+
 func TestNapLoadedPushesControlsOnEveryLoad(t *testing.T) {
 	setupNapTest(t)
 	host = &notifyTestHost{}

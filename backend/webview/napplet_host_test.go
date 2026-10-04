@@ -308,6 +308,135 @@ return { log: reloadLog, msgFromOld, loadedFromOld, liveAfterBoots, overlapStart
 	}
 }
 
+// SBOX-01, D-01, D-02, D-21: a frame's second load means its document was
+// replaced. The frame goes, the old session ends through nap.reset on the
+// lane, and a fresh frame boots with a fresh nap.boot answer and session.
+func TestNappletHostRebuildsReplacedFrame(t *testing.T) {
+	var got struct {
+		Log            []string `json:"log"`
+		LoadedFirst    int      `json:"loadedFirst"`
+		LoadedAfter    int      `json:"loadedAfter"`
+		Srcdoc1        string   `json:"srcdoc1"`
+		MsgFromOld     int      `json:"msgFromOld"`
+		OldPosted      []string `json:"oldPosted"`
+		NewPosted      []string `json:"newPosted"`
+		LoadedSecond   int      `json:"loadedSecond"`
+		Resets         int      `json:"resets"`
+		Boots          int      `json:"boots"`
+		Frame1Removed  bool     `json:"frame1Removed"`
+		Srcdoc2        string   `json:"srcdoc2"`
+		StaleChanged   bool     `json:"staleChanged"`
+		DoubleBoots    int      `json:"doubleBoots"`
+		DoubleResets   int      `json:"doubleResets"`
+		DoubleAppended int      `json:"doubleAppended"`
+		Live           int      `json:"live"`
+	}
+	runHost(t, `
+let boots = 0
+handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
+`, `
+await flush()
+const f0 = appended[0]
+fireLoad(f0)
+await flush()
+const loadedFirst = count("nap.loaded")
+const mark = log.length
+// the napplet reloads itself: a second load of the same frame
+fireLoad(f0)
+await flush()
+const replaceLog = log.slice(mark)
+const loadedAfter = count("nap.loaded")
+const f1 = appended[1]
+if (!f1) return { log: replaceLog, loadedFirst, loadedAfter }
+
+// the replaced document keeps posting, and a push for its session lands late
+fireMessage(f0.contentWindow, { type: "storage.keys", id: "old" })
+window.__nap_push(1, JSON.stringify({ type: "for-old-session" }))
+window.__nap_push(2, JSON.stringify({ type: "for-new-session" }))
+await flush()
+const msgFromOld = count("nap.msg")
+
+// the new frame's first load is its boot, its second replaces it again
+fireLoad(f1)
+await flush()
+const loadedSecond = count("nap.loaded")
+fireLoad(f1)
+await flush()
+const f2 = appended[2]
+if (!f2) return { log: replaceLog, loadedFirst, loadedAfter, srcdoc1: f1.srcdoc, loadedSecond }
+
+// a late load of a frame that is no longer current changes nothing
+const before = { resets: count("nap.reset"), boots: count("nap.boot"), log: log.length }
+fireLoad(f0)
+fireLoad(f1)
+await flush()
+const staleChanged = count("nap.reset") !== before.resets || count("nap.boot") !== before.boots || log.length !== before.log
+
+// a replacement whose late load fires right behind it: one rebuild only
+fireLoad(f2)
+await flush()
+const dBoots = count("nap.boot"), dResets = count("nap.reset"), dAppended = appended.length
+fireLoad(f2)
+fireLoad(f2)
+await flush()
+
+return {
+  log: replaceLog, loadedFirst, loadedAfter, srcdoc1: f1 && f1.srcdoc, msgFromOld,
+  oldPosted: f0.contentWindow.posted.map(p => p.type),
+  newPosted: f1.contentWindow.posted.map(p => p.type),
+  loadedSecond, resets: before.resets, boots: before.boots,
+  frame1Removed: f1.removed, srcdoc2: f2 && f2.srcdoc, staleChanged,
+  doubleBoots: count("nap.boot") - dBoots, doubleResets: count("nap.reset") - dResets,
+  doubleAppended: appended.length - dAppended, live: live().length,
+}
+`, &got)
+
+	if got.LoadedFirst != 1 {
+		t.Errorf("the first load sent nap.loaded %d times, want 1", got.LoadedFirst)
+	}
+	if got.LoadedAfter != 1 {
+		t.Errorf("a replaced document's load sent nap.loaded (%d in total, want 1)", got.LoadedAfter)
+	}
+	remove := indexOf(got.Log, "remove#0", 0)
+	reset := indexOf(got.Log, "nap.reset", 0)
+	boot := indexOf(got.Log, "nap.boot", 0)
+	start := indexOf(got.Log, "nap.start", 0)
+	appendNew := indexOf(got.Log, "append#1", 0)
+	if remove != 0 || reset < 0 || boot < 0 || start < 0 || appendNew < 0 ||
+		!(remove < reset && reset < boot && boot < start && start < appendNew) {
+		t.Fatalf("replacement order = %v, want remove#0, nap.reset, nap.boot, nap.start, append#1", got.Log)
+	}
+	if got.Srcdoc1 != "doc2" {
+		t.Errorf("rebuilt frame srcdoc = %q, want the second nap.boot answer", got.Srcdoc1)
+	}
+	if got.MsgFromOld != 0 {
+		t.Errorf("the replaced document's post reached Go (%d nap.msg)", got.MsgFromOld)
+	}
+	if len(got.OldPosted) != 0 {
+		t.Errorf("the replaced frame got %v", got.OldPosted)
+	}
+	if !slices.Equal(got.NewPosted, []string{"for-new-session"}) {
+		t.Errorf("the rebuilt frame got %v, want only its own session's push", got.NewPosted)
+	}
+	if got.LoadedSecond != 2 {
+		t.Errorf("the rebuilt frame's first load: nap.loaded %d in total, want 2", got.LoadedSecond)
+	}
+	if got.Resets != 2 || got.Boots != 3 || !got.Frame1Removed || got.Srcdoc2 != "doc3" {
+		t.Errorf("second replacement: resets %d, boots %d, frame1 removed %v, srcdoc %q; want 2, 3, true, doc3",
+			got.Resets, got.Boots, got.Frame1Removed, got.Srcdoc2)
+	}
+	if got.StaleChanged {
+		t.Error("a load of a frame that is no longer current did something")
+	}
+	if got.DoubleBoots != 1 || got.DoubleResets != 1 || got.DoubleAppended != 1 {
+		t.Errorf("one replacement with a late load behind it: %d nap.boot, %d nap.reset, %d appended; want 1 each",
+			got.DoubleBoots, got.DoubleResets, got.DoubleAppended)
+	}
+	if got.Live != 1 {
+		t.Errorf("%d live frames, want 1", got.Live)
+	}
+}
+
 var maxPendingRE = regexp.MustCompile(`const MAX_PENDING = (\d+)`)
 
 // D-07 queue bound: a napplet that floods the host page gets terminal

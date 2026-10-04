@@ -189,9 +189,10 @@
   // One ordered lane to Go, bounded so a napplet cannot queue without limit.
   // MAX_PENDING matches the 256-slot per-session queue in Go's napEnqueue;
   // past it every envelope that carries an id is refused at once. The bound
-  // is the napplet's: this page's own lifecycle calls (nap.start, nap.loaded)
-  // are trusted, keep their place in the lane and never count against it, so
-  // a flooding napplet cannot make a boot fail or lose its controls push.
+  // is the napplet's: this page's own lifecycle calls (nap.start, nap.loaded,
+  // nap.reset) are trusted, keep their place in the lane and never count
+  // against it, so a flooding napplet cannot make a boot fail, lose its
+  // controls push or keep its replaced session alive.
   const MAX_PENDING = 256
   let outbound = Promise.resolve()
   let pending = 0
@@ -471,9 +472,15 @@
   // instead of reaching the new session. bootSerial makes an older boot that
   // is still in flight give up, so overlapping boots leave one frame.
   //
-  // The frame's load event only triggers the notify.controls push
-  // (nap.loaded); it starts nothing. A napplet that reloads its own frame
-  // keeps its session; unexpected loads are handled on this same hook later.
+  // One frame holds exactly one document: the srcdoc boot() gave it. Its
+  // first load only triggers the notify.controls push (nap.loaded) and starts
+  // nothing. Any later load of the same frame means the document was
+  // replaced: a reload, a navigation the CSP let through, one it blocked
+  // while the old document lives on (WebKitGTK still reports that load),
+  // about:blank, about:srcdoc, or document.open. Whatever an engine still
+  // lets through is caught here, every kind the same way: the frame goes,
+  // its session ends, and a fresh frame boots with a fresh session
+  // (replaced, below).
   const showBootError = err => {
     document.body.textContent = "This napplet could not be started: " + ((err && err.message) || err)
   }
@@ -515,12 +522,44 @@
     f.setAttribute("referrerpolicy", "no-referrer")
     f.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
     f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
+    // loads are counted per frame, here in the closure that made it: the
+    // first is the boot, any later one a replaced document. srcdoc is set
+    // before the frame is appended, so the boot is exactly one load.
+    let loads = 0
     f.addEventListener("load", () => {
-      if (frame === f) enqueue(() => rpc("nap.loaded"), true).catch(() => {})
+      if (frame !== f) return
+      if (++loads === 1) enqueue(() => rpc("nap.loaded"), true).catch(() => {})
+      else replaced(f)
     })
     f.srcdoc = doc.srcdoc
     frame = f
     document.body.appendChild(f)
+  }
+
+  // ── replaced documents ──────────────────────────────────────────
+  // replaced(f) ends a frame whose document was replaced. Everything runs
+  // synchronously in the load handler: with frame null, whatever the
+  // replacing document (or a still-running original, after a blocked
+  // navigation) posts fails the sender check, and with session null, every
+  // push for the old session is dropped. nap.reset then ends the old
+  // session in Go on the trusted lane, so the session ends even when no new
+  // one follows: its subscriptions, prompts, fetches, uploads, inc topics
+  // and grants go with it, and Go drops anything still queued for it. The
+  // fresh boot waits for that, so its nap.boot and nap.start come after the
+  // teardown, and a boot already in flight gives up (bootSerial). A frame
+  // that is no longer current is ignored, so one replacement rebuilds once.
+  const replaced = f => {
+    if (frame !== f) return
+    f.remove()
+    frame = null
+    session = null
+    const serial = ++bootSerial
+    enqueue(() => rpc("nap.reset"), true)
+      .catch(() => {})
+      .then(() => {
+        // a dev reload in the meantime booted already
+        if (serial === bootSerial) boot()
+      })
   }
 
   const start = () => {

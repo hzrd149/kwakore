@@ -70,8 +70,9 @@ type napSession struct {
 	// post envelopes, which reach Go as nap.msg.
 	established bool
 
-	// gen counts sessions in this window. nap.start (and nap.reset) starts a
-	// new one, and a late answer for the old one must not reach the new
+	// gen counts sessions in this window. nap.start and nap.reset (a dev
+	// reload or a replaced document) both end the current one and move gen
+	// on, and a late answer for the old one must not reach the new
 	// document.
 	gen    int
 	ctx    context.Context
@@ -374,7 +375,8 @@ func (ci *Instance) napPushGen(gen int, envs ...any) bool {
 // window: see bridgeRPC. The lifecycle rpcs (nap.boot, nap.start, nap.loaded,
 // nap.reset) come only from the host page's own binding, never from the
 // napplet's frame, which can reach Go only through the host page, and only as
-// nap.msg.
+// nap.msg. nap.reset ends the session on a dev reload and whenever the host
+// page finds its frame's document replaced (napReset).
 func napRPC(ci *Instance, method, params string) (any, error) {
 	switch method {
 	case "nap.boot":
@@ -654,8 +656,17 @@ func (ci *Instance) napLoaded() {
 	ci.napPushGen(gen, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
 }
 
-// napReset drops the session (a dev reload: new bytes are coming). The host
-// page's next nap.start opens the new one.
+// napReset answers nap.reset: it ends the session the host page's frame
+// belonged to. The host page sends it in two cases: a dev reload (new bytes
+// are coming, dev.go) and a replaced document (D-02): the frame loaded a
+// second time, so something replaced the document it was booted with, and
+// the host page has already dropped that frame. Either way the teardown
+// happens here, before any new document exists: subscriptions, fetches,
+// uploads, prompts (owned by the session context), inc topics and grants
+// end, and the gen moves on, so a call the old document queued is stale.
+// The host page's next nap.start opens the new session; until then
+// established is false, and every envelope is dropped and nothing is
+// pushed.
 func (ci *Instance) napReset() {
 	if ci.nap == nil {
 		return
@@ -664,7 +675,9 @@ func (ci *Instance) napReset() {
 	defer ci.nap.dispatchMu.Unlock()
 	ci.nap.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
+	gen := ci.nap.gen
 	ci.nap.mu.Unlock()
+	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Int("gen", gen).Msg("napplet session reset")
 }
 
 // napTeardownLocked ends the current session: subscriptions, resource
