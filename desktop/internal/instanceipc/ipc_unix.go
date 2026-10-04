@@ -10,26 +10,90 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 )
 
 // getuid is the uid a peer must have. Tests swap it to force a mismatch.
 var getuid = os.Getuid
 
+// dirUID is the uid that must own every directory on the socket path. It is
+// separate from getuid so tests can fake a foreign directory without also
+// faking a foreign peer.
+var dirUID = os.Getuid
+
+// maxSocketPath is the size of sun_path on macOS, in bytes (Linux has 108).
+// A path this long or longer cannot be bound everywhere, so it is replaced by
+// a short per-user one.
+const maxSocketPath = 104
+
 // socketPath picks where the socket for dataDir lives and makes sure its
-// directory can be trusted. With create false (Dial) a missing directory is
-// reported as fs.ErrNotExist instead of being created.
+// directory can be trusted:
+//
+//   - $XDG_RUNTIME_DIR/verdana/<hash>.sock when XDG_RUNTIME_DIR is an absolute
+//     path to a real directory of ours that nobody else can enter;
+//   - else <dataDir>/ipc/launcher.sock;
+//   - and when that is maxSocketPath bytes or longer, a short per-user path
+//     (under the per-user os.TempDir on macOS, /tmp/verdana-<uid> elsewhere).
+//
+// With create false (Dial) a missing directory is reported as fs.ErrNotExist
+// instead of being created.
 func socketPath(dataDir string, create bool) (string, error) {
-	dir := filepath.Join(dataDir, "ipc")
+	hash := dataDirHash(dataDir)[:16]
+	var dir, path string
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" && filepath.IsAbs(xdg) && trustedRuntimeDir(xdg) {
+		dir = filepath.Join(xdg, "verdana")
+		path = filepath.Join(dir, hash+".sock")
+	} else {
+		dir = filepath.Join(dataDir, "ipc")
+		path = filepath.Join(dir, "launcher.sock")
+	}
+	if len(path) >= maxSocketPath {
+		if runtime.GOOS == "darwin" {
+			dir = filepath.Join(os.TempDir(), "verdana-"+hash)
+			path = filepath.Join(dir, "s.sock")
+		} else {
+			dir = fmt.Sprintf("/tmp/verdana-%d", dirUID())
+			path = filepath.Join(dir, hash+".sock")
+		}
+		if len(path) >= maxSocketPath {
+			return "", fmt.Errorf("no socket path shorter than %d bytes for %s", maxSocketPath, dataDir)
+		}
+	}
 	if err := verifyDir(dir, create); err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "launcher.sock"), nil
+	return path, nil
 }
 
-// verifyDir makes sure dir is a real directory (not a symlink) that only we
-// can enter, creating it 0700 when create is set and tightening it to 0700
-// when it is looser.
+// trustedRuntimeDir reports whether dir is a real directory owned by us with
+// no group or other permission bits. It is never modified: a runtime dir that
+// fails the check is just not used.
+func trustedRuntimeDir(dir string) bool {
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() || fi.Mode()&fs.ModeSymlink != 0 {
+		return false
+	}
+	return ownedByUs(fi) == nil && fi.Mode().Perm()&0o077 == 0
+}
+
+// ownedByUs fails unless fi belongs to dirUID.
+func ownedByUs(fi fs.FileInfo) error {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("cannot tell who owns %s", fi.Name())
+	}
+	if uid := int(st.Uid); uid != dirUID() {
+		return fmt.Errorf("%s is owned by uid %d, not us", fi.Name(), uid)
+	}
+	return nil
+}
+
+// verifyDir makes sure dir is a real directory (not a symlink) owned by us
+// that only we can enter, creating it 0700 when create is set and tightening
+// it to 0700 when it is looser. A directory someone else owns is refused:
+// they could have pre-created it to block us, which costs single-instance
+// forwarding but never hands them our socket.
 func verifyDir(dir string, create bool) error {
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) && create {
@@ -46,6 +110,9 @@ func verifyDir(dir string, create bool) error {
 	}
 	if !fi.IsDir() {
 		return fmt.Errorf("%s is not a directory", dir)
+	}
+	if err := ownedByUs(fi); err != nil {
+		return err
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		if err := os.Chmod(dir, 0700); err != nil {

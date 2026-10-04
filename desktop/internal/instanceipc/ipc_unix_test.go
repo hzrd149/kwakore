@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,9 @@ func TestListenReplacesStaleSocket(t *testing.T) {
 }
 
 func TestAcceptRefusesOtherUID(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no peer credentials on this system; the 0700 dir is the guard")
+	}
 	noRuntimeDir(t)
 	data := shortTempDir(t)
 	// the seam is set before the accept goroutine starts and, cleanups
@@ -298,6 +302,9 @@ func TestAcceptRefusesOtherUID(t *testing.T) {
 }
 
 func TestDialRefusesOtherUIDListener(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no peer credentials on this system; the 0700 dir is the guard")
+	}
 	noRuntimeDir(t)
 	data := shortTempDir(t)
 	ln, err := Listen(data, nil)
