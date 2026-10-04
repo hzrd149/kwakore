@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Desktop Process and Secrets Hardening
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-10-04T03:02:38.108Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-10-04T03:14:45.744Z"
 last_activity: 2026-10-03
 last_activity_desc: Phase 03 execution started
-state_head: 5b7e2ed8cb34d5c84387fa4e1532347a7deb61bb
+state_head: ef64140b19900015dbb064f887f7e34d179f0365
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 22
-  completed_plans: 13
+  completed_plans: 14
   percent: 25
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-03)
 ## Current Position
 
 Phase: 03 (Desktop Process and Secrets Hardening) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
 Last activity: 2026-10-03 — Phase 03 execution started
 
@@ -72,6 +72,7 @@ Progress: [███░░░░░░░] 25% (2/8 phases)
 | Phase 02 P06 | 14min | 3 tasks | 13 files |
 | Phase 02 P07 | 5min | 2 tasks | 6 files |
 | Phase 03 P01 | 6min | 3 tasks | 12 files |
+| Phase 03 P05 | 10 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-01: an unreadable (not only unparsable) state.json blocks saveState for the run so it is never replaced by defaults
 - [Phase 03]: 03-01: state-corrupt notice shows even when the rename fails, with Path = state.json where the data stayed
 - [Phase 03]: 03-01: notices keep ls.notices under ls.mu and DismissedNotices under stateMu, never both held; addNotice/removeNotice do not notify
+- [Phase 03]: 03-05: single-instance channel is a user-only Unix socket (peer uid checked both ends) or owner-only named pipe with server-SID check; v2 one-line protocol, TCP and launcher.port removed
+- [Phase 03]: 03-05: the instance server runs a command only after its ok reply was written, so a retrying sender never gets it run twice
 
 ### Pending Todos
 
@@ -150,6 +153,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T03:02:38.054Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-10-04T03:14:45.692Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
