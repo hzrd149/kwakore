@@ -19,6 +19,19 @@ type childUnavailableHost struct {
 	err      error
 	windows  int
 	settings int
+	// changed gets the FetchErr each StateChanged call saw, so a test can
+	// wait for the launch goroutine's last notification to finish
+	changed chan string
+}
+
+func (h *childUnavailableHost) StateChanged() {
+	ls.mu.Lock()
+	msg := ls.fetchErr
+	ls.mu.Unlock()
+	select {
+	case h.changed <- msg:
+	default:
+	}
 }
 
 func (h *childUnavailableHost) OpenWindow(WindowSpec) (Transport, error) {
@@ -45,7 +58,7 @@ func setupChildUnavailable(t *testing.T, openErr error) Napp {
 	statePath = filepath.Join(dataDir, "state.json")
 
 	oldHost := host
-	host = &childUnavailableHost{err: openErr}
+	host = &childUnavailableHost{err: openErr, changed: make(chan string, 64)}
 	ls.mu.Lock()
 	oldFetchErr := ls.fetchErr
 	ls.fetchErr = ""
@@ -75,20 +88,27 @@ func setupChildUnavailable(t *testing.T, openErr error) Napp {
 	return n
 }
 
-// launchAndWait launches from the store and waits for its error line.
+// launchAndWait launches from the store and waits for the notification
+// that carries its error line (the launch goroutine's last step).
 func launchAndWait(t *testing.T, n Napp) string {
 	t.Helper()
+	h := host.(*childUnavailableHost)
 	SetFetchErr("")
+	// notifications so far (a dismissal, the reset) are not this launch's
+	for len(h.changed) > 0 {
+		<-h.changed
+	}
 	Launch(n)
-	deadline := time.Now().Add(5 * time.Second)
+	timeout := time.After(5 * time.Second)
 	for {
-		if msg := Snapshot().FetchErr; msg != "" {
-			return msg
-		}
-		if time.Now().After(deadline) {
+		select {
+		case msg := <-h.changed:
+			if msg != "" {
+				return msg
+			}
+		case <-timeout:
 			t.Fatal("launch did not report an error within 5s")
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

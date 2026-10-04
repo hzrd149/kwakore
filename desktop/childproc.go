@@ -252,6 +252,10 @@ func prepareChild() (exe, dir string, err error) {
 		exe, dir = "", ""
 		if failClosed {
 			err = fmt.Errorf("%w: %v", backend.ErrWindowProgramUnavailable, err)
+			// the backend raises the child-unavailable notice; bring the
+			// manager up so an open from a shortcut, the tray or the store
+			// never fails silently (showManager is safe off the UI loop)
+			showManager()
 		}
 	}()
 

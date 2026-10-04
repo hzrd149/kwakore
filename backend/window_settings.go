@@ -155,6 +155,11 @@ func openSettings(nappID, section string) error {
 			delete(settingsWins, nappID)
 		}
 		settingsMu.Unlock()
+		if errors.Is(err, ErrWindowProgramUnavailable) {
+			// callers only log a failed settings open; the notice is what
+			// the user sees (raised with no lock held)
+			raiseChildUnavailable()
+		}
 		return err
 	}
 	w.attach(t)

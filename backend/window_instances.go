@@ -549,6 +549,12 @@ func Launch(napp Napp) {
 	go func() {
 		if _, err := launch(context.Background(), napp); err != nil {
 			log.Error().Err(err).Str("napp", napp.ID).Msg("launch failed")
+			if errors.Is(err, ErrWindowProgramUnavailable) {
+				// the notice is up already (launchWindow); the store line
+				// stays generic and never shows the host's detail
+				SetFetchErr(childUnavailableFetchErr)
+				return
+			}
 			SetFetchErr("launch failed: " + err.Error())
 		}
 	}()
@@ -671,6 +677,11 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	})
 	if err != nil {
 		WindowClosed(ci.instance)
+		if errors.Is(err, ErrWindowProgramUnavailable) {
+			// every way a window opens (store, shortcut, intent, napplet)
+			// ends here, so none of them fails without the notice
+			raiseChildUnavailable()
+		}
 		return nil, err
 	}
 	ci.attach(transport)
