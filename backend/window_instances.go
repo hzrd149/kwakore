@@ -44,6 +44,11 @@ type Instance struct {
 	// in trialStorage until the user accepts the close-time install offer.
 	trial        bool
 	trialStorage map[string]*nappStorage
+	// failedClosed is set when the napplet window reported that it closed
+	// itself before running the napplet (windowFailed engine-hardening):
+	// its close is then no trial to offer for install, and no window to
+	// list for reopening, since a reopen can only fail the same way (IN-09).
+	failedClosed atomic.Bool
 
 	sendMu    sync.Mutex
 	transport Transport
@@ -464,6 +469,10 @@ func loggableWireCode(code string) string {
 func (ci *Instance) windowFailed(code string) {
 	switch code {
 	case windowFailedEngineHardening:
+		if !ci.failedClosed.CompareAndSwap(false, true) {
+			// already reported: the notice is up, the log has its line
+			return
+		}
 		log.Error().Str("napp", ci.napp.ID).Str("instance", ci.instance).
 			Msg("napplet window closed itself: web engine hardening failed")
 		raiseNappletHardening()
@@ -532,12 +541,16 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
-	if ci.auxiliary {
-		// auxiliary windows are temporary helpers, not session windows:
-		// don't keep them listed for reopening.
+	failed := ci.failedClosed.Load()
+	if ci.auxiliary || failed {
+		// auxiliary windows are temporary helpers, not session windows,
+		// and a napplet window that failed closed would only fail again:
+		// don't keep either listed for reopening.
 		windows.Delete(ci.instance)
 	}
-	if ci.trial {
+	if ci.trial && !failed {
+		// a trial that never ran is nothing to offer for install: the user
+		// was just told it was closed before it ran
 		go finishNappletTrial(ci)
 	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")

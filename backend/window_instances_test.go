@@ -220,6 +220,64 @@ func TestWindowFailedRaisesNotice(t *testing.T) {
 	}
 }
 
+// TestWindowFailedClosesQuietly: a trial napplet window that failed closed
+// gets no "Did you like it? Install it" prompt when it closes, and is not
+// kept listed for reopening; a trial that ran and closed normally still gets
+// the prompt (IN-09).
+func TestWindowFailedClosesQuietly(t *testing.T) {
+	setupNapTest(t)
+	withFreshStateDir(t)
+	statePath = filepath.Join(dataDir, "state.json")
+	resetPrompts := func() {
+		promptMu.Lock()
+		promptActive = nil
+		promptQueue = nil
+		promptMu.Unlock()
+	}
+	resetPrompts()
+	t.Cleanup(resetPrompts)
+
+	trial := func(d string) *Instance {
+		ci, _ := openNapplet(t, d)
+		ci.trial = true
+		ci.trialStorage = make(map[string]*nappStorage)
+		putWindow(windowRecord{Instance: ci.instance, NappID: ci.napp.ID})
+		t.Cleanup(func() { windows.Delete(ci.instance) })
+		return ci
+	}
+	failed, ran := trial("failed-trial"), trial("ran-trial")
+
+	HandleWireMessage(failed.instance, `{"t":"windowFailed","code":"engine-hardening"}`)
+	WindowClosed(failed.instance)
+	WindowClosed(ran.instance)
+
+	var p *Prompt
+	deadline := time.Now().Add(time.Second)
+	for p == nil && time.Now().Before(deadline) {
+		p = CurrentPrompt()
+		time.Sleep(time.Millisecond)
+	}
+	if p == nil || p.Title != "Did you like ran-trial?" {
+		t.Fatalf("prompt for the trial that ran = %+v", p)
+	}
+	// give a stray prompt for the failed trial time to show up
+	time.Sleep(50 * time.Millisecond)
+	if got := pendingPrompts(); len(got) != 1 {
+		titles := []string{}
+		for _, q := range got {
+			titles = append(titles, q.Title)
+		}
+		t.Fatalf("pending prompts = %q, want only the one for the trial that ran", titles)
+	}
+	if _, ok := windows.Load(failed.instance); ok {
+		t.Fatal("a napplet window that failed closed is still listed for reopening")
+	}
+	if _, ok := windows.Load(ran.instance); !ok {
+		t.Fatal("the trial that ran lost its window record before the user answered")
+	}
+	AnswerPrompt(p.ID, Answer{OK: false, Scope: ScopeOnce})
+}
+
 // TestWindowFailedOnlyFromNapplets: windowFailed is a napplet window's line
 // to send. A napp (35130) window's page writes its own wire JSON on Android
 // (NappWebView.kt __verdanaHost), so from a non-napplet window the message
