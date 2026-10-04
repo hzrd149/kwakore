@@ -111,6 +111,12 @@ var (
 	// launcher data is not overwritten with defaults.
 	stateSaveBlocked atomic.Bool
 
+	// stateLost is set when this run found a state.json it could not use
+	// (unparseable, or unreadable): its record of where the login secrets
+	// live is gone, so the keyring item may be the only copy of the pairing
+	// (D-14, see secretsUnavailable). In memory only; loadState resets it.
+	stateLost atomic.Bool
+
 	// renameFile is os.Rename, swappable in tests.
 	renameFile = os.Rename
 )
@@ -119,12 +125,14 @@ func loadState() {
 	// the shortcut list is read from the files, not from here
 	reloadShortcuts()
 	statePath = filepath.Join(dataDir, "state.json")
+	stateLost.Store(false)
 	data, err := os.ReadFile(statePath)
 	switch {
 	case err == nil:
 		// a 0-byte file (a torn write from an older build) fails here too
 		if perr := json.Unmarshal(data, &state); perr != nil {
 			state = AppState{}
+			stateLost.Store(true)
 			keepCorruptState(perr)
 		}
 	case errors.Is(err, fs.ErrNotExist):
@@ -132,6 +140,7 @@ func loadState() {
 	default:
 		// it is there but we can't read it: don't replace it with defaults
 		log.Error().Err(err).Str("path", statePath).Msg("could not read state file, not saving state this run")
+		stateLost.Store(true)
 		stateSaveBlocked.Store(true)
 	}
 	// no client key is generated here: loadState also runs after a corrupt

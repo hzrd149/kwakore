@@ -579,7 +579,7 @@ func loadSecretsLocked(store SecretStore) (secretsRecord, bool) {
 			// flag stays until a start that reaches the keyring
 			return adoptSecrets(file, store, false), true
 		}
-		return secretsUnavailable(store, file, fileHas, loc)
+		return secretsUnavailable(store, file, fileHas, loc, stateLost.Load())
 	}
 
 	if loggedOut {
@@ -680,8 +680,9 @@ func fallBackToFile(store SecretStore, file secretsRecord) secretsRecord {
 
 // secretsUnavailable handles a store that could not be read (unavailable,
 // timed out, or an item we cannot decode). It never generates, deletes or
-// writes anything to the store.
-func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc string) (secretsRecord, bool) {
+// writes anything to the store. lost says this run found a state.json it
+// could not use (stateLost), so loc and the file copy say nothing.
+func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc string, lost bool) (secretsRecord, bool) {
 	switch {
 	case fileHas && loc == secretsInKeyring:
 		// a file copy left next to the keyring (a crash mid-migration):
@@ -695,6 +696,23 @@ func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc
 	case fileHas:
 		return fallBackToFile(store, file), true
 
+	case lost:
+		// state.json existed but was corrupt or unreadable, so where the
+		// secrets lived is unknown and the keyring item may be the only copy
+		// of the pairing (D-14, D-10): wait for the keyring like the case
+		// below, instead of a login screen whose next login would make a new
+		// client key and later overwrite that item. The location is recorded
+		// (the reset state.json no longer says it), so a later start that
+		// still can't reach the keyring waits too; one that reaches it and
+		// finds no item starts fresh.
+		stateMu.Lock()
+		if state.SecretsLocation != secretsInKeyring {
+			state.SecretsLocation = secretsInKeyring
+			saveState()
+		}
+		stateMu.Unlock()
+		fallthrough
+
 	case loc == secretsInKeyring:
 		// the secrets live only in the keyring we can't reach: never make
 		// a new client key in their place, wait for the user instead
@@ -706,8 +724,9 @@ func secretsUnavailable(store SecretStore, file secretsRecord, fileHas bool, loc
 		return secretsRecord{}, false
 
 	default:
-		// nothing saved yet: file mode, and the notice once a login is
-		// saved to the file (persistSecrets)
+		// nothing saved yet (a fresh install, or a state.json that never
+		// held secrets): file mode, and the notice once a login is saved to
+		// the file (persistSecrets)
 		return adoptSecrets(secretsRecord{}, store, false), true
 	}
 }

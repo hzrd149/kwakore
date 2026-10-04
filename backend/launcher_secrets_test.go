@@ -762,6 +762,86 @@ func TestSecretsUnavailableFreshNoticeOnlyWithLogin(t *testing.T) {
 	}
 }
 
+// a state.json that existed but was corrupt or unreadable, keyring
+// unavailable: the reset state no longer says where the secrets lived, so
+// the keyring item may be the only copy of the pairing. The launcher waits
+// on the keyring (the failed screen) instead of a login screen whose next
+// login would make a new client key, and a later start keeps waiting until
+// the keyring answers with the item.
+func TestSecretsUnavailableAfterLostStateWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, r *secretsRig)
+	}{
+		{"corrupt", func(t *testing.T, r *secretsRig) { r.writeState(t, "{not json") }},
+		{"unreadable", func(t *testing.T, r *secretsRig) {
+			if err := os.Mkdir(filepath.Join(r.dir, "state.json"), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := withFreshSecrets(t)
+			tc.setup(t, r)
+			store := newFakeStore()
+			store.put(t, otherClientKeyHex, "bunker://kept")
+			store.setErrs(ErrSecretStoreUnavailable, ErrSecretStoreUnavailable, ErrSecretStoreUnavailable)
+
+			loadState()
+			loadSecrets(store)
+
+			if w := keyringWait(); w != keyringFailed {
+				t.Fatalf("KeyringWait = %q, want failed", w)
+			}
+			if got := Phase(); got != PhaseLoading {
+				t.Fatalf("phase = %q, want loading", got)
+			}
+			if got := r.resumes(); len(got) != 0 {
+				t.Fatalf("resumed %v", got)
+			}
+			if _, err := clientKey(); err == nil {
+				t.Fatal("clientKey() generated a key while the keyring may hold the only pairing")
+			}
+			if got := strings.Join(store.callLog(), ","); got != "get" {
+				t.Fatalf("store calls = %s, want get", got)
+			}
+			if tc.name != "corrupt" {
+				return
+			}
+
+			// the defaults saved over the set-aside file remember the keyring
+			if got := secretsLocation(); got != "keyring" {
+				t.Fatalf("SecretsLocation = %q, want keyring", got)
+			}
+			if !strings.Contains(r.readState(t), `"secrets_location": "keyring"`) {
+				t.Fatalf("location not saved:\n%s", r.readState(t))
+			}
+
+			// next start, keyring still down: still waiting, still no key
+			r.restart(t, store)
+			if w := keyringWait(); w != keyringFailed {
+				t.Fatalf("KeyringWait = %q on the next start, want failed", w)
+			}
+			if _, err := clientKey(); err == nil {
+				t.Fatal("clientKey() generated a key on the next start")
+			}
+
+			// the keyring answers: its login and pairing are resumed as they were
+			store.setErrs(nil, nil, nil)
+			r.restart(t, store)
+			if got := r.resumes(); len(got) != 1 || got[0] != "bunker://kept" {
+				t.Fatalf("resumed %v, want the keyring's login", got)
+			}
+			if k, err := existingClientKey(); err != nil || k.Hex() != otherClientKeyHex {
+				t.Fatalf("client key %s, %v; want the keyring's", k.Hex(), err)
+			}
+			if it, ok := store.item(t); !ok || it.ClientKey != otherClientKeyHex || it.Login != "bunker://kept" {
+				t.Fatalf("keyring item changed: %+v, %v", it, ok)
+			}
+		})
+	}
+}
+
 // a login too large for the keyring (Pitfall 13) stays in the file.
 func TestSecretsLargeLoginStaysInFile(t *testing.T) {
 	r := withFreshSecrets(t)

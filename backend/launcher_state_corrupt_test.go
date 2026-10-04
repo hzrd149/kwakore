@@ -32,11 +32,12 @@ func withFreshStateDir(t *testing.T) string {
 	ls.notices = nil
 	ls.mu.Unlock()
 	savedDataDir, savedLog := dataDir, log
-	savedRename, savedBlocked := renameFile, stateSaveBlocked.Load()
+	savedRename, savedBlocked, savedLost := renameFile, stateSaveBlocked.Load(), stateLost.Load()
 
 	dataDir = dir
 	log = zerolog.Nop()
 	stateSaveBlocked.Store(false)
+	stateLost.Store(false)
 	// Snapshot asks the host for shortcut files: run alone (go test -run),
 	// nothing else has set one yet
 	savedHost := host
@@ -55,6 +56,7 @@ func withFreshStateDir(t *testing.T) string {
 		dataDir, log = savedDataDir, savedLog
 		renameFile = savedRename
 		stateSaveBlocked.Store(savedBlocked)
+		stateLost.Store(savedLost)
 	})
 	return dir
 }
