@@ -1,5 +1,7 @@
 desktop/verdana
 desktop/child/child
+# libwebview copies from the go-webview module (just webview-libs)
+desktop/internal/webviewlib/lib/
 
 # android build products
 android/app/libs/backend.aar

@@ -38,6 +38,12 @@ jobs:
       - name: validate shell installer
         run: bash -n scripts/install.sh
 
+      # the launcher embeds libwebview from internal/webviewlib/lib, which is
+      # copied out of the pinned go-webview module and never committed
+      - name: copy libwebview
+        working-directory: desktop
+        run: go generate ./internal/webviewlib
+
       # embed_prod.go embeds child/child, so the child has to exist before the
       # desktop package can even be compiled on a fresh checkout
       - name: build child
@@ -136,6 +142,12 @@ jobs:
         run: |
           cd backend && go mod download
           cd ../desktop && go mod download
+
+      # libwebview copies for the launcher to embed (git-ignored). No
+      # GOOS/GOARCH here: go generate runs its copy program on the runner
+      - name: copy libwebview
+        working-directory: desktop
+        run: go generate ./internal/webviewlib
 
       # the child (the webview host) is embedded into the main binary by
       # embed_prod.go, so it has to be built for the same target first

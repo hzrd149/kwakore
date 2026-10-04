@@ -1,13 +1,20 @@
-run:
+run: webview-libs
     cd desktop && go build -o child/child ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true VERDANA_SEARCH_DEBUG=1 ./verdana
 
-prod:
+prod: webview-libs
     cd desktop && go build -o child/child ./child && go build -o verdana -tags 'novulkan' .
 
 # Install the production desktop launcher into GOBIN (or GOPATH/bin). The
 # child webview host must be built first because it is embedded in Verdana.
-go-install:
+go-install: webview-libs
     cd desktop && go build -o child/child ./child && go install -tags 'novulkan' .
+
+# napp windows load libwebview from the launcher's verified per-user dir, so
+# the launcher embeds it. The copies come from the pinned go-webview module and
+# are git-ignored; every build needs them. GOOS/GOARCH must be unset here:
+# go generate builds its copy program for this machine.
+webview-libs:
+    cd desktop && go generate ./internal/webviewlib
 
 # the ui kit carries the launcher's own face (desktop/assets/*.ttf is
 # Verdana, in three faces) as woff2, inlined by backend/webview/embed.go.
