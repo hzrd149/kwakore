@@ -192,7 +192,7 @@ func TestNappletFromEventLenient(t *testing.T) {
 func TestNappFromEventStillReadsNapps(t *testing.T) {
 	evt := nostr.Event{Kind: KindNapp, Tags: nostr.Tags{{"d", "x"}, {"title", "X"}}}
 	n, ok := nappFromEvent(evt)
-	if !ok || n.IsNapplet() || n.ID == "" || strings.HasPrefix(n.ID, "napplet~") {
+	if !ok || n.IsNapplet() || n.ID == "" || strings.Contains(n.ID, ":") {
 		t.Fatalf("napp misread: ok=%v %+v", ok, n)
 	}
 }

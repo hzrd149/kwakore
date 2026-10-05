@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"sync"
 
 	"verdana/backend/fileutil"
@@ -38,30 +37,12 @@ var (
 	storages   = make(map[string]*nappStorage)
 )
 
-// storageFileFor maps a napp id to its storage file. Napp ids are
-// "<16hex>~<d-tag>" or "dev~<id>": the d-tag is author-controlled and may
-// contain slashes, so anything outside a safe alphabet is escaped.
+// storageFileFor is a napp's localStorage file: {dataDir}/storage/ and the
+// hash of the napp id (keyFileName), so the author's d tag never reaches a
+// file name and no two ids can share a file. Napplets never use this
+// directory; their NAP-STORAGE lives in napplet-storage/.
 func storageFileFor(nappID string) string {
-	return filepath.Join(dataDir, "storage", safeFileName(nappID)+".json")
-}
-
-// safeFileName is a napp id as a file name, without any path tricks.
-func safeFileName(nappID string) string {
-	var b strings.Builder
-	for _, r := range nappID {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
-			r == '-' || r == '_' || r == '.' || r == '~' {
-			b.WriteRune(r)
-		} else {
-			b.WriteString("_")
-		}
-	}
-	name := b.String()
-	if name == "" {
-		name = "_"
-	}
-	// belt and suspenders against ".." tricks: filepath.Base strips separators
-	return filepath.Base(name)
+	return filepath.Join(dataDir, "storage", keyFileName(nappID))
 }
 
 // StorageFile is the path of a napp's localStorage file, so platforms that

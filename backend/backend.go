@@ -135,21 +135,19 @@ func Logger() zerolog.Logger { return log }
 // segment. A d of "../../.." used to turn {dataDir}/napps/{id} into {dataDir}
 // itself, so a failed install or an uninstall removed the whole data
 // directory; "/../x" landed in another napp's namespace and "a/b" nested under
-// napp "a". The directory is instead the hex sha256 of today's id string
-// ({pk16}~{d} for napps, napplet~{pk16}~{d} for napplets), a fixed-width name
-// directly under {dataDir}/napps, and the result is still checked to sit
-// there. The id itself, in state, storage keys and wire messages, keeps the
+// napp "a". The directory is instead the hex sha256 of the id ({pk16}~{d}
+// for napps, the full NIP-01 address kind:pubkey:d for napplets), a
+// fixed-width name directly under {dataDir}/napps, and the result is still
+// checked to sit there. The id itself, in state and wire messages, keeps the
 // raw d byte for byte.
 //
-// Install directories are all this names. The localStorage and NAP-CONFIG
-// files are named by safeFileName, which stays inside its directory but maps
-// unsafe characters to "_", so two d values of one author can still share a
-// file there (CONFORMANCE CF-2, Phase 5 KEY-04).
+// Install directories are all this names, but every other directory or file
+// name derived from an id or a key follows the same rule: it is a hex hash
+// (keyFileName for napp localStorage and napplet NAP-STORAGE files).
 //
-// What goes into the hash may change later (the full address and artifact
-// hash are candidates); nothing is migrated, and directories under the old
-// raw-id layout are left alone rather than swept, since deleting unknown
-// directories automatically is the riskier act.
+// Nothing is migrated when an id scheme changes, and directories left by an
+// older one are not swept, since deleting unknown directories automatically
+// is the riskier act.
 //
 // A caller that gets an error must not touch the filesystem at all.
 func nappBaseDir(id string) (string, error) {

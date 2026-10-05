@@ -217,7 +217,7 @@ func TestConfigPruneSecretOrphans(t *testing.T) {
 func TestConfigStore(t *testing.T) {
 	dir := t.TempDir()
 	Init(dir, zerolog.Nop())
-	const id = "napplet~0123456789abcdef~cfg"
+	const id = "35129:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:cfg"
 	if _, ok := Values(id); ok {
 		t.Fatal("values before any schema")
 	}

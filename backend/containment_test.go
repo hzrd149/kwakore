@@ -206,6 +206,7 @@ func TestHostileDTagInstallStaysInsideDataDir(t *testing.T) {
 func TestNappBaseDirIsHashedAndContained(t *testing.T) {
 	setupNapTest(t)
 	const pk16 = "0123456789abcdef"
+	pk := strings.Repeat(pk16, 4)
 	ids := []string{
 		pk16 + "~..",
 		pk16 + "~../../..",
@@ -214,10 +215,11 @@ func TestNappBaseDirIsHashedAndContained(t *testing.T) {
 		pk16 + "~a",
 		pk16 + "~a_b",
 		pk16 + "~", // empty d
-		"napplet~" + pk16 + "~../../..",
-		"napplet~" + pk16 + "~x",
+		"35129:" + pk + ":../../..",
+		"35129:" + pk + ":x",
 		pk16 + "~x",
-		"napplet~" + pk16 + "~root",
+		"35129:" + pk + ":root",
+		"15129:" + pk + ":", // the root napplet
 	}
 
 	seen := make(map[string]string)
@@ -252,7 +254,7 @@ func TestNappBaseDirIsHashedAndContained(t *testing.T) {
 	}
 	// a napp and a napplet with the same d are different directories
 	napp, _ := nappBaseDir(pk16 + "~x")
-	napplet, _ := nappBaseDir("napplet~" + pk16 + "~x")
+	napplet, _ := nappBaseDir("35129:" + pk + ":x")
 	if napp == napplet {
 		t.Error("napp and napplet with the same d share a directory")
 	}
@@ -429,6 +431,9 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 					if rel, err := filepath.Rel(filepath.Join(r.dataDir, "storage"), storage); err != nil || !filepath.IsLocal(rel) || filepath.Dir(storage) != filepath.Join(r.dataDir, "storage") {
 						t.Fatalf("storage file %s escapes %s/storage", storage, r.dataDir)
 					}
+					if !storageFileName.MatchString(filepath.Base(storage)) {
+						t.Fatalf("storage file name %q is not 64 hex", filepath.Base(storage))
+					}
 				}
 
 				// update: a newer event with a changed file, same directory
@@ -596,7 +601,9 @@ func TestRootAndDRootNeverShare(t *testing.T) {
 		t.Errorf("root id = %q, want %q", root.ID, want)
 	}
 
-	// both install side by side, each with its own document
+	// both install side by side, each with its own document; uninstalled
+	// afterwards so the launcher's installed list holds nothing of this test
+	t.Cleanup(func() { Uninstall(root.ID); Uninstall(named.ID) })
 	for _, n := range []Napp{root, named} {
 		if err := InstallNapp(n); err != nil {
 			t.Fatalf("install %s: %v", n.ID, err)
