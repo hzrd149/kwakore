@@ -465,6 +465,23 @@ func setBusy(id string, busy bool) {
 	notifyState()
 }
 
+// trySetBusy claims the busy flag for id: it returns false, changing
+// nothing, if id is busy already, and otherwise sets the flag and returns
+// true. Checking and claiming happen under one hold of ls.mu, so of two
+// callers racing for the same id exactly one gets it (a separate IsBusy and
+// setBusy would let both through).
+func trySetBusy(id string) bool {
+	ls.mu.Lock()
+	if ls.busy[id] {
+		ls.mu.Unlock()
+		return false
+	}
+	ls.busy[id] = true
+	ls.mu.Unlock()
+	notifyState()
+	return true
+}
+
 // IsBusy says whether a napp is being installed or uninstalled right now.
 func IsBusy(id string) bool {
 	ls.mu.Lock()

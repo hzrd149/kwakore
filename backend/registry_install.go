@@ -21,8 +21,8 @@ import (
 )
 
 // backgroundSyncs tracks the shortcut and intent passes that installs,
-// uninstalls and settings changes start in the background, and the
-// launch-time update checks. They read host, dataDir and the update check's
+// uninstalls and settings changes start in the background, the launch-time
+// update checks and the Trys. They read host, dataDir and the update check's
 // seams, so tests wait on it before they swap those globals.
 var backgroundSyncs sync.WaitGroup
 
@@ -152,22 +152,52 @@ func InstallFromDiscovery(id string) bool {
 
 // TryNapplet downloads, verifies and opens a napplet without installing it.
 // Its document stays in memory for the lifetime of the window and the napp is
-// never added to InstalledNapps.
+// never added to InstalledNapps. A Try for a napplet that is busy (another
+// Try, an install) is ignored. A Try that opens nothing says so in the
+// notice stack and the store's error line, in fixed copy: the raw error,
+// which can name servers and hashes, only goes to the log.
 func TryNapplet(n Napp) {
 	if n.Unavailable != "" {
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Str("reason", n.Unavailable).
 			Msg("refusing to try an invalid latest version")
-		SetFetchErr("try failed: the latest version is invalid")
+		SetFetchErr("try failed: " + errUnavailable.Error())
+		raiseTrialFailed(n, trialFailedUnavailable)
 		return
 	}
-	go func() {
-		if err := tryNapplet(context.Background(), n); err != nil {
-			log.Error().Err(err).Str("napp", n.ID).Msg("napplet preview failed")
+	backgroundSyncs.Go(func() {
+		err := tryNapplet(context.Background(), n)
+		if err == nil {
+			return
+		}
+		log.Error().Err(err).Str("napp", n.ID).Msg("napplet preview failed")
+		switch {
+		case errors.Is(err, errTrialFiles):
+			SetFetchErr(trialFilesFetchErr)
+			raiseTrialFailed(n, trialFailedBlob)
+		case errors.Is(err, errUnavailable):
+			SetFetchErr("try failed: " + errUnavailable.Error())
+			raiseTrialFailed(n, trialFailedUnavailable)
+		case errors.Is(err, ErrWindowProgramUnavailable):
+			// launchWindow raised the child-unavailable notice already
+			SetFetchErr(childUnavailableFetchErr)
+		default:
 			SetFetchErr("try failed: " + err.Error())
 		}
-	}()
+	})
 }
 
+// errTrialFiles is a Try that opened nothing because one of the manifest's
+// files could not be downloaded or did not match its hash (D-13).
+var errTrialFiles = errors.New("a trial file failed to download or verify")
+
+// trialFilesFetchErr is the store's error line for errTrialFiles.
+const trialFilesFetchErr = "try failed: a file couldn't be downloaded or didn't match its manifest"
+
+// tryNapplet downloads every file the manifest lists and checks each against
+// its sha256 before the window opens with the index document (NIP-5D: fetch
+// each path blob and verify it). A trial never opens on part of a napplet:
+// any file that fails stops the others and opens nothing. A napplet that is
+// busy already is left alone and nil is returned.
 func tryNapplet(ctx context.Context, n Napp) error {
 	if n.Unavailable != "" {
 		return errUnavailable
@@ -178,21 +208,89 @@ func tryNapplet(ctx context.Context, n Napp) error {
 	if n.ID == "" {
 		return errors.New("napplet has no id")
 	}
-	want := n.IndexHash()
-	if want == "" {
+	index, ok := nappletIndexPath(n.Paths)
+	if !ok {
 		return errors.New("napplet has no index document")
 	}
-	setBusy(n.ID, true)
+	// one claim, under one lock: a second click, a search launcher and a
+	// single-instance token all land here, and only one may download
+	if !trySetBusy(n.ID) {
+		log.Debug().Str("napp", n.ID).Msg("napplet is busy, ignoring the try")
+		return nil
+	}
 	defer setBusy(n.ID, false)
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	document, err := downloadBlob(fetchCtx, n.BlossomServers(fetchCtx), want)
+	files, err := fetchTrialFiles(fetchCtx, n.Paths, n.BlossomServers(fetchCtx))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errTrialFiles, err)
+	}
+	if err := fetchCtx.Err(); err != nil {
+		// cancelled or timed out after the last file came in: still nothing
+		// to open
+		return fmt.Errorf("%w: %w", errTrialFiles, err)
+	}
+	var document []byte
+	for i, p := range n.Paths {
+		if p.Path == index.Path {
+			document = files[i]
+			break
+		}
 	}
 	_, err = launchWithDocument(ctx, n, "", document)
 	return err
+}
+
+// fetchTrialFiles downloads and verifies every path of a trial into memory,
+// at most maxParallelAssets at a time, in the order of paths. Each path is
+// fetched and checked on its own, even when another path has the same hash.
+// The first failure cancels the rest and is returned.
+func fetchTrialFiles(ctx context.Context, paths []NappPath, servers []string) ([][]byte, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	files := make([][]byte, len(paths))
+	sem := make(chan struct{}, maxParallelAssets)
+
+	for i, p := range paths {
+		wg.Go(func() {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = ctx.Err()
+				}
+				mu.Unlock()
+				return
+			}
+
+			data, err := downloadBlob(ctx, servers, p.Sha256)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s: %w", p.Path, err)
+					cancel()
+				}
+				return
+			}
+			files[i] = data
+		})
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return files, nil
 }
 
 // TryNappletFromDiscovery resolves an uninstalled discovery result and opens

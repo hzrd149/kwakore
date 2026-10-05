@@ -305,6 +305,20 @@ func raiseNappletRequires(n Napp) {
 	notifyState()
 }
 
+// raiseTrialFailed shows the error for a Try that opened no window: a file
+// that failed to download or verify (D-13), or an unavailable entry (S3).
+// All failures share one slot, so the newest replaces the last and shows
+// again after a dismissal.
+func raiseTrialFailed(n Napp, detail string) {
+	addNotice(Notice{
+		ID:     noticeTrialFailed,
+		Kind:   noticeKindError,
+		Title:  fmt.Sprintf(trialFailedTitle, noticeName(n.Name, n.D)),
+		Detail: detail,
+	})
+	notifyState()
+}
+
 // setKeyringFallbackNotice shows (on) or withdraws (off) the notice that
 // secrets live in a private file because the keyring was unavailable.
 // Turning it off also forgets an earlier dismissal, so a later fallback is

@@ -52,7 +52,7 @@ func (f *fakeManifests) fetch(ctx context.Context, napps []Napp) []nostr.Event {
 }
 
 // newUpdateRig isolates the launcher state, empties the update set, the
-// discovery list, the launcher error and the launch-check throttle, and swaps
+// discovery list, the launcher error, the notices and the launch-check throttle, and swaps
 // the relay lookup for a fake one.
 func newUpdateRig(t *testing.T) *fakeManifests {
 	t.Helper()
@@ -67,6 +67,11 @@ func newUpdateRig(t *testing.T) *fakeManifests {
 	launchChecksMu.Lock()
 	clear(launchChecks)
 	launchChecksMu.Unlock()
+	// a refused Try raises a notice: every rig starts from an empty stack
+	ls.mu.Lock()
+	savedNotices := ls.notices
+	ls.notices = nil
+	ls.mu.Unlock()
 	t.Cleanup(func() {
 		// a launch-time check may still be running: it reads the seam
 		backgroundSyncs.Wait()
@@ -75,6 +80,7 @@ func newUpdateRig(t *testing.T) *fakeManifests {
 		SetFetchErr("")
 		ls.mu.Lock()
 		ls.installed = nil
+		ls.notices = savedNotices
 		ls.mu.Unlock()
 	})
 	return f
