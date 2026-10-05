@@ -30,6 +30,7 @@ func liveNotices(id string) []Notice {
 
 func TestLegacyNappletRecordsDropped(t *testing.T) {
 	dir := withFreshStateDir(t)
+	t.Cleanup(backgroundSyncs.Wait)
 	author := testNappletKey.Public()
 	pk16 := author.Hex()[:16]
 
@@ -78,6 +79,9 @@ func TestLegacyNappletRecordsDropped(t *testing.T) {
 
 	loadState()
 	dropPreAddressNapplets()
+	// forgetting rules re-announces intents in the background; let it
+	// finish before the next loadState rewrites state under it
+	backgroundSyncs.Wait()
 
 	stateMu.Lock()
 	got := state
@@ -150,6 +154,7 @@ func TestLegacyNappletRecordsDropped(t *testing.T) {
 	ls.mu.Unlock()
 	loadState()
 	dropPreAddressNapplets()
+	backgroundSyncs.Wait()
 	if n := liveNotices(noticeNappletsReinstall); len(n) != 0 {
 		t.Errorf("second start raised %v", n)
 	}
