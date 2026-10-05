@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-10-05T16:21:32.002Z"
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-10-05T16:31:03.061Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-07 (desktop unavailable state, Opening… on Try, per-window notice state and the store notice strip)
-state_head: 5fdf824a093c5ff61bdcb1f3c3d44f4363462ad0
+last_activity_desc: Completed 05-08 (guarded blob downloads with a 64 MiB cap and user-server trust; per-schema source validation)
+state_head: 1a8b8a2c70aa50e656f3484f5045ceccc1a09fa1
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 36
+  completed_plans: 37
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 9 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-12 complete; 05-08 next)
+Plan: 10 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-08, 05-12 complete; 05-09 next)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-07-PLAN.md (desktop unavailable block on tiles, cards, profile rows and the napp page with no Try/Install/Update; Try reads Opening… while busy and ignores clicks; per-window notice state and the store's napplet notice strip)
+Last activity: 2026-10-05 — Completed 05-08-PLAN.md (manifest blobs fetched through the netguard-guarded blobClient with a 64 MiB cap and at most 3 https-preserving redirects; only the user's own or default Blossom servers may be private; WEB-NAPPLET drops a bad source, NIP-5D marks the manifest unavailable with the source reason)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -97,6 +97,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P12 | 4min | 2 tasks | 6 files |
 | Phase 05 P06 | 9min | 3 tasks | 6 files |
 | Phase 05 P07 | 8min | 3 tasks | 10 files |
+| Phase 05 P08 | 8min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -195,6 +196,8 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-06: InstallNapp/TryNapplet/TryNappletFromDiscovery/InstallFromDiscovery/applyUpdate refuse Unavailable entries with fixed FetchErr lines
 - [Phase 5]: 05-07: unavailable rules live in desktop/store_unavailable.go helpers; renderNappTile/renderNappCard take an installed flag and drop Try/Opening…/Install/Update by label
 - [Phase 5]: 05-07: notice widget state is per window (managerNotices, storeNotices); the store strip shows only napplet-trial-failed, napplet-requires:* and trial-data-discarded:*
+- [Phase 5]: 05-08: manifest blobs download through blobClient (netguard dial on every hop, Proxy nil, <=3 redirects, none away from https, 64 MiB cap); only the user's own or default Blossom servers use trustedBlobClient, which may reach LAN/localhost
+- [Phase 5]: 05-08: source is validated per schema: WEB-NAPPLET drops a bad tag (https/ssh/git/nostr with a host); NIP-5D requires a cloneable git URL or the manifest is unavailable with 'Its source isn't a valid git URL'
 
 ### Pending Todos
 
@@ -227,6 +230,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T16:21:31.859Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-10-05T16:31:02.914Z
+Stopped at: Completed 05-08-PLAN.md
 Resume file: None
