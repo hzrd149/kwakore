@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-10-05T16:13:32.087Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-10-05T16:21:32.002Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-06 (NIP-01 update selection, unavailable installed copies, install/try refusals, throttled launch-time update check)
-state_head: 668933ba93f90ce2fc148e4eb11a99fc552e1471
+last_activity_desc: Completed 05-07 (desktop unavailable state, Opening… on Try, per-window notice state and the store notice strip)
+state_head: 5fdf824a093c5ff61bdcb1f3c3d44f4363462ad0
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 35
+  completed_plans: 36
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 8 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-12 complete; 05-07 next)
+Plan: 9 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-12 complete; 05-08 next)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-06-PLAN.md (update checks, Update and a throttled background launch-time check pick the NIP-01 latest event; an invalid latest marks the installed copy unavailable; unavailable entries cannot be installed or tried; closes A11 launch-time clause)
+Last activity: 2026-10-05 — Completed 05-07-PLAN.md (desktop unavailable block on tiles, cards, profile rows and the napp page with no Try/Install/Update; Try reads Opening… while busy and ignores clicks; per-window notice state and the store's napplet notice strip)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -96,6 +96,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P05 | 7min | 3 tasks | 11 files |
 | Phase 05 P12 | 4min | 2 tasks | 6 files |
 | Phase 05 P06 | 9min | 3 tasks | 6 files |
+| Phase 05 P07 | 8min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -192,6 +193,8 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-06: the update set is merged per id (nil clears, absent keeps), so offline or empty lookups keep the previous state; Snapshot stamps only entries that still apply to the installed record
 - [Phase 5]: 05-06: launch-time check (D-19) runs from launchWindow for installed non-trial non-dev napplets, at most once per 30 min per napplet, 15 s timeout, never sets UpdateCheckRunning
 - [Phase 5]: 05-06: InstallNapp/TryNapplet/TryNappletFromDiscovery/InstallFromDiscovery/applyUpdate refuse Unavailable entries with fixed FetchErr lines
+- [Phase 5]: 05-07: unavailable rules live in desktop/store_unavailable.go helpers; renderNappTile/renderNappCard take an installed flag and drop Try/Opening…/Install/Update by label
+- [Phase 5]: 05-07: notice widget state is per window (managerNotices, storeNotices); the store strip shows only napplet-trial-failed, napplet-requires:* and trial-data-discarded:*
 
 ### Pending Todos
 
@@ -224,6 +227,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T16:13:31.958Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-10-05T16:21:31.859Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None

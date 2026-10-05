@@ -179,7 +179,7 @@ Plans:
   4. The registry picks the latest manifest event by NIP-01 rules before validating it. When that event is invalid, the napplet shows as unavailable instead of falling back to an older version
   5. A relative or host-less `source` URL is never accepted (a NIP-5D manifest with one is rejected; a WEB-NAPPLET manifest drops the `source`, per its spec), manifest blob downloads go through the public-internet guard (servers the user configured excepted), and a trial window fetches and hash-verifies every `path` blob of a NIP-5D manifest before launch
 
-**Plans**: 7/12 plans executed
+**Plans**: 8/12 plans executed
 **UI hint**: yes
 
 Plans:
@@ -198,7 +198,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 05-06-PLAN.md — Update checks and Update on the selection helper, unavailable installed copies, install/try refusals, launch-time background check (wave 3)
-- [ ] 05-07-PLAN.md — Desktop unavailable state, "Opening…" Try, per-window notices and the store notice strip (wave 3)
+- [x] 05-07-PLAN.md — Desktop unavailable state, "Opening…" Try, per-window notices and the store notice strip (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -275,7 +275,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
 | 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
 | 4. Frame Sandbox Lifecycle | 6/6 | Complete    | 2026-10-05 |
-| 5. Napplet Artifact Identity and Storage Keying | 7/12 | In Progress|  |
+| 5. Napplet Artifact Identity and Storage Keying | 8/12 | In Progress|  |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
 | 7. Resource, Upload and Media Policy | 0/TBD | Not started | - |
 | 8. Trusted Prompts, Remaining Domains and Audit Close-out | 0/TBD | Not started | - |
