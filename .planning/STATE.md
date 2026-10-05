@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-10-05T15:59:00.694Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-10-05T16:13:32.087Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-12 (macOS and Windows shortcuts and search launchers carry launch tokens; --try-napplet decodes them)
-state_head: e18749ed941737cf200c9e80fa78616f49e0a211
+last_activity_desc: Completed 05-06 (NIP-01 update selection, unavailable installed copies, install/try refusals, throttled launch-time update check)
+state_head: 668933ba93f90ce2fc148e4eb11a99fc552e1471
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 34
+  completed_plans: 35
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 7 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-12 complete; wave 2 done, 05-06 next)
+Plan: 8 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-12 complete; 05-07 next)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-12-PLAN.md (macOS and Windows app shortcuts and search launchers pass launch tokens, never raw ids; --try-napplet decodes tokens and refuses undecodable ones; D-21 done on every desktop OS)
+Last activity: 2026-10-05 — Completed 05-06-PLAN.md (update checks, Update and a throttled background launch-time check pick the NIP-01 latest event; an invalid latest marks the installed copy unavailable; unavailable entries cannot be installed or tried; closes A11 launch-time clause)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -95,6 +95,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P04 | 11min | 2 tasks | 7 files |
 | Phase 05 P05 | 7min | 3 tasks | 11 files |
 | Phase 05 P12 | 4min | 2 tasks | 6 files |
+| Phase 05 P06 | 9min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,10 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-05: only the NIP-01 winner of an address is validated; an invalid winner is listed unavailable with a fixed catalogue phrase and never falls back to an older valid event
 - [Phase 5]: 05-05: nappNewer treats equal CreatedAt with an unknown EventID as not newer, so pre-EventID records never flip-flop
 - [Phase 5]: 05-12: --try-napplet arguments resolve through trialTarget, which decodes launch tokens first; raw ids (GNOME, Android, older launchers) still resolve and undecodable tokens start nothing
+- [Phase 5]: 05-06: update checks, Update and the launch-time check select the NIP-01 latest event; an invalid latest marks the installed copy unavailable and offers nothing
+- [Phase 5]: 05-06: the update set is merged per id (nil clears, absent keeps), so offline or empty lookups keep the previous state; Snapshot stamps only entries that still apply to the installed record
+- [Phase 5]: 05-06: launch-time check (D-19) runs from launchWindow for installed non-trial non-dev napplets, at most once per 30 min per napplet, 15 s timeout, never sets UpdateCheckRunning
+- [Phase 5]: 05-06: InstallNapp/TryNapplet/TryNappletFromDiscovery/InstallFromDiscovery/applyUpdate refuse Unavailable entries with fixed FetchErr lines
 
 ### Pending Todos
 
@@ -219,6 +224,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:59:00.573Z
-Stopped at: Completed 05-12-PLAN.md
+Last session: 2026-10-05T16:13:31.958Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None
