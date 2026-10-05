@@ -55,7 +55,7 @@ func TestNappletFromEventValid(t *testing.T) {
 	if !n.IsNapplet() || n.ManifestKind() != KindNapplet {
 		t.Errorf("not marked as a napplet: %+v", n)
 	}
-	if want := nappletID(evt.PubKey, "feed-reader"); n.ID != want || !strings.HasPrefix(n.ID, "napplet~") {
+	if want := "35129:" + evt.PubKey.Hex() + ":feed-reader"; n.ID != want {
 		t.Errorf("id = %q, want %q", n.ID, want)
 	}
 	if n.Address() != "35129:"+evt.PubKey.Hex()+":feed-reader" {
@@ -348,7 +348,7 @@ func TestNIP5DManifestChecks(t *testing.T) {
 		t.Fatalf("root rejected: %v", err)
 	}
 	if rn.ManifestKind() != KindRootNapplet || rn.D != "" || rn.Address() != "15129:"+root.PubKey.Hex()+":" ||
-		rn.ID == nappletID(root.PubKey, "") {
+		rn.ID != rn.Address() {
 		t.Errorf("root: %+v", rn)
 	}
 	if f := manifestFilter(rn); f.Tags != nil || f.Kinds[0] != KindRootNapplet {

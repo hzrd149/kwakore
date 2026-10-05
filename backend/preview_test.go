@@ -46,14 +46,16 @@ func TestTryNappletLaunchesVerifiedDocumentWithoutInstalling(t *testing.T) {
 	t.Cleanup(func() { host = previousHost })
 
 	n := Napp{
-		ID:      "napplet~0123456789abcdef~preview",
-		D:       "preview",
-		Name:    "Preview",
-		Format:  FormatNapplet,
-		Kind:    KindNapplet,
-		Paths:   []NappPath{{Path: "/index.html", Sha256: hash}},
-		Servers: []string{server.URL},
+		D:            "preview",
+		Name:         "Preview",
+		Format:       FormatNapplet,
+		Kind:         KindNapplet,
+		Author:       testNappletKey.Public(),
+		ArtifactHash: hash,
+		Paths:        []NappPath{{Path: "/index.html", Sha256: hash}},
+		Servers:      []string{server.URL},
 	}
+	n.ID = n.Address()
 	if err := tryNapplet(context.Background(), n); err != nil {
 		t.Fatal(err)
 	}
@@ -95,15 +97,25 @@ func TestTryNappletRejectsNapps(t *testing.T) {
 
 func TestNappletTrialStorageIsEphemeralUntilPromoted(t *testing.T) {
 	setupNapTest(t)
-	ci := &Instance{trial: true, trialStorage: make(map[string]*nappStorage)}
-	storeID := "napplet-trial-shared"
+	n := Napp{D: "trial", Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf("trial")}
+	n.ID = n.Address()
+	ci := &Instance{napp: n, trial: true, trialStorage: make(map[string]*nappStorage)}
+	key, err := nappletStorageKey(n, "shared", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeID, err := nappletStorageFile(key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := napStorageSetValue(ci, storeID, "drawing", "pixel-art"); err != nil {
 		t.Fatal(err)
 	}
 	if got, ok := napStorageGetValue(ci, storeID, "drawing"); !ok || got != "pixel-art" {
 		t.Fatalf("trial value = %q, %v", got, ok)
 	}
-	if _, err := os.Stat(storageFileFor(storeID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(storeID); !os.IsNotExist(err) {
 		t.Fatalf("trial storage reached disk: %v", err)
 	}
 	if err := persistTrialStorage(ci); err != nil {
@@ -112,7 +124,7 @@ func TestNappletTrialStorageIsEphemeralUntilPromoted(t *testing.T) {
 	if got, ok := storageGet(storeID, "drawing"); !ok || got != "pixel-art" {
 		t.Fatalf("promoted value = %q, %v", got, ok)
 	}
-	if _, err := os.Stat(storageFileFor(storeID)); err != nil {
+	if _, err := os.Stat(storeID); err != nil {
 		t.Fatalf("promoted storage was not persisted: %v", err)
 	}
 }
@@ -128,13 +140,24 @@ func TestClosingNappletTrialOffersInstallAndDiscardsDeclinedData(t *testing.T) {
 	resetPrompts()
 	t.Cleanup(resetPrompts)
 
+	n := Napp{D: "trial", Name: "Pixel Paint", Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf("trial")}
+	n.ID = n.Address()
 	ci := &Instance{
 		instance:     "trial-close",
-		napp:         Napp{ID: "napplet~0123456789abcdef~trial", Name: "Pixel Paint", Format: FormatNapplet},
+		napp:         n,
 		trial:        true,
 		trialStorage: make(map[string]*nappStorage),
 	}
-	if err := napStorageSetValue(ci, "trial-store", "drawing", "temporary"); err != nil {
+	key, err := nappletStorageKey(n, "shared", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := nappletStorageFile(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := napStorageSetValue(ci, store, "drawing", "temporary"); err != nil {
 		t.Fatal(err)
 	}
 	putWindow(windowRecord{Instance: ci.instance, NappID: ci.napp.ID})
@@ -170,7 +193,9 @@ func TestClosingNappletTrialOffersInstallAndDiscardsDeclinedData(t *testing.T) {
 	if _, ok := windows.Load(ci.instance); ok {
 		t.Fatal("declined trial remained in the window history")
 	}
-	if matches, err := filepath.Glob(filepath.Join(dataDir, "storage", "*")); err != nil || len(matches) != 0 {
-		t.Fatalf("declined trial persisted storage: %v, %v", matches, err)
+	for _, dir := range []string{"storage", "napplet-storage"} {
+		if matches, err := filepath.Glob(filepath.Join(dataDir, dir, "*")); err != nil || len(matches) != 0 {
+			t.Fatalf("declined trial persisted storage in %s/: %v, %v", dir, matches, err)
+		}
 	}
 }

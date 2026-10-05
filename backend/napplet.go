@@ -76,7 +76,11 @@ func (n Napp) IsNapplet() bool { return n.Format == FormatNapplet }
 
 // Address is the napplet's stable identity, 35129:<pubkey>:<d> (15129:<pubkey>:
 // for a root napplet, or the napp's 35130 one). It is what NAP-INTENT names
-// handlers by.
+// handlers by, and for a napplet it is also its id: the kind and the full
+// 64-hex pubkey are in it, a root address ends at its last colon while every
+// named one has a non-empty d after it, and d is kept byte for byte, so no d
+// can name another napplet (a napp id, <pk16>~<d>, never contains a colon
+// before its "~", so the two id spaces cannot meet either).
 func (n Napp) Address() string {
 	return fmt.Sprintf("%d:%s:%s", n.ManifestKind(), n.Author.Hex(), n.D)
 }
@@ -114,12 +118,6 @@ func (n Napp) MissingDomains() []string {
 		}
 	}
 	return out
-}
-
-// nappletID keeps napplet ids apart from napp ids: an author migrating a napp
-// to a napplet under the same d-tag would otherwise collide on <pk16>~<d>.
-func nappletID(pk nostr.PubKey, d string) string {
-	return "napplet~" + pk.Hex()[:16] + "~" + d
 }
 
 // nappFromEvent reads either manifest kind. ok is false for an event that
@@ -289,7 +287,8 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 	})
 
 	n.D = ds[0]
-	n.ID = nappletID(evt.PubKey, n.D)
+	// a napplet's id is its NIP-01 address (see Napp.Address)
+	n.ID = n.Address()
 	n.Name = titles[0]
 	n.ArtifactHash = xs[0]
 	// the one file, as a path: install, updates and the launch check all

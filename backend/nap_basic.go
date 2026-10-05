@@ -2,10 +2,8 @@ package backend
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -78,26 +76,26 @@ const napQuotaExceeded = "quota exceeded"
 
 var errNappletQuota = errors.New(napQuotaExceeded)
 
-// napStoreID returns a domain-separated, collision-resistant storage key.
-// NAP-STORAGE requires shared data to be isolated by address and artifact;
-// instance data is further partitioned by an opaque per-window identifier.
-func napStoreID(c *napCall, scope string) string {
-	// Legacy/test napplet records created before NIP-5D artifact identities
-	// were stored keep their old shared namespace. Installed NIP-5D napplets
-	// always have ArtifactHash and use the conforming namespace below.
-	if c.ci.napp.ArtifactHash == "" && scope != "instance" {
-		return c.ci.napp.ID
+// storeFile is the NAP-STORAGE file a request reads or writes. Shared data
+// is keyed by the napplet's (address, artifact hash) per NAP-STORAGE, and
+// instance data additionally by the window's storage instance; the file is
+// named by the hash of that key (nappletStorageKey, nappletStorageFile).
+// A napplet without a valid hash, or an instance request from a window
+// without a storage instance, is a launcher bug: the call fails with
+// internal-error rather than falling back to a key some other version or
+// window shares (KEY-01). ok is false once the call has been answered.
+func (c *napCall) storeFile(scope string) (string, bool) {
+	key, err := nappletStorageKey(c.ci.napp, scope, c.ci.storageInstance)
+	var file string
+	if err == nil {
+		file, err = nappletStorageFile(key)
 	}
-	identity := c.ci.napp.ID + "\x00" + c.ci.napp.ArtifactHash
-	if scope == "instance" {
-		instance := c.ci.storageInstance
-		if instance == "" {
-			instance = c.ci.instance
-		}
-		identity += "\x00" + instance
+	if err != nil {
+		log.Error().Err(err).Str("napplet", c.ci.napp.ID).Str("type", c.Type).Msg("napplet storage has no scope")
+		c.failWith(napErrInternal)
+		return "", false
 	}
-	sum := sha256.Sum256([]byte(identity))
-	return fmt.Sprintf("napplet-%x", sum)
+	return file, true
 }
 
 type napStorageReq struct {
@@ -140,8 +138,11 @@ func napStorageGet(c *napCall) {
 		c.failWith(napErrInvalid)
 		return
 	}
-	storeID := napStoreID(c, r.Scope)
-	if v, found := napStorageGetValue(c.ci, storeID, *r.Key); found {
+	file, ok := c.storeFile(r.Scope)
+	if !ok {
+		return
+	}
+	if v, found := napStorageGetValue(c.ci, file, *r.Key); found {
 		c.reply(map[string]any{"value": v})
 		return
 	}
@@ -158,7 +159,11 @@ func napStorageSet(c *napCall) {
 		c.failWith(napErrInvalid)
 		return
 	}
-	if err := napStorageSetValue(c.ci, napStoreID(c, r.Scope), *r.Key, *r.Value); err != nil {
+	file, ok := c.storeFile(r.Scope)
+	if !ok {
+		return
+	}
+	if err := napStorageSetValue(c.ci, file, *r.Key, *r.Value); err != nil {
 		c.storageFailed(err)
 		return
 	}
@@ -174,7 +179,11 @@ func napStorageRemove(c *napCall) {
 		c.failWith(napErrInvalid)
 		return
 	}
-	if _, err := napStorageRemoveValue(c.ci, napStoreID(c, r.Scope), *r.Key); err != nil {
+	file, ok := c.storeFile(r.Scope)
+	if !ok {
+		return
+	}
+	if _, err := napStorageRemoveValue(c.ci, file, *r.Key); err != nil {
 		c.storageFailed(err)
 		return
 	}
@@ -186,7 +195,11 @@ func napStorageKeys(c *napCall) {
 	if !ok {
 		return
 	}
-	c.reply(map[string]any{"keys": napStorageKeyList(c.ci, napStoreID(c, r.Scope))})
+	file, ok := c.storeFile(r.Scope)
+	if !ok {
+		return
+	}
+	c.reply(map[string]any{"keys": napStorageKeyList(c.ci, file)})
 }
 
 // ─── link ────────────────────────────────────────────────────────

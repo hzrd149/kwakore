@@ -731,7 +731,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			removed, err := storageRemove(ci.napp.ID, p.Key)
+			removed, err := storageRemove(storageFileFor(ci.napp.ID), p.Key)
 			if err != nil {
 				return nil, err
 			}
@@ -741,7 +741,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			return nil, nil
 
 		case "napp.storageClear":
-			cleared, err := storageClear(ci.napp.ID)
+			cleared, err := storageClear(storageFileFor(ci.napp.ID))
 			if err != nil {
 				return nil, err
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -293,9 +294,9 @@ func TestNappAssetPathStaysInsideBase(t *testing.T) {
 // hostileShape builds one manifest shape for a d and the hash of its
 // index.html, signed by sk, so ids come from the production parser.
 type hostileShape struct {
-	name   string
-	prefix string // what goes before {pk16}~{d} in the id
-	event  func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event
+	name  string
+	id    func(pk nostr.PubKey, d string) string // the id an install records
+	event func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event
 }
 
 func signedWith(t *testing.T, sk nostr.SecretKey, kind nostr.Kind, tags nostr.Tags, content string, at nostr.Timestamp) nostr.Event {
@@ -307,25 +308,31 @@ func signedWith(t *testing.T, sk nostr.SecretKey, kind nostr.Kind, tags nostr.Ta
 	return evt
 }
 
+// nappletAddress is a named napplet's id: its NIP-01 address, raw d included.
+func nappletAddress(pk nostr.PubKey, d string) string {
+	return fmt.Sprintf("%d:%s:%s", KindNapplet, pk.Hex(), d)
+}
+
 var hostileShapes = []hostileShape{
 	{
 		name: "napp",
+		id:   func(pk nostr.PubKey, d string) string { return pk.Hex()[:16] + "~" + d },
 		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
 			tags := nostr.Tags{{"d", d}, {"title", "Hostile"}, {"path", "/index.html", hash}}
 			return signedWith(t, sk, KindNapp, tags, "", at)
 		},
 	},
 	{
-		name:   "nip5d",
-		prefix: "napplet~",
+		name: "nip5d",
+		id:   nappletAddress,
 		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
 			tags := nip5dTags(d, NappPath{Path: "/index.html", Sha256: hash})
 			return signedWith(t, sk, KindNapplet, tags, "", at)
 		},
 	},
 	{
-		name:   "web-napplet",
-		prefix: "napplet~",
+		name: "web-napplet",
+		id:   nappletAddress,
 		event: func(t *testing.T, sk nostr.SecretKey, d, hash string, at nostr.Timestamp) nostr.Event {
 			tags := validNappletTags()
 			for _, tag := range tags {
@@ -362,7 +369,7 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 				r := newContainmentRig(t)
 				sk := nostr.Generate()
 				pk := sk.Public()
-				wantID := shape.prefix + pk.Hex()[:16] + "~" + d
+				wantID := shape.id(pk, d)
 
 				v1 := []byte("<!doctype html><title>v1 " + d + "</title>")
 				n := r.hostileNapp(t, shape.event(t, sk, d, r.blob(v1), 1700000000))
@@ -405,10 +412,22 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 				}
 				r.assertContained(t, "launch")
 
-				// the storage key is the raw id too, and its file stays put
-				storage := storageFileFor(n.ID)
-				if rel, err := filepath.Rel(filepath.Join(r.dataDir, "storage"), storage); err != nil || !filepath.IsLocal(rel) || filepath.Dir(storage) != filepath.Join(r.dataDir, "storage") {
-					t.Fatalf("storage file %s escapes %s/storage", storage, r.dataDir)
+				// storage files are named by a hash and stay put: a napplet's
+				// NAP-STORAGE in napplet-storage/, a napp's localStorage in storage/
+				if n.IsNapplet() {
+					key, err := nappletStorageKey(n, "shared", "")
+					if err != nil {
+						t.Fatalf("storage key: %v", err)
+					}
+					storage, err := nappletStorageFile(key)
+					if err != nil || filepath.Dir(storage) != filepath.Join(r.dataDir, "napplet-storage") {
+						t.Fatalf("storage file %s escapes %s/napplet-storage: %v", storage, r.dataDir, err)
+					}
+				} else {
+					storage := storageFileFor(n.ID)
+					if rel, err := filepath.Rel(filepath.Join(r.dataDir, "storage"), storage); err != nil || !filepath.IsLocal(rel) || filepath.Dir(storage) != filepath.Join(r.dataDir, "storage") {
+						t.Fatalf("storage file %s escapes %s/storage", storage, r.dataDir)
+					}
 				}
 
 				// update: a newer event with a changed file, same directory

@@ -161,12 +161,9 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 	if n.Name == "" {
 		n.Name = "napplet"
 	}
-	n.ID = nappletID(evt.PubKey, n.D)
-	if !addressable(evt.Kind) {
-		// one root napplet per author: its id can't collide with a named one,
-		// whose d is never empty
-		n.ID = nappletID(evt.PubKey, "") + "root"
-	}
+	// the id is the NIP-01 address: 15129:<pk>: for the root napplet, whose
+	// d is empty, and 35129:<pk>:<d> with a non-empty d for a named one
+	n.ID = n.Address()
 	return n, nil
 }
 

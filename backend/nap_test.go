@@ -143,19 +143,33 @@ func setupNapTest(t *testing.T) {
 	})
 }
 
+// testNappletKey signs every test napplet, so fixtures have a real author
+// and their ids are real addresses.
+var testNappletKey = nostr.MustSecretKeyFromHex("0000000000000000000000000000000000000000000000000000000000000001")
+
+// testArtifactOf is a 64-hex artifact hash derived from label, the shape
+// every installed napplet has and NAP-STORAGE keys by.
+func testArtifactOf(label string) string {
+	sum := sha256.Sum256([]byte(label))
+	return hex.EncodeToString(sum[:])
+}
+
 // openNapplet registers a napplet window with a recording transport.
 func openNapplet(t *testing.T, d string) (*Instance, *recTransport) {
 	t.Helper()
-	n := Napp{ID: "napplet~0123456789abcdef~" + d, D: d, Name: d, Format: FormatNapplet, Kind: KindNapplet}
+	n := Napp{D: d, Name: d, Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf(d)}
+	n.ID = n.Address()
 	ci := &Instance{
-		instance:   d + "-" + randomID()[:6],
-		napp:       n,
-		subs:       map[int]context.CancelFunc{},
-		actions:    map[string]int{},
-		changed:    make(chan struct{}),
-		dispatches: map[int]chan WireMsg{},
-		gone:       make(chan struct{}),
-		nap:        newNapSession(),
+		instance:        d + "-" + randomID()[:6],
+		storageInstance: randomID(),
+		napp:            n,
+		subs:            map[int]context.CancelFunc{},
+		actions:         map[string]int{},
+		changed:         make(chan struct{}),
+		dispatches:      map[int]chan WireMsg{},
+		gone:            make(chan struct{}),
+		nap:             newNapSession(),
 	}
 	registerInstance(ci)
 	rec := newRecTransport()
@@ -798,8 +812,16 @@ func TestNapStorage(t *testing.T) {
 	}
 
 	// shared storage outlives the window: another window of the same napplet sees it
-	if v, ok := storageGet(ci.napp.ID, "a"); !ok || v != "shared" {
-		t.Errorf("not persisted under the napplet id: %q %v", v, ok)
+	key, err := nappletStorageKey(ci.napp, "shared", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := nappletStorageFile(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := storageGet(file, "a"); !ok || v != "shared" {
+		t.Errorf("not persisted under the napplet's scope: %q %v", v, ok)
 	}
 }
 
@@ -1761,10 +1783,11 @@ func TestNapIntentChangedReportsLastHandlerRemoval(t *testing.T) {
 	caller, rec := openNapplet(t, "intent-watcher")
 	ready(t, caller, rec, 1)
 	handler := Napp{
-		ID: "napplet~0123456789abcdef~profile-handler", D: "profile-handler",
-		Name: "Profile Handler", Format: FormatNapplet,
+		D: "profile-handler", Name: "Profile Handler", Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf("profile-handler"),
 		Conventions: []NappletConvention{{ID: "napplet:profile/open"}},
 	}
+	handler.ID = handler.Address()
 
 	intentChangedMu.Lock()
 	intentLastArchetypes = make(map[string]struct{})
@@ -2199,8 +2222,10 @@ func TestNappletDocumentChecksTheHash(t *testing.T) {
 	setupNapTest(t)
 	html := []byte("<!doctype html><p>napplet</p>")
 	sum := sha256.Sum256(html)
-	n := Napp{ID: "napplet~0123456789abcdef~doc", D: "doc", Format: FormatNapplet,
-		Paths: []NappPath{{Path: "/index.html", Sha256: hex.EncodeToString(sum[:])}}}
+	n := Napp{D: "doc", Format: FormatNapplet, Kind: KindNapplet, Author: testNappletKey.Public(),
+		ArtifactHash: hex.EncodeToString(sum[:]),
+		Paths:        []NappPath{{Path: "/index.html", Sha256: hex.EncodeToString(sum[:])}}}
+	n.ID = n.Address()
 	base, err := nappBaseDir(n.ID)
 	if err != nil {
 		t.Fatal(err)

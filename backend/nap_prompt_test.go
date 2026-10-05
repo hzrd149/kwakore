@@ -662,10 +662,12 @@ func installIntentHandler(t *testing.T, d, archetype string) Napp {
 	t.Helper()
 	topic := "napplet:" + archetype + "/open"
 	n := Napp{
-		ID: "napplet~0123456789abcdef~" + d, D: d, Name: d, Format: FormatNapplet, Kind: KindNapplet,
+		D: d, Name: d, Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf(d),
 		Conventions: []NappletConvention{{ID: topic}},
 		Actions:     []string{topic},
 	}
+	n.ID = n.Address()
 	dir, err := nappBaseDir(n.ID)
 	if err != nil {
 		t.Fatal(err)
