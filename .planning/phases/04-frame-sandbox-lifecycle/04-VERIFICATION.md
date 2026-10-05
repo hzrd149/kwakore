@@ -1,8 +1,8 @@
 ---
 phase: 04-frame-sandbox-lifecycle
 verified: 2026-10-04T19:49:21Z
-status: human_needed
-score: 49/52 must-haves verified
+status: passed
+score: 49/52 must-haves verified (3 backstop groups deferred: WebView2/WKWebView, Android, CI)
 behavior_unverified: 0
 overrides_applied: 1
 overrides:
@@ -334,3 +334,7 @@ What remains is engine and platform coverage the roadmap scoped to "where CI all
 
 _Verified: 2026-10-04T19:49:21Z_
 _Verifier: Claude (gsd-verifier)_
+
+## Human Validation
+
+User ran the Linux checks (04-UAT.md items 1–4, 9, 10) and reported "looks good" (2026-10-05), including the prohibition sign-off. Items 5–8 (WebView2, WKWebView, Android APK, CI xvfb smoke) are deferred to the milestone audit; the 3 backstop groups that depend on them remain unverified.

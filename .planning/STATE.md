@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
-current_phase: 4
-status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-10-04T18:09:10.865Z"
-last_activity: 2026-10-04
-last_activity_desc: Completed 04-06 (CONFORMANCE close-out: 5D-3, NIP-5D-reload, 5D-8 fixed; 5D-NG per engine; DEC-5, DEC-6); phase 4 ready for verification
-state_head: 8943fdf9c25f5fda565e53734b81c1b89ea0fe57
+current_phase: 5
+current_phase_name: Napplet Artifact Identity and Storage Keying
+status: planning
+stopped_at: Phase 04 complete, ready to plan Phase 5
+last_updated: "2026-10-05T13:31:33.786Z"
+last_activity: 2026-10-05
+last_activity_desc: Phase 04 complete, transitioned to Phase 5
+state_head: 65f8339c93767f0ea33c7302a15bd0ee4b205fca
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 28
   completed_plans: 28
-  percent: 38
-current_phase_name: Frame Sandbox Lifecycle
+  percent: 50
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-04)
 
 ## Current Position
 
-Phase: 4 — EXECUTING (all plans complete, ready for verification)
-Plan: 6 of 6
-Status: Ready for verification (04-06 complete)
-Last activity: 2026-10-04 — Completed 04-06 (CONFORMANCE close-out: 5D-3, NIP-5D-reload and 5D-8 fixed (Phase 4) with code and test citations; 5D-NG-webkitgtk/-webview2/-wkwebview/-android Non-Guarantee rows, unverified engines say so; DEC-5 marker, DEC-6 hardening scope; SBOX-01..04 complete; end-of-phase smoke list in 04-06-SUMMARY)
+Phase: 5 — Napplet Artifact Identity and Storage Keying
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-05 — Phase 04 complete, transitioned to Phase 5
 
 Progress: [████░░░░░░] 38% (3/8 phases)
 
@@ -38,7 +38,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 
 **Velocity:**
 
-- Total plans completed: 22
+- Total plans completed: 28
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -49,6 +49,7 @@ Progress: [████░░░░░░] 38% (3/8 phases)
 | 1 | 5 | - | - |
 | 2 | 7 | - | - |
 | 03 | 10 | - | - |
+| 04 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -201,5 +202,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-04T18:09:10.785Z
-Stopped at: Completed 04-06-PLAN.md
+Stopped at: Phase 04 complete, ready to plan Phase 5
 Resume file: None
