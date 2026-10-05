@@ -65,7 +65,7 @@ func checkLnkCommand(t *testing.T, spec lnkSpec) []string {
 func TestSearchLnkPassesAuthorTextAsData(t *testing.T) {
 	for _, payload := range lnkPayloads {
 		napplet := backend.AppShortcut{ID: "35129:pk:paint", Token: "=dG9rZW4", Name: payload, Description: payload}
-		names := windowsShortcutNames([]backend.AppShortcut{napplet})
+		names := windowsShortcutNames(`C:\Start\Verdana Discover`, []backend.AppShortcut{napplet})
 		spec := searchLnkSpec(`C:\Start\Verdana Discover`, names[0], `C:\Verdana\verdana.exe`, napplet)
 		env := checkLnkCommand(t, spec)
 
@@ -88,7 +88,7 @@ func TestSearchLnkPassesAuthorTextAsData(t *testing.T) {
 func TestAppLnkPassesAuthorTextAsData(t *testing.T) {
 	for _, payload := range lnkPayloads {
 		shortcut := backend.AppShortcut{ID: "35128:pk:notes", Token: "=bm90ZXM", Name: payload, Description: payload}
-		names := windowsShortcutNames([]backend.AppShortcut{shortcut})
+		names := windowsShortcutNames(`C:\Start\Verdana Apps`, []backend.AppShortcut{shortcut})
 		spec := appLnkSpec(`C:\Start\Verdana Apps`, names[0], `C:\Verdana\verdana.exe`, `C:\Data\icons\k.ico`, shortcut)
 		env := checkLnkCommand(t, spec)
 

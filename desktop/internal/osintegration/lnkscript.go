@@ -2,6 +2,7 @@ package osintegration
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -78,9 +79,31 @@ func lnkCommand(spec lnkSpec) (args []string, env []string, err error) {
 	return []string{"-NoProfile", "-NonInteractive", "-Command", lnkScript}, env, nil
 }
 
-// windowsShortcutName turns an author-controlled title into a file name
-// Windows accepts. It is a file name only: it never reaches powershell source.
-func windowsShortcutName(name string) string {
+// Windows refuses a link whose full path is longer than MAX_PATH, and the
+// shell caps a link's comment (INFOTIPSIZE). A title or description is
+// author text of any length, so both are bounded before a link is written:
+// the name to what fits under MAX_PATH with room to spare after the folder,
+// and never more than maxLnkNameUnits; the comment to maxLnkDescriptionUnits.
+// Lengths are in UTF-16 units, as Windows counts them.
+const (
+	windowsMaxPath         = 259 // MAX_PATH less its terminating NUL
+	lnkPathMargin          = 16
+	maxLnkNameUnits        = 64
+	minLnkNameUnits        = 8
+	lnkSuffixUnits         = len(" (123456)") // the short id suffix a name may get
+	maxLnkDescriptionUnits = 512
+)
+
+// lnkNameBudget is the longest file name stem a link in dir may have.
+func lnkNameBudget(dir string) int {
+	budget := windowsMaxPath - lnkPathMargin - utf16Len(dir) - len(`\`) - lnkSuffixUnits - len(".lnk")
+	return min(maxLnkNameUnits, max(budget, minLnkNameUnits))
+}
+
+// windowsShortcutStem turns an author-controlled title into a file name
+// Windows accepts, at most maxUnits long, and says whether it was cut. It is
+// a file name only: it never reaches powershell source.
+func windowsShortcutStem(name string, maxUnits int) (string, bool) {
 	name = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(`<>:"/\|?*`, r) || r < 32 {
 			return '-'
@@ -89,33 +112,37 @@ func windowsShortcutName(name string) string {
 	}, appShortcutText(name))
 	name = strings.Trim(name, " .")
 	if name == "" {
-		return "Verdana App"
+		return "Verdana App", false
 	}
-	stem := strings.ToUpper(strings.TrimSuffix(name, filepath.Ext(name)))
-	reserved := stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
-		len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9'
-	if reserved {
-		name = "Verdana " + name
+	name, cut := truncateText(name, maxUnits, utf16Units)
+	if windowsReservedName(name) {
+		var recut bool
+		name, recut = truncateText("Verdana "+name, maxUnits, utf16Units)
+		cut = cut || recut
 	}
-	return name
+	return name, cut
 }
 
-// windowsShortcutNames gives every shortcut its file name stem, adding a short
-// id suffix where two titles collide (case-insensitively, as on NTFS).
-func windowsShortcutNames(shortcuts []backend.AppShortcut) []string {
-	counts := make(map[string]int, len(shortcuts))
-	for _, s := range shortcuts {
-		counts[strings.ToLower(windowsShortcutName(s.Name))]++
-	}
-	names := make([]string, len(shortcuts))
-	for i, s := range shortcuts {
-		name := windowsShortcutName(s.Name)
-		if counts[strings.ToLower(name)] > 1 {
-			name += " (" + appShortcutKey(s.ID)[:6] + ")"
-		}
-		names[i] = name
-	}
-	return names
+// windowsReservedName reports a name Windows keeps for a device.
+func windowsReservedName(name string) bool {
+	stem := strings.ToUpper(strings.TrimSuffix(name, filepath.Ext(name)))
+	return stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+		len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9'
+}
+
+// windowsShortcutNames gives every shortcut in dir its file name stem, bounded
+// for dir and unique within it (see uniqueShortcutNames).
+func windowsShortcutNames(dir string, shortcuts []backend.AppShortcut) []string {
+	budget := lnkNameBudget(dir)
+	return uniqueShortcutNames(shortcuts, func(name string) (string, bool) {
+		return windowsShortcutStem(name, budget)
+	})
+}
+
+// lnkDescription is the comment a link carries for an author's description.
+func lnkDescription(description string) string {
+	description, _ = truncateText(appShortcutText(description), maxLnkDescriptionUnits, utf16Units)
+	return description
 }
 
 // searchLnkSpec is the Start menu link for one discovered napplet: activating
@@ -126,7 +153,7 @@ func searchLnkSpec(dir, name, exe string, napplet backend.AppShortcut) lnkSpec {
 		Path:        filepath.Join(dir, name+".lnk"),
 		Target:      exe,
 		Arguments:   `--background --try-napplet "` + napplet.Token + `"`,
-		Description: appShortcutText(napplet.Description),
+		Description: lnkDescription(napplet.Description),
 	}
 }
 
@@ -136,7 +163,56 @@ func appLnkSpec(dir, name, exe, iconPath string, shortcut backend.AppShortcut) l
 		Path:        filepath.Join(dir, name+".lnk"),
 		Target:      exe,
 		Arguments:   `--background --launch-napp "` + shortcut.Token + `"`,
-		Description: appShortcutText(shortcut.Description),
+		Description: lnkDescription(shortcut.Description),
 		Icon:        iconPath + ",0",
 	}
+}
+
+// syncSearchLinks writes one search link per discovered napplet into dir with
+// write, skipping the ones that fail, and removes every other link there.
+func syncSearchLinks(dir string, napplets []backend.AppShortcut, exe string, write func(lnkSpec) error) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	names := windowsShortcutNames(dir, napplets)
+	entries := make([]shortcutEntry, len(napplets))
+	for i, napplet := range napplets {
+		spec := searchLnkSpec(dir, names[i], exe, napplet)
+		entries[i] = shortcutEntry{id: napplet.ID, paths: []string{spec.Path}, write: func() error { return write(spec) }}
+	}
+	desired, writeErr := writeShortcutEntries("search shortcut", entries)
+	if err := removeStaleFiles(dir, ".lnk", desired); err != nil {
+		return err
+	}
+	return writeErr
+}
+
+// syncAppLinks writes one app link per installed napp into dir, and its icon
+// into icons with writeIcon, skipping the entries that fail, and removes every
+// other link and icon there.
+func syncAppLinks(dir, icons string, shortcuts []backend.AppShortcut, exe string,
+	writeIcon func(path string, shortcut backend.AppShortcut) error, write func(lnkSpec) error) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	names := windowsShortcutNames(dir, shortcuts)
+	entries := make([]shortcutEntry, len(shortcuts))
+	for i, shortcut := range shortcuts {
+		iconPath := filepath.Join(icons, appShortcutKey(shortcut.ID)+".ico")
+		spec := appLnkSpec(dir, names[i], exe, iconPath, shortcut)
+		entries[i] = shortcutEntry{id: shortcut.ID, paths: []string{spec.Path, iconPath}, write: func() error {
+			if err := writeIcon(iconPath, shortcut); err != nil {
+				return err
+			}
+			return write(spec)
+		}}
+	}
+	desired, writeErr := writeShortcutEntries("app shortcut", entries)
+	if err := removeStaleFiles(dir, ".lnk", desired); err != nil {
+		return err
+	}
+	if err := removeStaleFiles(icons, ".ico", desired); err != nil {
+		return err
+	}
+	return writeErr
 }

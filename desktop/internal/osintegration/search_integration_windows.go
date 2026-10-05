@@ -3,8 +3,6 @@
 package osintegration
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"verdana/backend"
 )
@@ -17,18 +15,5 @@ func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(programs, "Verdana Discover")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	desired := make(map[string]bool, len(napplets))
-	names := windowsShortcutNames(napplets)
-	for i, napplet := range napplets {
-		spec := searchLnkSpec(dir, names[i], exe, napplet)
-		if err := writeLnk(spec); err != nil {
-			return fmt.Errorf("creating search shortcut failed: %w", err)
-		}
-		desired[spec.Path] = true
-	}
-	return removeStaleWindowsFiles(dir, ".lnk", desired)
+	return syncSearchLinks(filepath.Join(programs, "Verdana Discover"), napplets, exe, writeLnk)
 }

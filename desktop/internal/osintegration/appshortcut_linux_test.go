@@ -137,3 +137,33 @@ func TestAppShortcutHostileNameSingleLine(t *testing.T) {
 		t.Fatalf("names were not flattened onto one line:\n%s", data)
 	}
 }
+
+func TestSyncAppShortcutsSkipsFailedEntry(t *testing.T) {
+	useAppShortcutDirs(t)
+	stale := backend.AppShortcut{ID: "napp-gone", Token: backend.LaunchToken("napp-gone"), Name: "Gone"}
+	if err := SyncAppShortcuts([]backend.AppShortcut{stale}, "/opt/verdana"); err != nil {
+		t.Fatal(err)
+	}
+	first := backend.AppShortcut{ID: "napp-one", Token: backend.LaunchToken("napp-one"), Name: "One"}
+	// a token the Exec quoting refuses fails only its own entry
+	broken := backend.AppShortcut{ID: "napp-broken", Token: "x\nExec=/bin/evil", Name: "Broken"}
+	last := backend.AppShortcut{ID: "napp-three", Token: backend.LaunchToken("napp-three"), Name: "Three", Description: strings.Repeat("long ", 200)}
+	err := SyncAppShortcuts([]backend.AppShortcut{first, broken, last}, "/opt/verdana")
+	if err == nil || !strings.Contains(err.Error(), "1 of 3") {
+		t.Fatalf("want the failure counted, got %v", err)
+	}
+	entry := func(s backend.AppShortcut) string {
+		return filepath.Join(applicationsDir(), appShortcutPrefix+appShortcutKey(s.ID)+".desktop")
+	}
+	for _, s := range []backend.AppShortcut{first, last} {
+		if _, err := os.Stat(entry(s)); err != nil {
+			t.Fatalf("%s not written: %v", s.ID, err)
+		}
+	}
+	if _, err := os.Stat(entry(broken)); !os.IsNotExist(err) {
+		t.Fatalf("refused entry written: %v", err)
+	}
+	if _, err := os.Stat(entry(stale)); !os.IsNotExist(err) {
+		t.Fatalf("stale entry kept after a failed one: %v", err)
+	}
+}
