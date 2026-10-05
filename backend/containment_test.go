@@ -136,7 +136,7 @@ func (r *containmentRig) assertContained(t *testing.T, step string) {
 // nappEvent is a kind 35130 manifest with one path tag for /index.html.
 func nappEvent(t *testing.T, d, indexHash string) nostr.Event {
 	t.Helper()
-	evt := testNappEvent(nostr.Generate().Public(), d, "Hostile", 1700000000).Event
+	evt := testNappEvent(nostr.Generate(), d, "Hostile", 1700000000).Event
 	evt.Tags = append(evt.Tags, nostr.Tag{"path", "/index.html", indexHash})
 	return evt
 }

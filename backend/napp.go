@@ -97,6 +97,16 @@ type Napp struct {
 	RequiredDomains []string            `json:"requiredDomains,omitempty"`
 	OptionalDomains []string            `json:"optionalDomains,omitempty"`
 
+	// EventID is the hex id of the manifest event this record was read
+	// from. Records from different lookups of one address are ordered by
+	// CreatedAt and then the lowest EventID (NIP-01, see registry_select.go).
+	EventID string `json:"eventId,omitempty"`
+	// Unavailable is set when the NIP-01 latest event of the address is
+	// invalid. It holds one fixed catalogue phrase (napplet.go), never
+	// validator text, which can embed author input. Such a record can be
+	// listed but never installed, tried or updated to.
+	Unavailable string `json:"unavailable,omitempty"`
+
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
 	// was seen on the relays (kind:35130, same author+d-tag, newer
 	// created_at). It is not part of the wire model.

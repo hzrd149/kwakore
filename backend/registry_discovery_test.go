@@ -13,17 +13,22 @@ type discoveryPublish struct {
 	done bool
 }
 
-func testNappEvent(pk nostr.PubKey, d, title string, at nostr.Timestamp) nostr.RelayEvent {
-	return nostr.RelayEvent{Event: nostr.Event{
+// testNappEvent is a signed kind 35130 manifest: discovery only considers
+// events whose id and signature check out.
+func testNappEvent(sk nostr.SecretKey, d, title string, at nostr.Timestamp) nostr.RelayEvent {
+	evt := nostr.Event{
 		Kind:      KindNapp,
-		PubKey:    pk,
 		CreatedAt: at,
 		Tags:      nostr.Tags{{"d", d}, {"title", title}},
-	}}
+	}
+	if err := evt.Sign(sk); err != nil {
+		panic(err)
+	}
+	return nostr.RelayEvent{Event: evt}
 }
 
 func TestDiscoveryShowsNappsBeforeEOSE(t *testing.T) {
-	pk := nostr.Generate().Public()
+	sk := nostr.Generate()
 	events := make(chan nostr.RelayEvent)
 	eose := make(chan struct{})
 	published := make(chan discoveryPublish, 16)
@@ -36,7 +41,7 @@ func TestDiscoveryShowsNappsBeforeEOSE(t *testing.T) {
 	}()
 
 	// a slow relay holds back EOSE; what the fast ones sent still shows up
-	events <- testNappEvent(pk, "notes", "Notes", 1)
+	events <- testNappEvent(sk, "notes", "Notes", 1)
 	select {
 	case p := <-published:
 		if p.done || len(p.list) != 1 || p.list[0].Name != "Notes" {
@@ -52,7 +57,7 @@ func TestDiscoveryShowsNappsBeforeEOSE(t *testing.T) {
 	}
 
 	// events after EOSE keep coming in
-	events <- testNappEvent(pk, "chat", "Chat", 1)
+	events <- testNappEvent(sk, "chat", "Chat", 1)
 	if p := <-published; len(p.list) != 2 {
 		t.Fatalf("live publish = %+v, want two napps", p)
 	}
@@ -62,11 +67,11 @@ func TestDiscoveryShowsNappsBeforeEOSE(t *testing.T) {
 }
 
 func TestDiscoveryKeepsNewestVersion(t *testing.T) {
-	pk := nostr.Generate().Public()
+	sk := nostr.Generate()
 	events := make(chan nostr.RelayEvent, 4)
-	events <- testNappEvent(pk, "notes", "Notes v2", 2)
-	events <- testNappEvent(pk, "notes", "Notes v1", 1)
-	events <- testNappEvent(pk, "notes", "Notes v3", 3)
+	events <- testNappEvent(sk, "notes", "Notes v2", 2)
+	events <- testNappEvent(sk, "notes", "Notes v1", 1)
+	events <- testNappEvent(sk, "notes", "Notes v3", 3)
 	close(events)
 
 	var last discoveryPublish

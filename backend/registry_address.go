@@ -61,15 +61,6 @@ func IsNappAddress(input string) bool {
 	return err == nil
 }
 
-func isNapKind(k nostr.Kind) bool {
-	for _, nk := range napKinds {
-		if nk == k {
-			return true
-		}
-	}
-	return false
-}
-
 // addressFilter is the query for the current manifest at ptr. A root
 // napplet (kind 15129) is replaceable, so it has no d tag to match.
 func addressFilter(ptr nostr.EntityPointer) nostr.Filter {

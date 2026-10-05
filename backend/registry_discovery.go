@@ -92,11 +92,13 @@ func refreshFollows(ctx context.Context) {
 // collectDiscovery reads napps off a discovery subscription until it
 // closes, handing publish the list so far every flush interval while new
 // ones keep arriving, and with done set once every relay has sent EOSE (or
-// been given up on) or the subscription ends. Several versions of one napp
-// collapse into the newest.
+// been given up on) or the subscription ends. The events of one address
+// collapse into its NIP-01 winner (registry_select.go), which is listed
+// even when it is invalid: then as unavailable, never as an older version.
 func collectDiscovery(events <-chan nostr.RelayEvent, eose <-chan struct{}, flush time.Duration, publish func(list []Napp, done bool)) {
 	var list []Napp
-	index := make(map[string]int)
+	latest := latestByAddress{}
+	index := make(map[string]int) // address -> position in list
 	dirty, finished := false, false
 
 	ticker := time.NewTicker(flush)
@@ -111,17 +113,15 @@ func collectDiscovery(events <-chan nostr.RelayEvent, eose <-chan struct{}, flus
 				}
 				return
 			}
-			n, ok := nappFromEvent(re.Event)
-			if !ok {
+			if !latest.add(re.Event) {
 				continue
 			}
-			if i, seen := index[n.ID]; seen {
-				if n.CreatedAt <= list[i].CreatedAt {
-					continue
-				}
+			n := nappFromLatest(re.Event)
+			addr := eventAddress(re.Event)
+			if i, seen := index[addr]; seen {
 				list[i] = n
 			} else {
-				index[n.ID] = len(list)
+				index[addr] = len(list)
 				list = append(list, n)
 			}
 			dirty = true
