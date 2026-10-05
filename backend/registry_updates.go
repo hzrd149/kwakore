@@ -280,14 +280,20 @@ func launchUpdateCheck(n Napp) {
 // relay lookup this triggers when there is none. Only the NIP-01 latest
 // version is ever installed, and only when it is valid.
 func Update(id string) {
+	// claimed before the record is read, so no install, update or
+	// uninstall of the same id runs between the read and the write
+	if !trySetBusy(id) {
+		log.Warn().Str("napp", id).Msg("napp is busy, not updating")
+		SetFetchErr("update failed: " + errBusy.Error())
+		return
+	}
+	defer setBusy(id, false)
+
 	n, ok := InstalledNapp(id)
 	if !ok {
 		SetFetchErr("napp " + id + " is not installed")
 		return
 	}
-
-	setBusy(id, true)
-	defer setBusy(id, false)
 
 	latest := newerVersion(n)
 	if latest == nil {
@@ -300,7 +306,7 @@ func Update(id string) {
 
 // applyUpdate does the shared re-download: fetch every path of newer into the
 // napp's install dir, then record it as the installed version. Called with
-// setBusy held. newer needs the full event shape; Paths and Servers are the
+// the napp's busy claim held (trySetBusy). newer needs the full event shape; Paths and Servers are the
 // parts that matter for the download itself.
 func applyUpdate(current, newer Napp) {
 	if newer.Unavailable != "" {
@@ -309,6 +315,16 @@ func applyUpdate(current, newer Napp) {
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).
 			Msg("refusing to update to an invalid latest version")
 		SetFetchErr("update failed: " + errUnavailable.Error())
+		return
+	}
+	// never a downgrade: checked before the download, which it would
+	// waste, and again when the record is written
+	stateMu.Lock()
+	installed, had := state.InstalledNapps[current.ID]
+	stateMu.Unlock()
+	if had && nappNewer(installed, newer) {
+		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
+		SetFetchErr("update failed: " + errOlderVersion.Error())
 		return
 	}
 	base, err := nappBaseDir(current.ID)
@@ -337,6 +353,12 @@ func applyUpdate(current, newer Napp) {
 	newer.UpdateAvailable = nil
 	stateMu.Lock()
 	previous, had := state.InstalledNapps[current.ID]
+	if had && nappNewer(previous, newer) {
+		stateMu.Unlock()
+		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
+		SetFetchErr("update failed: " + errOlderVersion.Error())
+		return
+	}
 	state.InstalledNapps[current.ID] = newer
 	delete(state.LastLaunched, current.ID)
 	saveState()

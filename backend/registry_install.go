@@ -48,6 +48,25 @@ func refreshInstalled() {
 // quote author input.
 var errUnavailable = errors.New("the latest version is invalid")
 
+// errBusy refuses an install, update or uninstall of a napp another one of
+// them (or a Try) is already working on. Each claims the napp's busy flag
+// with trySetBusy, so two of them never write the same install directory or
+// race on its record, and none clears a claim it does not own.
+var errBusy = errors.New("this napp is already being installed, updated or removed")
+
+// errOlderVersion refuses to install a version older than the installed one
+// (NIP-01 order: created_at, then the lowest event id). Installing it would
+// downgrade the napp and, for a napplet, reclaim the newer version's
+// storage and settings.
+var errOlderVersion = errors.New("a newer version is already installed")
+
+// olderThanInstalledLocked says whether n is older than the version
+// installed under its id. stateMu is held.
+func olderThanInstalledLocked(n Napp) bool {
+	current, ok := state.InstalledNapps[n.ID]
+	return ok && nappNewer(current, n)
+}
+
 // Install downloads a napp's files and records it as installed. Blocking:
 // call it from a goroutine (progress shows up as IsBusy). It also takes
 // updates: an already-installed napp is simply re-downloaded over. A failure
@@ -69,9 +88,21 @@ func InstallNapp(n Napp) error {
 		return errUnavailable
 	}
 	n.UpdateAvailable = nil
-	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
-	setBusy(n.ID, true)
+	if !trySetBusy(n.ID) {
+		log.Warn().Str("napp", n.ID).Msg("napp is busy, not installing")
+		return errBusy
+	}
 	defer setBusy(n.ID, false)
+	// checked before the download, which it would waste, and again when
+	// the record is written
+	stateMu.Lock()
+	older := olderThanInstalledLocked(n)
+	stateMu.Unlock()
+	if older {
+		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
+		return errOlderVersion
+	}
+	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 
 	base, err := nappBaseDir(n.ID)
 	if err != nil {
@@ -91,6 +122,11 @@ func InstallNapp(n Napp) error {
 	stateMu.Lock()
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
+	}
+	if olderThanInstalledLocked(n) {
+		stateMu.Unlock()
+		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
+		return errOlderVersion
 	}
 	previous, overwrote := state.InstalledNapps[n.ID]
 	state.InstalledNapps[n.ID] = n
@@ -125,9 +161,13 @@ func InstallNapp(n Napp) error {
 // config wait for the last of its windows to be gone before they are
 // deleted, so nothing is removed under a window still running.
 func Uninstall(id string) {
-	log.Info().Str("napp", id).Msg("uninstalling napp")
-	setBusy(id, true)
+	if !trySetBusy(id) {
+		log.Warn().Str("napp", id).Msg("napp is busy, not uninstalling")
+		SetFetchErr("uninstall failed: " + errBusy.Error())
+		return
+	}
 	defer setBusy(id, false)
+	log.Info().Str("napp", id).Msg("uninstalling napp")
 
 	stateMu.Lock()
 	record, installed := state.InstalledNapps[id]
@@ -416,6 +456,14 @@ func finishNappletTrial(ci *Instance) {
 	}
 	// not found (offline, or no relay has it any more): the trial's own
 	// event is the newest thing known
+	//
+	// the user may have installed it from the store while the question was
+	// up: that version, or a newer one, is not replaced by what the trial
+	// or a lagging relay knows (InstallNapp refuses an older one too)
+	if current, ok := InstalledNapp(ci.napp.ID); ok && !nappNewer(target, current) {
+		promoteTrial(ci, current, "could not keep trial data: ")
+		return
+	}
 	if err := InstallNapp(target); err != nil {
 		SetFetchErr("install failed: " + err.Error())
 		forgetWindow(ci)
