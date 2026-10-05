@@ -90,43 +90,48 @@ func (n Napp) Naddr() string {
 // resolveTimeout bounds one address lookup across every relay asked.
 const resolveTimeout = 15 * time.Second
 
-// ResolveNappAddress finds the newest valid manifest at an address: in the
-// local store, then on the address's relay hints, the author's write relays
-// and the launcher's relays. Blocking.
+// errUnavailable refuses to open or install an address whose latest
+// manifest is invalid. Fixed text: the validator's own error can quote
+// author input.
+var errUnavailable = errors.New("the latest version is invalid")
+
+// ResolveNappAddress finds the current manifest at an address, its NIP-01
+// latest event (registry_select.go), in the local store, on the address's
+// relay hints, the author's write relays and the launcher's relays. When
+// that event is invalid the result is an unavailable entry (Unavailable
+// set), never an older valid version. Blocking.
 func ResolveNappAddress(ctx context.Context, input string) (Napp, error) {
 	ptr, err := ParseNappAddress(input)
 	if err != nil {
 		return Napp{}, err
 	}
-	if sys == nil {
-		return Napp{}, errors.New("not started")
-	}
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
-	var (
-		best    Napp
-		found   bool
-		invalid bool
-	)
-	consider := func(evt nostr.Event) {
-		if evt.PubKey != ptr.PublicKey || evt.Kind != ptr.Kind ||
-			(addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier) {
-			return
-		}
-		n, ok := nappFromEvent(evt)
-		if !ok {
-			invalid = true
-			return
-		}
-		if !found || n.CreatedAt > best.CreatedAt {
-			best, found = n, true
-		}
+	events, err := addressEvents(ctx, ptr)
+	if err != nil {
+		return Napp{}, err
 	}
+	best, found := pickAddress(ptr, events)
+	if !found {
+		return Napp{}, errors.New("no napp or napplet found at that address")
+	}
+	if best.AuthorName == "" {
+		best.AuthorName = best.AuthorShortName()
+	}
+	return best, nil
+}
 
+// addressEvents gathers the manifest events at ptr from the local store and
+// the relays. It is a variable so tests can stand in for the relays.
+var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.Event, error) {
+	if sys == nil {
+		return nil, errors.New("not started")
+	}
+	var events []nostr.Event
 	filter := addressFilter(ptr)
 	for evt := range sys.Store.QueryEvents(filter, 10) {
-		consider(evt)
+		events = append(events, evt)
 	}
 
 	// relay hints are only a place to look, and only public ws(s) ones are
@@ -146,20 +151,31 @@ func ResolveNappAddress(ctx context.Context, input string) (Napp, error) {
 	}
 	if len(urls) > 0 {
 		for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-address"}) {
-			consider(re.Event)
+			events = append(events, re.Event)
 		}
 	}
+	return events, nil
+}
 
-	if !found {
-		if invalid {
-			return Napp{}, errors.New("the manifest at that address is not a valid napp or napplet")
+// pickAddress is the NIP-01 winner among the authentic events for the
+// address ptr names: events by another author, of another kind or (for an
+// addressable kind) with another d are ignored, whatever a relay sent. found
+// is false when nothing authentic matched; an invalid winner is found, as an
+// unavailable entry.
+func pickAddress(ptr nostr.EntityPointer, events []nostr.Event) (Napp, bool) {
+	latest := latestByAddress{}
+	for _, evt := range events {
+		if evt.PubKey != ptr.PublicKey || evt.Kind != ptr.Kind ||
+			(addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier) {
+			continue
 		}
-		return Napp{}, errors.New("no napp or napplet found at that address")
+		latest.add(evt)
 	}
-	if best.AuthorName == "" {
-		best.AuthorName = best.AuthorShortName()
+	// every event left has the one address, so there is at most one winner
+	for _, evt := range latest {
+		return nappFromLatest(evt), true
 	}
-	return best, nil
+	return Napp{}, false
 }
 
 // ─── the launcher's lookup ───────────────────────────────────────
@@ -231,7 +247,7 @@ func rememberResolved(n Napp) {
 	if ls.resolved == nil {
 		ls.resolved = make(map[string]Napp)
 	}
-	if prev, ok := ls.resolved[n.ID]; !ok || n.CreatedAt >= prev.CreatedAt {
+	if prev, ok := ls.resolved[n.ID]; !ok || nappNewer(n, prev) {
 		ls.resolved[n.ID] = n
 	}
 	ls.discovery = ls.withResolved(ls.discovery)
@@ -241,7 +257,8 @@ func rememberResolved(n Napp) {
 }
 
 // withResolved adds the napps found by address to a discovery list, or
-// swaps in the resolved copy where it is newer than the listed one.
+// swaps in the resolved copy where it wins over the listed one by the NIP-01
+// order (nappNewer).
 func (l *launcherState) withResolved(list []Napp) []Napp {
 	if len(l.resolved) == 0 {
 		return list
@@ -253,7 +270,7 @@ func (l *launcherState) withResolved(list []Napp) []Napp {
 	}
 	for _, n := range l.resolved {
 		if i, ok := seen[n.ID]; ok {
-			if n.CreatedAt > out[i].CreatedAt {
+			if nappNewer(n, out[i]) {
 				out[i] = n
 			}
 			continue
@@ -290,7 +307,17 @@ func OpenAddress(input string) error {
 	if err != nil {
 		return err
 	}
+	return openResolved(n)
+}
+
+// openResolved is OpenAddress once the address resolved and nothing is
+// installed there: list it, then ask, install and launch. An unavailable
+// entry is listed, so the store can say why, but never offered.
+func openResolved(n Napp) error {
 	rememberResolved(n)
+	if n.Unavailable != "" {
+		return errUnavailable
+	}
 	if !askInstall(n) {
 		// a no is an answer, not a failure
 		return nil
@@ -310,7 +337,16 @@ func InstallAddress(input string) (Napp, error) {
 	if err != nil {
 		return Napp{}, err
 	}
+	return installResolved(n)
+}
+
+// installResolved is InstallAddress once the address resolved: list it and
+// install it, unless it is unavailable.
+func installResolved(n Napp) (Napp, error) {
 	rememberResolved(n)
+	if n.Unavailable != "" {
+		return Napp{}, errUnavailable
+	}
 	if err := InstallNapp(n); err != nil {
 		return Napp{}, err
 	}

@@ -1,7 +1,12 @@
 package backend
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
@@ -122,4 +127,157 @@ func TestResolvedNappsSurviveDiscovery(t *testing.T) {
 			t.Error("an older resolved copy replaced the discovered one")
 		}
 	}
+}
+
+func TestResolveAddressPicksNIP01Winner(t *testing.T) {
+	sk := nostr.Generate()
+	ptr := nostr.EntityPointer{PublicKey: sk.Public(), Kind: KindNapplet, Identifier: "app"}
+	low, high := tiedPair(t, sk)
+
+	// a tie goes to the lower id, in either order
+	for _, events := range [][]nostr.Event{{low, high}, {high, low}} {
+		n, found := pickAddress(ptr, events)
+		if !found || n.EventID != low.ID.Hex() || n.Unavailable != "" {
+			t.Errorf("tie: found=%v %+v, want the lower id %s", found, n, low.ID.Hex())
+		}
+	}
+
+	// what a relay sent for other addresses never competes, however new
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+	other := nostr.Generate()
+	strays := []nostr.Event{
+		signedWith(t, other, KindNapplet, nip5dTags("app", index), "", 500),                 // wrong author
+		signedWith(t, sk, KindNapp, nip5dTags("app", index), "", 500),                       // wrong kind
+		signedWith(t, sk, KindNapplet, nip5dTags("other", index), "", 500),                  // wrong d
+		signedWith(t, sk, KindNapplet, nostr.Tags{{"d", "other"}, {"title", "x"}}, "", 600), // wrong d, invalid
+	}
+	n, found := pickAddress(ptr, append(strays, low))
+	if !found || n.EventID != low.ID.Hex() {
+		t.Errorf("strays: found=%v %+v", found, n)
+	}
+
+	// an invalid newest is the answer, as unavailable, never the older one
+	invalid := signedWith(t, sk, KindNapplet, nostr.Tags{{"d", "app"}, {"title", "App"}}, "", 200)
+	n, found = pickAddress(ptr, []nostr.Event{low, invalid, high})
+	if !found || n.Unavailable == "" || n.EventID != invalid.ID.Hex() || len(n.Paths) != 0 {
+		t.Errorf("invalid newest: found=%v %+v", found, n)
+	}
+
+	// nothing authentic is not found
+	if _, found := pickAddress(ptr, strays); found {
+		t.Error("found a napplet among strays only")
+	}
+	forged := low
+	forged.ID = nostr.ID{}
+	if _, found := pickAddress(ptr, []nostr.Event{forged}); found {
+		t.Error("found a napplet whose id was forged")
+	}
+
+	// and through the lookup: no events is the not-found error
+	old := addressEvents
+	t.Cleanup(func() { addressEvents = old })
+	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return strays, nil }
+	if _, err := ResolveNappAddress(context.Background(), nip19.EncodeNaddr(ptr.PublicKey, ptr.Kind, ptr.Identifier, nil)); err == nil ||
+		!strings.Contains(err.Error(), "no napp or napplet found") {
+		t.Errorf("lookup with nothing authentic: %v", err)
+	}
+}
+
+func TestOpenAndInstallAddressRefuseUnavailable(t *testing.T) {
+	setupNapTest(t)
+	resetResolved(t)
+	sk := nostr.Generate()
+	invalid := signedWith(t, sk, KindNapplet, nostr.Tags{{"d", "app"}, {"title", "App"}}, "", 200)
+	n := nappFromLatest(invalid)
+	if n.Unavailable == "" {
+		t.Fatal("fixture should be unavailable")
+	}
+
+	before := PendingPrompts()
+	done := make(chan error, 1)
+	go func() { done <- openResolved(n) }()
+	select {
+	case err := <-done:
+		if err == nil || err.Error() != "the latest version is invalid" {
+			t.Errorf("open: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("opening an unavailable address asked to install it")
+	}
+	if _, err := installResolved(n); err == nil || err.Error() != "the latest version is invalid" {
+		t.Errorf("install: %v", err)
+	}
+	if PendingPrompts() != before {
+		t.Error("a prompt was queued for an unavailable address")
+	}
+	if _, ok := InstalledNapp(n.ID); ok {
+		t.Error("an unavailable address was installed")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dataDir, "napps")); len(entries) != 0 {
+		t.Errorf("install wrote %d entries under napps/", len(entries))
+	}
+	// it is still listed, so the store can say why
+	if got, ok := DiscoveredNapp(n.ID); !ok || got.Unavailable == "" {
+		t.Errorf("unavailable entry not listed: %v %+v", ok, got)
+	}
+}
+
+func TestResolvedNappsTieBreak(t *testing.T) {
+	listed := Napp{ID: "a", CreatedAt: 10, EventID: strings.Repeat("5", 64)}
+	cases := []struct {
+		name     string
+		resolved Napp
+		replaces bool
+	}{
+		{"same second, lower id", Napp{ID: "a", CreatedAt: 10, EventID: strings.Repeat("1", 64)}, true},
+		{"same second, higher id", Napp{ID: "a", CreatedAt: 10, EventID: strings.Repeat("9", 64)}, false},
+		{"same second, same id", listed, false},
+		{"same second, unknown id", Napp{ID: "a", CreatedAt: 10}, false},
+		{"older, lower id", Napp{ID: "a", CreatedAt: 9, EventID: strings.Repeat("0", 64)}, false},
+		{"newer, higher id", Napp{ID: "a", CreatedAt: 11, EventID: strings.Repeat("f", 64)}, true},
+	}
+	for _, c := range cases {
+		l := launcherState{resolved: map[string]Napp{"a": c.resolved}}
+		got := l.withResolved([]Napp{listed})
+		if len(got) != 1 {
+			t.Fatalf("%s: %d entries", c.name, len(got))
+		}
+		if replaced := got[0].EventID != listed.EventID || got[0].CreatedAt != listed.CreatedAt; replaced != c.replaces {
+			t.Errorf("%s: replaced=%v, want %v", c.name, replaced, c.replaces)
+		}
+	}
+
+	// rememberResolved keeps the winner the same way
+	resetResolved(t)
+	rememberResolved(Napp{ID: "b", CreatedAt: 10, EventID: strings.Repeat("5", 64)})
+	rememberResolved(Napp{ID: "b", CreatedAt: 10, EventID: strings.Repeat("9", 64)})
+	rememberResolved(Napp{ID: "b", CreatedAt: 9, EventID: strings.Repeat("0", 64)})
+	ls.mu.Lock()
+	kept := ls.resolved["b"].EventID
+	ls.mu.Unlock()
+	if kept != strings.Repeat("5", 64) {
+		t.Errorf("resolved cache kept %s", kept)
+	}
+	rememberResolved(Napp{ID: "b", CreatedAt: 10, EventID: strings.Repeat("1", 64)})
+	ls.mu.Lock()
+	kept = ls.resolved["b"].EventID
+	ls.mu.Unlock()
+	if kept != strings.Repeat("1", 64) {
+		t.Errorf("a lower id of the same second didn't replace: %s", kept)
+	}
+}
+
+// resetResolved empties the resolved cache and the discovery list for one
+// test and puts them back after it.
+func resetResolved(t *testing.T) {
+	t.Helper()
+	ls.mu.Lock()
+	resolved, discovery := ls.resolved, ls.discovery
+	ls.resolved, ls.discovery = nil, nil
+	ls.mu.Unlock()
+	t.Cleanup(func() {
+		ls.mu.Lock()
+		ls.resolved, ls.discovery = resolved, discovery
+		ls.mu.Unlock()
+	})
 }

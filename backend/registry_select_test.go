@@ -297,3 +297,46 @@ func TestUnavailableNameSanitized(t *testing.T) {
 		t.Errorf("untitled: name %q, unavailable %q", n.Name, n.Unavailable)
 	}
 }
+
+func TestAuthorNappsKeepUnavailable(t *testing.T) {
+	sk := nostr.Generate()
+	pk := sk.Public()
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+	nappTags := func(title string) nostr.Tags {
+		return nostr.Tags{{"d", "same"}, {"title", title}, {"path", "/index.html", testArtifact}}
+	}
+
+	napp1 := signedWith(t, sk, KindNapp, nappTags("Napp v1"), "", 100)
+	napp2 := signedWith(t, sk, KindNapp, nappTags("Napp v2"), "", 300)
+	// a napplet sharing the napp's d: its newest version is invalid
+	nappletOld := signedWith(t, sk, KindNapplet, nip5dTags("same", index), "", 100)
+	nappletBad := signedWith(t, sk, KindNapplet, nostr.Tags{{"d", "same"}, {"title", "Broken"}}, "", 200)
+	root := signedWith(t, sk, KindRootNapplet, nostr.Tags{{"path", "/index.html", testArtifact}, {"title", "Root"}}, "", 150)
+	// another author's event a relay mixed in
+	stranger := signedWith(t, nostr.Generate(), KindNapp, nappTags("Stranger"), "", 400)
+
+	got := authorNapps(pk, []nostr.Event{nappletBad, napp1, stranger, root, nappletOld, napp2})
+	if len(got) != 3 {
+		t.Fatalf("%d entries, want napp, napplet and root: %+v", len(got), got)
+	}
+	byAddr := map[string]Napp{}
+	for _, n := range got {
+		if n.Author != pk {
+			t.Errorf("another author's entry listed: %+v", n)
+		}
+		byAddr[n.Address()] = n
+	}
+	if n := byAddr[eventAddress(napp2)]; n.Name != "Napp v2" || n.EventID != napp2.ID.Hex() {
+		t.Errorf("napp: %+v", n)
+	}
+	if n := byAddr[eventAddress(nappletBad)]; n.Unavailable == "" || n.EventID != nappletBad.ID.Hex() || len(n.Paths) != 0 {
+		t.Errorf("napplet with an invalid newest: %+v", n)
+	}
+	if n := byAddr[eventAddress(root)]; n.Unavailable != "" || n.Name != "Root" {
+		t.Errorf("root: %+v", n)
+	}
+	// newest first
+	if got[0].CreatedAt != 300 || got[1].CreatedAt != 200 || got[2].CreatedAt != 150 {
+		t.Errorf("order: %d %d %d", got[0].CreatedAt, got[1].CreatedAt, got[2].CreatedAt)
+	}
+}

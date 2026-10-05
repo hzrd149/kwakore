@@ -50,9 +50,10 @@ func FetchProfileDetail(pubkeyHex string) ProfileDetail {
 	}
 }
 
-// FetchAuthorNapps lists the napps and napplets (kind:35130/35129) an author published: from the
-// author's own write relays plus the launcher's discovery relays. Newest
-// version wins per d-tag, so an author that republished the same napp shows
+// FetchAuthorNapps lists the napps and napplets an author published: from
+// the author's own write relays plus the launcher's discovery relays. Each
+// address shows once, as its NIP-01 latest event (an unavailable entry when
+// that event is invalid), so an author that republished the same napp shows
 // up once. It blocks (with its own timeout), so call it off the render loop.
 func FetchAuthorNapps(pubkeyHex string) []Napp {
 	pk, err := nostr.PubKeyFromHex(pubkeyHex)
@@ -70,50 +71,48 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 		return nil
 	}
 
-	byID := make(map[string]Napp)
-	collect := func(evt nostr.Event) {
-		n, ok := nappFromEvent(evt)
-		if !ok {
-			return
-		}
-		// keyed by id, not d: a napp and a napplet may share a d-tag
-		if prev, ok := byID[n.ID]; !ok || n.CreatedAt > prev.CreatedAt {
-			byID[n.ID] = n
-		}
+	filter := nostr.Filter{Kinds: napKinds, Authors: []nostr.PubKey{pk}}
+	var events []nostr.Event
+	for evt := range sys.Store.QueryEvents(filter, 200) {
+		events = append(events, evt)
+	}
+	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
+		events = append(events, re.Event)
 	}
 
-	// whatever is already local renders instantly
-	for evt := range sys.Store.QueryEvents(nostr.Filter{
-		Kinds:   napKinds,
-		Authors: []nostr.PubKey{pk},
-	}, 200) {
-		collect(evt)
-	}
-
-	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   napKinds,
-		Authors: []nostr.PubKey{pk},
-	}, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
-		collect(re.Event)
-	}
-
-	out := make([]Napp, 0, len(byID))
-	for _, n := range byID {
-		out = append(out, n)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt != out[j].CreatedAt {
-			return out[i].CreatedAt > out[j].CreatedAt
-		}
-		return out[i].Name < out[j].Name
-	})
-
+	out := authorNapps(pk, events)
 	// author names resolve in the background and are stamped here too
 	for i := range out {
 		if out[i].AuthorName == "" {
 			out[i].AuthorName = out[i].AuthorShortName()
 		}
 	}
+	return out
+}
+
+// authorNapps is one entry per address among pk's authentic manifest
+// events, newest first: keyed by address, not d, because a napp and a
+// napplet may share a d tag.
+func authorNapps(pk nostr.PubKey, events []nostr.Event) []Napp {
+	latest := latestByAddress{}
+	for _, evt := range events {
+		if evt.PubKey == pk {
+			latest.add(evt)
+		}
+	}
+	out := make([]Napp, 0, len(latest))
+	for _, evt := range latest {
+		out = append(out, nappFromLatest(evt))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
