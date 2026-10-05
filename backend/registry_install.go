@@ -76,7 +76,7 @@ func olderThanInstalledLocked(n Napp) bool {
 // is shown in the launcher.
 func Install(n Napp) {
 	if err := InstallNapp(n); err != nil {
-		SetFetchErr("install failed: " + err.Error())
+		SetFetchErr(failureLine("install failed: ", installFallback, n.ID, err))
 	}
 }
 
@@ -252,6 +252,7 @@ func InstallFromDiscovery(id string) bool {
 		go Install(n)
 		return true
 	}
+	log.Warn().Str("napp", id).Msg("nothing known about napp to install")
 	return false
 }
 
@@ -286,7 +287,7 @@ func TryNapplet(n Napp) {
 			// launchWindow raised the child-unavailable notice already
 			SetFetchErr(childUnavailableFetchErr)
 		default:
-			SetFetchErr("try failed: " + err.Error())
+			SetFetchErr(failureLine("try failed: ", windowFallback, n.ID, err))
 		}
 	})
 }
@@ -407,6 +408,7 @@ func fetchTrialFiles(ctx context.Context, paths []NappPath, servers []string) ([
 func TryNappletFromDiscovery(arg string) bool {
 	n, installed, ok := trialTarget(arg)
 	if !ok {
+		log.Warn().Str("napp", arg).Msg("nothing known about napplet to try")
 		return false
 	}
 	if installed {
@@ -505,7 +507,7 @@ func finishNappletTrial(ci *Instance) {
 		}
 	}
 	if err != nil {
-		SetFetchErr("install failed: " + err.Error())
+		SetFetchErr(failureLine("install failed: ", installFallback, target.ID, err))
 		forgetWindow(ci)
 		dropTrial(ci)
 		return
@@ -558,7 +560,7 @@ func promoteTrial(ci *Instance, installed Napp, errPrefix string) {
 		log.Info().Str("napp", ci.napp.ID).Msg("trial data dropped: its version is no longer installed")
 		dropTrial(ci)
 	case err != nil:
-		SetFetchErr(errPrefix + err.Error())
+		SetFetchErr(failureLine(errPrefix, trialDataFallback, ci.napp.ID, err))
 	}
 }
 
@@ -673,7 +675,7 @@ func stageNappFiles(ctx context.Context, n Napp, base string, servers []string) 
 	}
 	if err := ctx.Err(); err != nil {
 		os.RemoveAll(staging)
-		return "", err
+		return "", fmt.Errorf("%w: %w", errFilesFailed, err)
 	}
 	return staging, nil
 }
@@ -795,8 +797,9 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	data, err := downloadBlob(ctx, servers, p.Sha256)
 	if err != nil {
 		// the file, not the hash: an install or update that failed has to
-		// say which of the napp's files nobody could serve
-		return fmt.Errorf("%s: %w", p.Path, err)
+		// say which of the napp's files nobody could serve (in the log;
+		// the launcher line is errFilesFailed's fixed text)
+		return fmt.Errorf("%w: %s: %w", errFilesFailed, p.Path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)

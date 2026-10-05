@@ -182,7 +182,8 @@ func TestChildUnavailableOnLauncherSettings(t *testing.T) {
 func TestChildUnavailableOnlyForItsError(t *testing.T) {
 	n := setupChildUnavailable(t, errors.New("no display"))
 
-	if msg := launchAndWait(t, n); msg != "launch failed: no display" {
+	// any other host error reads as fixed copy; its text goes to the log
+	if msg := launchAndWait(t, n); msg != "launch failed: "+windowFallback {
 		t.Fatalf("FetchErr = %q", msg)
 	}
 	if err := OpenLauncherSettings(); err == nil {

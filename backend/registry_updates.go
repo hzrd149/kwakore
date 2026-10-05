@@ -292,13 +292,13 @@ func Update(id string) {
 
 	n, ok := InstalledNapp(id)
 	if !ok {
-		SetFetchErr("napp " + id + " is not installed")
+		SetFetchErr(failureLine("update failed: ", installFallback, id, errNotInstalled))
 		return
 	}
 
 	latest := newerVersion(n)
 	if latest == nil {
-		SetFetchErr("no update found for " + n.Label())
+		SetFetchErr("no update found for " + fetchErrName(n))
 		return
 	}
 
@@ -331,8 +331,7 @@ func applyUpdate(current, newer Napp) {
 	}
 	base, err := nappBaseDir(current.ID)
 	if err != nil {
-		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
-		SetFetchErr("update failed: " + err.Error())
+		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -347,8 +346,7 @@ func applyUpdate(current, newer Napp) {
 	// version running as it was (D-10)
 	staging, err := stageNappFiles(ctx, newer, base, servers)
 	if err != nil {
-		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
-		SetFetchErr("update failed: " + err.Error())
+		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
 		return
 	}
 
@@ -371,8 +369,7 @@ func applyUpdate(current, newer Napp) {
 	if err != nil {
 		stateMu.Unlock()
 		os.RemoveAll(staging)
-		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
-		SetFetchErr("update failed: " + err.Error())
+		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
 		return
 	}
 	state.InstalledNapps[current.ID] = newer

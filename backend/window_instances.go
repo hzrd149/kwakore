@@ -672,14 +672,14 @@ func Launch(napp Napp) {
 
 	go func() {
 		if _, err := launch(context.Background(), napp); err != nil {
-			log.Error().Err(err).Str("napp", napp.ID).Msg("launch failed")
 			if errors.Is(err, ErrWindowProgramUnavailable) {
+				log.Error().Err(err).Str("napp", napp.ID).Msg("launch failed")
 				// the notice is up already (launchWindow); the store line
 				// stays generic and never shows the host's detail
 				SetFetchErr(childUnavailableFetchErr)
 				return
 			}
-			SetFetchErr("launch failed: " + err.Error())
+			SetFetchErr(failureLine("launch failed: ", windowFallback, napp.ID, err))
 		}
 	}()
 }
@@ -690,7 +690,7 @@ func LaunchByID(id string) {
 		Launch(n)
 		return
 	}
-	SetFetchErr("napp " + id + " is not installed")
+	SetFetchErr(failureLine("launch failed: ", windowFallback, id, errNotInstalled))
 }
 
 // launch opens a napp window and returns its instance.
@@ -753,7 +753,7 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		present := installFiles()
 		stateMu.Unlock()
 		if !present {
-			return nil, fmt.Errorf("napp %s is not installed", id)
+			return nil, fmt.Errorf("napp %s: %w", id, errNotInstalled)
 		}
 	}
 
@@ -775,7 +775,7 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		stateMu.Unlock()
 		if !ok || !current.IsNapplet() || !present {
 			reclaimMu.Unlock()
-			return nil, fmt.Errorf("napplet %s is not installed", id)
+			return nil, fmt.Errorf("napplet %s: %w", id, errNotInstalled)
 		}
 		napp = current
 		unlockReclaim = reclaimMu.Unlock

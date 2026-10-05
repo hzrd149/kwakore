@@ -309,11 +309,11 @@ func RunShortcutEntries(entries []ShortcutEntry) error {
 	for _, entry := range entries {
 		napp, ok := InstalledNapp(entry.NappID)
 		if !ok {
-			SetFetchErr("shortcut napp " + entry.NappID + " is not installed")
+			SetFetchErr(failureLine("shortcut failed: ", shortcutFallback, entry.NappID, errNotInstalled))
 			continue
 		}
 		if err := openAndDispatch(ctx, napp, entry.Actions); err != nil {
-			SetFetchErr("shortcut failed on " + napp.Label() + ": " + err.Error())
+			SetFetchErr(failureLine("shortcut failed on "+fetchErrName(napp)+": ", shortcutFallback, napp.ID, err))
 		}
 	}
 	return nil

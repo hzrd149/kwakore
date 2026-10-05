@@ -369,14 +369,14 @@ func SetRelays(text string) {
 // button on a discovery card applies the newer version.
 func Install(id string) {
 	if !backend.InstallFromDiscovery(id) {
-		backend.SetFetchErr("nothing known about napp " + id)
+		backend.SetFetchErr("nothing known about that napp")
 	}
 }
 
 // TryNapplet opens a discovered napplet without installing it.
 func TryNapplet(id string) {
 	if !backend.TryNappletFromDiscovery(id) {
-		backend.SetFetchErr("nothing known about napplet " + id)
+		backend.SetFetchErr("nothing known about that napplet")
 	}
 }
 
@@ -392,7 +392,7 @@ func LookupAddress(input string) { backend.LookupAddress(input) }
 func OpenAddress(input string) {
 	go func() {
 		if err := backend.OpenAddress(input); err != nil {
-			backend.SetFetchErr("couldn't open that address: " + err.Error())
+			backend.SetFetchErr(backend.OpenAddressFailure(err))
 		}
 	}()
 }
