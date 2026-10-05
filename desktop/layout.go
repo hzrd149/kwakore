@@ -740,63 +740,91 @@ func layoutDevTab(
 	)
 }
 
-// layoutConfirmLogout is the dialog shown when the user hits "Log out":
-// logging out closes every open napp, so it deserves a second look.
-func layoutConfirmLogout(
+// layoutConfirm is a second-look dialog over the whole window: a title, a
+// body that says what is about to be lost, the destructive button and the
+// way out. The manager's logout and the store's napplet update and uninstall
+// all use it. maxWidth caps the text column (0 leaves it at the window's
+// width) so a long body wraps into a readable column instead of a long line.
+func layoutConfirm(
 	gtx layout.Context,
 	th *material.Theme,
+	title, body, yesLabel, noLabel string,
 	yesBtn,
 	noBtn *widget.Clickable,
+	maxWidth unit.Dp,
+) layout.Dimensions {
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layoutConfirmCard(gtx, th, title, body, yesLabel, noLabel, yesBtn, noBtn, maxWidth)
+	})
+}
+
+// layoutConfirmCard is layoutConfirm's card, apart from the centering so
+// tests can measure it.
+func layoutConfirmCard(
+	gtx layout.Context,
+	th *material.Theme,
+	title, body, yesLabel, noLabel string,
+	yesBtn,
+	noBtn *widget.Clickable,
+	maxWidth unit.Dp,
 ) layout.Dimensions {
 	p := currentTheme()
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		macro := op.Record(gtx.Ops)
-		dims := layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					t := material.H6(th, "Log out?")
-					t.Font.Weight = font.Bold
-					return t.Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					l := material.Body2(th, "This closes every open napp and forgets the key on this device.")
-					l.Color = p.subtle
-					return l.Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							pointer.CursorPointer.Add(gtx.Ops)
-							b := material.Button(th, yesBtn, "Log out")
-							b.Background = p.chipBg
-							b.Color = p.danger
-							return b.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							pointer.CursorPointer.Add(gtx.Ops)
-							b := material.Button(th, noBtn, "Cancel")
-							b.Background = p.chipBg
-							b.Color = p.chipFg
-							return b.Layout(gtx)
-						}),
-					)
-				}),
-			)
-		})
-		call := macro.Stop()
-		// card behind the dialog, like the prompt dialogs
-		bg := clip.RRect{
-			Rect: image.Rectangle{Max: image.Point{X: dims.Size.X, Y: dims.Size.Y}},
-			NW:   10, NE: 10, SW: 10, SE: 10,
+	macro := op.Record(gtx.Ops)
+	dims := layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if maxWidth > 0 {
+			if m := gtx.Dp(maxWidth); gtx.Constraints.Max.X > m {
+				gtx.Constraints.Max.X = m
+			}
+			if gtx.Constraints.Min.X > gtx.Constraints.Max.X {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			}
 		}
-		defer bg.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, p.card)
-		call.Add(gtx.Ops)
-		return dims
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				t := material.H6(th, title)
+				t.Font.Weight = font.Bold
+				return t.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, body)
+				l.Color = p.subtle
+				return l.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						// filled with danger and labeled in bg: danger text
+						// on a chip falls just under AA in light mode
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, yesBtn, yesLabel)
+						b.Background = p.danger
+						b.Color = p.bg
+						return b.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, noBtn, noLabel)
+						b.Background = p.chipBg
+						b.Color = p.chipFg
+						return b.Layout(gtx)
+					}),
+				)
+			}),
+		)
 	})
+	call := macro.Stop()
+	// card behind the dialog, like the prompt dialogs
+	bg := clip.RRect{
+		Rect: image.Rectangle{Max: image.Point{X: dims.Size.X, Y: dims.Size.Y}},
+		NW:   10, NE: 10, SW: 10, SE: 10,
+	}
+	defer bg.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, p.card)
+	call.Add(gtx.Ops)
+	return dims
 }
 
 func layoutProfile(

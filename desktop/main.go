@@ -397,7 +397,9 @@ func gioMain() {
 					if confirmNoBtn.Clicked(gtx) {
 						setConfirmLogout(false)
 					}
-					return layoutConfirmLogout(gtx, th, &confirmYesBtn, &confirmNoBtn)
+					return layoutConfirm(gtx, th, "Log out?",
+						"This closes every open napp and forgets the key on this device.",
+						"Log out", "Cancel", &confirmYesBtn, &confirmNoBtn, 0)
 				}
 
 				switch st.Phase {

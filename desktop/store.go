@@ -43,6 +43,11 @@ type storeState struct {
 	// discoveryQuery is the equivalent handoff from GNOME Shell's search
 	// provider when the user asks Verdana to show every matching result.
 	discoveryQuery string
+
+	// confirm is the napplet update or uninstall waiting for the user's
+	// answer (see store_confirm.go); while it is set the window shows only
+	// its dialog.
+	confirm *storeConfirm
 }
 
 var store storeState
@@ -263,6 +268,8 @@ func runStoreWindow() {
 		profileOpenBtns       []widget.Clickable
 		profileActionBtns     []widget.Clickable
 		profileUpdateBtns     []widget.Clickable
+		confirmYesBtn         widget.Clickable
+		confirmNoBtn          widget.Clickable
 	)
 	filterEd.SingleLine = true
 	installedFilterEd.SingleLine = true
@@ -291,6 +298,22 @@ func runStoreWindow() {
 				layoutStoreLoggedOut(gtx, th, &managerBtn, st.Phase == backend.PhaseLogin)
 				e.Frame(gtx.Ops)
 				continue
+			}
+
+			// a pending napplet update or uninstall replaces the whole
+			// window, the way the manager's logout dialog does
+			if pendingConfirm() != nil {
+				if confirmYesBtn.Clicked(gtx) {
+					confirmYes()
+				} else if confirmNoBtn.Clicked(gtx) {
+					confirmNo()
+				}
+				if c := pendingConfirm(); c != nil {
+					title, body, yesLabel, noLabel := c.dialogCopy()
+					layoutConfirm(gtx, th, title, body, yesLabel, noLabel, &confirmYesBtn, &confirmNoBtn, 420)
+					e.Frame(gtx.Ops)
+					continue
+				}
 			}
 
 			store.mu.Lock()
@@ -401,7 +424,7 @@ func runStoreWindow() {
 				if !acted {
 					for _, i := range instVis {
 						if installedUpdateBtns[i].Clicked(gtx) {
-							go backend.Update(st.Installed[i].ID)
+							requestUpdate(st.Installed[i], false, busy[st.Installed[i].ID])
 							acted = true
 						}
 					}
