@@ -702,7 +702,17 @@ var hex64JSON = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
 // (Phase 1 D-04) or anywhere outside the three directories. The expected
 // names come from keyFileName and napconfig.FileName, the helpers storage
 // and config write with, so live data can never be one byte off.
+//
+// It deletes nothing when the installed list cannot be trusted (see
+// sweepHeld): an empty list after a lost state.json would otherwise take
+// every installed napplet's data with it, and the recovery Phase 3 designed
+// (restore the state.json.corrupt-* copy, or fix the permissions, and
+// restart) would bring the napplets back without their data.
 func sweepNappletData() {
+	if why := sweepHeld(); why != "" {
+		log.Warn().Str("reason", why).Msg("not sweeping napplet storage and settings this run")
+		return
+	}
 	keepStorage := make(map[string]bool)
 	keepConfig := make(map[string]bool)
 	stateMu.Lock()
@@ -752,6 +762,33 @@ func sweepNappletData() {
 	if removed > 0 || failed > 0 {
 		log.Info().Int("removed", removed).Int("failed", failed).Msg("swept storage and settings no installed napplet owns")
 	}
+}
+
+// sweepHeld says why the installed list of this run cannot decide what to
+// sweep, or "" when it can:
+//   - this run found a state.json it could not read or parse (stateLost),
+//     or must not save state (stateSaveBlocked): the list is defaults
+//   - a state.json.corrupt-* copy is kept next to state.json: a run before
+//     this one started from defaults, so the list may be missing napplets
+//     the user can still bring back by restoring that copy. The sweep waits
+//     until the user restores or deletes it; orphan files only cost disk
+//     space until then, while a wrong sweep loses data for good.
+//   - the data dir cannot be listed, so the copies above cannot be ruled out
+func sweepHeld() string {
+	if stateLost.Load() || stateSaveBlocked.Load() {
+		return "state.json was not usable"
+	}
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return "could not list the data directory"
+	}
+	const prefix = "state.json.corrupt-" // corruptStatePath
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			return "a corrupt state.json copy is kept"
+		}
+	}
+	return ""
 }
 
 // broadcastStorage tells every other open window of the same napp about a

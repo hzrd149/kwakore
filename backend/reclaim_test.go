@@ -872,6 +872,80 @@ func TestStartupSweepIdempotent(t *testing.T) {
 	}
 }
 
+// everyThere fails for every fixture path the sweep removed.
+func everyThere(t *testing.T, dir string, f sweepFixture) {
+	t.Helper()
+	for _, p := range append(slices.Clone(f.keep), f.remove...) {
+		if _, err := os.Lstat(p); err != nil {
+			t.Errorf("swept %s: %v", strings.TrimPrefix(p, dir), err)
+		}
+	}
+}
+
+// TestStartupSweepHeldOnCorruptState: a state.json that does not parse is
+// set aside and the run starts from defaults, so its installed list is
+// empty. Nothing is swept, then or on the next start, while the corrupt copy
+// the user could restore is kept (CR-02).
+func TestStartupSweepHeldOnCorruptState(t *testing.T) {
+	dir := withFreshStateDir(t)
+	t.Cleanup(backgroundSyncs.Wait)
+	f := newSweepFixture(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"installed_napps": {`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	startupSequence()
+	if !stateLost.Load() {
+		t.Fatal("the corrupt state.json was not noticed")
+	}
+	everyThere(t, dir, f)
+
+	// the next start finds the defaults saved over state.json and the
+	// corrupt copy next to it: still nothing is swept
+	startupSequence()
+	if stateLost.Load() {
+		t.Fatal("the second start lost its state too")
+	}
+	everyThere(t, dir, f)
+
+	// once the user deletes the copy, the sweep runs again
+	copies, err := filepath.Glob(filepath.Join(dir, "state.json.corrupt-*"))
+	if err != nil || len(copies) != 1 {
+		t.Fatalf("corrupt copies = %v, %v", copies, err)
+	}
+	if err := os.Remove(copies[0]); err != nil {
+		t.Fatal(err)
+	}
+	startupSequence()
+	if _, err := os.Lstat(f.remove[0]); err == nil {
+		t.Fatal("the sweep stayed off after the corrupt copy was removed")
+	}
+}
+
+// TestStartupSweepHeldOnUnreadableState: a state.json that is there but
+// cannot be read is left alone and nothing is saved this run; its napplets
+// keep their storage and settings (CR-02).
+func TestStartupSweepHeldOnUnreadableState(t *testing.T) {
+	dir := withFreshStateDir(t)
+	t.Cleanup(backgroundSyncs.Wait)
+	f := newSweepFixture(t, dir)
+	// a directory in its place: reading it fails with something other than
+	// "does not exist", on every platform and as any user
+	statePathFixture := filepath.Join(dir, "state.json")
+	if err := os.Remove(statePathFixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(statePathFixture, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	startupSequence()
+	if !stateSaveBlocked.Load() {
+		t.Fatal("the unreadable state.json did not block saving")
+	}
+	everyThere(t, dir, f)
+}
+
 // TestStartSweepsBeforeWindows: Start sweeps synchronously, after the state
 // is loaded and the pre-address records are dropped, and before the
 // installed list is published (nothing can open a window before that).
