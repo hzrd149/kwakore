@@ -557,3 +557,152 @@ func TestRootAndDRootRulesApart(t *testing.T) {
 	Uninstall(named.ID)
 	backgroundSyncs.Wait()
 }
+
+// ─── updates, overwrites and deleted windows ─────────────────────
+
+func TestUpdateReclaimsSupersededHash(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	ci, tr := openWindowOf(t, v1)
+	old := seedNapplet(t, v1, ci.storageInstance)
+	// a window closed earlier this run, listed for reopening
+	closedInst := randomID()
+	putWindow(windowRecord{Instance: "closed-app", StorageInstance: closedInst, NappID: v1.ID})
+	t.Cleanup(func() { windows.Delete("closed-app") })
+	oldClosed := storeFileOf(t, v1, "instance", closedInst)
+	if err := storageSetQuota(oldClosed, "k", "v", nappletStorageQuota, errNappletQuota); err != nil {
+		t.Fatal(err)
+	}
+
+	v2 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v2", 20))
+	SetFetchErr("")
+	applyUpdate(v1, v2)
+	if got := fetchErr(); got != "" {
+		t.Fatalf("update failed: %s", got)
+	}
+	rec, _ := InstalledNapp(v1.ID)
+	if rec.ArtifactHash != v2.ArtifactHash || rec.ArtifactHash == v1.ArtifactHash {
+		t.Fatalf("installed hash %s after the update", rec.ArtifactHash)
+	}
+	updated := rec
+	fresh := seedNapplet(t, updated, randomID())
+
+	// the old version's window still runs: its files stay, and it can
+	// still write to them
+	assertFiles(t, "old version, window open", append(old.all(), oldClosed), true)
+	ready(t, ci, tr.recTransport, 1)
+	post(t, ci, map[string]any{"type": "storage.set", "id": "1", "key": "late", "value": "write"})
+	if res := tr.wait(t, "storage.set.result", 1); res["error"] != nil {
+		t.Fatalf("write from the old version's window: %v", res)
+	}
+	if v, ok := storedValue(t, old.shared, "late"); !ok || v != "write" {
+		t.Fatalf("the late write did not land in the old version's store: %q %v", v, ok)
+	}
+
+	WindowClosed(ci.instance)
+	assertFiles(t, "old version, window closed", append(old.all(), oldClosed), false)
+	assertFiles(t, "new version", fresh.all(), true)
+	if pendingCount() != 0 {
+		t.Errorf("%d reclaims still pending", pendingCount())
+	}
+}
+
+func TestInstallOverwriteReclaims(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	v2 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v2", 20))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	inst := randomID()
+	putWindow(windowRecord{Instance: "closed-app", StorageInstance: inst, NappID: v1.ID})
+	t.Cleanup(func() { windows.Delete("closed-app") })
+	old := seedNapplet(t, v1, inst)
+	fresh := seedNapplet(t, v2, inst)
+
+	if err := InstallNapp(v2); err != nil {
+		t.Fatal(err)
+	}
+	assertFiles(t, "overwritten version", old.all(), false)
+	assertFiles(t, "installed version", fresh.all(), true)
+
+	// installing the same version again reclaims nothing
+	if err := InstallNapp(v2); err != nil {
+		t.Fatal(err)
+	}
+	assertFiles(t, "reinstalled version", fresh.all(), true)
+	if pendingCount() != 0 {
+		t.Errorf("%d reclaims pending", pendingCount())
+	}
+}
+
+func TestWindowDeleteReclaimsInstanceFile(t *testing.T) {
+	newReclaimRig(t)
+	n := reclaimNappletFixture("paint", "1")
+	installWithDir(t, n)
+
+	for _, kind := range []string{"auxiliary", "failed closed"} {
+		ci, _ := openWindowOf(t, n)
+		if kind == "auxiliary" {
+			ci.auxiliary = true
+		} else {
+			ci.failedClosed.Store(true)
+		}
+		files := seedNapplet(t, n, ci.storageInstance)
+		WindowClosed(ci.instance)
+		if lookupWindow(ci.instance) != nil {
+			t.Errorf("%s: window record kept", kind)
+		}
+		if onDisk(files.instance) {
+			t.Errorf("%s: instance file left behind", kind)
+		}
+		if !onDisk(files.shared) || !onDisk(files.config) {
+			t.Errorf("%s: the version's shared data went with one window", kind)
+		}
+	}
+
+	// a window closed normally stays listed for reopening, with its data
+	kept, _ := openWindowOf(t, n)
+	keptFiles := seedNapplet(t, n, kept.storageInstance)
+	WindowClosed(kept.instance)
+	if lookupWindow(kept.instance) == nil || !onDisk(keptFiles.instance) {
+		t.Error("a reopenable window lost its record or its instance data")
+	}
+
+	// a storage instance a live window shares is not reclaimed with the
+	// record of another
+	live, _ := openWindowOf(t, n)
+	aux, _ := openWindowOf(t, n)
+	aux.auxiliary = true
+	aux.storageInstance = live.storageInstance
+	shared := seedNapplet(t, n, live.storageInstance)
+	WindowClosed(aux.instance)
+	if !onDisk(shared.instance) {
+		t.Error("an instance file a live window uses was reclaimed")
+	}
+}
+
+func TestWindowDeleteDeclinedTrialLeavesNothing(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	n := r.napplet("sketch", trialFile{"/index.html", "<!doctype html>sketch"})
+	s := newTrialSession(t, n)
+	if !s.finish(t, false) {
+		t.Fatal("no install prompt")
+	}
+	if lookupWindow(s.ci.instance) != nil {
+		t.Error("the declined trial's window record was kept")
+	}
+	for _, file := range []string{s.shared, s.instance, s.config} {
+		if onDisk(file) {
+			t.Errorf("the declined trial left %s on disk", filepath.Base(file))
+		}
+	}
+}

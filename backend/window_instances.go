@@ -558,8 +558,9 @@ func WindowClosed(instance string) {
 	if ci.auxiliary || failed {
 		// auxiliary windows are temporary helpers, not session windows,
 		// and a napplet window that failed closed would only fail again:
-		// don't keep either listed for reopening.
-		windows.Delete(ci.instance)
+		// don't keep either listed for reopening, nor the instance
+		// storage only a reopen could have reached (D-07).
+		forgetWindow(ci)
 	}
 	if ci.trial && !failed {
 		// a trial that never ran is nothing to offer for install: the user

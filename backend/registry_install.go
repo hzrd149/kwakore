@@ -92,6 +92,7 @@ func InstallNapp(n Napp) error {
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
+	previous, overwrote := state.InstalledNapps[n.ID]
 	state.InstalledNapps[n.ID] = n
 	saveState()
 	stateMu.Unlock()
@@ -101,6 +102,12 @@ func InstallNapp(n Napp) error {
 	// itself checks the installed records too, this only tidies up
 	if scope, err := nappletScope(n); err == nil {
 		cancelPendingReclaim(scope)
+	}
+	// an install over another version of the napplet (the store's Update
+	// button installs the newer event) supersedes it like an update does
+	// (D-05); reinstalling the same version reclaims nothing
+	if overwrote && previous.IsNapplet() && previous.ArtifactHash != n.ArtifactHash {
+		reclaimNapplet(previous, instancesForNapp(n.ID))
 	}
 
 	refreshInstalled()
@@ -386,7 +393,7 @@ func finishNappletTrial(ci *Instance) {
 	enqueuePrompt(p)
 	if !p.wait().OK {
 		dropTrial(ci)
-		windows.Delete(ci.instance)
+		forgetWindow(ci)
 		return
 	}
 
@@ -402,7 +409,7 @@ func finishNappletTrial(ci *Instance) {
 				Msg("refusing to install a trial whose latest version is invalid")
 			SetFetchErr("install failed: " + errUnavailable.Error())
 			dropTrial(ci)
-			windows.Delete(ci.instance)
+			forgetWindow(ci)
 			return
 		}
 		target = latest
@@ -412,7 +419,7 @@ func finishNappletTrial(ci *Instance) {
 	if err := InstallNapp(target); err != nil {
 		SetFetchErr("install failed: " + err.Error())
 		dropTrial(ci)
-		windows.Delete(ci.instance)
+		forgetWindow(ci)
 		return
 	}
 	installed, ok := InstalledNapp(target.ID)

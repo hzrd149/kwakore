@@ -336,13 +336,26 @@ func applyUpdate(current, newer Napp) {
 	newer.ID = current.ID
 	newer.UpdateAvailable = nil
 	stateMu.Lock()
+	previous, had := state.InstalledNapps[current.ID]
 	state.InstalledNapps[current.ID] = newer
 	delete(state.LastLaunched, current.ID)
 	saveState()
 	stateMu.Unlock()
+	if !had {
+		previous = current
+	}
 
 	// the previously available update is now the installed version
 	mergeUpdateState(current.ID, nil)
+
+	// the superseded version's storage and config are nobody's any more
+	// (D-05); a window still running it keeps them until it closes (D-24)
+	if scope, err := nappletScope(newer); err == nil {
+		cancelPendingReclaim(scope)
+	}
+	if previous.IsNapplet() && previous.ArtifactHash != newer.ArtifactHash {
+		reclaimNapplet(previous, instancesForNapp(current.ID))
+	}
 
 	refreshInstalled()
 	log.Info().Str("napp", current.ID).Msg("update complete")

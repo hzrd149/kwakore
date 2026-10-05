@@ -615,6 +615,34 @@ func reclaimStoreKey(key string) {
 	}
 }
 
+// forgetWindow deletes a closed window's record and, for a napplet window,
+// the instance store only that record could have reopened (D-07), unless a
+// live window or another record shares its storage instance. A trial's
+// stores were in memory, so nothing of it is on disk to remove.
+func forgetWindow(ci *Instance) {
+	windows.Delete(ci.instance)
+	if !ci.napp.IsNapplet() || ci.storageInstance == "" {
+		return
+	}
+	for _, rec := range windowRecords() {
+		if rec.StorageInstance == ci.storageInstance {
+			return
+		}
+	}
+	for _, other := range allInstances() {
+		if other != ci && other.storageInstance == ci.storageInstance {
+			return
+		}
+	}
+	key, err := nappletStorageKey(ci.napp, "instance", ci.storageInstance)
+	if err != nil {
+		return
+	}
+	reclaimMu.Lock()
+	defer reclaimMu.Unlock()
+	reclaimStoreKey(key)
+}
+
 // instancesForNapp is every storage instance a window of the napp has had
 // this run: the window records (closed windows listed for reopening
 // included) and the live windows.
