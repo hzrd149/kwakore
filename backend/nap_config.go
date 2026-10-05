@@ -83,8 +83,8 @@ func napConfigRegisterSchema(c *napCall) {
 		// subscribers see the values the new schema resolves to; this
 		// window's own included, after the result its registerSchema
 		// was waiting for
-		pushConfigValues(napp.ID)
-		settingsChanged(napp.ID)
+		pushConfigValues(scope)
+		settingsChanged(scope)
 	}
 }
 
@@ -156,35 +156,38 @@ func napConfigOpenSettings(c *napCall) {
 			section = ""
 		}
 	}
-	nappID := c.ci.napp.ID
-	// config.openSettings is reply-less: a panic here has nobody to answer
+	napp := c.ci.napp
+	// config.openSettings is reply-less: a panic here has nobody to answer.
+	// The window opens on this napplet's own scope, whatever version is
+	// installed.
 	safeGo(nil, "open settings", func() {
-		if err := openSettings(nappID, section); err != nil {
-			log.Warn().Err(err).Str("napplet", nappID).Msg("could not open napplet settings")
+		if err := openSettingsFor(napp, section); err != nil {
+			log.Warn().Err(err).Str("napplet", napp.ID).Msg("could not open napplet settings")
 		}
 	})
 }
 
-// pushConfigValues gives every subscribed window of a napp the values of its
-// own scope.
-func pushConfigValues(nappID string) {
-	for _, ci := range runningForNapp(nappID) {
-		if ci.nap == nil {
+// pushConfigValues gives every subscribed window of a scope its values.
+// Windows are matched by scope, not napp id: an old-version window and a
+// new-version window share an id, and neither may hear the other's values.
+func pushConfigValues(scope string) {
+	values, ok := napconfig.Values(scope)
+	if !ok {
+		return
+	}
+	env := map[string]any{"type": "config.values", "values": values}
+	for _, ci := range allInstances() {
+		if ci.nap == nil || !ci.napp.IsNapplet() {
 			continue
 		}
-		scope, err := nappletScope(ci.napp)
-		if err != nil {
-			continue
-		}
-		values, ok := napconfig.Values(scope)
-		if !ok {
+		if s, err := nappletScope(ci.napp); err != nil || s != scope {
 			continue
 		}
 		ci.nap.mu.Lock()
 		sub := ci.nap.configSubscribed
 		ci.nap.mu.Unlock()
 		if sub {
-			ci.napPush(map[string]any{"type": "config.values", "values": values})
+			ci.napPush(env)
 		}
 	}
 }

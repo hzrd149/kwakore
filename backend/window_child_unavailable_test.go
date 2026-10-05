@@ -172,7 +172,7 @@ func TestChildUnavailableOnLauncherSettings(t *testing.T) {
 	}
 	// the failed window is forgotten, so the next open tries again
 	settingsMu.Lock()
-	_, stuck := settingsWins[launcherSettingsID]
+	_, stuck := settingsWins[settingsKey{nappID: launcherSettingsID}]
 	settingsMu.Unlock()
 	if stuck {
 		t.Fatal("a failed settings window is still registered")

@@ -11,8 +11,11 @@ import (
 	"verdana/backend/napconfig"
 )
 
-// Settings windows: one per napp, owned by the launcher rather than by the
-// napp. The page in it (webview/napplet-settings.*) renders the napp's
+// Settings windows: one per napp and NAP-CONFIG scope, owned by the
+// launcher rather than by the napp. A napplet's settings window is bound to
+// the scope (address and artifact hash) of the version it was opened for, so
+// two versions of one napplet never share a window, and a save or reset in
+// one writes only that version's values. The page in it (webview/napplet-settings.*) renders the napp's
 // NAP-CONFIG schema as a form and lists what the user let it do; it talks
 // to the backend over the same wire protocol a napp window does ({t:"rpc"}
 // up, {t:"resp"} and {t:"eval"} down), through HandleSettingsMessage.
@@ -34,6 +37,10 @@ type SettingsSpec struct {
 type settingsWindow struct {
 	id     string
 	nappID string
+	// scope is the NAP-CONFIG scope the window edits (nappletScope of the
+	// napplet it was opened for); "" for napps and the launcher's window,
+	// which have no NAP-CONFIG section.
+	scope string
 
 	mu        sync.Mutex
 	transport Transport
@@ -41,9 +48,16 @@ type settingsWindow struct {
 	section   string
 }
 
+// settingsKey is what settings windows are kept by. A struct rather than a
+// joined string: a raw d may hold any byte, so no separator is safe.
+type settingsKey struct {
+	nappID string
+	scope  string
+}
+
 var (
 	settingsMu   sync.Mutex
-	settingsWins = map[string]*settingsWindow{} // by napp id
+	settingsWins = map[settingsKey]*settingsWindow{}
 	settingsSeq  int
 )
 
@@ -70,8 +84,9 @@ func (w *settingsWindow) attach(t Transport) {
 	}
 }
 
-// settingsNapp finds the napp a settings window is for: installed, a dev
-// napp, or one that only has a window open.
+// settingsNapp finds the napp an id names for its settings: installed, a
+// dev napp, or one that only has a window open. For a napplet that picks the
+// version (and so the NAP-CONFIG scope) the store's Settings button opens.
 func settingsNapp(nappID string) (Napp, bool) {
 	if n, ok := InstalledNapp(nappID); ok {
 		return n, true
@@ -87,42 +102,62 @@ func settingsNapp(nappID string) (Napp, bool) {
 	return Napp{}, false
 }
 
-// OpenSettings opens (or brings up) a napp's settings window.
-func OpenSettings(nappID string) error { return openSettings(nappID, "") }
+// OpenSettings opens (or brings up) a napp's settings window: the store's
+// Settings button. A napplet's opens on the installed version's scope.
+func OpenSettings(nappID string) error {
+	napp, ok := settingsNapp(nappID)
+	if !ok {
+		return errors.New("unknown napp")
+	}
+	return openSettingsFor(napp, "")
+}
 
 // OpenLauncherSettings opens the settings window with only the launcher's
 // own page in it (relays, Blossom servers).
-func OpenLauncherSettings() error { return openSettings(launcherSettingsID, "") }
+func OpenLauncherSettings() error {
+	return openSettingsWindow(settingsKey{nappID: launcherSettingsID}, "Verdana", "")
+}
 
 // OpenAbout opens the launcher's settings window on its About page.
-func OpenAbout() error { return openSettings(launcherSettingsID, "about") }
+func OpenAbout() error {
+	return openSettingsWindow(settingsKey{nappID: launcherSettingsID}, "Verdana", "about")
+}
 
 // launcherSettingsID stands for the launcher among the napp ids settings
 // windows are kept by; no napp id is empty.
 const launcherSettingsID = ""
 
 // OpenSettingsFor opens the settings of the napp in a window: the gear in
-// the window's chrome.
+// the window's chrome. A napplet's opens on that window's own scope, which
+// may be another version than the installed one.
 func OpenSettingsFor(instance string) error {
 	ci := lookupInstance(instance)
 	if ci == nil {
 		return errors.New("no such window")
 	}
-	return openSettings(ci.napp.ID, "")
+	return openSettingsFor(ci.napp, "")
 }
 
-func openSettings(nappID, section string) error {
-	name := "Verdana"
-	if nappID != launcherSettingsID {
-		napp, ok := settingsNapp(nappID)
-		if !ok {
-			return errors.New("unknown napp")
+// openSettingsFor opens the settings window of napp, bound to its NAP-CONFIG
+// scope. A napplet without a valid scope gets a window with no NAP-CONFIG
+// section rather than another version's (or a shared) scope.
+func openSettingsFor(napp Napp, section string) error {
+	key := settingsKey{nappID: napp.ID}
+	if napp.IsNapplet() {
+		scope, err := nappletScope(napp)
+		if err != nil {
+			log.Error().Err(err).Str("napplet", napp.ID).Msg("napplet settings have no config scope")
+		} else {
+			key.scope = scope
 		}
-		name = napp.Label()
 	}
+	return openSettingsWindow(key, napp.Label(), section)
+}
 
+func openSettingsWindow(key settingsKey, name, section string) error {
+	nappID := key.nappID
 	settingsMu.Lock()
-	if w, open := settingsWins[nappID]; open {
+	if w, open := settingsWins[key]; open {
 		settingsMu.Unlock()
 		w.mu.Lock()
 		t := w.transport
@@ -136,8 +171,8 @@ func openSettings(nappID, section string) error {
 		return nil
 	}
 	settingsSeq++
-	w := &settingsWindow{id: "settings-" + strconv.Itoa(settingsSeq), nappID: nappID, section: section}
-	settingsWins[nappID] = w
+	w := &settingsWindow{id: "settings-" + strconv.Itoa(settingsSeq), nappID: nappID, scope: key.scope, section: section}
+	settingsWins[key] = w
 	settingsMu.Unlock()
 
 	theme, vars := Theme()
@@ -151,8 +186,8 @@ func openSettings(nappID, section string) error {
 	})
 	if err != nil {
 		settingsMu.Lock()
-		if settingsWins[nappID] == w {
-			delete(settingsWins, nappID)
+		if settingsWins[key] == w {
+			delete(settingsWins, key)
 		}
 		settingsMu.Unlock()
 		if errors.Is(err, ErrWindowProgramUnavailable) {
@@ -181,9 +216,9 @@ func lookupSettingsWindow(window string) *settingsWindow {
 func SettingsClosed(window string) {
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
-	for id, w := range settingsWins {
+	for key, w := range settingsWins {
 		if w.id == window {
-			delete(settingsWins, id)
+			delete(settingsWins, key)
 			return
 		}
 	}
@@ -308,16 +343,24 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
 		}
-		if err := napconfig.Save(settingsScope(w), req.Values); err != nil {
+		if w.scope == "" {
+			// a napp, the launcher, or a napplet with no scope: nothing
+			// here has NAP-CONFIG values to save
+			return nil, errors.New("this napp has no settings")
+		}
+		if err := napconfig.Save(w.scope, req.Values); err != nil {
 			return nil, err
 		}
-		pushConfigValues(w.nappID)
+		pushConfigValues(w.scope)
 		return settingsLoadFor(w), nil
 	case "settings.reset":
-		if err := napconfig.Reset(settingsScope(w)); err != nil {
+		if w.scope == "" {
+			return nil, errors.New("this napp has no settings")
+		}
+		if err := napconfig.Reset(w.scope); err != nil {
 			return nil, err
 		}
-		pushConfigValues(w.nappID)
+		pushConfigValues(w.scope)
 		return settingsLoadFor(w), nil
 	case "settings.saveLauncher":
 		var req struct {
@@ -462,7 +505,8 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	if napp, ok := settingsNapp(w.nappID); ok {
 		out.Name = napp.Label()
 	}
-	if s, stored := napconfig.Snapshot(settingsScope(w)); s != nil {
+	// a napp, or a napplet with no scope, has no NAP-CONFIG section
+	if s, stored := napconfig.Snapshot(w.scope); w.scope != "" && s != nil {
 		out.Schema = s.Raw
 		// what the napplet would be delivered, minus the secrets, which
 		// the page only learns are set
@@ -478,27 +522,21 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	return out
 }
 
-// settingsScope is the NAP-CONFIG scope a settings window edits: the
-// scope of the napp it was opened for, or "" when it has none.
-func settingsScope(w *settingsWindow) string {
-	n, ok := settingsNapp(w.nappID)
-	if !ok || !n.IsNapplet() {
-		return ""
+// settingsChanged tells the open settings windows of a scope to load again:
+// its schema changed under them. Windows of other versions are left alone.
+func settingsChanged(scope string) {
+	if scope == "" {
+		return
 	}
-	scope, err := nappletScope(n)
-	if err != nil {
-		return ""
-	}
-	return scope
-}
-
-// settingsChanged tells a napp's open settings window to load again: its
-// schema changed under it.
-func settingsChanged(nappID string) {
 	settingsMu.Lock()
-	w := settingsWins[nappID]
+	var wins []*settingsWindow
+	for key, w := range settingsWins {
+		if key.scope == scope {
+			wins = append(wins, w)
+		}
+	}
 	settingsMu.Unlock()
-	if w != nil {
+	for _, w := range wins {
 		w.send(WireMsg{T: "eval", Code: "window.__settings_reload && window.__settings_reload()"})
 	}
 }

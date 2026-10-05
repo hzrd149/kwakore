@@ -399,7 +399,7 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 	case "nap.openSettings":
 		// the gear in the host page's chrome, never the napplet: its frame
 		// cannot reach these rpcs
-		return nil, openSettings(ci.napp.ID, "")
+		return nil, openSettingsFor(ci.napp, "")
 	}
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }
