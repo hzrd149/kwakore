@@ -1,10 +1,12 @@
 package osintegration
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Shared scratch for the OS shortcut file writers and readers
@@ -38,13 +40,34 @@ func shortcutSlug(name string) string {
 	return b.String() + "-" + fmt.Sprintf("%x", h.Sum32())
 }
 
+// refreshTimeout bounds one update-desktop-database run. It only rebuilds a
+// small cache, so one that takes longer is stuck and is killed.
+const refreshTimeout = 30 * time.Second
+
 // RefreshShortcutParent tells desktop environments to re-read a directory of
-// shortcut files, when that is a thing it does.
+// shortcut files, when that is a thing it does. It does not wait: callers run
+// on sync passes and host calls that should not stall on a cache rebuild. The
+// child is still waited for in the background, so each call does not leave a
+// zombie behind until the launcher exits, and it is killed if it outlives
+// refreshTimeout.
 func RefreshShortcutParent(dir string) {
 	if dir == "" {
 		return
 	}
-	if _, err := exec.LookPath("update-desktop-database"); err == nil {
-		exec.Command("update-desktop-database", dir).Start()
+	if _, err := exec.LookPath("update-desktop-database"); err != nil {
+		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+	cmd := exec.CommandContext(ctx, "update-desktop-database", dir)
+	if err := cmd.Start(); err != nil {
+		cancel()
+		log.Debug().Err(err).Str("dir", dir).Msg("could not start update-desktop-database")
+		return
+	}
+	go func() {
+		defer cancel()
+		if err := cmd.Wait(); err != nil {
+			log.Debug().Err(err).Str("dir", dir).Msg("update-desktop-database failed")
+		}
+	}()
 }

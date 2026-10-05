@@ -8,9 +8,10 @@ import (
 )
 
 // TestMain keeps update-desktop-database off PATH. RefreshShortcutParent
-// starts it without waiting, and it writes a cache into the test's
-// applications dir while t.TempDir is being removed, which fails the
-// cleanup at random.
+// starts it without waiting (it reaps it in the background), and it writes a
+// cache into the test's applications dir while t.TempDir is being removed,
+// which fails the cleanup at random. A test that needs it puts a stand-in on
+// PATH with t.Setenv.
 func TestMain(m *testing.M) {
 	os.Setenv("PATH", "")
 	os.Exit(m.Run())

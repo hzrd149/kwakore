@@ -5,8 +5,11 @@ package osintegration
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
 	"verdana/backend"
 )
 
@@ -117,5 +120,72 @@ func TestBundleShortcutHostileName(t *testing.T) {
 	}
 	if _, got, ok := parseDesktopShortcut(raw); !ok || got != token {
 		t.Fatalf("token read back as %q (ok=%v), want %q", got, ok, token)
+	}
+}
+
+// refreshChildren lists the pids of this process's children whose command
+// is update-desktop-database (the kernel keeps 15 bytes of it), running or
+// not yet reaped.
+func refreshChildren(t *testing.T) []int {
+	t.Helper()
+	stats, err := filepath.Glob("/proc/[0-9]*/stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := os.Getpid()
+	var out []int
+	for _, path := range stats {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // the process is gone
+		}
+		// pid (comm) state ppid ...; comm may hold spaces and parens
+		stat := string(data)
+		open, end := strings.IndexByte(stat, '('), strings.LastIndexByte(stat, ')')
+		if open < 0 || end < open {
+			continue
+		}
+		fields := strings.Fields(stat[end+1:])
+		if len(fields) < 2 || stat[open+1:end] != "update-desktop-" {
+			continue
+		}
+		if ppid, _ := strconv.Atoi(fields[1]); ppid != self {
+			continue
+		}
+		pid, _ := strconv.Atoi(strings.TrimSpace(stat[:open]))
+		out = append(out, pid)
+	}
+	return out
+}
+
+func TestRefreshShortcutParentReapsChild(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc")
+	}
+	// a stand-in that exits at once, so the only thing that can keep it in
+	// the process table is nobody waiting for it
+	bin := t.TempDir()
+	script := filepath.Join(bin, "update-desktop-database")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if left := refreshChildren(t); len(left) > 0 {
+		t.Fatalf("children left over before the test: %v", left)
+	}
+
+	for range 3 {
+		RefreshShortcutParent(t.TempDir())
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		left := refreshChildren(t)
+		if len(left) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("update-desktop-database was never reaped: pids %v", left)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
