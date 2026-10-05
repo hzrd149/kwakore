@@ -971,3 +971,65 @@ func TestTrialDeclinedForgetsTrialConfig(t *testing.T) {
 		t.Errorf("declining raised %v", n)
 	}
 }
+
+// installedHasData says whether the installed napplet's shared store holds
+// anything. A record with no valid scope has nothing to keep.
+func installedHasData(installed Napp) bool {
+	key, err := nappletStorageKey(installed, "shared", "")
+	if err != nil {
+		return false
+	}
+	file, err := nappletStorageFile(key)
+	if err != nil {
+		return false
+	}
+	s := storageFor(file)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data) > 0
+}
+
+// TestTrialPromotionNeverOverwritesAConcurrentWrite: a window of the
+// installed version writes its shared store while a closed trial of the
+// same version is promoted. Whichever lands first, the window's write is
+// never lost (D-25, WR-02).
+func TestTrialPromotionNeverOverwritesAConcurrentWrite(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	installed := installedFrom(t, evt)
+	installRecord(t, installed)
+
+	for i := 0; i < 50; i++ {
+		s := newTrialSession(t, installed)
+		// every round starts from an empty installed store
+		if _, err := storageClear(s.shared); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			if err := storageSetQuota(s.shared, "window", "mine", nappletStorageQuota, errNappletQuota); err != nil {
+				t.Error(err)
+			}
+		})
+		wg.Go(func() { promoteTrial(s.ci, installed, "") })
+		wg.Wait()
+
+		if v, ok := storedValue(t, s.shared, "window"); !ok || v != "mine" {
+			t.Fatalf("round %d: the window's write was overwritten (%q, %v)", i, v, ok)
+		}
+		if got := fetchErr(); got != "" {
+			t.Fatalf("round %d: launcher error %q", i, got)
+		}
+		// either the trial went in first and the window's key joined it,
+		// or the trial's data was discarded with the existing-data notice
+		_, trialKept := storedValue(t, s.shared, "drawing")
+		notices := trialDataNotice(installed)
+		if !trialKept && (len(notices) != 1 || notices[0].Detail != trialDataExistingData) {
+			t.Fatalf("round %d: trial data dropped without a notice: %+v", i, notices)
+		}
+		ls.mu.Lock()
+		ls.notices = nil
+		ls.mu.Unlock()
+	}
+}

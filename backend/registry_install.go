@@ -504,34 +504,19 @@ func promoteTrial(ci *Instance, installed Napp, errPrefix string) {
 		}
 		return
 	}
-	if installedHasData(installed) {
-		had := trialHasData(ci)
+	had := trialHasData(ci)
+	err := persistTrialStorage(ci)
+	switch {
+	case errors.Is(err, errInstalledHasData):
+		// checked and refused under the store's lock, in the same step
+		// that would have written (D-25)
 		dropTrial(ci)
 		if had {
 			raiseTrialDataDiscarded(ci.napp, trialDataExistingData)
 		}
-		return
-	}
-	if err := persistTrialStorage(ci); err != nil {
+	case err != nil:
 		SetFetchErr(errPrefix + err.Error())
 	}
-}
-
-// installedHasData says whether the installed napplet's shared store holds
-// anything. A record with no valid scope has nothing to keep.
-func installedHasData(installed Napp) bool {
-	key, err := nappletStorageKey(installed, "shared", "")
-	if err != nil {
-		return false
-	}
-	file, err := nappletStorageFile(key)
-	if err != nil {
-		return false
-	}
-	s := storageFor(file)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.data) > 0
 }
 
 // dropTrial discards a closed trial's data: its in-memory stores and, unless

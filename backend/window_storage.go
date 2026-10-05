@@ -408,24 +408,67 @@ func napStorageKeyList(ci *Instance, file string) []string {
 	return keys
 }
 
+// errInstalledHasData refuses to promote a trial over an installed napplet
+// whose shared store already holds data: that data is never overwritten
+// (D-25).
+var errInstalledHasData = errors.New("the installed napplet already has saved data")
+
 // persistTrialStorage promotes the in-memory stores from a successful trial
 // into the files the installed napplet uses: the trial keyed its stores by
 // the same file paths, so promotion writes them where they belong.
+//
+// The shared store goes first, and only when it is empty: the check and the
+// write happen under one hold of its lock, so a window of the installed
+// version that writes in between is never overwritten. When it holds data,
+// nothing is written and errInstalledHasData is returned. Any other store
+// that already holds data is left as it is too.
 func persistTrialStorage(ci *Instance) error {
-	for file, trial := range ci.trialStorage {
-		trial.mu.Lock()
-		data := make(map[string]string, len(trial.data))
-		for key, value := range trial.data {
-			data[key] = value
+	sharedFile := ""
+	if key, err := nappletStorageKey(ci.napp, "shared", ""); err == nil {
+		if file, err := nappletStorageFile(key); err == nil {
+			sharedFile = file
 		}
-		size := trial.size
-		trial.mu.Unlock()
+	}
+	files := make([]string, 0, len(ci.trialStorage)+1)
+	if sharedFile != "" {
+		files = append(files, sharedFile)
+	}
+	for file := range ci.trialStorage {
+		if file != sharedFile {
+			files = append(files, file)
+		}
+	}
+	for _, file := range files {
+		var data map[string]string
+		size := 0
+		if trial, ok := ci.trialStorage[file]; ok {
+			trial.mu.Lock()
+			data = make(map[string]string, len(trial.data))
+			for key, value := range trial.data {
+				data[key] = value
+			}
+			size = trial.size
+			trial.mu.Unlock()
+		}
 
 		permanent := storageFor(file)
 		permanent.mu.Lock()
 		if err := permanent.writableLocked(nil); err != nil {
 			permanent.mu.Unlock()
 			return err
+		}
+		if len(permanent.data) > 0 {
+			permanent.mu.Unlock()
+			if file == sharedFile {
+				return errInstalledHasData
+			}
+			continue
+		}
+		if data == nil {
+			// the trial never touched the shared store: it only had to
+			// be empty
+			permanent.mu.Unlock()
+			continue
 		}
 		if err := storagePersistLocked(file, data); err != nil {
 			permanent.mu.Unlock()
