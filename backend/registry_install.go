@@ -160,17 +160,38 @@ func tryNapplet(ctx context.Context, n Napp) error {
 }
 
 // TryNappletFromDiscovery resolves an uninstalled discovery result and opens
-// it ephemerally. Installed napplets are opened normally.
-func TryNappletFromDiscovery(id string) bool {
-	if n, ok := InstalledNapp(id); ok {
+// it ephemerally. Installed napplets are opened normally. The argument is a
+// launch token (what the macOS and Windows search launchers pass) or a raw id
+// (GNOME search, Android and launchers written by earlier builds); a token
+// that does not decode is refused and starts nothing.
+func TryNappletFromDiscovery(arg string) bool {
+	n, installed, ok := trialTarget(arg)
+	if !ok {
+		return false
+	}
+	if installed {
 		Launch(n)
-		return true
+	} else {
+		TryNapplet(n)
+	}
+	return true
+}
+
+// trialTarget resolves a --try-napplet argument to the napplet it names:
+// the installed napp if there is one, otherwise a discovered napplet.
+func trialTarget(arg string) (n Napp, installed bool, ok bool) {
+	id, err := launchIDFromToken(arg)
+	if err != nil {
+		log.Warn().Err(err).Int("length", len(arg)).Msg("refusing undecodable napplet trial token")
+		return Napp{}, false, false
+	}
+	if n, ok := InstalledNapp(id); ok {
+		return n, true, true
 	}
 	if n, ok := DiscoveredNapp(id); ok && n.IsNapplet() {
-		TryNapplet(n)
-		return true
+		return n, false, true
 	}
-	return false
+	return Napp{}, false, false
 }
 
 // finishNappletTrial asks whether a just-closed preview should become an

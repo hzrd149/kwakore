@@ -13,7 +13,8 @@ import (
 
 // SyncSearchNapplets writes tiny application bundles below ~/Applications.
 // Spotlight indexes application bundles automatically; activating one routes
-// the discovered ID through Verdana's trial-aware launch path.
+// the discovered napplet, as its launch token, through Verdana's
+// trial-aware launch path.
 func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -54,7 +55,7 @@ func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 		if err := writeAtomic(filepath.Join(appDir, "Contents", "Info.plist"), []byte(plist), 0644); err != nil {
 			return err
 		}
-		script := "#!/bin/sh\nexec " + shellQuote(exe) + " --background --try-napplet " + shellQuote(napplet.ID) + "\n"
+		script := "#!/bin/sh\nexec " + shellQuote(exe) + " --background --try-napplet " + shellQuote(napplet.Token) + "\n"
 		if err := writeAtomic(filepath.Join(macOSDir, "launch"), []byte(script), 0755); err != nil {
 			return err
 		}

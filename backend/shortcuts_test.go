@@ -77,3 +77,49 @@ func TestBundleTokenLegacyMixedFields(t *testing.T) {
 		t.Fatalf("mixed token parsed to %#v", entries)
 	}
 }
+
+// TestTryNappletTokenDecodes checks that --try-napplet with a launch token
+// reaches the same napplet as the raw id, and that a token which does not
+// decode is refused before anything is looked up or started.
+func TestTryNappletTokenDecodes(t *testing.T) {
+	resetResolved(t)
+	discovered := Napp{ID: hostileShortcutID, Format: FormatNapplet, Name: "hostile"}
+	installedID := "35129:" + strings.Repeat("cd", 32) + ":kept \\"
+	installed := Napp{ID: installedID, Format: FormatNapplet, Name: "kept"}
+	ls.mu.Lock()
+	ls.discovery = []Napp{discovered}
+	ls.mu.Unlock()
+	stateMu.Lock()
+	saved := state.InstalledNapps
+	state.InstalledNapps = map[string]Napp{installedID: installed}
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		state.InstalledNapps = saved
+		stateMu.Unlock()
+	})
+
+	for _, arg := range []string{LaunchToken(hostileShortcutID), hostileShortcutID} {
+		n, isInstalled, ok := trialTarget(arg)
+		if !ok || isInstalled || n.ID != hostileShortcutID {
+			t.Fatalf("trialTarget(%q) = %q installed=%v ok=%v, want the discovered napplet", arg, n.ID, isInstalled, ok)
+		}
+	}
+	// the installed napplet wins, and an id ending in a backslash decodes intact
+	for _, arg := range []string{LaunchToken(installedID), installedID} {
+		n, isInstalled, ok := trialTarget(arg)
+		if !ok || !isInstalled || n.ID != installedID {
+			t.Fatalf("trialTarget(%q) = %q installed=%v ok=%v, want the installed napplet", arg, n.ID, isInstalled, ok)
+		}
+	}
+
+	// undecodable tokens and unknown ids start nothing
+	for _, bad := range []string{"=", "=!!not-base64!!", "=a", LaunchToken("35129:" + strings.Repeat("ef", 32) + ":gone")} {
+		if _, _, ok := trialTarget(bad); ok {
+			t.Fatalf("trialTarget(%q) resolved", bad)
+		}
+		if TryNappletFromDiscovery(bad) {
+			t.Fatalf("TryNappletFromDiscovery(%q) started something", bad)
+		}
+	}
+}
