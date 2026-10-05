@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
 current_phase: 5
-current_phase_name: READY TO EXECUTE
+current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Phase 04 complete, ready to plan Phase 5
-last_updated: "2026-10-05T15:05:57.217Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-10-05T15:18:56.289Z"
 last_activity: 2026-10-05
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
-state_head: 767043c6e4f183f57863e7c7d5aee95f12f61a2c
+last_activity_desc: Completed 05-01 (address ids, (address, artifact) storage keying, D-23 drop)
+state_head: c64ad80bf55fdc1cc096bf5b173d3c0e46110850
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 28
+  completed_plans: 29
   percent: 50
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 
 ## Current Position
 
-Phase: 5 — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-05 — Phase 04 complete, transitioned to Phase 5
+Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
+Plan: 2 of 12 (05-01 complete)
+Status: Executing
+Last activity: 2026-10-05 — Completed 05-01-PLAN.md (address ids, (address, artifact) storage keying, D-23 drop)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -89,6 +89,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 04 P04 | 6min | 3 tasks | 10 files |
 | Phase 04 P05 | 18min | 3 tasks | 5 files |
 | Phase 04 P06 | 11min | 2 tasks | 2 files |
+| Phase 05 P01 | 12min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -169,6 +170,8 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-05: the adversarial fixture's load-delayed document holds its load with a 40 MB data: image (a busy wait never opens the C2 window); the WebKit smoke runs in CI under xvfb
 - [Phase 4]: 04-06: CONFORMANCE Non-Guarantee rows (5D-NG-*) claim nothing for an engine without a recorded run; WebView2/WKWebView/Android say unverified until the end-of-phase smoke
 - [Phase 4]: 04-06: DEC-5 records the document-start marker as a no-global deviation from NIP-5D Security 5; DEC-6 records the engine hardening scope
+- [Phase 5]: Phase 05-01: napplet ids are NIP-01 addresses; NAP-STORAGE keyed by address 0x00 artifactHash [0x00 instance], hex(sha256) file names in napplet-storage/, no fallback (internal-error)
+- [Phase 5]: Phase 05-01: pre-address napplet records dropped once at startup with session-only napplets-reinstall notice; napps/ untouched
 
 ### Pending Todos
 
@@ -201,6 +204,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-04T18:09:10.785Z
-Stopped at: Phase 04 complete, ready to plan Phase 5
+Last session: 2026-10-05T15:18:56.159Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
