@@ -2,7 +2,11 @@ package backend
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -294,7 +298,7 @@ func TestNapConfigReloadDropsSubscription(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready(t, ci, rec, 2)
-	if err := napconfig.Save(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
+	if err := napconfig.Save(configScopeOf(t, ci), map[string]any{"theme": "light"}); err != nil {
 		t.Fatal(err)
 	}
 	pushConfigValues(ci.napp.ID)
@@ -347,24 +351,103 @@ func TestNapConfigOpenSettings(t *testing.T) {
 	}
 }
 
-func TestNapConfigValuesSurviveUpdate(t *testing.T) {
+// configScopeOf is a window's NAP-CONFIG scope, which the test needs valid.
+func configScopeOf(t *testing.T, ci *Instance) string {
+	t.Helper()
+	scope, err := nappletScope(ci.napp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scope
+}
+
+// TestNapConfigResetsOnUpdate: NAP-CONFIG keys values on the napplet's
+// (dTag, aggregateHash) identity, so a value saved at artifact H1 is not
+// delivered to a window of the same napplet at H2, while H1's window still
+// gets it. This replaces TestNapConfigValuesSurviveUpdate (D-03, KEY-02).
+func TestNapConfigResetsOnUpdate(t *testing.T) {
 	setupConfigTest(t)
-	ci, rec := openNapplet(t, "cfg-update")
-	ci.napp.ArtifactHash = "old"
-	ready(t, ci, rec, 1)
-	post(t, ci, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
-	rec.wait(t, "config.registerSchema.result", 1)
-	if err := napconfig.Save(ci.napp.ID, map[string]any{"theme": "light"}); err != nil {
+	a, recA := openNapplet(t, "cfg-update")
+	a.napp.ArtifactHash = testArtifactOf("h1")
+	b, recB := openNapplet(t, "cfg-update")
+	b.napp.ArtifactHash = testArtifactOf("h2")
+	scopeA, scopeB := configScopeOf(t, a), configScopeOf(t, b)
+
+	ready(t, a, recA, 1)
+	post(t, a, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
+	recA.wait(t, "config.registerSchema.result", 1)
+	if err := napconfig.Save(scopeA, map[string]any{"theme": "light"}); err != nil {
 		t.Fatal(err)
 	}
 
-	next, rec2 := openNapplet(t, "cfg-update")
-	next.napp.ArtifactHash = "new"
-	ready(t, next, rec2, 1)
-	post(t, next, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
-	post(t, next, map[string]any{"type": "config.get", "id": "g"})
-	if v := rec2.wait(t, "config.values", 1)["values"].(map[string]any); v["theme"] != "light" {
-		t.Fatalf("settings lost across an update: %v", v)
+	// before H2 registers a schema it has none
+	ready(t, b, recB, 1)
+	post(t, b, map[string]any{"type": "config.get", "id": "g0"})
+	if e := recB.wait(t, "config.schemaError", 1); e["code"] != napconfig.CodeNoSchema {
+		t.Fatalf("H2 before its schema: %v", e)
+	}
+	post(t, b, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
+	if res := recB.wait(t, "config.registerSchema.result", 1); res["ok"] != true {
+		t.Fatalf("H2 registration: %v", res)
+	}
+	post(t, b, map[string]any{"type": "config.get", "id": "g"})
+	if v := recB.wait(t, "config.values", 1)["values"].(map[string]any); v["theme"] != "dark" {
+		t.Fatalf("H2 was delivered H1's settings: %v", v)
+	}
+	post(t, a, map[string]any{"type": "config.get", "id": "g"})
+	if v := recA.wait(t, "config.values", 1)["values"].(map[string]any); v["theme"] != "light" {
+		t.Fatalf("H1 lost its settings: %v", v)
+	}
+
+	// one hex-named file per scope, named as NAP-STORAGE names its keys
+	got := dirFiles(t, filepath.Join(dataDir, "config"))
+	want := []string{napconfig.FileName(scopeA), napconfig.FileName(scopeB)}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("config files: %v, want %v", got, want)
+	}
+	for _, scope := range []string{scopeA, scopeB} {
+		if napconfig.FileName(scope) != keyFileName(scope) {
+			t.Fatalf("napconfig and storage name %q differently", scope)
+		}
+	}
+}
+
+// TestNapConfigNeverFallsBackToAddress: a napplet whose artifact hash is
+// missing or malformed has no NAP-CONFIG scope; its requests fail
+// internal-error in their route's shape and no config file is written.
+func TestNapConfigNeverFallsBackToAddress(t *testing.T) {
+	for _, hash := range []string{"", "artifact-a", strings.ToUpper(testArtifactOf("x"))} {
+		t.Run(fmt.Sprintf("hash %q", hash), func(t *testing.T) {
+			setupConfigTest(t)
+			ci, rec := openNapplet(t, "cfg-no-hash")
+			ci.napp.ArtifactHash = hash
+			ready(t, ci, rec, 1)
+
+			post(t, ci, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
+			res := rec.wait(t, "config.registerSchema.result", 1)
+			if res["id"] != "r" || res["ok"] != false || res["error"] != napErrInternal || res["code"] != napErrInternal {
+				t.Fatalf("registerSchema: %v", res)
+			}
+			post(t, ci, map[string]any{"type": "config.subscribe"})
+			post(t, ci, map[string]any{"type": "config.get", "id": "g"})
+			e := rec.wait(t, "config.schemaError", 1)
+			if e["id"] != "g" || e["error"] != napErrInternal || e["code"] != napErrInternal {
+				t.Fatalf("get: %v", e)
+			}
+			// subscribe fails silently (its shape sends nothing): no values,
+			// no second schemaError
+			time.Sleep(20 * time.Millisecond)
+			if got := rec.find("config.values"); len(got) != 0 {
+				t.Fatalf("values without a scope: %v", got)
+			}
+			if got := rec.find("config.schemaError"); len(got) != 1 {
+				t.Fatalf("schemaErrors: %v", got)
+			}
+			if got := dirFiles(t, filepath.Join(dataDir, "config")); len(got) != 0 {
+				t.Fatalf("config/ got files: %v", got)
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ package napconfig
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,42 +215,171 @@ func TestConfigPruneSecretOrphans(t *testing.T) {
 	}
 }
 
+// withVersion is raw with its $version replaced.
+func withVersion(t *testing.T, raw []byte, v int) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["$version"] = v
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestConfigStore(t *testing.T) {
 	dir := t.TempDir()
 	Init(dir, zerolog.Nop())
-	const id = "35129:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:cfg"
-	if _, ok := Values(id); ok {
+	// scopes are opaque here: the backend builds them from the address and
+	// the artifact hash, and this package only hashes them into file names
+	const addr = "35129:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:cfg"
+	scope1 := addr + "\x00" + strings.Repeat("1", 64)
+	scope2 := addr + "\x00" + strings.Repeat("2", 64)
+	if _, ok := Values(scope1); ok {
 		t.Fatal("values before any schema")
 	}
 	raw, _ := os.ReadFile("testdata/config/full.json")
-	if changed, err := Register(id, "hash1", raw, nil); err != nil || !changed {
+	if changed, err := Register(scope1, raw, nil); err != nil || !changed {
 		t.Fatalf("register: %v %v", changed, err)
 	}
-	if changed, err := Register(id, "hash1", raw, nil); err != nil || changed {
+	if changed, err := Register(scope1, raw, nil); err != nil || changed {
 		t.Fatalf("re-register of the same schema: %v %v", changed, err)
 	}
 	v1 := uint64(1)
-	if _, err := Register(id, "hash1", raw, &v1); err == nil || err.Code != CodeVersionConflict {
+	if _, err := Register(scope1, raw, &v1); err == nil || err.Code != CodeVersionConflict {
 		t.Fatalf("version disagreeing with $version: %v", err)
 	}
-	if err := Save(id, map[string]any{"theme": "light", "apiKey": "sekret"}); err != nil {
+	// inside one scope, going back a version is a conflict
+	if _, err := Register(scope1, withVersion(t, raw, 1), nil); err == nil || err.Code != CodeVersionConflict {
+		t.Fatalf("older $version in the same scope: %v", err)
+	}
+	if err := Save(scope1, map[string]any{"theme": "light", "apiKey": "sekret"}); err != nil {
 		t.Fatal(err)
 	}
 
-	// a fresh process reads it back, and a new artifact keeps the values
-	Init(dir, zerolog.Nop())
-	if _, err := Register(id, "hash2", raw, nil); err != nil {
-		t.Fatal(err)
+	// a changed schema in the same scope keeps the values
+	if changed, err := Register(scope1, withVersion(t, raw, 3), nil); err != nil || !changed {
+		t.Fatalf("schema change: %v %v", changed, err)
 	}
-	vals, ok := Values(id)
-	if !ok || vals["theme"] != "light" || vals["apiKey"] != "sekret" {
+	if vals, ok := Values(scope1); !ok || vals["theme"] != "light" || vals["apiKey"] != "sekret" {
+		t.Fatalf("values lost on a schema change: %v %#v", ok, vals)
+	}
+
+	// a fresh process reads scope1 back; scope2 (another artifact hash of
+	// the same napplet) starts from defaults
+	Init(dir, zerolog.Nop())
+	if vals, ok := Values(scope1); !ok || vals["theme"] != "light" {
 		t.Fatalf("after reload: %v %#v", ok, vals)
 	}
-	if err := Reset(id); err != nil {
+	if _, err := Register(scope2, raw, nil); err != nil {
 		t.Fatal(err)
 	}
-	vals, _ = Values(id)
+	vals, ok := Values(scope2)
+	if !ok || vals["theme"] != "dark" || vals["apiKey"] != nil {
+		t.Fatalf("a new artifact inherited values: %v %#v", ok, vals)
+	}
+	if err := Reset(scope1); err != nil {
+		t.Fatal(err)
+	}
+	vals, _ = Values(scope1)
 	if vals["theme"] != "dark" || vals["apiKey"] != nil {
 		t.Fatalf("after reset: %#v", vals)
+	}
+
+	// every file is named hex(sha256(scope)).json, one per scope
+	entries, _ := os.ReadDir(dir)
+	names := map[string]bool{}
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if len(names) != 2 || !names[FileName(scope1)] || !names[FileName(scope2)] {
+		t.Fatalf("config files: %v", names)
+	}
+
+	// Forget removes the file and the cached entry
+	if err := Forget(scope1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, FileName(scope1))); !os.IsNotExist(err) {
+		t.Fatalf("forgotten scope's file: %v", err)
+	}
+	if _, ok := Values(scope1); ok {
+		t.Fatal("forgotten scope still has a schema")
+	}
+	if HasSchema(scope1) || !HasSchema(scope2) {
+		t.Fatal("Forget touched the wrong scope")
+	}
+	// forgetting twice is fine
+	if err := Forget(scope1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// isHexFileName is name being 64 lowercase hex digits and ".json".
+func isHexFileName(name string) bool {
+	base, ok := strings.CutSuffix(name, ".json")
+	if !ok || len(base) != 64 {
+		return false
+	}
+	for _, r := range base {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func TestConfigFileName(t *testing.T) {
+	// hex(sha256("")) is a fixed, known name; the backend's keyFileName
+	// produces the same for the same input
+	if got := FileName(""); got != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.json" {
+		t.Fatalf("FileName(\"\") = %q", got)
+	}
+	// no scope's characters reach the name, and case is not folded
+	seen := map[string]string{}
+	for _, scope := range []string{"35129:pk:a\x00" + strings.Repeat("f", 64), "../../etc/passwd", "A", "a", "x/y", "x\\y", "x_y"} {
+		n := FileName(scope)
+		if !isHexFileName(n) {
+			t.Fatalf("FileName(%q) = %q", scope, n)
+		}
+		if prev, dup := seen[n]; dup {
+			t.Fatalf("%q and %q share %s", prev, scope, n)
+		}
+		seen[n] = scope
+	}
+}
+
+// TestConfigEmptyScopeRefused: an empty scope is what a failed derivation
+// would look like, and it must never name a file every such call shares.
+func TestConfigEmptyScopeRefused(t *testing.T) {
+	dir := t.TempDir()
+	Init(dir, zerolog.Nop())
+	raw, _ := os.ReadFile("testdata/config/full.json")
+	if _, err := Register("", raw, nil); err == nil || err.Code != CodeInvalidSchema {
+		t.Fatalf("register with no scope: %v", err)
+	}
+	if _, ok := Values(""); ok {
+		t.Fatal("values with no scope")
+	}
+	if HasSchema("") {
+		t.Fatal("schema with no scope")
+	}
+	if s, _ := Snapshot(""); s != nil {
+		t.Fatal("snapshot with no scope")
+	}
+	if err := Save("", map[string]any{"theme": "light"}); err == nil {
+		t.Fatal("save with no scope")
+	}
+	if err := Reset(""); err == nil {
+		t.Fatal("reset with no scope")
+	}
+	if err := Forget(""); err == nil {
+		t.Fatal("forget with no scope")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("files written for an empty scope: %v", entries)
 	}
 }

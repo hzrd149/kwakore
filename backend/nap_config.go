@@ -9,8 +9,12 @@ import (
 // NAP-CONFIG: a napplet declares its settings as a JSON Schema, the launcher
 // renders them in the napp's settings window, and the napplet reads what the
 // user chose. The launcher is the only writer; nothing here takes a value
-// from the napplet. Schema and values live in the napconfig package, keyed by the
-// napp's address.
+// from the napplet. Schema and values live in the napconfig package, keyed by
+// nappletScope: the napplet's address and artifact hash, the same scope
+// NAP-STORAGE keys by. An update is a new artifact hash and so a fresh scope,
+// starting from the schema's defaults (NAP-CONFIG keys values on (dTag,
+// aggregateHash)). A napplet without a valid hash has no scope and every
+// config request fails internal-error; nothing falls back to the address.
 //
 // config.values payloads may carry secrets: they are never logged.
 
@@ -26,6 +30,20 @@ func init() {
 
 func configSchemaErrorEnv(code, msg string) map[string]any {
 	return map[string]any{"type": "config.schemaError", "code": code, "error": msg}
+}
+
+// configScope is the NAP-CONFIG scope of the calling napplet. Without one
+// the call fails internal-error in its route's shape: a napplet always has a
+// hash once installed or tried, so a missing one is a launcher bug, not
+// something to paper over with a shared key.
+func (c *napCall) configScope() (string, bool) {
+	scope, err := nappletScope(c.ci.napp)
+	if err != nil {
+		log.Error().Err(err).Str("napplet", c.ci.napp.ID).Str("type", c.Type).Msg("napplet config has no scope")
+		c.failWith(napErrInternal)
+		return "", false
+	}
+	return scope, true
 }
 
 func napConfigRegisterSchema(c *napCall) {
@@ -46,8 +64,12 @@ func napConfigRegisterSchema(c *napCall) {
 		v := uint64(*r.Version)
 		version = &v
 	}
+	scope, ok := c.configScope()
+	if !ok {
+		return
+	}
 	napp := c.ci.napp
-	changed, cerr := napconfig.Register(napp.ID, napp.ArtifactHash, r.Schema, version)
+	changed, cerr := napconfig.Register(scope, r.Schema, version)
 	if cerr != nil {
 		log.Info().Str("napplet", napp.ID).Str("code", cerr.Code).Str("error", cerr.Msg).Msg("napplet config schema rejected")
 		c.reply(map[string]any{"ok": false, "code": cerr.Code, "error": cerr.Msg})
@@ -67,7 +89,11 @@ func napConfigRegisterSchema(c *napCall) {
 }
 
 func napConfigGet(c *napCall) {
-	values, ok := napconfig.Values(c.ci.napp.ID)
+	scope, ok := c.configScope()
+	if !ok {
+		return
+	}
+	values, ok := napconfig.Values(scope)
 	if !ok {
 		// Go still sends the request's id, but the pristine shim routes
 		// config.schemaError only to onSchemaError, so a get made before
@@ -81,11 +107,15 @@ func napConfigGet(c *napCall) {
 }
 
 func napConfigSubscribe(c *napCall) {
+	scope, ok := c.configScope()
+	if !ok {
+		return
+	}
 	s := c.ci.nap
 	s.mu.Lock()
 	s.configSubscribed = true
 	s.mu.Unlock()
-	values, ok := napconfig.Values(c.ci.napp.ID)
+	values, ok := napconfig.Values(scope)
 	if !ok {
 		// the subscription stands: the first values arrive once a schema
 		// is registered
@@ -119,7 +149,10 @@ func napConfigOpenSettings(c *napCall) {
 	if section != "" {
 		// an undeclared section is ignored silently: the window opens
 		// at the top, and the napplet learns nothing either way
-		if sch, _ := napconfig.Snapshot(c.ci.napp.ID); sch == nil || !sch.Sections[section] {
+		scope, err := nappletScope(c.ci.napp)
+		if err != nil {
+			section = ""
+		} else if sch, _ := napconfig.Snapshot(scope); sch == nil || !sch.Sections[section] {
 			section = ""
 		}
 	}
@@ -132,22 +165,26 @@ func napConfigOpenSettings(c *napCall) {
 	})
 }
 
-// pushConfigValues gives every subscribed window of a napp its values.
+// pushConfigValues gives every subscribed window of a napp the values of its
+// own scope.
 func pushConfigValues(nappID string) {
-	values, ok := napconfig.Values(nappID)
-	if !ok {
-		return
-	}
-	env := map[string]any{"type": "config.values", "values": values}
 	for _, ci := range runningForNapp(nappID) {
 		if ci.nap == nil {
+			continue
+		}
+		scope, err := nappletScope(ci.napp)
+		if err != nil {
+			continue
+		}
+		values, ok := napconfig.Values(scope)
+		if !ok {
 			continue
 		}
 		ci.nap.mu.Lock()
 		sub := ci.nap.configSubscribed
 		ci.nap.mu.Unlock()
 		if sub {
-			ci.napPush(env)
+			ci.napPush(map[string]any{"type": "config.values", "values": values})
 		}
 	}
 }

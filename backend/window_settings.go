@@ -308,13 +308,13 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
 		}
-		if err := napconfig.Save(w.nappID, req.Values); err != nil {
+		if err := napconfig.Save(settingsScope(w), req.Values); err != nil {
 			return nil, err
 		}
 		pushConfigValues(w.nappID)
 		return settingsLoadFor(w), nil
 	case "settings.reset":
-		if err := napconfig.Reset(w.nappID); err != nil {
+		if err := napconfig.Reset(settingsScope(w)); err != nil {
 			return nil, err
 		}
 		pushConfigValues(w.nappID)
@@ -462,7 +462,7 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	if napp, ok := settingsNapp(w.nappID); ok {
 		out.Name = napp.Label()
 	}
-	if s, stored := napconfig.Snapshot(w.nappID); s != nil {
+	if s, stored := napconfig.Snapshot(settingsScope(w)); s != nil {
 		out.Schema = s.Raw
 		// what the napplet would be delivered, minus the secrets, which
 		// the page only learns are set
@@ -476,6 +476,20 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 		}
 	}
 	return out
+}
+
+// settingsScope is the NAP-CONFIG scope a settings window edits: the
+// scope of the napp it was opened for, or "" when it has none.
+func settingsScope(w *settingsWindow) string {
+	n, ok := settingsNapp(w.nappID)
+	if !ok || !n.IsNapplet() {
+		return ""
+	}
+	scope, err := nappletScope(n)
+	if err != nil {
+		return ""
+	}
+	return scope
 }
 
 // settingsChanged tells a napp's open settings window to load again: its
