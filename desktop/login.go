@@ -218,7 +218,7 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 	// state.json usually lands the user here
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutNotices(gtx, th, st.Notices)
+			return layoutNotices(gtx, th, managerNotices, st.Notices)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return material.List(th, &s.list).Layout(gtx, len(rows), func(gtx layout.Context, i int) layout.Dimensions {

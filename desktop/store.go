@@ -568,6 +568,17 @@ func runStoreWindow() {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layoutStoreHeader(gtx, th, &backBtn, &viewBtns, &launcherSettingsBtn, page, view, len(st.Installed), trayUserLabel(st.ProfileName, st.Pubkey), st.ProfilePicture)
 				}),
+				// the napplet notices (a failed Try, unsupported features,
+				// discarded trial data) also show here, across the full
+				// content width on lists and pages alike, since the Try or
+				// launch behind them usually started in the store. With
+				// none it takes no space. It is never drawn under a pending
+				// confirmation: that branch above replaces the whole frame.
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Left: unit.Dp(24), Right: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layoutNotices(gtx, th, storeNotices, storeNoticeFilter(st.Notices))
+					})
+				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Left: unit.Dp(24), Right: unit.Dp(24), Bottom: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						switch {

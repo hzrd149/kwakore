@@ -37,21 +37,20 @@ func noticeTestContext() layout.Context {
 	}
 }
 
-// resetNoticeUI gives a test a fresh notice stack state.
-func resetNoticeUI(t *testing.T) {
+// resetNoticeUI gives a test a fresh state for one window's notice stack,
+// putting the old one back when the test ends.
+func resetNoticeUI(t *testing.T, ns *noticeState) {
 	t.Helper()
-	oldWidgets, oldCopied := noticeUI.widgets, noticeUI.copied
-	noticeUI.widgets = map[string]*noticeWidget{}
-	noticeUI.copied = map[string]bool{}
-	t.Cleanup(func() {
-		noticeUI.widgets, noticeUI.copied = oldWidgets, oldCopied
-	})
+	old := *ns
+	*ns = *newNoticeState()
+	t.Cleanup(func() { *ns = old })
 }
 
+// layoutNoticesHeight lays the manager's notice stack out once.
 func layoutNoticesHeight(t *testing.T, notices []backend.Notice) image.Point {
 	t.Helper()
 	gtx := noticeTestContext()
-	return layoutNotices(gtx, noticeTestTheme(), notices).Size
+	return layoutNotices(gtx, noticeTestTheme(), managerNotices, notices).Size
 }
 
 var (
@@ -79,7 +78,7 @@ var (
 // ─── notice stack ───────────────────────────────────────────────────────
 
 func TestNoticeStackEmptyTakesNoSpace(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	// no card and no 16dp spacer: the screens look exactly as before
 	for _, notices := range [][]backend.Notice{nil, {}} {
 		if size := layoutNoticesHeight(t, notices); size != (image.Point{}) {
@@ -89,7 +88,7 @@ func TestNoticeStackEmptyTakesNoSpace(t *testing.T) {
 }
 
 func TestNoticeStackThreeFitTheManagerWindow(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	// given out of order on purpose: the stack draws what the backend sends
 	size := layoutNoticesHeight(t, []backend.Notice{testKeyringNotice, testChildNotice, testCorruptNotice})
 	if size.Y <= 0 {
@@ -108,7 +107,7 @@ func TestNoticeStackThreeFitTheManagerWindow(t *testing.T) {
 }
 
 func TestNoticeLongPathWrapsInsteadOfClipping(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	short := layoutNoticesHeight(t, []backend.Notice{testCorruptNotice})
 
 	long := testCorruptNotice
@@ -124,7 +123,7 @@ func TestNoticeLongPathWrapsInsteadOfClipping(t *testing.T) {
 }
 
 func TestNoticeLongTextWraps(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	short := layoutNoticesHeight(t, []backend.Notice{testChildNotice})
 	long := testChildNotice
 	long.Title = strings.Repeat("Napp windows can't open ", 20)
@@ -136,7 +135,7 @@ func TestNoticeLongTextWraps(t *testing.T) {
 }
 
 func TestNoticeRepeatIDRendersOnce(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	once := layoutNoticesHeight(t, []backend.Notice{testChildNotice})
 	twice := layoutNoticesHeight(t, []backend.Notice{testChildNotice, testChildNotice})
 	if once != twice {
@@ -145,7 +144,7 @@ func TestNoticeRepeatIDRendersOnce(t *testing.T) {
 }
 
 func TestNoticeDismissRunsOffTheFrame(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	release := make(chan struct{})
 	called := make(chan string, 1)
 	old := onDismissNotice
@@ -158,9 +157,9 @@ func TestNoticeDismissRunsOffTheFrame(t *testing.T) {
 
 	th := noticeTestTheme()
 	notices := []backend.Notice{testChildNotice, testKeyringNotice}
-	layoutNotices(noticeTestContext(), th, notices)
-	noticeWidgetFor(testKeyringNotice.ID).dismiss.Click()
-	layoutNotices(noticeTestContext(), th, notices) // returns although the call blocks
+	layoutNotices(noticeTestContext(), th, managerNotices, notices)
+	managerNotices.widgetFor(testKeyringNotice.ID).dismiss.Click()
+	layoutNotices(noticeTestContext(), th, managerNotices, notices) // returns although the call blocks
 
 	select {
 	case id := <-called:
@@ -173,22 +172,22 @@ func TestNoticeDismissRunsOffTheFrame(t *testing.T) {
 }
 
 func TestNoticeCopyPathMarksCopied(t *testing.T) {
-	resetNoticeUI(t)
+	resetNoticeUI(t, managerNotices)
 	th := noticeTestTheme()
 	notices := []backend.Notice{testCorruptNotice}
-	layoutNotices(noticeTestContext(), th, notices)
-	noticeWidgetFor(testCorruptNotice.ID).copyPath.Click()
-	layoutNotices(noticeTestContext(), th, notices)
-	if !noticeUI.copied[testCorruptNotice.ID] {
+	layoutNotices(noticeTestContext(), th, managerNotices, notices)
+	managerNotices.widgetFor(testCorruptNotice.ID).copyPath.Click()
+	layoutNotices(noticeTestContext(), th, managerNotices, notices)
+	if !managerNotices.copied[testCorruptNotice.ID] {
 		t.Fatal("Copy path did not mark the notice copied")
 	}
 	// the chip keeps reading Copied after the card goes and comes back
-	layoutNotices(noticeTestContext(), th, nil)
-	if !noticeUI.copied[testCorruptNotice.ID] {
+	layoutNotices(noticeTestContext(), th, managerNotices, nil)
+	if !managerNotices.copied[testCorruptNotice.ID] {
 		t.Fatal("the copied mark did not last for the process")
 	}
-	if len(noticeUI.widgets) != 0 {
-		t.Fatalf("widgets of gone notices were kept: %v", noticeUI.widgets)
+	if len(managerNotices.widgets) != 0 {
+		t.Fatalf("widgets of gone notices were kept: %v", managerNotices.widgets)
 	}
 }
 
@@ -444,5 +443,118 @@ func TestNoticePendingPrimaryAfterLoadingStillOpens(t *testing.T) {
 	}
 	if pending() {
 		t.Fatal("primary still pending after it was shown")
+	}
+}
+
+// ─── store notice strip (05 S5) ─────────────────────────────────────────
+
+var (
+	testTrialFailedNotice = backend.Notice{
+		ID:     "napplet-trial-failed",
+		Kind:   "error",
+		Title:  "Couldn't try Clock",
+		Detail: "One of its files couldn't be downloaded or didn't match its manifest, so Verdana didn't open it. Check your connection and try again.",
+	}
+	testRequiresNotice = backend.Notice{
+		ID:     "napplet-requires:35129:" + testConfirmPubkey + ":clock",
+		Kind:   "warning",
+		Title:  "Unsupported features in Clock",
+		Detail: "Clock asks for features Verdana doesn't support: media; it may not work.",
+	}
+	testTrialDataNotice = backend.Notice{
+		ID:     "trial-data-discarded:35129:" + testConfirmPubkey + ":clock",
+		Kind:   "warning",
+		Title:  "Trial data from Clock wasn't kept",
+		Detail: "It was saved by a different version than the one now installed, so Verdana discarded it.",
+	}
+)
+
+func TestStoreNoticeStripFilters(t *testing.T) {
+	launcher := []backend.Notice{
+		testChildNotice,
+		{ID: "napplet-hardening", Kind: "error", Title: "x"},
+		testKeyringNotice,
+		testCorruptNotice,
+		{ID: "napplets-reinstall", Kind: "warning", Title: "x"},
+	}
+	// in backend order, with launcher-level notices mixed in
+	all := []backend.Notice{
+		launcher[0], launcher[1], testTrialFailedNotice, launcher[3],
+		launcher[2], launcher[4], testRequiresNotice, testTrialDataNotice,
+	}
+	got := storeNoticeFilter(all)
+	want := []string{testTrialFailedNotice.ID, testRequiresNotice.ID, testTrialDataNotice.ID}
+	if len(got) != len(want) {
+		t.Fatalf("store strip kept %d notices (%v), want %v", len(got), got, want)
+	}
+	for i, n := range got {
+		if n.ID != want[i] {
+			t.Fatalf("store strip[%d] = %q, want %q", i, n.ID, want[i])
+		}
+	}
+	// launcher notices stay manager-only, and a bare prefix id is no match
+	if got := storeNoticeFilter(append(launcher, backend.Notice{ID: "napplet-requires"})); len(got) != 0 {
+		t.Fatalf("store strip kept launcher notices: %v", got)
+	}
+}
+
+func TestStoreNoticeStripEmptyTakesNoSpace(t *testing.T) {
+	ns := newNoticeState()
+	gtx := noticeTestContext()
+	gtx.Constraints = layout.Exact(image.Pt(952, 600)) // the store's 1000dp less its 24dp insets
+	only := storeNoticeFilter([]backend.Notice{testChildNotice, testKeyringNotice, testCorruptNotice})
+	if size := layoutNotices(gtx, noticeTestTheme(), ns, only).Size; size != (image.Point{}) {
+		t.Fatalf("store strip with only launcher notices has size %v, want zero", size)
+	}
+	gtx = noticeTestContext()
+	gtx.Constraints = layout.Exact(image.Pt(952, 600))
+	size := layoutNotices(gtx, noticeTestTheme(), ns, storeNoticeFilter([]backend.Notice{testRequiresNotice}))
+	if size.Size.Y <= 0 || size.Size.X != 952 {
+		t.Fatalf("store strip with a requires notice has size %v, want full width and some height", size.Size)
+	}
+}
+
+func TestNoticeStatesIndependent(t *testing.T) {
+	called := make(chan string, 4)
+	old := onDismissNotice
+	onDismissNotice = func(id string) { called <- id }
+	t.Cleanup(func() { onDismissNotice = old })
+
+	manager, storeSide := newNoticeState(), newNoticeState()
+	th := noticeTestTheme()
+	notices := []backend.Notice{testTrialFailedNotice}
+
+	layoutNotices(noticeTestContext(), th, manager, notices)
+	if len(manager.widgets) != 1 || len(storeSide.widgets) != 0 {
+		t.Fatalf("a manager frame touched the store's widgets: manager %v, store %v", manager.widgets, storeSide.widgets)
+	}
+	layoutNotices(noticeTestContext(), th, storeSide, notices)
+	if manager.widgetFor(testTrialFailedNotice.ID) == storeSide.widgetFor(testTrialFailedNotice.ID) {
+		t.Fatal("both windows share one notice widget")
+	}
+
+	// Dismiss in the store reaches the backend once; the manager's card
+	// was not clicked
+	storeSide.widgetFor(testTrialFailedNotice.ID).dismiss.Click()
+	layoutNotices(noticeTestContext(), th, storeSide, notices)
+	layoutNotices(noticeTestContext(), th, manager, notices)
+	select {
+	case id := <-called:
+		if id != testTrialFailedNotice.ID {
+			t.Fatalf("dismissed %q, want %q", id, testTrialFailedNotice.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Dismiss in the store never reached the backend")
+	}
+	select {
+	case id := <-called:
+		t.Fatalf("a second dismissal reached the backend: %q", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// once the backend drops it, each window forgets its own widgets
+	layoutNotices(noticeTestContext(), th, storeSide, nil)
+	if len(storeSide.widgets) != 0 || len(manager.widgets) != 1 {
+		t.Fatalf("store frame cleared the wrong widgets: manager %v, store %v", manager.widgets, storeSide.widgets)
 	}
 }

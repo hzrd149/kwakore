@@ -23,8 +23,10 @@ import (
 // login and main screens: launcher-level problems the user should know about,
 // such as a login kept in a file because the keyring was unavailable, a
 // state.json that could not be read, or napp windows that failed closed.
-// The backend owns the list, its order and its copy (State.Notices); this
-// file only draws it and turns clicks into backend calls.
+// The store window draws the napplet-scoped ones too, in a strip of the same
+// cards (storeNoticeFilter). The backend owns the list, its order and its
+// copy (State.Notices); this file only draws it and turns clicks into
+// backend calls.
 
 // noticeStateCorruptPrefix starts the ID of the corrupt-state notice, the
 // only one with a path to copy.
@@ -36,16 +38,52 @@ type noticeWidget struct {
 	copyPath widget.Clickable
 }
 
-// noticeUI is the notice stack's own state. Only the manager window's frame
-// goroutine touches it, and there is at most one manager window at a time.
-// copied remembers the notices whose path was copied, so their chip reads
-// "Copied" for the rest of the process.
-var noticeUI = struct {
+// noticeState is one window's notice stack state. The manager and the store
+// run separate frame goroutines, so each owns one and only its own frames
+// touch it: managerNotices is used by the manager's main and login screens,
+// storeNotices by the store window. copied remembers the notices whose path
+// was copied, so their chip reads "Copied" for the rest of the process.
+type noticeState struct {
 	widgets map[string]*noticeWidget
 	copied  map[string]bool
-}{
-	widgets: map[string]*noticeWidget{},
-	copied:  map[string]bool{},
+}
+
+func newNoticeState() *noticeState {
+	return &noticeState{
+		widgets: map[string]*noticeWidget{},
+		copied:  map[string]bool{},
+	}
+}
+
+var (
+	managerNotices = newNoticeState()
+	storeNotices   = newNoticeState()
+)
+
+// The napplet-scoped notices (05-UI-SPEC S4) are also shown in the store
+// window, where the Try or launch that raised them usually happened. These
+// ids are the backend's; the desktop keeps its own copy, as it does for
+// noticeStateCorruptPrefix.
+const (
+	noticeTrialFailed     = "napplet-trial-failed"
+	noticeRequiresPrefix  = "napplet-requires:"
+	noticeTrialDataPrefix = "trial-data-discarded:"
+)
+
+// storeNoticeFilter keeps the notices the store strip shows, in the order
+// given: the trial failure and the per-napplet requires and trial-data
+// warnings. Launcher-level notices (keyring, corrupt state, the window
+// program, hardening, reinstall) stay in the manager alone.
+func storeNoticeFilter(notices []backend.Notice) []backend.Notice {
+	var out []backend.Notice
+	for _, n := range notices {
+		if n.ID == noticeTrialFailed ||
+			strings.HasPrefix(n.ID, noticeRequiresPrefix) ||
+			strings.HasPrefix(n.ID, noticeTrialDataPrefix) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // onDismissNotice is what Dismiss runs, off the frame goroutine. Tests swap
@@ -68,10 +106,12 @@ func chipButton(th *material.Theme, btn *widget.Clickable, label string) layout.
 }
 
 // layoutNotices draws the notices in the order given (the backend sorts
-// them), at most one card per ID, 8dp apart and with 16dp below the last.
-// With no notices it draws nothing and takes no space, so the screens below
-// look exactly as they do without it. Clicks are handled here, in the frame.
-func layoutNotices(gtx layout.Context, th *material.Theme, notices []backend.Notice) layout.Dimensions {
+// them), at most one card per ID, 8dp apart and with 16dp below the last,
+// keeping its widgets in ns, the calling window's state. With no notices it
+// draws nothing and takes no space, so the screens below look exactly as
+// they do without it. Clicks are handled here, in the frame; Dismiss goes
+// to the backend, so the card leaves every window on its next frame.
+func layoutNotices(gtx layout.Context, th *material.Theme, ns *noticeState, notices []backend.Notice) layout.Dimensions {
 	seen := make(map[string]bool, len(notices))
 	shown := make([]backend.Notice, 0, len(notices))
 	for _, n := range notices {
@@ -82,9 +122,9 @@ func layoutNotices(gtx layout.Context, th *material.Theme, notices []backend.Not
 		shown = append(shown, n)
 	}
 	// forget the widgets of notices that are gone, but not what was copied
-	for id := range noticeUI.widgets {
+	for id := range ns.widgets {
 		if !seen[id] {
-			delete(noticeUI.widgets, id)
+			delete(ns.widgets, id)
 		}
 	}
 	if len(shown) == 0 {
@@ -92,7 +132,7 @@ func layoutNotices(gtx layout.Context, th *material.Theme, notices []backend.Not
 	}
 
 	for _, n := range shown {
-		w := noticeWidgetFor(n.ID)
+		w := ns.widgetFor(n.ID)
 		if w.dismiss.Clicked(gtx) {
 			go onDismissNotice(n.ID)
 		}
@@ -101,7 +141,7 @@ func layoutNotices(gtx layout.Context, th *material.Theme, notices []backend.Not
 				Type: "application/text",
 				Data: io.NopCloser(strings.NewReader(n.Path)),
 			})
-			noticeUI.copied[n.ID] = true
+			ns.copied[n.ID] = true
 		}
 	}
 
@@ -113,26 +153,28 @@ func layoutNotices(gtx layout.Context, th *material.Theme, notices []backend.Not
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
 		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutNoticeCard(gtx, th, n, noticeWidgetFor(n.ID))
+			return layoutNoticeCard(gtx, th, n, ns.widgetFor(n.ID), ns.copied[n.ID])
 		}))
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func noticeWidgetFor(id string) *noticeWidget {
-	w := noticeUI.widgets[id]
+// widgetFor is the clickable state of the card for id in this window.
+func (ns *noticeState) widgetFor(id string) *noticeWidget {
+	w := ns.widgets[id]
 	if w == nil {
 		w = new(noticeWidget)
-		noticeUI.widgets[id] = w
+		ns.widgets[id] = w
 	}
 	return w
 }
 
 // layoutNoticeCard draws one notice: a full-width card with the title, the
 // detail and the path box on the left and its buttons on the right. No text
-// is ever cut short: titles, details and paths wrap.
-func layoutNoticeCard(gtx layout.Context, th *material.Theme, n backend.Notice, w *noticeWidget) layout.Dimensions {
+// is ever cut short: titles, details and paths wrap. copied makes the path
+// chip read "Copied".
+func layoutNoticeCard(gtx layout.Context, th *material.Theme, n backend.Notice, w *noticeWidget, copied bool) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	gtx.Constraints.Min.Y = 0
 	macro := op.Record(gtx.Ops)
@@ -147,7 +189,7 @@ func layoutNoticeCard(gtx layout.Context, th *material.Theme, n backend.Notice, 
 					return chipButton(th, &w.dismiss, "Dismiss")(gtx)
 				}
 				label := "Copy path"
-				if noticeUI.copied[n.ID] {
+				if copied {
 					label = "Copied"
 				}
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
