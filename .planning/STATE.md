@@ -178,7 +178,7 @@ None yet.
 
 - [Phase 7]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Phase 6]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
-- [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
+- [All phases]: Android is no longer a focus and will be removed next milestone (user, 2026-10-05): no Android UI/Kotlin work; shared-backend changes must keep `GOOS=android` Go builds compiling. Previously: shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
 - [Phase 5]: Storage/config file names can collide across `d` values (CONFORMANCE CF-2, KEY-04)
 - [Phase 6]: Address-form INC senders `<kind>:<pubkey>:<d>` can be imitated by a crafted `d` (review IN-06, A5); T-01-21 checklist test should require fixed rows to cite an existing Test func
 - [Rebuild]: Desktop child and Android AAR must be rebuilt after Phases 1-3 (new host page, wireline readers, bridge answer token, secrets accessors); desktop builds now need `just webview-libs` first, and CLAUDE.md test commands should say so (user to update)
