@@ -392,8 +392,8 @@ func finishNappletTrial(ci *Instance) {
 	p.CloseOnReject = true
 	enqueuePrompt(p)
 	if !p.wait().OK {
-		dropTrial(ci)
 		forgetWindow(ci)
+		dropTrial(ci)
 		return
 	}
 
@@ -408,8 +408,8 @@ func finishNappletTrial(ci *Instance) {
 			log.Warn().Str("napp", ci.napp.ID).Str("event", latest.EventID).Str("reason", latest.Unavailable).
 				Msg("refusing to install a trial whose latest version is invalid")
 			SetFetchErr("install failed: " + errUnavailable.Error())
-			dropTrial(ci)
 			forgetWindow(ci)
+			dropTrial(ci)
 			return
 		}
 		target = latest
@@ -418,8 +418,8 @@ func finishNappletTrial(ci *Instance) {
 	// event is the newest thing known
 	if err := InstallNapp(target); err != nil {
 		SetFetchErr("install failed: " + err.Error())
-		dropTrial(ci)
 		forgetWindow(ci)
+		dropTrial(ci)
 		return
 	}
 	installed, ok := InstalledNapp(target.ID)

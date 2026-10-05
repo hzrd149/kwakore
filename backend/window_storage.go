@@ -617,11 +617,14 @@ func reclaimStoreKey(key string) {
 
 // forgetWindow deletes a closed window's record and, for a napplet window,
 // the instance store only that record could have reopened (D-07), unless a
-// live window or another record shares its storage instance. A trial's
-// stores were in memory, so nothing of it is on disk to remove.
+// live window or another record shares its storage instance. A trial kept
+// its stores in memory, and a declined or failed one is never promoted, so
+// nothing of it is on disk: only its record goes, and the file system is not
+// touched from the trial's background finish. finishNappletTrial therefore
+// forgets the window before dropTrial clears ci.trial.
 func forgetWindow(ci *Instance) {
 	windows.Delete(ci.instance)
-	if !ci.napp.IsNapplet() || ci.storageInstance == "" {
+	if !ci.napp.IsNapplet() || ci.storageInstance == "" || ci.trial || ci.previewDocument != nil {
 		return
 	}
 	for _, rec := range windowRecords() {
