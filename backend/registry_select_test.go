@@ -2,8 +2,13 @@ package backend
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"fiatjaf.com/nostr"
 )
@@ -147,8 +152,8 @@ func TestInvalidLatestIsUnavailable(t *testing.T) {
 			t.Fatalf("%s: %d entries, want one for the address", name, len(last))
 		}
 		n := last[0]
-		if n.Unavailable == "" {
-			t.Fatalf("%s: the older valid version was listed instead: %+v", name, n)
+		if n.Unavailable != reasonRequiredTags {
+			t.Fatalf("%s: want the newer event listed unavailable (%q), got %+v", name, reasonRequiredTags, n)
 		}
 		if n.EventID != invalid.ID.Hex() || n.CreatedAt != invalid.CreatedAt {
 			t.Errorf("%s: entry is not the newer event: id %s at %d", name, n.EventID, n.CreatedAt)
@@ -164,5 +169,131 @@ func TestInvalidLatestIsUnavailable(t *testing.T) {
 	// a valid winner is listed with its event id
 	if n := nappFromLatest(valid); n.Unavailable != "" || n.EventID != valid.ID.Hex() {
 		t.Errorf("valid winner: %+v", n)
+	}
+}
+
+func TestUnavailableReasonCatalogue(t *testing.T) {
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+	asset := NappPath{Path: "/a.js", Sha256: strings.Repeat("ab", 32)}
+	web := func(edit func(nostr.Tags) nostr.Tags) nostr.Tags { return edit(validNappletTags()) }
+	without := func(name string) func(nostr.Tags) nostr.Tags {
+		return func(tags nostr.Tags) nostr.Tags {
+			out := nostr.Tags{}
+			for _, tag := range tags {
+				if tag[0] != name {
+					out = append(out, tag)
+				}
+			}
+			return out
+		}
+	}
+	plus := func(extra ...nostr.Tag) func(nostr.Tags) nostr.Tags {
+		return func(tags nostr.Tags) nostr.Tags { return append(tags, extra...) }
+	}
+	swap := func(name string, tag nostr.Tag) func(nostr.Tags) nostr.Tags {
+		return func(tags nostr.Tags) nostr.Tags { return append(without(name)(tags), tag) }
+	}
+
+	cases := []struct {
+		name    string
+		kind    nostr.Kind
+		tags    nostr.Tags
+		content string
+		want    string
+	}{
+		// NIP-5D file lists
+		{"nip5d traversal", KindNapplet, nip5dTags("app", index, NappPath{Path: "/../../evil", Sha256: testArtifact}), "", reasonFileList},
+		{"nip5d duplicate path", KindNapplet, nip5dTags("app", index, index), "", reasonFileList},
+		{"nip5d no index", KindNapplet, nip5dTags("app", asset), "", reasonFileList},
+		{"nip5d bad sha", KindNapplet, nip5dTags("app", NappPath{Path: "/index.html", Sha256: "nothex"}), "", reasonFileList},
+		{"root without paths", KindRootNapplet, validNappletTags(), "x", reasonFileList},
+		{"nip5d wrong aggregate", KindNapplet, append(nip5dTags("app", index), nostr.Tag{"x", strings.Repeat("0", 64), "aggregate"}), "", reasonHashes},
+		{"nip5d named without d", KindNapplet, nip5dTags("", index), "", reasonRequiredTags},
+
+		// WEB-NAPPLET required tags
+		{"two d", KindNapplet, web(plus(nostr.Tag{"d", "other"})), "x", reasonRequiredTags},
+		{"no x", KindNapplet, web(without("x")), "x", reasonRequiredTags},
+		{"two titles", KindNapplet, web(plus(nostr.Tag{"title", "Other"})), "x", reasonRequiredTags},
+		{"no server", KindNapplet, web(without("server")), "x", reasonRequiredTags},
+		{"empty content", KindNapplet, validNappletTags(), " ", reasonRequiredTags},
+		{"legacy requires", KindNapplet, web(plus(nostr.Tag{"requires", "relay"})), "x", reasonRequiredTags},
+
+		// WEB-NAPPLET conventions
+		{"malformed i", KindNapplet, web(plus(nostr.Tag{"i", "bogus"})), "x", reasonConventions},
+		{"convention twice", KindNapplet, web(plus(nostr.Tag{"i", "napplet:feed/open"})), "x", reasonConventions},
+		{"z not a token", KindNapplet, web(swap("z", nostr.Tag{"z", "Not A Token"})), "x", reasonConventions},
+		{"convention without z", KindNapplet, web(without("z")), "x", reasonConventions},
+		{"malformed R", KindNapplet, web(plus(nostr.Tag{"R", "Bad"})), "x", reasonConventions},
+	}
+	for _, c := range cases {
+		evt := signedEvent(t, c.kind, c.tags, c.content)
+		n := nappFromLatest(evt)
+		if n.Unavailable != c.want {
+			t.Errorf("%s: Unavailable = %q, want %q", c.name, n.Unavailable, c.want)
+		}
+	}
+
+	// anything without a category is the default, also through wrapping
+	if got := unavailableReason(errors.New("something else")); got != reasonManifest {
+		t.Errorf("uncategorized: %q", got)
+	}
+	wrapped := fmt.Errorf("context: %w", invalidManifest(reasonHashes, errors.New("mismatch")))
+	if got := unavailableReason(wrapped); got != reasonHashes {
+		t.Errorf("wrapped: %q", got)
+	}
+}
+
+func TestUnavailableReasonNeverCarriesAuthorText(t *testing.T) {
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+	hostile := "/../‮evil"
+	evt := signedEvent(t, KindNapplet, nip5dTags("app", index, NappPath{Path: hostile, Sha256: testArtifact}), "")
+
+	// the validator's own text names the path (it goes to the log) ...
+	_, err := nappletFromEvent(evt)
+	if err == nil || !strings.Contains(err.Error(), "evil") {
+		t.Fatalf("fixture: want an error naming the path, got %v", err)
+	}
+	// ... the listed reason is exactly the catalogue phrase
+	n := nappFromLatest(evt)
+	if n.Unavailable != reasonFileList {
+		t.Fatalf("Unavailable = %q, want %q", n.Unavailable, reasonFileList)
+	}
+
+	conv := signedEvent(t, KindNapplet, append(validNappletTags(), nostr.Tag{"i", "napplet:‮evil"}), "x")
+	if got := nappFromLatest(conv).Unavailable; got != reasonConventions {
+		t.Fatalf("convention: Unavailable = %q, want %q", got, reasonConventions)
+	}
+	for _, got := range []string{n.Unavailable, nappFromLatest(conv).Unavailable} {
+		if strings.Contains(got, "evil") || strings.ContainsRune(got, '‮') {
+			t.Errorf("author text in the reason: %q", got)
+		}
+	}
+}
+
+func TestUnavailableNameSanitized(t *testing.T) {
+	title := "Bad\n‮" + strings.Repeat("x", 100)
+	evt := signedEvent(t, KindNapplet, nostr.Tags{{"d", "app"}, {"title", title}, {"title", "Second"}}, "")
+	n := nappFromLatest(evt)
+	if n.Unavailable == "" {
+		t.Fatalf("fixture should be invalid: %+v", n)
+	}
+	if !strings.HasPrefix(n.Name, "Bad x") {
+		t.Errorf("name = %q, want the first title sanitized", n.Name)
+	}
+	if utf8.RuneCountInString(n.Name) > 64 {
+		t.Errorf("name has %d runes, want at most 64", utf8.RuneCountInString(n.Name))
+	}
+	for _, r := range n.Name {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			t.Errorf("name keeps rune %U", r)
+		}
+	}
+	if n.D != "app" {
+		t.Errorf("d = %q", n.D)
+	}
+
+	untitled := signedEvent(t, KindNapplet, nostr.Tags{{"d", "app"}}, "")
+	if n := nappFromLatest(untitled); n.Unavailable == "" || n.Name != "" {
+		t.Errorf("untitled: name %q, unavailable %q", n.Name, n.Unavailable)
 	}
 }

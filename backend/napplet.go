@@ -120,6 +120,45 @@ func (n Napp) MissingDomains() []string {
 	return out
 }
 
+// The reasons an address's latest manifest is listed as unavailable (UI-SPEC
+// S3). Napp.Unavailable only ever holds one of these fixed phrases: the
+// validators' own errors quote author input (paths, conventions), which can
+// carry newlines or bidi overrides, so they go to the log and never to the
+// screen.
+const (
+	reasonFileList     = "Its file list is malformed"
+	reasonHashes       = "Its files don't match their hashes"
+	reasonRequiredTags = "Required tags are missing or malformed"
+	reasonSource       = "Its source isn't a valid git URL" // the NIP-5D source rule
+	reasonConventions  = "Its conventions are malformed"
+	reasonManifest     = "Its manifest is malformed" // anything else
+)
+
+// manifestError is a validation failure filed under one catalogue reason.
+// Error() is the underlying text, for logs.
+type manifestError struct {
+	reason string
+	err    error
+}
+
+func (e *manifestError) Error() string { return e.err.Error() }
+func (e *manifestError) Unwrap() error { return e.err }
+
+// invalidManifest files err under a catalogue reason.
+func invalidManifest(reason string, err error) error {
+	return &manifestError{reason: reason, err: err}
+}
+
+// unavailableReason is the catalogue phrase for a validation error, the
+// default one when it has no category.
+func unavailableReason(err error) string {
+	var me *manifestError
+	if errors.As(err, &me) {
+		return me.reason
+	}
+	return reasonManifest
+}
+
 // nappFromEvent reads either manifest kind. ok is false for an event that
 // must not be listed at all: a napplet that fails validation (including the
 // legacy shapes the spec says to reject outright).
@@ -162,7 +201,7 @@ func nappletFromEvent(evt nostr.Event) (Napp, error) {
 		return nip5dFromEvent(evt)
 	}
 	if evt.Kind != KindNapplet {
-		return Napp{}, errors.New("a root napplet needs path tags")
+		return Napp{}, invalidManifest(reasonFileList, errors.New("a root napplet needs path tags"))
 	}
 	return webNappletFromEvent(evt)
 }
@@ -172,7 +211,7 @@ func nappletFromEvent(evt nostr.Event) (Napp, error) {
 // second-guess the fields.
 func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 	if strings.TrimSpace(evt.Content) == "" {
-		return Napp{}, errors.New("empty content")
+		return Napp{}, invalidManifest(reasonRequiredTags, errors.New("empty content"))
 	}
 
 	var (
@@ -198,27 +237,27 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 		case "requires", "C":
 			// a NIP-5D marker without NIP-5D's path tags, or the unmerged
 			// C-tag draft: neither shape is reinterpreted
-			return Napp{}, fmt.Errorf("legacy %q tag", tag[0])
+			return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("legacy %q tag", tag[0]))
 
 		case "d":
 			if len(tag) != 2 || tag[1] == "" {
-				return Napp{}, errors.New("malformed d tag")
+				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed d tag"))
 			}
 			ds = append(ds, tag[1])
 		case "x":
 			if len(tag) != 2 || !hex64.MatchString(tag[1]) {
-				return Napp{}, errors.New("malformed x tag")
+				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed x tag"))
 			}
 			xs = append(xs, tag[1])
 		case "title":
 			if len(tag) != 2 || strings.TrimSpace(tag[1]) == "" {
-				return Napp{}, errors.New("malformed title tag")
+				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed title tag"))
 			}
 			titles = append(titles, tag[1])
 		case "server":
 			origin, ok := httpsOrigin(tag)
 			if !ok {
-				return Napp{}, errors.New("malformed server tag")
+				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed server tag"))
 			}
 			if !slices.Contains(n.Servers, origin) {
 				n.Servers = append(n.Servers, origin)
@@ -236,7 +275,7 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 
 		case "z":
 			if len(tag) != 2 || !domainToken.MatchString(tag[1]) {
-				return Napp{}, errors.New("malformed z tag")
+				return Napp{}, invalidManifest(reasonConventions, errors.New("malformed z tag"))
 			}
 			if !roles[tag[1]] {
 				roles[tag[1]] = true
@@ -245,16 +284,16 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 		case "i":
 			c, err := parseConvention(tag)
 			if err != nil {
-				return Napp{}, err
+				return Napp{}, invalidManifest(reasonConventions, err)
 			}
 			if conventions[c.ID] {
-				return Napp{}, fmt.Errorf("convention %s listed twice", c.ID)
+				return Napp{}, invalidManifest(reasonConventions, fmt.Errorf("convention %s listed twice", c.ID))
 			}
 			conventions[c.ID] = true
 			n.Conventions = append(n.Conventions, c)
 		case "R", "O":
 			if len(tag) != 2 || !domainToken.MatchString(tag[1]) {
-				return Napp{}, fmt.Errorf("malformed %s tag", tag[0])
+				return Napp{}, invalidManifest(reasonConventions, fmt.Errorf("malformed %s tag", tag[0]))
 			}
 			if tag[0] == "R" {
 				n.RequiredDomains = appendUniqueString(n.RequiredDomains, tag[1])
@@ -265,20 +304,20 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 	}
 
 	if len(ds) != 1 {
-		return Napp{}, fmt.Errorf("want exactly one d tag, got %d", len(ds))
+		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one d tag, got %d", len(ds)))
 	}
 	if len(xs) != 1 {
-		return Napp{}, fmt.Errorf("want exactly one x tag, got %d", len(xs))
+		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one x tag, got %d", len(xs)))
 	}
 	if len(titles) != 1 {
-		return Napp{}, fmt.Errorf("want exactly one title tag, got %d", len(titles))
+		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one title tag, got %d", len(titles)))
 	}
 	if len(n.Servers) == 0 {
-		return Napp{}, errors.New("no server tag")
+		return Napp{}, invalidManifest(reasonRequiredTags, errors.New("no server tag"))
 	}
 	for _, c := range n.Conventions {
 		if !roles[conventionRole(c.ID)] {
-			return Napp{}, fmt.Errorf("convention %s has no matching z tag", c.ID)
+			return Napp{}, invalidManifest(reasonConventions, fmt.Errorf("convention %s has no matching z tag", c.ID))
 		}
 	}
 	// R wins over O

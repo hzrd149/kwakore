@@ -37,7 +37,7 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 	if addressable(evt.Kind) {
 		n.D = evt.Tags.GetD()
 		if n.D == "" {
-			return Napp{}, errors.New("named napplet without a d tag")
+			return Napp{}, invalidManifest(reasonRequiredTags, errors.New("named napplet without a d tag"))
 		}
 	}
 
@@ -51,14 +51,14 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 		switch tag[0] {
 		case "path":
 			if len(tag) < 3 {
-				return Napp{}, errors.New("malformed path tag")
+				return Napp{}, invalidManifest(reasonFileList, errors.New("malformed path tag"))
 			}
 			p, sha := tag[1], strings.ToLower(tag[2])
 			if !safeNappletPath(p) || !hex64.MatchString(sha) {
-				return Napp{}, fmt.Errorf("bad path tag %q", p)
+				return Napp{}, invalidManifest(reasonFileList, fmt.Errorf("bad path tag %q", p))
 			}
 			if seenPath[p] {
-				return Napp{}, fmt.Errorf("path %q listed twice", p)
+				return Napp{}, invalidManifest(reasonFileList, fmt.Errorf("path %q listed twice", p))
 			}
 			seenPath[p] = true
 			n.Paths = append(n.Paths, NappPath{Path: p, Sha256: sha})
@@ -68,7 +68,7 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 				continue
 			}
 			if declared != "" {
-				return Napp{}, errors.New("more than one aggregate x tag")
+				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("more than one aggregate x tag"))
 			}
 			declared = strings.ToLower(tag[1])
 		case "title":
@@ -123,14 +123,14 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 	}
 
 	if len(n.Paths) == 0 {
-		return Napp{}, errors.New("no path tags")
+		return Napp{}, invalidManifest(reasonFileList, errors.New("no path tags"))
 	}
 	if _, ok := nappletIndexPath(n.Paths); !ok {
-		return Napp{}, errors.New("no /index.html path")
+		return Napp{}, invalidManifest(reasonFileList, errors.New("no /index.html path"))
 	}
 	aggregate := aggregateHash(n.Paths)
 	if declared != "" && declared != aggregate {
-		return Napp{}, fmt.Errorf("aggregate x %s does not match the path tags (%s)", declared, aggregate)
+		return Napp{}, invalidManifest(reasonHashes, fmt.Errorf("aggregate x %s does not match the path tags (%s)", declared, aggregate))
 	}
 	n.ArtifactHash = aggregate
 

@@ -3,6 +3,8 @@ package backend
 import (
 	"bytes"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"fiatjaf.com/nostr"
 )
@@ -75,9 +77,18 @@ func (m latestByAddress) add(evt nostr.Event) bool {
 // validated: when it is invalid the result is an unavailable entry, never
 // an older valid version of the same address.
 func nappFromLatest(evt nostr.Event) Napp {
-	n, ok := nappFromEvent(evt)
-	if !ok {
-		return unavailableNapp(evt, "Its manifest is malformed")
+	if evt.Kind != KindNapplet && evt.Kind != KindRootNapplet {
+		n := nappFromNappEvent(evt)
+		n.EventID = evt.ID.Hex()
+		return n
+	}
+	n, err := nappletFromEvent(evt)
+	if err != nil {
+		// the full validator text goes to the log only: it can quote author
+		// input, so the listing gets a fixed catalogue phrase instead
+		log.Debug().Err(err).Str("event", evt.ID.Hex()).Str("address", eventAddress(evt)).
+			Msg("latest napplet event is invalid")
+		return unavailableNapp(evt, unavailableReason(err))
 	}
 	n.EventID = evt.ID.Hex()
 	return n
@@ -85,11 +96,13 @@ func nappFromLatest(evt nostr.Event) Napp {
 
 // unavailableNapp is the listing of an address whose latest event is
 // invalid. It carries enough to be shown and recognised (the address as its
-// id, kind, author, d, time and event id) and nothing to install or run: no
-// paths, servers or actions.
+// id, kind, author, d, a display-safe name, time and event id) and nothing
+// to install or run: no paths, servers or actions. reason is a catalogue
+// phrase (napplet.go).
 func unavailableNapp(evt nostr.Event, reason string) Napp {
 	n := Napp{
 		ID:          eventAddress(evt),
+		Name:        unavailableName(evt),
 		Author:      evt.PubKey,
 		CreatedAt:   evt.CreatedAt,
 		EventID:     evt.ID.Hex(),
@@ -118,4 +131,31 @@ func nappNewer(a, b Napp) bool {
 		return false
 	}
 	return a.EventID < b.EventID
+}
+
+// maxUnavailableNameRunes caps the name an unavailable entry is listed under.
+const maxUnavailableNameRunes = 64
+
+// unavailableName is the first title tag of an invalid manifest made safe to
+// draw: control and format runes (newlines, bidi overrides) become spaces,
+// whitespace collapses, and it is cut to 64 runes. "" when there is none;
+// the GUI then falls back to the d tag.
+func unavailableName(evt nostr.Event) string {
+	for _, tag := range evt.Tags {
+		if len(tag) < 2 || tag[0] != "title" {
+			continue
+		}
+		name := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+				return ' '
+			}
+			return r
+		}, tag[1])
+		name = strings.Join(strings.Fields(name), " ")
+		if runes := []rune(name); len(runes) > maxUnavailableNameRunes {
+			name = strings.TrimSpace(string(runes[:maxUnavailableNameRunes]))
+		}
+		return name
+	}
+	return ""
 }
