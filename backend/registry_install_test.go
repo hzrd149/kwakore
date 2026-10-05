@@ -2,6 +2,9 @@ package backend
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +145,150 @@ func TestTrialInstallDoesNotDowngrade(t *testing.T) {
 	}
 	if onDisk(s.shared) || onDisk(s.instance) {
 		t.Error("the older trial's data was written")
+	}
+}
+
+// ─── staged installs (WR-01) ─────────────────────────────────────
+
+// halfServedNapplet is a napplet manifest for d whose index.html (document)
+// is served by b and whose second file is not: its download fails after
+// index.html arrived.
+func (b *blobRig) halfServedNapplet(t *testing.T, sk nostr.SecretKey, d, document string, at nostr.Timestamp) nostr.Event {
+	t.Helper()
+	index := NappPath{Path: "/index.html", Sha256: b.add([]byte(document))}
+	missing := NappPath{Path: "/app.js", Sha256: hashOf("never served " + document)}
+	tags := nip5dTags(d, index, missing)
+	for _, tag := range tags {
+		if tag[0] == "server" {
+			tag[1] = b.url
+		}
+	}
+	return signedWith(t, sk, KindNapplet, tags, document, at)
+}
+
+// assertInstalledIntact checks that want is still the installed record, that
+// its document still boots, and that no staging or set-aside directory is
+// left next to its install dir.
+func assertInstalledIntact(t *testing.T, want Napp, document string) {
+	t.Helper()
+	rec, ok := InstalledNapp(want.ID)
+	if !ok || rec.EventID != want.EventID {
+		t.Fatalf("installed %v %s, want %s", ok, rec.EventID, want.EventID)
+	}
+	if doc, err := nappletDocument(rec); err != nil || string(doc) != document {
+		t.Fatalf("installed document %q, %v, want %q", doc, err, document)
+	}
+	base, err := nappBaseDir(want.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != filepath.Base(base) && strings.HasPrefix(e.Name(), filepath.Base(base)) {
+			t.Errorf("left behind next to the install dir: %s", e.Name())
+		}
+	}
+}
+
+func TestFailedInstallOverKeepsInstalledCopy(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	files := seedNapplet(t, v1, randomID())
+
+	v2 := installedFrom(t, blobs.halfServedNapplet(t, sk, "app", "v2", 20))
+	if err := InstallNapp(v2); err == nil {
+		t.Fatal("an install with a missing file succeeded")
+	}
+	assertInstalledIntact(t, v1, "v1")
+	assertFiles(t, "installed version", files.all(), true)
+}
+
+func TestFailedUpdateKeepsInstalledCopy(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	files := seedNapplet(t, v1, randomID())
+
+	// index.html of the new version downloads fine; the other file fails
+	v2 := installedFrom(t, blobs.halfServedNapplet(t, sk, "app", "v2", 20))
+	SetFetchErr("")
+	applyUpdate(v1, v2)
+	if got := fetchErr(); !strings.HasPrefix(got, "update failed: ") {
+		t.Fatalf("launcher error %q", got)
+	}
+	assertInstalledIntact(t, v1, "v1")
+	assertFiles(t, "installed version", files.all(), true)
+}
+
+func TestFailedSwapKeepsInstalledCopy(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	v2 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v2", 20))
+
+	// the installed copy moves aside, then the new one cannot move in
+	prev := renameInstallDir
+	t.Cleanup(func() { renameInstallDir = prev })
+	renameInstallDir = func(from, to string) error {
+		if strings.Contains(filepath.Base(from), stagingInfix) {
+			return errors.New("injected rename failure")
+		}
+		return os.Rename(from, to)
+	}
+	if err := InstallNapp(v2); err == nil {
+		t.Fatal("an install whose swap failed succeeded")
+	}
+	SetFetchErr("")
+	applyUpdate(v1, v2)
+	if got := fetchErr(); !strings.HasPrefix(got, "update failed: ") {
+		t.Fatalf("launcher error %q", got)
+	}
+	assertInstalledIntact(t, v1, "v1")
+
+	renameInstallDir = prev
+	if err := InstallNapp(v2); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledIntact(t, v2, "v2")
+}
+
+func TestInstallClearsStaleStaging(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	base, err := nappBaseDir(v1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// what a crash in the middle of an install leaves
+	for _, dir := range []string{base + stagingInfix + "1", base + oldInfix + "2"} {
+		writeFixture(t, filepath.Join(dir, "index.html"))
+	}
+	other := filepath.Join(filepath.Dir(base), "another"+stagingInfix+"1")
+	writeFixture(t, filepath.Join(other, "index.html"))
+
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledIntact(t, v1, "v1")
+	if !onDisk(other) {
+		t.Error("another napp's staging directory was removed")
 	}
 }

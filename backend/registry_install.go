@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,10 +113,12 @@ func InstallNapp(n Napp) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
+	// the files land next to the install dir first: a failed download
+	// leaves an installed copy exactly as it was, still launchable (D-10)
 	servers := n.BlossomServers(ctx)
-	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
+	staging, err := stageNappFiles(ctx, n, base, servers)
+	if err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
-		os.RemoveAll(base)
 		return err
 	}
 
@@ -125,13 +128,23 @@ func InstallNapp(n Napp) error {
 	}
 	if olderThanInstalledLocked(n) {
 		stateMu.Unlock()
+		os.RemoveAll(staging)
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
 		return errOlderVersion
+	}
+	// files and record change together, under stateMu
+	removeOld, err := swapInstallDir(staging, base)
+	if err != nil {
+		stateMu.Unlock()
+		os.RemoveAll(staging)
+		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
+		return err
 	}
 	previous, overwrote := state.InstalledNapps[n.ID]
 	state.InstalledNapps[n.ID] = n
 	saveState()
 	stateMu.Unlock()
+	removeOld()
 
 	// an uninstall of this very version that was waiting for a window to
 	// close must not delete what is installed again (D-24); the reclaim
@@ -185,6 +198,7 @@ func Uninstall(id string) {
 		log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
 	} else {
 		os.RemoveAll(base)
+		removeStaleStaging(base)
 	}
 
 	// the record goes before the reclaim: reclaim keeps any scope that is
@@ -544,6 +558,106 @@ func dropTrial(ci *Instance) {
 	}
 	if err := napconfig.Forget(scope); err != nil {
 		log.Warn().Err(err).Str("napp", ci.napp.ID).Msg("could not forget a trial's config")
+	}
+}
+
+// ─── staging an install ──────────────────────────────────────────
+
+// An install or update never writes into the directory a record points at.
+// It downloads into a fresh directory next to it (same parent, so the swap
+// is a rename on one file system), and only once every file is there and
+// verified does swapInstallDir put it in place. A failure at any point
+// before that leaves the installed copy as it was, files and record.
+
+// stagingInfix and oldInfix name the directories an install works in,
+// after the install dir's own name: napps/<hex>.staging-* and
+// napps/<hex>.old-*. They belong to that one napp, so removeStaleStaging
+// can clear what a crash left behind while the napp's busy claim is held.
+const (
+	stagingInfix = ".staging-"
+	oldInfix     = ".old-"
+)
+
+// renameInstallDir is os.Rename, swappable in tests.
+var renameInstallDir = os.Rename
+
+// stageNappFiles downloads every file of n into a new directory next to
+// base and returns it. On failure nothing is left behind and base is never
+// touched. The caller holds n's busy claim.
+func stageNappFiles(ctx context.Context, n Napp, base string, servers []string) (string, error) {
+	parent := filepath.Dir(base)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return "", err
+	}
+	removeStaleStaging(base)
+	staging, err := os.MkdirTemp(parent, filepath.Base(base)+stagingInfix)
+	if err != nil {
+		return "", err
+	}
+	// MkdirTemp makes it 0700; an install dir has always been 0755
+	if err := os.Chmod(staging, 0755); err != nil {
+		os.RemoveAll(staging)
+		return "", err
+	}
+	if err := fetchNappAssets(ctx, n, staging, servers); err != nil {
+		os.RemoveAll(staging)
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		os.RemoveAll(staging)
+		return "", err
+	}
+	return staging, nil
+}
+
+// swapInstallDir puts staging where base is: base (when there is one) is
+// renamed aside, staging renamed in, and the returned func removes the old
+// copy, outside any lock. When staging cannot be renamed in, the old copy
+// is renamed back, so base is never left missing by a failed swap.
+func swapInstallDir(staging, base string) (func(), error) {
+	old := ""
+	if _, err := os.Lstat(base); err == nil {
+		old = base + oldInfix + randomID()[:8]
+		if err := renameInstallDir(base, old); err != nil {
+			return nil, fmt.Errorf("could not move the installed copy aside: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err := renameInstallDir(staging, base); err != nil {
+		if old != "" {
+			if rerr := renameInstallDir(old, base); rerr != nil {
+				log.Error().Err(rerr).Str("dir", filepath.Base(base)).Msg("could not put the installed copy back")
+			}
+		}
+		return nil, fmt.Errorf("could not move the new files in place: %w", err)
+	}
+	return func() {
+		if old != "" {
+			os.RemoveAll(old)
+		}
+	}, nil
+}
+
+// removeStaleStaging removes the staging and set-aside directories of
+// base's napp that an interrupted install or update left behind. Only
+// directories named after base are touched; the napp's busy claim keeps
+// any other install of it from running meanwhile.
+func removeStaleStaging(base string) {
+	parent, name := filepath.Dir(base), filepath.Base(base)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), name+stagingInfix) || strings.HasPrefix(e.Name(), name+oldInfix) {
+			if err := os.RemoveAll(filepath.Join(parent, e.Name())); err != nil {
+				log.Warn().Err(err).Str("dir", e.Name()).Msg("could not remove a stale install directory")
+			}
+		}
 	}
 }
 

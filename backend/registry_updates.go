@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -304,8 +305,9 @@ func Update(id string) {
 	applyUpdate(n, *latest)
 }
 
-// applyUpdate does the shared re-download: fetch every path of newer into the
-// napp's install dir, then record it as the installed version. Called with
+// applyUpdate does the shared re-download: fetch every path of newer next to
+// the napp's install dir, then swap the files in and record it as the
+// installed version in one step. Called with
 // the napp's busy claim held (trySetBusy). newer needs the full event shape; Paths and Servers are the
 // parts that matter for the download itself.
 func applyUpdate(current, newer Napp) {
@@ -340,7 +342,11 @@ func applyUpdate(current, newer Napp) {
 	if len(servers) == 0 {
 		servers = newer.BlossomServers(ctx)
 	}
-	if err := fetchNappAssets(ctx, newer, base, servers); err != nil {
+	// downloaded next to the install dir and swapped in only when every
+	// file is there and verified: a failed update leaves the installed
+	// version running as it was (D-10)
+	staging, err := stageNappFiles(ctx, newer, base, servers)
+	if err != nil {
 		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
 		SetFetchErr("update failed: " + err.Error())
 		return
@@ -355,14 +361,25 @@ func applyUpdate(current, newer Napp) {
 	previous, had := state.InstalledNapps[current.ID]
 	if had && nappNewer(previous, newer) {
 		stateMu.Unlock()
+		os.RemoveAll(staging)
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
 		SetFetchErr("update failed: " + errOlderVersion.Error())
+		return
+	}
+	// files and record change together, under stateMu
+	removeOld, err := swapInstallDir(staging, base)
+	if err != nil {
+		stateMu.Unlock()
+		os.RemoveAll(staging)
+		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
+		SetFetchErr("update failed: " + err.Error())
 		return
 	}
 	state.InstalledNapps[current.ID] = newer
 	delete(state.LastLaunched, current.ID)
 	saveState()
 	stateMu.Unlock()
+	removeOld()
 	if !had {
 		previous = current
 	}
