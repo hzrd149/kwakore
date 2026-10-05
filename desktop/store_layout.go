@@ -237,9 +237,9 @@ func layoutNappsTab(
 					settingsBtn = &settingsBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, true, st.Installed[row])
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, true, st.Installed[row])
 			})
 		}),
 	)
@@ -397,16 +397,16 @@ func layoutDiscoveryTab(
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
 				}
-				if row < len(openBtns) && !installedSet[n.ID] && n.IsNapplet() {
+				if row < len(openBtns) && tryAllowed(n, installedSet[n.ID]) {
 					tryBtn = &openBtns[row]
 				}
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, installedSet[n.ID], n)
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, installedSet[n.ID], n)
 			}
 			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),

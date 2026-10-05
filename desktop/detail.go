@@ -193,20 +193,10 @@ func layoutNappDetail(
 		return l.Layout(gtx)
 	}
 	installed := installedSet[n.ID]
-	working := busy[n.ID]
-	canOpen := installed || n.IsNapplet()
-	openLabel := "Open"
-	if !installed && n.IsNapplet() {
-		openLabel = "Try"
-	}
-	primaryLabel := "Install"
-	if installed {
-		primaryLabel = "Uninstall"
-	}
-	if working {
-		primaryLabel = "Working…"
-	}
-	hasUpdate := n.UpdateAvailable != nil
+	// the action row, with no Try, Install or Update for an unavailable
+	// entry, whose status block takes the update line's place
+	acts := nappPageActions(n, installed, busy[n.ID])
+	unavailable := unavailableLines(n, installed)
 
 	authorName, authorPic := "", ""
 	if n.Author.Hex() != "" {
@@ -231,7 +221,11 @@ func layoutNappDetail(
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					t := material.H6(th, n.Label())
+					title := n.Label()
+					if n.Unavailable != "" {
+						title = cardName(n)
+					}
+					t := material.H6(th, title)
 					t.Font.Weight = font.Bold
 					return t.Layout(gtx)
 				}),
@@ -276,43 +270,42 @@ func layoutNappDetail(
 		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !canOpen || openBtn == nil {
+					if acts.open == "" || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, openBtn, openLabel)
+					b := material.Button(th, openBtn, acts.open)
 					b.Background = currentTheme().suggestBg
 					b.Color = currentTheme().suggestFg
 					return b.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !canOpen || openBtn == nil {
+					if acts.open == "" || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if primaryBtn == nil {
+					if acts.primary == "" || primaryBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, primaryBtn, primaryLabel)
+					b := material.Button(th, primaryBtn, acts.primary)
 					if installed {
 						b.Background = currentTheme().chipBg
 						b.Color = currentTheme().chipFg
 					}
-					return b.Layout(gtx)
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
 				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !hasUpdate || updateBtn == nil {
+					if !acts.update || updateBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
 					return material.Button(th, updateBtn, "Update").Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !hasUpdate || updateBtn == nil {
+					if !acts.update || updateBtn == nil {
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
@@ -320,7 +313,7 @@ func layoutNappDetail(
 				// its settings window: what it declared (NAP-CONFIG) and
 				// what the user let it do
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || settingsBtn == nil {
+					if !acts.settings || settingsBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
@@ -332,7 +325,7 @@ func layoutNappDetail(
 				// the naddr is how a napp is shared: pasted into another
 				// launcher's discovery filter, it finds this one
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if copyAddrBtn == nil || n.Naddr() == "" {
+					if !acts.copyAddr || copyAddrBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
@@ -344,7 +337,14 @@ func layoutNappDetail(
 			)
 		})
 	}))
-	if hasUpdate {
+	if unavailable != nil {
+		// the reason wraps freely here: the page has room for it
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layoutUnavailableBlock(gtx, th, unavailable, 0)
+			})
+		}))
+	} else if acts.update {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := material.Body2(th, "An update is available.")
@@ -514,7 +514,7 @@ func layoutProfileDetail(
 				if !installedSet[n.ID] && n.IsNapplet() {
 					openLabel = "Try"
 				}
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, true, n)
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, true, installedSet[n.ID], n)
 			})
 		}),
 	)

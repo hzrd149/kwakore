@@ -734,7 +734,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", true, st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", true, false, st.Dev[i])
 			})
 		}),
 	)
@@ -993,8 +993,10 @@ func nappAuthor(napp backend.Napp) (name, picture string) {
 	return name, ""
 }
 
-// renderNappCard draws one napp row: icon, name, description, author, optional
-// handled actions, and action buttons. When cardBtn is not nil the whole card
+// renderNappCard draws one napp row: icon, name, description (or, for an
+// unavailable entry, its unavailable block, worded for an installed copy
+// when installed is set), author, optional handled actions, and action
+// buttons. When cardBtn is not nil the whole card
 // is clickable (it opens the napp's page); authorBtn alone opens the author's
 // profile page.
 // Buttons drawn on top of the card's area keep working, so the frame handler
@@ -1011,10 +1013,23 @@ func renderNappCard(
 	openLabel,
 	btnLabel,
 	secondLabel string,
-	showActions bool,
+	showActions,
+	installed bool,
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := nappAuthor(napp)
+	// an unavailable entry draws its block instead of the description and
+	// never a Try, Install or Update button (store_unavailable.go)
+	unavailable := unavailableLines(napp, installed)
+	if unavailableDrops(napp, openLabel) {
+		openBtn = nil
+	}
+	if unavailableDrops(napp, btnLabel) {
+		btn = nil
+	}
+	if unavailableDrops(napp, secondLabel) {
+		secondBtn = nil
+	}
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -1031,7 +1046,7 @@ func renderNappCard(
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							label := material.Body1(th, napp.Name)
+							label := material.Body1(th, cardName(napp))
 							label.Font.Weight = font.Bold
 							label.MaxLines = 2
 							if !napp.IsNapplet() {
@@ -1048,6 +1063,14 @@ func renderNappCard(
 							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if unavailable == nil {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layoutUnavailableBlock(gtx, th, unavailable, 2)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if !showActions {
 								return layout.Dimensions{}
 							}
@@ -1060,7 +1083,7 @@ func renderNappCard(
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if napp.Description == "" {
+							if napp.Description == "" || unavailable != nil {
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

@@ -166,7 +166,9 @@ func cardDescription(s string) string {
 }
 
 // renderNappTile draws one napp as a grid tile: icon and name on top, then
-// the description, optional actions and author, and buttons along the bottom.
+// the description (or, for an unavailable entry, its unavailable block,
+// worded for an installed copy when installed is set), optional actions and
+// author, and buttons along the bottom.
 // The clickable parts work as renderNappCard's do. Given a minimum height
 // (gridRow's second pass) the tile stretches to it and keeps its buttons at
 // the bottom edge.
@@ -182,18 +184,22 @@ func renderNappTile(
 	openLabel,
 	btnLabel,
 	secondLabel string,
-	showActions bool,
+	showActions,
+	installed bool,
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := nappAuthor(napp)
 	fill := gtx.Constraints.Min.Y > 0
+	// an unavailable entry draws its block where the description goes
+	// and never a Try, Install or Update button (store_unavailable.go)
+	unavailable := unavailableLines(napp, installed)
 	width := gtx.Constraints.Max.X
 
 	// the buttons: Open and Settings in their softer colours, then the
 	// update and install/uninstall ones
 	var buttons []layout.Widget
 	button := func(b *widget.Clickable, label string, colors *[2]color.NRGBA) {
-		if b == nil || label == "" {
+		if b == nil || label == "" || unavailableDrops(napp, label) {
 			return
 		}
 		buttons = append(buttons, func(gtx layout.Context) layout.Dimensions {
@@ -285,7 +291,7 @@ func renderNappTile(
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(th, napp.Name)
+							l := material.Body1(th, cardName(napp))
 							l.Font.Weight = font.Bold
 							l.MaxLines = 2
 							return l.Layout(gtx)
@@ -304,6 +310,11 @@ func renderNappTile(
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if unavailable != nil {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layoutUnavailableBlock(gtx, th, unavailable, 2)
+				})
+			}
 			if napp.Description == "" {
 				return layout.Dimensions{}
 			}
