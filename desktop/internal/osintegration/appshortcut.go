@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"verdana/backend"
 	"verdana/backend/fileutil"
 
@@ -29,7 +30,18 @@ func appShortcutKey(id string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// appShortcutText makes an author-controlled name or description safe to
+// write as one shortcut key on every platform: control runes (a newline would
+// start a new .desktop key) and format runes (bidirectional overrides that
+// make the name read differently than it is) become spaces, then whitespace
+// collapses. It mirrors the backend's napLinkLabel.
 func appShortcutText(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, value)
 	return strings.Join(strings.Fields(value), " ")
 }
 

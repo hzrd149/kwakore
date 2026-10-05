@@ -32,7 +32,7 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("bundle shortcut token: %w", err)
 	}
-	data := fmt.Sprintf(desktopTemplate, name, quotedExe, quotedToken)
+	data := fmt.Sprintf(desktopTemplate, appShortcutText(name), quotedExe, quotedToken)
 	if err := os.MkdirAll(applicationsDir(), 0755); err != nil {
 		return "", err
 	}
