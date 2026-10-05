@@ -42,6 +42,16 @@ Out of this phase: NAP domain semantics (Phases 6-8), trusted prompts (Phase 8),
 - **D-16:** A napplet whose latest event is invalid shows on its store card as "Unavailable — the latest version is invalid" with a short reason and no install button.
 - **D-17:** (user) Android is out of focus and will be removed next milestone: no Android UI, text or Kotlin changes in this phase; the `backend/mobile` API only changes where shared backend signatures force it, and `GOOS=android` builds must still compile.
 
+### Post-research decisions (2026-10-05)
+- **D-18:** (user) Refines D-11. `source` is validated per manifest schema. WEB-NAPPLET events follow the pinned spec: absolute `https://`, `ssh://`, `git://` or `nostr://`; scp-like remotes are invalid; a malformed `source` is ignored (dropped), not a reason to reject the manifest. NIP-5D events use the D-11 git set (`https://`, `http://`, `git://`, `ssh://`, `git+ssh://`, scp-like `user@host:path`; absolute with a host).
+- **D-19:** (user) Closes A11 as written. On launch, a throttled, non-blocking background check looks for a newer manifest event (when online) and only updates the store's "update available" / "unavailable" state; it never delays or blocks the launch.
+- **D-20:** (user) Refines D-12. Blossom servers the user configured in settings may be private (LAN or localhost) and bypass the public-host check; manifest `server` tags and the author's kind 10063 list stay public-only.
+- **D-21:** (user) Pre-existing bug fixed in this phase: a hostile `d` can inject lines (e.g. `Exec=`) into Linux app-shortcut `.desktop` files through `X-Verdana-Napp-ID` and the `Exec` quoting (`desktop/internal/osintegration/appshortcut_linux.go:31-41`, `shortcutfile_linux.go:149-157`). Shortcut files carry an encoded id (no raw `d`), control characters are rejected or escaped in every written key, with a hostile-`d` regression test (newline, `Exec=` duplicate).
+- **D-22:** The shared selection helper verifies the event id (`evt.CheckID()`) before comparing, so a validly signed event with a forged id cannot win NIP-01 tie-breaks; `Napp` gains `EventID` and `Unavailable` fields.
+- **D-23:** Old-id (`napplet~pk16~d`) records are dropped at state load, with their rules, action usage and last-launched entries. Old install directories under `napps/` stay orphaned (Phase 1 D-04 forbids sweeping `napps/`).
+- **D-24:** Cleanup never races open windows: deleting a superseded or uninstalled napplet's storage/config waits until the last window of that version closes (evicted stores are marked dead and refuse writes), and uninstall closes the napplet's windows. Napplet storage gets its own directory so the D-08 sweep cannot touch napp/dev localStorage.
+- **D-25:** Trial promotion with matching hashes never overwrites a non-empty installed store: existing data is kept and the trial data is discarded with a notice.
+
 ### Claude's Discretion
 - Exact address encoding inside hashes, sweep timing/throttling, notice and confirmation copy and styling (match existing Gio conventions and the Phase 3 UI-SPEC), size cap and timeout values, helper placement, and test structure.
 
