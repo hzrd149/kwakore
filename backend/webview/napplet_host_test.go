@@ -117,8 +117,14 @@ const live = () => appended.filter(f => !f.removed)
 // async function whose return value is printed as JSON), and decodes it.
 func runHost(t *testing.T, setup, steps string, out any) {
 	t.Helper()
+	runHostSource(t, nappletHostJS, setup, steps, out)
+}
+
+// runHostSource is runHost with source in place of the embedded host page.
+func runHostSource(t *testing.T, source, setup, steps string, out any) {
+	t.Helper()
 	node := needNode(t)
-	program := hostHarness + "\n" + setup + "\n" + nappletHostJS + "\n" +
+	program := hostHarness + "\n" + setup + "\n" + source + "\n" +
 		";(async () => {\n" + steps + "\n})().then(r => { process.stdout.write(JSON.stringify(r)) }, " +
 		"err => { process.stderr.write(String(err && err.stack || err)); process.exitCode = 1 })\n"
 	cmd := exec.Command(node, "-")
@@ -735,6 +741,102 @@ return {
 	}
 	if !slices.Equal(got.Own, []string{"storage.keys.result:new:internal-error"}) {
 		t.Errorf("the rebuilt frame's own refusal: %v", got.Own)
+	}
+}
+
+// A reply nap.msg answers with is, like a refusal, the answer to the frame
+// that sent the request: once that document is replaced, a reply that comes
+// back late goes nowhere, never to the frame that replaced it.
+//
+// As shipped, the ordered lane already keeps the two apart: a rebuild's
+// nap.start (and a replacement's nap.reset) waits behind the old request, so
+// that request settles while there is no frame at all. The binding must not
+// rest on that ordering, so the second case takes nap.start off the lane and
+// boots through a dev reload, which waits for nothing: the new frame is up
+// while the old request is still out, and only the binding drops its reply.
+func TestNappletHostDropsRepliesForReplacedFrames(t *testing.T) {
+	const onLane = `started = await enqueue(() => rpc("nap.start"), true)`
+	if n := strings.Count(nappletHostJS, onLane); n != 1 {
+		t.Fatalf("napplet-host.js has %d copies of %q, want 1", n, onLane)
+	}
+	offLane := strings.Replace(nappletHostJS, onLane, `started = await rpc("nap.start")`, 1)
+
+	setup := `
+let boots = 0
+handlers["nap.boot"] = () => ({ srcdoc: "doc" + (++boots), title: "probe" })
+`
+	// each replace step replaces the first document while its request is
+	// held, lets Go answer that request, and loads the frame that replaced it
+	cases := []struct {
+		name, source, replace string
+	}{
+		{"shipped lane", nappletHostJS, `
+fireLoad(f0)
+await flush()
+// the old request settles before the rebuild can start
+unhold("nap.msg")
+release("nap.msg", { type: "storage.keys.result", id: "old", keys: ["secret"] })
+await flush(10)
+if (appended[1]) fireLoad(appended[1])
+await flush()
+`},
+		{"nap.start off the lane", offLane, `
+window.__nap_reload()
+await flush(10)
+if (appended[1]) fireLoad(appended[1])
+await flush()
+// the new frame is up and loaded; only now does Go answer the old request
+unhold("nap.msg")
+release("nap.msg", { type: "storage.keys.result", id: "old", keys: ["secret"] })
+await flush(10)
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got struct {
+				Rebuilt   bool     `json:"rebuilt"`
+				OldPosted []string `json:"oldPosted"`
+				NewPosted []string `json:"newPosted"`
+				Own       []string `json:"own"`
+			}
+			runHostSource(t, tc.source, setup, `
+await flush()
+const f0 = appended[0]
+fireLoad(f0)
+await flush()
+hold("nap.msg")
+fireMessage(f0.contentWindow, { type: "storage.keys", id: "old" })
+await flush()
+`+tc.replace+`
+const f1 = appended[1]
+if (!f1 || f1.removed) return { rebuilt: false }
+const newPosted = f1.contentWindow.posted.map(p => p.type + ":" + p.id)
+
+// the new frame's own reply still reaches it
+handlers["nap.msg"] = () => ({ type: "storage.keys.result", id: "new", keys: [] })
+fireMessage(f1.contentWindow, { type: "storage.keys", id: "new" })
+await flush()
+return {
+  rebuilt: true,
+  oldPosted: f0.contentWindow.posted.map(p => p.type + ":" + p.id),
+  newPosted,
+  own: f1.contentWindow.posted.map(p => p.type + ":" + p.id).slice(newPosted.length),
+}
+`, &got)
+
+			if !got.Rebuilt {
+				t.Fatal("the replaced frame was not rebuilt")
+			}
+			if len(got.OldPosted) != 0 {
+				t.Errorf("the replaced frame got %v, want nothing", got.OldPosted)
+			}
+			if len(got.NewPosted) != 0 {
+				t.Errorf("the new frame got %v, the reply meant for the document it replaced", got.NewPosted)
+			}
+			if !slices.Equal(got.Own, []string{"storage.keys.result:new"}) {
+				t.Errorf("the new frame's own reply: %v", got.Own)
+			}
+		})
 	}
 }
 

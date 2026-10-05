@@ -234,8 +234,9 @@
       if (++markers >= 2) replaced(frame)
       return
     }
-    // the frame this envelope came from: a refusal is its answer and goes
-    // to it only, never to a document that replaced it in the meantime
+    // the frame this envelope came from: Go's reply or a refusal is its
+    // answer and goes to it only, never to a document that replaced it in
+    // the meantime
     const from = frame
     // one at a time: the desktop binding runs every call on its own thread,
     // so two calls in flight can reach Go in either order, and NAP needs the
@@ -256,7 +257,9 @@
         throw napError("NAP envelope is too large", "too-large")
       }
       return rpc("nap.msg", json)
-    }).then(deliver, err => {
+    }).then(envelopes => {
+      if (frame === from) deliver(envelopes)
+    }, err => {
       console.error("[napplet-host]", err)
       if (frame === from) refuse(data, err)
     })
