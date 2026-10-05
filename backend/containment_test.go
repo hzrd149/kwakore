@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -473,4 +474,146 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 			})
 		}
 	}
+}
+
+// ─── storage file names (KEY-03, KEY-04) ─────────────────────────
+
+var storageFileName = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
+
+// keyNapplet is a napplet of the test author with this d at a fixed version:
+// the root napplet for an empty d, a named one otherwise.
+func keyNapplet(d string) Napp {
+	n := Napp{D: d, Format: FormatNapplet, Kind: KindNapplet,
+		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf("one version")}
+	if d == "" {
+		n.Kind = KindRootNapplet
+	}
+	n.ID = n.Address()
+	return n
+}
+
+// TestStorageFileNamesNeverCollide: d values that a lossy file-name mapping,
+// case folding or Unicode normalization would merge each get their own
+// files. Equality is exact UTF-8 bytes (KEY-04).
+func TestStorageFileNamesNeverCollide(t *testing.T) {
+	setupNapTest(t)
+	groups := [][]string{
+		{"a/b", "a_b", "a b"},
+		{"App", "app"},
+		{"x\x00y", "x"},
+		{"a\x1fb", "a"},
+		{"../..", ".."},
+		{"é", "é"},  // NFC é, NFD e + combining acute
+		{"", "root"}, // the root napplet and d=root
+	}
+	pk16 := testNappletKey.Public().Hex()[:16]
+	instance := strings.Repeat("0", 32)
+	seen := map[string]string{} // file path -> what owns it
+	claim := func(t *testing.T, what, file, dir string) {
+		t.Helper()
+		if !storageFileName.MatchString(filepath.Base(file)) {
+			t.Errorf("%s: file name %q is not 64 hex", what, filepath.Base(file))
+		}
+		if filepath.Dir(file) != dir {
+			t.Errorf("%s: %s is not directly in %s", what, file, dir)
+		}
+		if other, dup := seen[file]; dup {
+			t.Errorf("%s and %s share %s", what, other, file)
+		}
+		seen[file] = what
+	}
+	for _, group := range groups {
+		for _, d := range group {
+			n := keyNapplet(d)
+			for _, scope := range []string{"shared", "instance"} {
+				key, err := nappletStorageKey(n, scope, instance)
+				if err != nil {
+					t.Fatalf("d=%q %s: %v", d, scope, err)
+				}
+				file, err := nappletStorageFile(key)
+				if err != nil {
+					t.Fatalf("d=%q %s: %v", d, scope, err)
+				}
+				claim(t, fmt.Sprintf("napplet d=%q %s", d, scope), file, filepath.Join(dataDir, "napplet-storage"))
+			}
+			// the napp with the same d keeps its localStorage elsewhere
+			claim(t, fmt.Sprintf("napp d=%q", d), storageFileFor(pk16+"~"+d), filepath.Join(dataDir, "storage"))
+		}
+	}
+
+	// the napp file name is the hash of the napp id, nothing else
+	sum := sha256.Sum256([]byte("abc~x"))
+	if got, want := StorageFile("abc~x"), filepath.Join(dataDir, "storage", hex.EncodeToString(sum[:])+".json"); got != want {
+		t.Errorf("StorageFile = %s, want %s", got, want)
+	}
+}
+
+// TestRootAndDRootNeverShare: an author's root napplet (15129) and its named
+// napplet with d=root (35129) are different napplets in every keyed place
+// (KEY-03). Later plans add their own rows (config, rules) to the checks.
+func TestRootAndDRootNeverShare(t *testing.T) {
+	r := newContainmentRig(t)
+	sk := nostr.Generate()
+	rootHTML := []byte("<!doctype html><title>the root napplet</title>")
+	namedHTML := []byte("<!doctype html><title>d=root</title>")
+	root := r.hostileNapp(t, signedWith(t, sk, KindRootNapplet,
+		nostr.Tags{{"path", "/index.html", r.blob(rootHTML)}, {"title", "Root"}, {"server", "https://blossom.example.com"}}, "", 1700000000))
+	named := r.hostileNapp(t, signedWith(t, sk, KindNapplet,
+		nip5dTags("root", NappPath{Path: "/index.html", Sha256: r.blob(namedHTML)}), "", 1700000000))
+
+	storageFile := func(t *testing.T, n Napp, scope string) string {
+		key, err := nappletStorageKey(n, scope, strings.Repeat("0", 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := nappletStorageFile(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return file
+	}
+	checks := []struct {
+		what string
+		of   func(t *testing.T, n Napp) string
+	}{
+		{"id", func(t *testing.T, n Napp) string { return n.ID }},
+		{"install directory", func(t *testing.T, n Napp) string {
+			dir, err := nappBaseDir(n.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return dir
+		}},
+		{"shared storage file", func(t *testing.T, n Napp) string { return storageFile(t, n, "shared") }},
+		{"instance storage file", func(t *testing.T, n Napp) string { return storageFile(t, n, "instance") }},
+	}
+	for _, c := range checks {
+		if a, b := c.of(t, root), c.of(t, named); a == b {
+			t.Errorf("root and d=root share their %s: %q", c.what, a)
+		}
+	}
+	if want := "15129:" + sk.Public().Hex() + ":"; root.ID != want {
+		t.Errorf("root id = %q, want %q", root.ID, want)
+	}
+
+	// both install side by side, each with its own document
+	for _, n := range []Napp{root, named} {
+		if err := InstallNapp(n); err != nil {
+			t.Fatalf("install %s: %v", n.ID, err)
+		}
+	}
+	for _, c := range []struct {
+		n    Napp
+		want []byte
+	}{{root, rootHTML}, {named, namedHTML}} {
+		n, want := c.n, c.want
+		if _, ok := InstalledNapp(n.ID); !ok {
+			t.Errorf("%s not installed", n.ID)
+		}
+		got, err := os.ReadFile(filepath.Join(r.hashedDir(n.ID), "index.html"))
+		if err != nil || string(got) != string(want) {
+			t.Errorf("%s index.html = %q, %v", n.ID, got, err)
+		}
+	}
+	r.assertContained(t, "root and d=root")
 }
