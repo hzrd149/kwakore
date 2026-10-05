@@ -19,7 +19,7 @@ affects: [05-09, 05-10, 05-11, napconfig, settings window, trial promotion, recl
 actuals:
   tokens: 26500    # chars/4 over the 7 changed files (105880 chars); added lines alone are ~7500
   tasks: 2
-  commits: 3
+  commits: 4
 
 tech-stack:
   added: []
@@ -161,7 +161,8 @@ status: complete
 
 1. **Task 1 (tracer): scope-keyed napconfig, FileName/Forget, internal-error handlers, inverted update test.** Commit `75b6166` (feat).
    - The tracer gate passed: the tracer's `<verify>` was re-run end to end before expansion. The plan is autonomous and live checks are deferred by the orchestrator.
-2. **Task 2: config pushes and settings windows follow their version.** RED `d6cf244` (test), then GREEN `51677c5` (feat).
+2. **Task 2: config pushes and settings windows follow their version.** RED `d6cf244` (test), then GREEN `51677c5` (feat), then follow-up `b5a1be0` (test).
+   - `b5a1be0` is a one-line hunk in `setupConfigTest` (`map[settingsKey]*settingsWindow{}`) that was left unstaged in 51677c5. The backend test build at 51677c5 alone does not compile; HEAD does.
 
 ## Files Created/Modified
 
@@ -254,4 +255,4 @@ status: complete
 ## Self-Check: PASSED
 
 - The SUMMARY and every modified file exist on disk.
-- Commits 75b6166, d6cf244 and 51677c5 are found in `git log`.
+- Commits 75b6166, d6cf244, 51677c5 and b5a1be0 are found in `git log`.
