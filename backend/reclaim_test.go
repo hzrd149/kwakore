@@ -1265,3 +1265,24 @@ func TestTrialPromotionAfterUninstallWritesNothing(t *testing.T) {
 	// installRecord started shortcut syncs that read the rig's host
 	backgroundSyncs.Wait()
 }
+
+// TestLaunchNeverCreatesInstallDir: a launch of a napp whose files are not
+// there fails without making its install dir. Only an install's swap makes
+// it; an empty one made between the swap's renames would keep the new copy
+// from moving in on Windows (IN-10).
+func TestLaunchNeverCreatesInstallDir(t *testing.T) {
+	newLaunchRig(t)
+	n := Napp{ID: "35130:" + strings.Repeat("ab", 32) + ":site", D: "site", Kind: KindNapp, Name: "site"}
+	installRecord(t, n)
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci, err := launch(context.Background(), n); err == nil {
+		closeOnCleanup(t, ci)
+		t.Fatal("a napp with no files opened a window")
+	}
+	if onDisk(base) {
+		t.Fatal("the launch created the install dir")
+	}
+}

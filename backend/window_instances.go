@@ -726,16 +726,21 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	if err != nil {
 		return nil, fmt.Errorf("napp %s: %w", id, err)
 	}
+	// installFiles says whether the install dir holds a document. It is
+	// asked under stateMu, which an install's directory swap holds, so it
+	// never looks in the instant between the swap's two renames. It never
+	// creates the dir: only the swap does, and an empty dir made in that
+	// instant would keep the new copy from being renamed in on Windows.
+	installFiles := func() bool {
+		_, err := os.Stat(filepath.Join(appDir, "index.html"))
+		return err == nil
+	}
 	pageURL := ""
 	if napp.IsNapplet() {
 		// a napplet window never navigates anywhere: the shell loads the
 		// launcher's host page and asks for the verified document (nap.boot),
-		// which comes from the install dir or, for a dev napplet, its folder
-		if previewDocument == nil && devLookup(id) == nil {
-			if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
-				return nil, fmt.Errorf("napplet %s is not installed", id)
-			}
-		}
+		// which comes from the install dir (checked below, with the record)
+		// or, for a dev napplet, its folder
 	} else if d := devLookup(id); d != nil {
 		// dev napps live in memory, not on disk: the shell navigates to
 		// the throwaway server (folder napps) or the dev server (url napps)
@@ -744,10 +749,10 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 			return nil, fmt.Errorf("dev napp %s has nowhere to run", id)
 		}
 	} else {
-		if err := os.MkdirAll(appDir, 0755); err != nil {
-			return nil, err
-		}
-		if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
+		stateMu.Lock()
+		present := installFiles()
+		stateMu.Unlock()
+		if !present {
 			return nil, fmt.Errorf("napp %s is not installed", id)
 		}
 	}
@@ -766,8 +771,9 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		reclaimMu.Lock()
 		stateMu.Lock()
 		current, ok := state.InstalledNapps[id]
+		present := ok && installFiles()
 		stateMu.Unlock()
-		if !ok || !current.IsNapplet() {
+		if !ok || !current.IsNapplet() || !present {
 			reclaimMu.Unlock()
 			return nil, fmt.Errorf("napplet %s is not installed", id)
 		}
