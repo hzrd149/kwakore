@@ -256,13 +256,15 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		}
 	}
 
-	// the spec rows Phases 1 and 4 own, each in its spec's section
+	// the spec rows Phases 1, 4 and 5 own, each in its spec's section
 	for spec, ids := range map[string][]string{
-		"NIP-5D":      {"5D-1", "NIP-5D-presence", "5D-3", "NIP-5D-reload", "5D-8"},
-		"WEB-NAPPLET": {"W-1"},
+		"NIP-5D":      {"5D-1", "NIP-5D-presence", "5D-3", "NIP-5D-reload", "5D-4", "5D-5", "5D-6", "5D-8"},
+		"WEB-NAPPLET": {"W-1", "W-3", "W-4", "W-5"},
 		"NAP-SHELL":   {"NAP-SHELL-1"},
 		"NAP-INTENT":  {"NAP-INTENT-1"},
 		"NAP-INC":     {"NAP-INC-sender"},
+		"NAP-STORAGE": {"S-1", "S-2", "S-3"},
+		"NAP-CONFIG":  {"CF-1"},
 	} {
 		tb, ok := tableIn(pinSection[spec])
 		if !ok {
@@ -305,6 +307,32 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 	if tb, ok := tableIn(pinSection["WEB-NAPPLET"]); ok {
 		if row, ok := rowsByID(tb)["W-1"]; ok && strings.Contains(cell(row, tb.col("Reason")), "still normalize") {
 			t.Error("section WEB-NAPPLET: row W-1 still describes the CF-2 residue")
+		}
+	}
+	// the Phase 5 gap rows (FEATURES S-1..S-3, CF-1, 5D-4..5D-6, W-3..W-5)
+	for spec, ids := range map[string][]string{
+		"NIP-5D":      {"5D-4", "5D-5", "5D-6"},
+		"WEB-NAPPLET": {"W-3", "W-4", "W-5"},
+		"NAP-STORAGE": {"S-1", "S-2", "S-3"},
+		"NAP-CONFIG":  {"CF-1"},
+	} {
+		tb, ok := tableIn(pinSection[spec])
+		if !ok {
+			continue // reported above
+		}
+		rows := rowsByID(tb)
+		for _, id := range ids {
+			row, ok := rows[id]
+			if !ok {
+				continue // reported above
+			}
+			if st := cell(row, tb.col("Status")); !strings.HasPrefix(st, "fixed (Phase 5)") {
+				t.Errorf("section %s: row %s has status %q, want fixed (Phase 5)", spec, id, st)
+			}
+			// each one quotes the pinned text it closes
+			if !curlyQuote.MatchString(cell(row, tb.col("Requirement"))) {
+				t.Errorf("section %s: row %s quotes no spec text", spec, id)
+			}
 		}
 	}
 	if tb, ok := tableIn("Conflicts"); ok && conflicts != nil {
@@ -380,7 +408,35 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 
 	// DEC-5 records the document-start marker (D-18) and DEC-6 the engine
 	// hardening scope (D-19)
-	requireRows("Decisions", "DEC-", 6, "Decision", "Reason", "Owner")
+	decisions := requireRows("Decisions", "DEC-", 6, "Decision", "Reason", "Owner")
+
+	// DEC-7 records the per-schema source rules (D-11, D-18) and DEC-8 which
+	// Blossom servers may be private (D-20)
+	if tb, ok := tableIn("Decisions"); ok && decisions != nil {
+		for id, wants := range map[string][]string{
+			"DEC-7": {"WEB-NAPPLET", "NIP-5D", "scp-like", "`git+ssh://`"},
+			"DEC-8": {"user-configured or default", "kind 10063", "netguard", "proxy"},
+		} {
+			row, ok := decisions[id]
+			if !ok {
+				t.Errorf("Decisions: row %s is missing", id)
+				continue
+			}
+			for _, c := range []string{"Decision", "Reason", "Owner"} {
+				if cell(row, tb.col(c)) == "" {
+					t.Errorf("Decisions: row %s has an empty %q cell", id, c)
+				}
+			}
+			if owner := cell(row, tb.col("Owner")); !strings.HasPrefix(owner, "Phase 5 (done") {
+				t.Errorf("Decisions: row %s has owner %q, want Phase 5 (done)", id, owner)
+			}
+			for _, want := range wants {
+				if !strings.Contains(cell(row, tb.col("Decision")), want) {
+					t.Errorf("Decisions: row %s does not say %q", id, want)
+				}
+			}
+		}
+	}
 
 	// a fixed row is a claim: it cites the code and test behind it
 	for _, tb := range tables {
