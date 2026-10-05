@@ -691,15 +691,18 @@ var hex64JSON = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
 //     an installed napplet's scope
 //   - config/: .json files that are not the config file of an installed
 //     napplet's scope (napconfig owns the directory; legacy names included)
-//   - storage/: .json files whose name is not 64 hex, the napp and napplet
-//     names of builds before D-04. 64-hex files there are napp localStorage,
-//     which nothing at startup can attribute (dev napps are never in state),
-//     so they always stay.
+//
+// storage/ is never touched. It holds napp (35130) and dev localStorage,
+// which nothing at startup can attribute (dev napps are never in state), and
+// the files earlier builds wrote there under their old names: napp data the
+// user may still want back through a downgrade or a manual rename, and
+// napplet data that costs a few KB. Napplet storage has its own directory
+// precisely so this sweep never reaches napp data (D-24).
 //
 // Only regular files are touched: no symlink (nor what it points at), no
 // directory, no other file type and no .tmp-* file of an atomic write in
 // progress. It uses os.Remove, never RemoveAll, and never looks at napps/
-// (Phase 1 D-04) or anywhere outside the three directories. The expected
+// (Phase 1 D-04) or anywhere outside the two directories. The expected
 // names come from keyFileName and napconfig.FileName, the helpers storage
 // and config write with, so live data can never be one byte off.
 //
@@ -755,9 +758,6 @@ func sweepNappletData() {
 	})
 	sweep(nappletConfigDir(), func(name string) bool {
 		return strings.HasSuffix(name, ".json") && !keepConfig[name]
-	})
-	sweep(filepath.Join(dataDir, "storage"), func(name string) bool {
-		return strings.HasSuffix(name, ".json") && !hex64JSON.MatchString(name)
 	})
 	if removed > 0 || failed > 0 {
 		log.Info().Int("removed", removed).Int("failed", failed).Msg("swept storage and settings no installed napplet owns")

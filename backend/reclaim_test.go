@@ -797,10 +797,12 @@ func newSweepFixture(t *testing.T, dir string) sweepFixture {
 	mkdir(filepath.Join(configDir, "sub.json"))
 	symlink(f.outside, filepath.Join(configDir, "linked.json"))
 
-	// storage/
-	remove(filepath.Join(nappDir, "0123456789abcdef~notes.json"))
-	remove(filepath.Join(nappDir, "napplet~0123456789abcdef~old.json"))
-	remove(filepath.Join(nappDir, "napplet-"+testArtifactOf("old")+".json"))
+	// storage/ is napp localStorage and never swept, old names included:
+	// a napp's file of a build before D-04, and napplet files of earlier
+	// builds the sweep cannot tell from napp data (WR-06)
+	keep(filepath.Join(nappDir, "0123456789abcdef~notes.json"))
+	keep(filepath.Join(nappDir, "napplet~0123456789abcdef~old.json"))
+	keep(filepath.Join(nappDir, "napplet-"+testArtifactOf("old")+".json"))
 	keep(filepath.Join(nappDir, keyFileName("0123456789abcdef~notes")))
 	keep(filepath.Join(nappDir, ".tmp-abc"))
 	mkdir(filepath.Join(nappDir, "sub.json"))
