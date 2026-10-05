@@ -58,13 +58,13 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Identity and storage
 
-- [ ] **KEY-01**: Napplet storage is always keyed by full address plus artifact hash, with no address-only fallback (S-1, S-2)
-- [ ] **KEY-02**: NAP-CONFIG values are keyed by full address plus artifact hash (CF-1)
-- [ ] **KEY-03**: A root napplet and a named napplet with `d="root"` from the same author never share storage, config, rules or install directory (5D-6)
-- [ ] **KEY-04**: Storage and config file names cannot collide across different `d` values (CF-2)
-- [ ] **KEY-05**: Storage for superseded artifact hashes, uninstalled napplets and deleted window instances is reclaimed (S-3)
-- [ ] **KEY-06**: Promoting a trial window's storage on install writes it under the installed artifact's hash
-- [ ] **KEY-07**: The desktop update UI tells the user that updating a napplet resets its saved data
+- [x] **KEY-01**: Napplet storage is always keyed by full address plus artifact hash, with no address-only fallback (S-1, S-2)
+- [x] **KEY-02**: NAP-CONFIG values are keyed by full address plus artifact hash (CF-1)
+- [x] **KEY-03**: A root napplet and a named napplet with `d="root"` from the same author never share storage, config, rules or install directory (5D-6)
+- [x] **KEY-04**: Storage and config file names cannot collide across different `d` values (CF-2)
+- [x] **KEY-05**: Storage for superseded artifact hashes, uninstalled napplets and deleted window instances is reclaimed (S-3)
+- [x] **KEY-06**: Promoting a trial window's storage on install writes it under the installed artifact's hash
+- [x] **KEY-07**: The desktop update UI tells the user that updating a napplet resets its saved data
 
 ### Relay and outbox
 
@@ -102,10 +102,10 @@ Spec pins and decisions: `.planning/research/SPEC-PINS.md`. Gap IDs in parenthes
 
 ### Registry
 
-- [ ] **REG-01**: The latest manifest event is chosen by NIP-01 rules before validation; an invalid latest event marks the napplet unavailable instead of falling back to an older one (W-3)
-- [ ] **REG-02**: `source` URLs must be absolute with a host; manifest blob downloads go through the public-internet guard (W-4, W-5)
-- [ ] **REG-03**: Trial windows fetch and verify every `path` blob of a NIP-5D manifest before launch (5D-4)
-- [ ] **REG-04**: Launching a napplet whose `requires` domains are unsupported shows a warning on desktop (5D-5)
+- [x] **REG-01**: The latest manifest event is chosen by NIP-01 rules before validation; an invalid latest event marks the napplet unavailable instead of falling back to an older one (W-3)
+- [x] **REG-02**: `source` URLs must be absolute with a host; manifest blob downloads go through the public-internet guard (W-4, W-5)
+- [x] **REG-03**: Trial windows fetch and verify every `path` blob of a NIP-5D manifest before launch (5D-4)
+- [x] **REG-04**: Launching a napplet whose `requires` domains are unsupported shows a warning on desktop (5D-5)
 
 ## v2 Requirements
 
@@ -171,13 +171,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SECR-01 | Phase 3 | Complete |
 | SECR-02 | Phase 3 | Complete |
 | SECR-03 | Phase 3 | Complete |
-| KEY-01 | Phase 5 | Pending |
-| KEY-02 | Phase 5 | Pending |
-| KEY-03 | Phase 5 | Pending |
-| KEY-04 | Phase 5 | Pending |
-| KEY-05 | Phase 5 | Pending |
-| KEY-06 | Phase 5 | Pending |
-| KEY-07 | Phase 5 | Pending |
+| KEY-01 | Phase 5 | Complete |
+| KEY-02 | Phase 5 | Complete |
+| KEY-03 | Phase 5 | Complete |
+| KEY-04 | Phase 5 | Complete |
+| KEY-05 | Phase 5 | Complete |
+| KEY-06 | Phase 5 | Complete |
+| KEY-07 | Phase 5 | Complete |
 | RELY-01 | Phase 6 | Pending |
 | RELY-02 | Phase 6 | Pending |
 | RELY-03 | Phase 6 | Pending |
@@ -200,10 +200,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MISC-03 | Phase 8 | Pending |
 | MISC-04 | Phase 8 | Pending |
 | MISC-05 | Phase 8 | Pending |
-| REG-01 | Phase 5 | Pending |
-| REG-02 | Phase 5 | Pending |
-| REG-03 | Phase 5 | Pending |
-| REG-04 | Phase 5 | Pending |
+| REG-01 | Phase 5 | Complete |
+| REG-02 | Phase 5 | Complete |
+| REG-03 | Phase 5 | Complete |
+| REG-04 | Phase 5 | Complete |
 
 **Coverage:**
 

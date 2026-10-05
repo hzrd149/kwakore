@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
-status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-10-05T17:02:25.805Z"
+status: verifying
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-10-05T17:12:18.930Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-10 (reclaim on uninstall/update/window delete deferred while a window uses the data; escaped rule and usage ids; startup sweep)
-state_head: 20883f880c7973186552c756bf714d82524c9a1f
+last_activity_desc: Completed 05-11 (CONFORMANCE close-out for Phase 5, NAPPLETS.md, consolidated end-of-phase smoke list); all 12 phase 5 plans done
+state_head: 3fe06ef17d7027bf7ec2d3e21fd089bdd96ed68a
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 39
+  completed_plans: 40
   percent: 50
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 
 ## Current Position
 
-Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 12 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-08, 05-09, 05-10, 05-12 complete; 05-11 next)
-Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-10-PLAN.md (Uninstall closes a napplet's windows and removes its storage, config, rules, usage and directory; updates and installs over another hash reclaim the superseded version; auxiliary/failed windows take their instance store; reclaims wait for the last window of the version and never delete a reinstalled scope; dead stores refuse writes; rule/usage ids escape 0x1B/0x1F per part, legacy keys unchanged; Start sweeps unowned napplet-storage/config files and pre-D-04 storage names)
+Phase: 5 (Napplet Artifact Identity and Storage Keying) — VERIFYING
+Plan: 12 of 12 (all complete: 05-01 through 05-12; end-of-phase human smoke list in 05-11-SUMMARY.md)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-05 — Completed 05-11-PLAN.md (CONFORMANCE: CF-2 and conflicts A4, A7, A11 fixed (Phase 5); rows S-1..S-3, CF-1, 5D-4..5D-6, W-3..W-5; DEC-7 per-schema source rules, DEC-8 Blossom trust; TestConformanceChecklistSkeleton pins them. NAPPLETS.md describes the address-plus-hash runtime with the launch-check privacy note. KEY-01..07 and REG-01..04 complete)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -100,6 +100,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P08 | 8min | 2 tasks | 7 files |
 | Phase 05 P09 | 10min | 3 tasks | 8 files |
 | Phase 05 P10 | 13min | 3 tasks | 8 files |
+| Phase 05 P11 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -209,6 +210,8 @@ Recent decisions affecting current work:
 - [Phase 5]: [05-10] Uninstall closes a napplet's windows (napps keep their flow), reclaims shared/instance storage and config, and calls ForgetPermission(id, "")
 - [Phase 5]: [05-10] Rule and usage ids escape each part (0x1B -> 0x1B 0x1B, 0x1F -> 0x1B 's') before the 0x1F join; parts without either byte, i.e. every legacy key, encode byte-identically
 - [Phase 5]: [05-10] Start runs sweepNappletData synchronously after dropPreAddressNapplets and before refreshInstalled: regular files only, os.Remove only, napplet-storage/ and config/ unexpected names, storage/ non-64-hex names; napps/ and 64-hex napp localStorage never touched
+- [Phase 5]: 05-11: CONFORMANCE CF-2 and conflicts A4, A7, A11 read fixed (Phase 5); rows S-1..S-3, CF-1, 5D-4..5D-6, W-3..W-5 and decisions DEC-7 (source per schema) and DEC-8 (own Blossom servers, user-configured or default, may be private) pinned by TestConformanceChecklistSkeleton
+- [Phase 5]: 05-11: A4 records that permission rules stay keyed by the full address (not the hash) and are removed on uninstall
 
 ### Pending Todos
 
@@ -241,6 +244,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T17:02:25.675Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-10-05T17:12:18.797Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
