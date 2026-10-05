@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"fiatjaf.com/nostr"
 	_ "golang.org/x/image/webp"
@@ -269,7 +270,7 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 				n.IconSha, n.IconMime = tag[1], tag[2]
 			}
 		case "source":
-			if len(tag) == 2 && validSource(tag[1]) {
+			if len(tag) == 2 && validWebNappletSource(tag[1]) {
 				n.Sources = append(n.Sources, tag[1])
 			}
 
@@ -358,16 +359,84 @@ func httpsOrigin(tag nostr.Tag) (string, bool) {
 	return "https://" + strings.ToLower(u.Host), true
 }
 
-func validSource(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Host == "" && u.Opaque == "") {
+// A source tag is display metadata only: the launcher never fetches, clones,
+// opens or runs it. It is still checked, because a user may paste it into git
+// clone: a value that is not an absolute URL with a host, or whose host or
+// user starts with "-" (read by git and ssh as an option, as in
+// ssh://-oProxyCommand=…), is not shown. Each manifest schema has its own
+// rule, below.
+
+// sourceChars refuses an empty value and any whitespace, control or format
+// character (a bidi override would make the shown remote lie).
+func sourceChars(raw string) bool {
+	if raw == "" {
 		return false
 	}
-	switch u.Scheme {
-	case "https", "ssh", "git", "nostr":
-		return true
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
 	}
-	return false
+	return true
+}
+
+// sourceURL checks an absolute URL against one schema's schemes: hierarchical
+// (no opaque form such as https:foo or nostr:naddr1…), with a host, and with
+// neither host nor user starting with "-". ok is false when raw does not
+// parse as a URL with a scheme at all.
+func sourceURL(raw string, schemes ...string) (valid, ok bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
+		return false, false
+	}
+	if !slices.Contains(schemes, u.Scheme) || u.Opaque != "" {
+		return false, true
+	}
+	host := u.Hostname()
+	if host == "" || strings.HasPrefix(host, "-") {
+		return false, true
+	}
+	if u.User != nil && strings.HasPrefix(u.User.Username(), "-") {
+		return false, true
+	}
+	return true, true
+}
+
+// validWebNappletSource follows WEB-NAPPLET @7ae5b19a: “`source` values MUST
+// be absolute `https://`, `ssh://`, `git://`, or `nostr://` URLs”, and
+// “scp-like remotes are not portable and are invalid”. webNappletFromEvent
+// drops a tag that fails, because “A malformed optional metadata tag (`icon`
+// or `source`) MUST be ignored without invalidating an otherwise valid event”.
+func validWebNappletSource(raw string) bool {
+	if !sourceChars(raw) {
+		return false
+	}
+	valid, _ := sourceURL(raw, "https", "ssh", "git", "nostr")
+	return valid
+}
+
+// validGitSource is the NIP-5D rule (D-11; NIP-5A's source rule is not
+// pinned): a cloneable git URL. That is https, http, git, ssh or git+ssh with
+// a host, or git's scp-like user@host:path, which git recognizes only when no
+// "/" comes before the first ":". The user@ part is required: without it
+// https:foo would read as an scp-like remote on host "https". Relative
+// paths, file:// and nostr: in any form are refused, and nip5dFromEvent
+// refuses the whole manifest for it.
+func validGitSource(raw string) bool {
+	if !sourceChars(raw) {
+		return false
+	}
+	if valid, ok := sourceURL(raw, "https", "http", "git", "ssh", "git+ssh"); ok {
+		return valid
+	}
+	colon := strings.IndexByte(raw, ':')
+	if colon <= 0 || strings.Contains(raw[:colon], "/") {
+		return false
+	}
+	user, host, ok := strings.Cut(raw[:colon], "@")
+	return ok && user != "" && host != "" && raw[colon+1:] != "" &&
+		!strings.Contains(host, "@") &&
+		!strings.HasPrefix(user, "-") && !strings.HasPrefix(host, "-")
 }
 
 // parseConvention reads ["i", "napplet:<role>/<intent>", "<param>", ...].

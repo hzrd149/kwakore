@@ -379,3 +379,143 @@ func signedEvent(t *testing.T, kind nostr.Kind, tags nostr.Tags, content string)
 	}
 	return evt
 }
+
+// ─── source tags ────────────────────────────────────────────────
+
+func TestValidSourceWebNapplet(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"https://github.com/a/b.git", true},
+		{"ssh://git@host/x", true},
+		{"git://host/x", true},
+		{"nostr://npub1abc/relay.damus.io/repo", true},
+		{"HTTPS://Host/x", true},
+		// not in the pinned WEB-NAPPLET set
+		{"http://host/x", false},
+		{"git+ssh://git@host/x", false},
+		{"git@github.com:user/repo.git", false}, // scp-like is invalid here
+		{"file:///repo", false},
+		// opaque, host-less or relative
+		{"https:foo", false},
+		{"nostr:naddr1xyz", false},
+		{"//host/path", false},
+		{"https:///nohost", false},
+		{"https://", false},
+		{"https://:443/x", false},
+		{"./repo", false},
+		{"repo", false},
+		{"", false},
+		// option injection if pasted into git clone
+		{"ssh://-oProxyCommand=x/y", false},
+		{"ssh://-user@host/x", false},
+		// whitespace, control and format characters
+		{"https://host/a b", false},
+		{"https://host/a\nb", false},
+		{"https://host/a\x00", false},
+		{"https://host/‮evil", false},
+	} {
+		if got := validWebNappletSource(tc.raw); got != tc.want {
+			t.Errorf("validWebNappletSource(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestValidSourceNIP5D(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"https://github.com/a/b.git", true},
+		{"http://host/x", true},
+		{"git://host/x", true},
+		{"ssh://git@host/x", true},
+		{"git+ssh://git@host/x", true},
+		{"HTTPS://Host/x", true},
+		{"git@github.com:user/repo.git", true},
+		{"user@host:path", true},
+		// not cloneable git URLs
+		{"nostr://npub1abc/x", false},
+		{"nostr:naddr1xyz", false},
+		{"https:foo", false},
+		{"//host/path", false},
+		{"https:///nohost", false},
+		{"https://", false},
+		{"file:///repo", false},
+		{"./repo", false},
+		{"a/b:c", false},
+		{"host:path", false}, // scp-like needs the user@ part
+		{"user@host:", false},
+		{"@host:path", false},
+		{"user@:path", false},
+		{"", false},
+		// option injection
+		{"ssh://-oProxyCommand=x/y", false},
+		{"-user@host:path", false},
+		{"user@-host:path", false},
+		// whitespace and control characters
+		{"git@host:a b", false},
+		{"git@host:a\tb", false},
+		{"https://host/a\r\n", false},
+	} {
+		if got := validGitSource(tc.raw); got != tc.want {
+			t.Errorf("validGitSource(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestWebNappletMalformedSourceIgnored(t *testing.T) {
+	for _, raw := range []string{"https:foo", "nostr:naddr1xyz", "git@github.com:user/repo.git",
+		"ssh://-oProxyCommand=x/y", "http://host/x", "https://host/a b"} {
+		tags := validNappletTags()
+		for i, tag := range tags {
+			if tag[0] == "source" {
+				tags[i] = nostr.Tag{"source", raw}
+			}
+		}
+		tags = append(tags, nostr.Tag{"source", "https://github.com/a/b.git"})
+		n := nappFromLatest(signedNapplet(t, tags, "desc"))
+		if n.Unavailable != "" {
+			t.Errorf("source %q made the event unavailable: %s", raw, n.Unavailable)
+			continue
+		}
+		// the bad one is dropped, the good one kept
+		if !slices.Equal(n.Sources, []string{"https://github.com/a/b.git"}) {
+			t.Errorf("source %q: sources %v", raw, n.Sources)
+		}
+	}
+}
+
+func TestNIP5DInvalidSourceIsUnavailable(t *testing.T) {
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+
+	// no source tag at all is fine, and a cloneable one is kept
+	if n := nappFromLatest(signedNapplet(t, nip5dTags("app", index), "")); n.Unavailable != "" {
+		t.Fatalf("no source: unavailable %q", n.Unavailable)
+	}
+	for _, raw := range []string{"git@github.com:user/repo.git", "git+ssh://git@host/x", "http://host/x"} {
+		tags := append(nip5dTags("app", index), nostr.Tag{"source", raw})
+		n := nappFromLatest(signedNapplet(t, tags, ""))
+		if n.Unavailable != "" || !slices.Equal(n.Sources, []string{raw}) {
+			t.Errorf("source %q: unavailable %q, sources %v", raw, n.Unavailable, n.Sources)
+		}
+	}
+
+	for _, raw := range []string{"nostr://npub1abc/x", "nostr:naddr1xyz", "https:foo", "//host/path",
+		"https:///nohost", "ssh://-oProxyCommand=x/y", "-user@host:path", "user@-host:path",
+		"host:path", "user@host:", "a/b:c", "./repo", "file:///repo"} {
+		tags := append(nip5dTags("app", index), nostr.Tag{"source", raw})
+		evt := signedNapplet(t, tags, "")
+		if _, err := nappletFromEvent(evt); err == nil {
+			t.Errorf("source %q accepted", raw)
+		}
+		n := nappFromLatest(evt)
+		if n.Unavailable != "Its source isn't a valid git URL" {
+			t.Errorf("source %q: unavailable %q", raw, n.Unavailable)
+		}
+		if len(n.Sources) != 0 || len(n.Paths) != 0 {
+			t.Errorf("source %q: unavailable entry kept %v %v", raw, n.Sources, n.Paths)
+		}
+	}
+}

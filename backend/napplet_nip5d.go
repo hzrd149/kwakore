@@ -84,9 +84,12 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 				n.Servers = append(n.Servers, origin)
 			}
 		case "source":
-			if validSource(tag[1]) {
-				n.Sources = append(n.Sources, tag[1])
+			// a NIP-5D source must be cloneable; one that isn't makes the
+			// manifest invalid (REG-02), the reason saying so
+			if !validGitSource(tag[1]) {
+				return Napp{}, invalidManifest(reasonSource, fmt.Errorf("bad source tag %q", tag[1]))
 			}
+			n.Sources = append(n.Sources, tag[1])
 		case "requires":
 			if domainToken.MatchString(tag[1]) {
 				n.RequiredDomains = appendUniqueString(n.RequiredDomains, tag[1])
