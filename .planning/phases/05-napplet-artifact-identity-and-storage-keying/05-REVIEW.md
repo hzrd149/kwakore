@@ -1,375 +1,272 @@
 ---
 phase: 05-napplet-artifact-identity-and-storage-keying
-reviewed: 2026-10-05T17:26:13Z
+reviewed: 2026-10-05T19:25:02Z
 depth: deep
-files_reviewed: 72
+iteration: 3
+files_reviewed: 16
 files_reviewed_list:
-  - NAPPLETS.md
-  - backend/app_shortcuts.go
-  - backend/backend.go
-  - backend/bridge.go
-  - backend/containment_test.go
-  - backend/host.go
-  - backend/launcher_notices.go
-  - backend/launcher_notices_test.go
-  - backend/launcher_state.go
-  - backend/launcher_state_legacy_test.go
-  - backend/launcher_ui.go
-  - backend/launcher_usage.go
-  - backend/nap.go
-  - backend/nap_basic.go
-  - backend/nap_config.go
-  - backend/nap_config_test.go
-  - backend/nap_prompt_test.go
-  - backend/nap_storage_test.go
-  - backend/nap_test.go
-  - backend/napconfig/schema_test.go
-  - backend/napconfig/store.go
-  - backend/napp.go
-  - backend/napplet.go
-  - backend/napplet_nip5d.go
-  - backend/napplet_test.go
-  - backend/preview_test.go
   - backend/reclaim_test.go
   - backend/registry_address.go
-  - backend/registry_address_test.go
-  - backend/registry_blob_test.go
-  - backend/registry_detail.go
-  - backend/registry_discovery.go
-  - backend/registry_discovery_test.go
   - backend/registry_install.go
-  - backend/registry_select.go
-  - backend/registry_select_test.go
-  - backend/registry_updates.go
-  - backend/registry_updates_test.go
-  - backend/search_integration.go
-  - backend/shortcuts.go
-  - backend/shortcuts_test.go
-  - backend/spec_conformance_test.go
-  - backend/window_child_unavailable_test.go
+  - backend/registry_install_test.go
   - backend/window_instances.go
-  - backend/window_permissions.go
-  - backend/window_settings.go
-  - backend/window_storage.go
-  - desktop/detail.go
-  - desktop/grid.go
-  - desktop/internal/osintegration/appshortcut.go
   - desktop/internal/osintegration/appshortcut_darwin.go
   - desktop/internal/osintegration/appshortcut_linux.go
   - desktop/internal/osintegration/appshortcut_linux_test.go
   - desktop/internal/osintegration/appshortcut_windows.go
-  - desktop/internal/osintegration/autostart_linux.go
+  - desktop/internal/osintegration/lnkscript.go
+  - desktop/internal/osintegration/lnkscript_test.go
+  - desktop/internal/osintegration/main_linux_test.go
   - desktop/internal/osintegration/search_integration_darwin.go
-  - desktop/internal/osintegration/search_integration_linux.go
   - desktop/internal/osintegration/search_integration_windows.go
-  - desktop/internal/osintegration/shortcutfile_linux.go
-  - desktop/internal/osintegration/shortcutfile_linux_test.go
-  - desktop/layout.go
-  - desktop/login.go
-  - desktop/main.go
-  - desktop/notices.go
-  - desktop/notices_test.go
-  - desktop/store.go
-  - desktop/store_confirm.go
-  - desktop/store_confirm_test.go
-  - desktop/store_layout.go
-  - desktop/store_unavailable.go
-  - desktop/store_unavailable_test.go
-  - spec/CONFORMANCE.md
+  - desktop/internal/osintegration/shortcutsync.go
+  - desktop/internal/osintegration/shortcutsync_test.go
 findings:
-  critical: 2
-  warning: 7
-  info: 8
-  total: 17
+  critical: 0
+  warning: 2
+  info: 11
+  total: 13
 status: issues_found
 ---
 
-# Phase 5: Code Review Report
+# Phase 5: Code Review Report (iteration 3)
 
-**Reviewed:** 2026-10-05T17:26:13Z
-**Depth:** deep (standard plus cross-file tracing of storage keying, reclaim, sweep, selection, downloads and shortcut writers)
-**Files Reviewed:** 72
+**Reviewed:** 2026-10-05T19:25:02Z
+**Depth:** deep. I traced the lock order through Uninstall, launchWindow, the directory swap and the trial finish. I also traced the close path to the desktop child and to the Android host (`VerdanaHost.kt`).
+**Files Reviewed:** 16 (scope: `git diff df752a4 HEAD -- . ':!.planning'`, plus the code these files call into: `desktop/childproc.go`, `desktop/child/main.go`, `backend/mobile/mobile.go`, `android/.../VerdanaHost.kt`, `backend/search_integration.go`, `backend/app_shortcuts.go`, `backend/registry_updates.go`, `backend/window_storage.go`)
 **Status:** issues_found
 
 ## Summary
 
-Scope: `git diff 0d05b62 HEAD -- . ':!.planning'`. I traced every place a napplet's data is keyed, reclaimed or swept, every manifest selection site, the blob download clients, the source validators, the shortcut and search writers on all three desktop OSes, notice text sanitizing, and the desktop confirm and stale-guard flow. `go vet ./...` is clean for the host build and for `CGO_ENABLED=0 GOOS=android GOARCH=arm64` (no Kotlin was changed). The targeted backend tests pass with `-race`.
+**Verification:**
+- Child rebuilt with `go generate ./internal/webviewlib && go build -o child/child ./child`.
+- `cd backend && go test -race ./...` passes.
+- `cd desktop && go test -race -tags novulkan ./...` passes.
+- I ran the new and touched race tests 5 more times with `-race -count=5`; all passed. The tests were `TestUninstallClosesLaunchInProgress`, `TestUninstallClosesWindowStillOpening`, `TestUninstallRacingLaunch`, `TestTrialInstallWaitsForStoreInstall`, `TestSwapRetriesTransientRenameFailure`, `TestLaunchNeverCreatesInstallDir` and `TestLaunchRacingReclaim`.
+- `go vet` is clean on these targets:
+  - the host build, for both modules
+  - `CGO_ENABLED=0 GOOS=android GOARCH=arm64` (backend)
+  - `GOOS=windows` and `GOOS=darwin` (`desktop/internal/osintegration`)
+- Logs are in `/tmp/claude-1000/-home-user-Projects-verdana/a09b2a20-a933-474d-991e-339bbba43438/scratchpad/p5iter3/`.
 
-What holds up:
-- The storage key is injective, and the address-only fallback is gone (KEY-01).
-- Config is keyed by the same scope as storage (KEY-02).
-- Files are named by hash (KEY-04).
-- `latestByAddress.add` runs CheckID and VerifySignature before comparing. The `newerEvent`/`nappNewer` tie-breaks are right, and every selection site I found uses the shared helper with no fallback to an older event (REG-01).
-- netguard is enforced on every dial of the public blob client.
-- Linux `.desktop` Exec and key injection is closed (D-21).
-- Rule and usage key escaping still decodes keys saved by earlier builds.
+Both iteration-2 warnings are fixed on desktop. No Critical issue remains. Two new warnings:
+- The pending-close mechanism added for WR-02 does not work on Android.
+- The "unique" shortcut names still let two entries share one file on NTFS and APFS.
 
-Two blocking problems:
+### Lock order and blocking (the areas the caller asked about)
 
-1. **CR-01:** The Windows Start-menu writers build PowerShell commands with `psSingleQuote`, which only escapes ASCII `'`. PowerShell also treats U+2018 to U+201B as single quotes. Any napplet title on a discovery relay therefore runs arbitrary PowerShell on Windows. Phase 5 makes this worse: invalid ("unavailable") manifests are now listed in Discovery, so the event no longer needs to be a valid napplet.
-2. **CR-02:** The new startup sweep deletes every napplet storage and config file whenever `state.json` was corrupt or unreadable. This defeats the Phase 3 "set it aside, don't destroy the user's data" recovery.
+- **Uninstall.** It now takes reclaimMu → stateMu, then releases stateMu, then takes instancesMu (`runningForNapp`), then releases reclaimMu. This matches the documented order.
+  - Nothing that holds stateMu, instancesMu, ls.mu, a store mu or configMu takes reclaimMu.
+  - `ci.Close()` and the slow work (`RemoveAll`, `reclaimNapplet`, which takes reclaimMu again on its own, and `ForgetPermission`) all run after the unlock.
+  - Uninstall's only callers are UI goroutines (`go backend.Uninstall`), and none of them holds a backend lock.
+  - No deadlock found.
+- **launchWindow.**
+  - The new presence check for 35130 napps takes stateMu alone, briefly.
+  - The napplet check runs under the existing reclaimMu → stateMu section.
+  - `launchReadHook` is nil in production.
+- **Rename retries.** They sleep under stateMu, which the swap holds, at most 20+40+60+80 ms = 200 ms per rename. There are at most 3 renames, so at most about 600 ms in the worst case on Windows (3 renames, all failing). Elsewhere, attempts is 1, so there is no sleep.
+  - `Snapshot` reads `ls`, not stateMu, so Gio frames don't stall.
+  - Only a synchronous `InstalledNapp` call (an open button) can wait, and only for that bounded time.
+  - `os.ErrNotExist` is not retried, which is correct for a missing source.
+- **The 2-minute trial wait.** `waitNotBusy` runs only in `finishNappletTrial`, which runs on its own goroutine (`go finishNappletTrial(ci)` from `WindowClosed`).
+  - It holds no lock while it waits: it polls `IsBusy`, which takes ls.mu for one map read.
+  - The prompt has already been answered, so the prompt queue is not held either.
+  - No UI freeze or deadlock is possible.
+- **Pending close.** `Close` and `attach` set and read `closeRequested` under `sendMu`, so exactly one of them calls `t.Close()`.
+  - The flag is per `*Instance`, so it can't close another window. A reopen with the same instance string creates a new `Instance`.
+  - Nothing leaks: the flag is one bool, and the early return in `attach` correctly drops the queued messages.
+  - On desktop the `close` line sits in the child's stdin pipe and is handled once the webview exists.
+  - On Android the close is lost (WR-01).
+- **Truncated names.**
+  - Windows: the stem is cut to at most 64 units and to the per-folder MAX_PATH budget, with the "…" counted. The worst-case fallback (`stem (16-hex key N)`) overshoots the reserved suffix by at most 13 units, which the 16-unit margin absorbs.
+  - macOS: the stem is cut to 64 bytes, far below the 255-byte limit.
+  - Uniqueness holds only under Go's `strings.ToLower` (WR-02).
+- **Skip-and-continue.** A failed entry's paths stay in `desired`, so an earlier link at that path is kept, and stale removal still runs.
+  - A link can still be deleted when its on-disk name differs only in case from the name the pass wants (IN-12). This predates the rewrite and heals on the next pass.
 
-The warnings are races and fail-open paths:
-- A failed install-over or update deletes or corrupts the working copy.
-- Trial promotion has a check-then-write gap.
-- Nothing prevents installing an older version over a newer one.
-- Reclaim decides from a single snapshot of the open windows.
-- The trusted blob client follows redirects anywhere.
-- All napp localStorage from earlier builds is deleted silently.
-- The detail page's Update button and unavailable status can never appear.
+### Status of iteration-2 findings
 
-## Critical Issues
+| ID | Status | Notes |
+|----|--------|-------|
+| WR-01 Windows Start-menu sync DoS | **Resolved** | Names are bounded per folder, and descriptions are capped at 512 UTF-16 units (Windows) and 1024 bytes (macOS). All three OSes write each entry on its own and still remove stale entries. On Linux, a token that quoting refuses now fails only its own entry. The callers only log the returned error (`SyncSystemSearch`, `syncAppShortcuts`), so a hostile entry can't raise a persistent banner. Tests cover the 300-rune title, the 40,000-rune description, and continuing past a failed entry. |
+| WR-02 Uninstall misses a launching window | **Resolved on desktop; open on Android (new WR-01)** | Deleting the record and listing the windows now happen together under reclaimMu, and `Instance.Close` before `attach` is remembered. All three regression tests pass under `-race`. |
+| IN-09 trial data dropped on install race | **Resolved** | On `errBusy` or `errOlderVersion` the trial waits, re-reads the installed record and promotes against it. `openResolved` launches the newer installed version. |
+| IN-10 presence check races the swap, MkdirAll | **Partly resolved** | The check is under stateMu, and `launchWindow` no longer creates the install dir. The first bullet (a window registered on a superseded version can't boot after the swap) remains, carried as IN-10 below. |
+| IN-11 no rename retry on Windows | **Resolved** | There are 5 attempts with linear backoff, and the test covers both the retry and the give-up path. |
+| IN-01..IN-06, IN-08 | **Carried forward** | Unchanged. |
 
-### CR-01: PowerShell command injection through typographic single quotes in the Windows shortcut and search writers (remote, from any relay event)
-
-**File:** `desktop/internal/osintegration/search_integration_windows.go:31-46`, `desktop/internal/osintegration/appshortcut_windows.go:43-58`, helper `desktop/internal/osintegration/shortcutfile_windows.go:114-116`, reached from `backend/search_integration.go:58-75` and `backend/registry_discovery.go:66`
-
-**Issue:** `psSingleQuote` only doubles ASCII `'`:
-```go
-func psSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-```
-PowerShell's tokenizer treats U+2018 `‘`, U+2019 `’`, U+201A `‚` and U+201B `‛` as single-quote characters too. Any of them inside the value ends the string literal. Two values are author-controlled:
-- The shortcut **path**. It is built from `windowsShortcutName(napplet.Name)`, which only maps `<>:"/\|?*` and characters below 32.
-- The **Description**. `appShortcutText` removes only control and Cf characters, and U+2019 is Pf.
-
-Both go into the `-Command` string. For example, a title of `x’; Start-Process calc; ’` produces `$ws.CreateShortcut('...\x’; Start-Process calc; ’.lnk')`, which runs `Start-Process calc`.
-
-How it is reached:
-- `SyncSystemSearch` runs on **every completed discovery fetch** with no preference gate.
-- It writes an entry for **every discovered napplet** (`systemSearchEntries` covers `st.Discovery` and `st.Installed`).
-
-So any signed kind 35129 or 15129 event on a discovery relay gets code execution as the user on Windows.
-
-Phase 5 widens this:
-- `collectDiscovery`/`nappFromLatest` now list invalid latest events as unavailable entries (`IsNapplet()` is true, and the name comes from `unavailableName`, which does not touch quotes). Before, such events were dropped. The event now only needs a valid signature.
-- 05-12 rewrote these exact lines and stated in comments that the Arguments are safe, but left the path and Description arguments unprotected.
-
-The installed-app writer (`appshortcut_windows.go`) has the same flaw for installed napps and napplets.
-
-**Fix:** Don't build PowerShell source from untrusted text. Pass the values as data, for example with `-EncodedCommand` and `$args`, or through environment variables read inside the script. If quoting has to stay, escape every PowerShell single-quote character:
-```go
-func psSingleQuote(s string) string {
-	var b strings.Builder
-	b.WriteByte('\'')
-	for _, r := range s {
-		switch r {
-		case '\'', '\u2018', '\u2019', '\u201a', '\u201b':
-			b.WriteRune(r) // PowerShell doubles any single-quote char to escape it
-		}
-		b.WriteRune(r)
-	}
-	b.WriteByte('\'')
-	return b.String()
-}
-```
-Also:
-- Strip or replace those characters in `windowsShortcutName`.
-- Gate `SyncSystemSearch` behind an opt-in preference, as GNOME search is.
-- Leave `Unavailable` entries out of `systemSearchEntries`.
-- Add a regression test with a U+2019 title and description.
-
-### CR-02: Startup sweep deletes all napplet storage and settings when state.json was corrupt or unreadable
-
-**File:** `backend/backend.go:88-96`, `backend/window_storage.go:705-755`, interacting with `backend/launcher_state.go:124-160`
-
-**Issue:** `sweepNappletData` keeps only files owned by `state.InstalledNapps` and deletes every other 64-hex `.json` in `napplet-storage/` and every `.json` in `config/`. `loadState` handles two failure cases this way:
-- On a parse failure it sets `state = AppState{}`, sets `stateLost`, and moves the file aside to `state.json.corrupt-<unix>`.
-- On a read error (EACCES, EIO, a file locked on Windows) it sets `stateLost` and `stateSaveBlocked` and leaves the file in place.
-
-In both cases `InstalledNapps` is empty, so the sweep runs unconditionally and permanently deletes every installed napplet's NAP-STORAGE and NAP-CONFIG data.
-
-Phase 3 designed this recovery so the user can restore `state.json.corrupt-*` (the notice offers the path) or fix permissions and restart without losing anything. After this phase, restoring the state file brings back the napplets with all their data gone. In the read-error case the state file is intact, and a transient I/O error alone wipes everything. No test covers either case (`reclaim_test.go` has no corrupt or lost-state test).
-
-**Fix:** Skip the sweep whenever this run could not trust the installed list:
-```go
-func sweepNappletData() {
-	if stateLost.Load() || stateSaveBlocked.Load() {
-		log.Warn().Msg("state.json was not usable this run: not sweeping napplet data")
-		return
-	}
-	...
-}
-```
-Better still, also skip it while any `state.json.corrupt-*` copy newer than the last successful sweep exists. Add regression tests for the parse-failure and read-failure paths.
+## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: A failed install-over or update deletes or corrupts the working installed copy (violates D-10, "an installed copy keeps running at its installed version")
+### WR-01: On Android, a close for a window that is still opening is lost, so the WR-02 fix does not hold there
 
-**File:** `backend/registry_install.go:84-89`, `backend/registry_updates.go:323-331`
+**File:** `backend/window_instances.go:268-302`, `backend/registry_install.go:194-211`, `backend/mobile/mobile.go:225`, `android/app/src/main/java/com/verdana/app/VerdanaHost.kt:132-141, 238-242, 264-270`
 
-**Issue:** There are two ways this happens:
-- **Install over an existing version.** `InstallNapp` downloads into the *live* install directory (`nappBaseDir(n.ID)`, which is the same for every version of an address). On any download failure it runs `os.RemoveAll(base)`. Phase 5 routes napplet updates through `Install` on purpose ("an install over another version ... supersedes it like an update does", plus the `viaInstall` confirm path). `InstallFromDiscovery` on an installed id and trial promotion (`finishNappletTrial` to `InstallNapp`) also call it. In all these cases a network hiccup deletes the installed napplet's files while its record stays, so the napplet can no longer launch ("napplet ... is not installed").
-- **Update.** `applyUpdate` also writes the new files straight over the old ones. If `/index.html` arrives before another path fails, the installed record still names the old `IndexHash`, and `nappletDocument` refuses to boot ("installed file does not match its hash").
+**Issue:** `attach` calls `t.Close()` as soon as `host.OpenWindow` returns. On Android, `openWindow` only posts `startActivityOnMain { launchWindow(...) }`, so the `NappActivity` is not in `windows` yet. `closeWindow` then finds nothing to close:
 
-The pre-existing behaviour is now on the main napplet update path.
-
-**Fix:** Download into a staging directory next to the install dir (for example `napps/.staging-<random>`), then swap it in with a rename only after every file is verified. Never `RemoveAll` a directory that a record still points at:
-```go
-if err := fetchNappAssets(ctx, n, staging, servers); err != nil {
-	os.RemoveAll(staging) // never base
-	return err
+```kotlin
+override fun closeWindow(instance: String) {
+    outbox.remove(instance)
+    windows[instance]?.finishWindow()   // null: the activity has not claimed yet
+    settingsWindows[instance]?.finishWindow()
 }
-// rename base -> base.old, staging -> base, remove base.old
 ```
 
-### WR-02: Trial promotion check-then-write is not atomic and can overwrite installed data (D-25)
+The close is dropped. When the activity claims the instance a moment later, it comes up as normal. So on Android the iteration-2 WR-02 interleaving is unchanged. Uninstall "closes" a window that is still opening, the window stays open on a napplet that is no longer installed, and the pending reclaim waits until the user closes it. Both claims are false on Android:
+- the comment in `Instance.Close`: "a close (an uninstall's) never misses a window that is opening"
+- the comment in Uninstall: "is closed below"
 
-**File:** `backend/registry_install.go:445-455`, `backend/window_storage.go:414-441`
+The same loss affects every other early `Close`, for example `CloseAllWindows` from `mobile.Stop`. The backend tests don't catch it, because `gatedHost`'s transport records `Close` synchronously.
 
-**Issue:** `promoteTrial` calls `installedHasData`, which locks the store, reads `len(s.data)` and unlocks. Separately it then calls `persistTrialStorage`, which locks again and **replaces** `permanent.data = data` wholesale.
+Android hardening is deferred, but the project constraint says Android must keep working with shared backend changes. This fix relies on a transport property (a `Close` before the window is up still takes effect) that only the desktop transport has.
 
-If an installed window of the same version writes in between, the write is overwritten. That can happen:
-- on the already-installed path (line 380), or
-- right after `InstallNapp` → `refreshInstalled`, when the user can already launch the installed copy.
+**Fix:** Pick one of these:
+- **Host side.** Remember the request until the window claims:
+```kotlin
+private val closeBeforeClaim = ConcurrentHashMap.newKeySet<String>()
+override fun closeWindow(instance: String) {
+    outbox.remove(instance)
+    val w = windows[instance]; val s = settingsWindows[instance]
+    if (w == null && s == null) closeBeforeClaim.add(instance)
+    w?.finishWindow(); s?.finishWindow()
+}
+internal fun claim(window: NappActivity): Boolean {
+    ...
+    if (closeBeforeClaim.remove(window.instance)) { window.finishWindow(); return false }
+    ...
+}
+```
+- **Backend side, transport-agnostic.** Make a close-requested window refuse to run. In `HandleMessage`, or at least in `nap.boot`, check `closeRequested` under `sendMu`, re-send `t.Close()`, and drop the message. The first message from any platform arrives only once the window exists, so the second close always lands.
 
-D-25 says existing data must never be overwritten.
+Also add a test whose fake transport ignores a `Close` that arrives before a "ready" step.
 
-**Fix:** Do the emptiness check inside `persistTrialStorage` under the same `permanent.mu` hold, and return a sentinel when the store is not empty:
+### WR-02: Shortcut names are de-duplicated with `strings.ToLower`, which doesn't match how NTFS or APFS compare names, so one entry can overwrite another's link
+
+**File:** `desktop/internal/osintegration/shortcutsync.go:123-148` (used by `lnkscript.go:139-145`, `appshortcut_darwin.go:25-31`, `search_integration_darwin.go:27-33`)
+
+**Issue:** `uniqueShortcutNames` decides collisions with `strings.ToLower`. Its doc comment promises "Each name is unique within the pass, so no entry overwrites another's file". The file systems compare names differently:
+- **NTFS** compares names through its upcase table, which uppercases runes. Go keeps these pairs distinct:
+  - `ToLower("Sıgnal") = "sıgnal"` (dotless ı, U+0131) versus `ToLower("Signal") = "signal"`
+  - `ToLower("ſignal")` (long s, U+017F) versus `"signal"`
+
+  Both pairs uppercase to `SIGNAL`. I checked the Go side with a scratch program. On NTFS they should be the same file.
+- **APFS**, in its default case-insensitive mode, is also normalization-insensitive. So `Café` in NFC and `Café` in NFD are one bundle, while `strings.ToLower` keeps them distinct.
+
+Each pair gets distinct names, distinct `desired` paths and no suffix. Both writes then go to the same file on disk, and the later write wins:
+- Search entries are processed in name order, so `ı`/`ſ` (above U+00FF) sort after `i`/`s`.
+- App entries are processed in id order.
+
+A discovery entry from any author can therefore take over the Start-menu link (Windows) or the Spotlight bundle (macOS) for another discovered napplet. The entry keeps the victim's visible name, but launches the attacker's `--try-napplet` token. An exact-title copy would instead give both entries `(abc123)` suffixes, so the trick also hides the original entry. Stale removal keeps the shared file, because both paths are in `desired`. The same happens in the installed-apps folders, where both napps are installed.
+
+**Fix:** Compare with a key that covers both foldings and normalization, for example:
 ```go
-permanent.mu.Lock()
-if len(permanent.data) > 0 { permanent.mu.Unlock(); return errInstalledHasData }
+// collisionKey folds a name the way NTFS (upcase table) and case-insensitive
+// APFS (case and normalization insensitive) compare it, erring on the side of
+// calling two names equal
+func collisionKey(name string) string {
+	return strings.ToLower(strings.ToUpper(norm.NFC.String(name)))
+}
 ```
-Have `promoteTrial` map that sentinel to `trialDataExistingData`.
-
-### WR-03: Nothing stops an older version from being installed over a newer one, and Install/Update for one id run concurrently
-
-**File:** `backend/registry_install.go:65-116, 400-429`, `backend/registry_updates.go:282-299`
-
-**Issue:** `InstallNapp` overwrites whatever is installed and reclaims the previous version (`previous.ArtifactHash != n.ArtifactHash`) without checking `nappNewer(n, previous)`. `finishNappletTrial` picks `target` before the user answers the prompt:
-- the trial's own event when the lookup finds nothing (offline), or
-- the relays' `latest`, which can be older than what is installed.
-
-If the user installs a newer version from the store while the "Did you like X?" prompt is up, clicking Install then downgrades the napplet and deletes the newer version's storage and settings.
-
-Separately:
-- `InstallNapp` and `Update` both use plain `setBusy` instead of `trySetBusy`. Background paths (trial finish, `OpenAddress`, `InstallFromDiscovery`, mobile) can therefore run an Install and an Update for the same id at once. They write the same directory and race on `state.InstalledNapps`, and each reclaims what it believes is "previous".
-- `InstallNapp`'s deferred `setBusy(id, false)` can also clear a running Try's busy claim.
-
-**Fix:**
-- Re-read `InstalledNapp(id)` under `stateMu` at commit time and refuse when `nappNewer(previous, n)`.
-- Claim the id with `trySetBusy` in `InstallNapp`/`Update` and return a "busy" error instead of proceeding.
-- In `finishNappletTrial`, re-check the installed record after the prompt returns.
-
-### WR-04: The reclaim decision uses one snapshot of the open windows; writers that start afterwards recreate reclaimed files
-
-**File:** `backend/window_storage.go:496-520, 573-617`, `backend/window_instances.go:649-665, 695-764`, `backend/registry_install.go:425-456`
-
-**Issue:** `reclaimNapplet` deletes immediately when `scopeHasWindow(scope)` is false at one instant. Three writers can get a store after the eviction:
-- **A launch in flight.** `Launch(napp)` captures a record (often the store's snapshot from the start of the frame) and only becomes visible to `allInstances()` at `registerInstance`. An update or uninstall that lands in between reclaims immediately. The window then opens on the superseded or uninstalled scope, `storageFor` returns a fresh, non-dead store, and the first write recreates the file. For NIP-5D this works whenever `/index.html` is unchanged between versions, because the boot hash check still passes. Uninstall's `runningForNapp` close loop also misses such a window.
-- **`promoteTrial` racing `Uninstall`.** The trial window is gone, the record is deleted and the files reclaimed, then `persistTrialStorage` writes them back.
-- **`installedHasData`** runs `storageFor` on a reclaimed scope.
-
-Each leaves orphan files until the next start, and a running window watches its data vanish (D-24: "cleanup never races open windows").
-
-**Fix:**
-- Mark scopes as reclaimed: keep a `reclaimedScopes` set under `reclaimMu`, cleared by install or `cancelPendingReclaim`.
-- Have `storageFor`/`set`/`persistTrialStorage` refuse writes to a reclaimed scope's files.
-- Alternatively, register a "launching" marker before `nappBaseDir` and count it in `scopeHasWindow`.
-
-### WR-05: The trusted blob client follows redirects to any address, and third-party defaults are trusted
-
-**File:** `backend/registry_install.go:596-604, 632-643, 648-682`
-
-**Issue:** `trustedBlobClient` dials without restriction (D-20 allows that for the user's own servers). It shares `blobRedirect`, which only limits the hop count and https downgrade, so a redirect from a trusted server to any host is also dialed without restriction.
-
-`userBlobServers()` returns `defaultBlossomServers` (`relay.nostrapps.com`, `nostr.download`) when the user never chose any, and a manifest can trigger the trusted client just by naming one of those origins. A 3xx from such a third-party server, which the user never configured, can point at `https://127.0.0.1:<port>/...` or a LAN host, and the request goes out. D-20 grants private-network access only to servers "the user configured in settings".
-
-**Fix:** Give `trustedBlobClient` its own `CheckRedirect`. It should allow only same-origin hops, or re-check every off-origin hop with `netguard.PublicHost` and use the guarded dialer for it. Consider treating the built-in defaults as public-only as well.
-
-### WR-06: The startup sweep silently and permanently deletes all napp (35130) localStorage from earlier builds (contradicts the D-24 rationale)
-
-**File:** `backend/window_storage.go:694-697, 749-751`
-
-**Issue:** The `storage/` rule deletes every `.json` whose name is not 64 hex characters. That is every napp's localStorage written before D-04, keyed by `safeFileName(id)`.
-
-D-24 gives napplet storage its own directory precisely "so the D-08 sweep cannot touch napp/dev localStorage", and the phase boundary excludes napp storage semantics beyond file naming. The only notice raised (`napplets-reinstall`) talks about napplets, so napp users lose their data with no indication. Because the deletion happens on first start, a downgrade or a manual rename can no longer recover it.
-
-**Fix:** Either leave `storage/` alone, as D-24 describes, or confirm with the user that silent napp data loss is acceptable and raise a notice that names napps. If no migration is allowed, at least keep the old files (they cost a few KB), so a later release or a manual rename can restore them.
-
-### WR-07: The detail page's Update button (D-14) and installed unavailable status never appear
-
-**File:** `desktop/detail.go:145-153, 189-199`, `desktop/store.go:481, 502-503`, `desktop/store_unavailable.go:189-191, 213-215`
-
-**Issue:** The napp page builds its row from `detailNapp(tab)`, which returns `backend.LookupNapp(id)`, which returns `InstalledNapp(id)`, the **raw state record**. `InstallNapp`/`applyUpdate` clear `UpdateAvailable`, and only `Snapshot()` stamps `UpdateAvailable`/`Unavailable` on its own copies. The consequences:
-- `installedShowsUpdate(n)` is always false on the detail page.
-- The Update button is never drawn and its click is ignored.
-- `unavailableLines(n, installed)` never shows the "latest version is invalid" block for an installed napplet.
-
-The profile page's Update has the same root cause: `FetchAuthorNapps` entries never carry `UpdateAvailable`, so the `viaInstall` confirm branch is dead code. The tests construct `Napp` values with `UpdateAvailable` set by hand, so they don't catch this.
-
-**Fix:** Resolve the installed entry from `st.Installed` (the stamped snapshot) in `detailNapp` and in the profile row. For example, pass `st` and prefer `installedOr(st, n)`. Add a test that drives `detailNapp` against a real `Snapshot()`.
+Use it for `counts` and `used`. `golang.org/x/text` is already an indirect dependency of the desktop module. Add a test asserting that `Signal`, `Sıgnal`, `ſignal` and an NFD `Café` against an NFC `Café` all get distinct suffixed names.
 
 ## Info
 
-### IN-01: The update dialog promises a reset that does not happen when the artifact hash is unchanged
+### IN-01: The update dialog promises a reset that doesn't happen when the artifact hash is unchanged (carried forward)
 
-**File:** `desktop/store_confirm.go:80-82`, `backend/registry_updates.go:356`
+**File:** `desktop/store_confirm.go:75-77`, `backend/registry_updates.go:395`
 
-**Issue:** A republished event with the same files (same `ArtifactHash`) is offered as an update. The dialog says "Updating resets this napplet's saved data", but `applyUpdate` correctly keeps the data.
+**Issue:** A republished event with the same files (same `ArtifactHash`) is offered as an update with "Updating resets this napplet's saved data". `applyUpdate` keeps the data in that case.
 
-**Fix:** Word the dialog conditionally (`n.UpdateAvailable.ArtifactHash != n.ArtifactHash`), or skip the confirmation when the hash matches.
+**Fix:** Word the dialog conditionally on `n.UpdateAvailable.ArtifactHash != n.ArtifactHash`, or skip the confirmation when the hashes match.
 
-### IN-02: `InstallAddress` has no callers outside tests and installs without a newer-version check
+### IN-02: `InstallAddress` is exported dead code (carried forward)
 
-**File:** `backend/registry_address.go:330-349`
+**File:** `backend/registry_address.go:333-355`
 
-**Issue:** The function is exported dead code that "installs (or updates)" whatever the resolver returns, which can be older than what is installed (see WR-03).
+**Issue:** No caller exists outside tests.
 
-**Fix:** Remove it, or route it through the WR-03 monotonic guard.
+**Fix:** Remove it, or document its intended caller.
 
-### IN-03: The scp-like source check misses a bracketed host that starts with "-"
+### IN-03: The scp-like source check misses a bracketed host that starts with "-" (carried forward)
 
 **File:** `backend/napplet.go:432-439`
 
-**Issue:** `git@[-oProxyCommand=x]:p` passes `validGitSource`, because the host is checked for a leading `-` with its brackets still on. git strips the brackets and then blocks the host itself ("strange hostname"), so this is defence in depth only.
+**Issue:** `git@[-oProxyCommand=x]:p` passes `validGitSource`. git itself refuses that host, so this is defence in depth only.
 
-**Fix:** Trim `[`/`]` before the `-` prefix check, or refuse brackets in the scp-like form.
+**Fix:** Trim `[` and `]` before the `-` prefix check, or refuse brackets in the scp-like form.
 
-### IN-04: Several NIP-5D path spellings install to the same file
+### IN-04: Several NIP-5D path spellings install to the same file (carried forward)
 
 **File:** `backend/napplet_nip5d.go:56-64`, `backend/backend.go:185-200`
 
-**Issue:** `/index.html`, `index.html`, `/` and `./index.html` are distinct for `seenPath` but all map to `base/index.html`. The parallel writes in `fetchNappAssets` are last-writer-wins, so the install can fail to boot nondeterministically. The hash check keeps this safe.
+**Issue:** `/index.html`, `index.html`, `/` and `./index.html` count as distinct for `seenPath`, but all map to `index.html`. The parallel writes into the staging dir are last-writer-wins. The boot hash check keeps this safe.
 
-**Fix:** Normalize with `nappAssetPath` when checking for duplicates and reject collisions.
+**Fix:** Normalize with `nappAssetPath` before the duplicate check, and reject collisions.
 
-### IN-05: Napp localStorage is still keyed by the 64-bit `pk16~d` id
+### IN-05: Napp localStorage and install dirs are still keyed by the 64-bit `pk16~d` id (carried forward)
 
-**File:** `backend/window_storage.go:50-52`
+**File:** `backend/window_storage.go:50-52`, `backend/backend.go:166-178`
 
-**Issue:** D-04 already renamed every napp file, which would have been the moment to key by the full address and stop depending on a 16-hex pubkey prefix. The install dir has the same issue.
+**Issue:** Both are keyed by a 16-hex pubkey prefix instead of the full address. `openResolved`'s new fallback launches whatever is installed under `n.ID`, which inherits the same assumption.
 
 **Fix:** Key both by `n.Address()` the next time the scheme changes.
 
-### IN-06: Uninstall closes trial windows, which then immediately offer to install the napplet
+### IN-06: Uninstall closes trial windows, which then immediately offer to install the napplet (carried forward)
 
-**File:** `backend/registry_install.go:136-140`, `backend/window_instances.go:565-569`
+**File:** `backend/registry_install.go:203-211`, `backend/window_instances.go:586-589`
 
-**Issue:** `runningForNapp(id)` includes trial windows. Closing them runs `finishNappletTrial`, which can prompt "Did you like X? Install it" right after the user confirmed the uninstall.
+**Issue:** `runningForNapp(id)` includes trial windows. Closing them runs `finishNappletTrial`, which finds nothing installed and asks "Did you like X? Install it" right after the user confirmed the uninstall.
 
-**Fix:** Mark trials closed by an uninstall so they are discarded without a prompt.
+**Fix:** Mark trials that an uninstall closes, so they are discarded without a prompt.
 
-### IN-07: Windows bundle shortcuts quote their values twice (pre-existing, outside the diff)
+### IN-08: A polling test with a 1-second deadline may be flaky under `-race` on CI (carried forward)
 
-**File:** `desktop/internal/osintegration/shortcutfile_windows.go:30-33`
+**File:** `backend/preview_test.go:193-198`
 
-**Issue:** `'%s'` wraps values that `psSingleQuote` has already quoted, which produces `''C:\...''`. That is a PowerShell parse error, and the target path is not quoted at all. With the new `=`-prefixed tokens the Arguments also become `''=... ''`.
+**Issue:** The test busy-polls `CurrentPrompt()` against a 1-second deadline. The other polls use 5 seconds, including the new `TestTrialInstallWaitsForStoreInstall`.
 
-**Fix:** Use `%s` with `psSingleQuote` for all three values, after the CR-01 fix.
+**Fix:** Raise the deadline to 5 seconds, or use a hook on `enqueuePrompt`.
 
-### IN-08: Polling tests with a 1 s deadline may be flaky under `-race` on CI
+### IN-10: A window registered on a superseded version can't boot once the swap lands (carried forward, narrowed)
 
-**File:** `backend/preview_test.go:188-196, 712-719`
+**File:** `backend/window_instances.go:770-786`, `backend/nap.go:730-753`, `backend/registry_install.go:685-705`
 
-**Issue:** These tests wait for prompts by busy-polling `CurrentPrompt()` with `time.Sleep(1ms)` against a 1 s deadline.
+**Issue:** The presence-check race and the `MkdirAll` are fixed. What remains is the timing gap. Suppose a napplet window is registered just before an update, so its reclaim is correctly deferred, and it boots after the swap. Its `nap.boot` then reads the new `index.html` and fails the hash check. An old-version window that reloads fails the same way. No data is lost.
 
-**Fix:** Use a channel or a hook on `enqueuePrompt`, or a longer deadline.
+**Fix:** Keep `.old-*` until the last window of the superseded scope closes, as reclaim does for storage, and have `nap.boot` read from it. Or document that only windows that have already booted keep their version.
+
+### IN-12: Stale removal compares paths exactly, so a link whose title changes only in case is deleted right after it is written (new, predates the rewrite)
+
+**File:** `desktop/internal/osintegration/shortcutsync.go:153-170`, `appshortcut_darwin.go:35-45`, `search_integration_darwin.go:37-47`
+
+**Issue:** Suppose a napp's title changes only in case between passes, for example an update retitles "paint" to "Paint". The write then lands on the existing entry:
+- On macOS this is certain: `MkdirAll` reuses the existing bundle directory, `paint.app`.
+- On Windows the link save probably reuses the existing file too, but this depends on how `Save()` creates it.
+
+`ReadDir` returns the old name, `desired[path]` misses it, and the pass deletes the entry it just wrote. The next pass recreates it. For installed apps, that pass may not run until the next install or startup.
+
+**Fix:** In the stale check, look entries up through the same folded key as `uniqueShortcutNames` (see WR-02's `collisionKey`), not by exact path. Alternatively, rename on a case-only change.
+
+### IN-13: The Windows reserved-name check misses multi-dot and superscript device names (new, now only skips the one entry)
+
+**File:** `desktop/internal/osintegration/lnkscript.go:127-131`
+
+**Issue:** `windowsReservedName` strips only the last extension, so `CON.a.b` passes. Win32 treats the part before the first dot as the device name, so `CON.a.b.lnk` is reserved. `COM¹`, `COM²` and `COM³` are reserved too. A title like these makes the link write fail. Since WR-01, that skips only the one entry, so the impact is cosmetic.
+
+**Fix:** Test the part before the first `.`, with trailing spaces trimmed. Include `¹²³` among the COM/LPT digits.
+
+### IN-14: `update-desktop-database` is started and never waited on, which leaves a zombie per Linux app-shortcut sync (new, predates this phase)
+
+**File:** `desktop/internal/osintegration/shortcutfile.go:43-50`
+
+**Issue:** `exec.Command(...).Start()` without `Wait`, so each `SyncAppShortcuts` call leaves a defunct child until the launcher exits. The new `main_linux_test.go`, which empties PATH, works around the test-side effect (writes after `t.TempDir` cleanup) but not the production one.
+
+**Fix:** `go cmd.Wait()` after a successful `Start`. Or run it synchronously with a short timeout from the sync's background goroutine.
 
 ---
 
-_Reviewed: 2026-10-05T17:26:13Z_
+_Reviewed: 2026-10-05T19:25:02Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+_Iteration: 3_
