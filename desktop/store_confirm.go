@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"verdana/backend"
@@ -147,4 +148,63 @@ func runConfirmed(c *storeConfirm) {
 	default:
 		storeUpdate(c.id)
 	}
+}
+
+// requestUninstall is what every store Uninstall button does on an installed
+// entry. While the napp is busy it does nothing. A napp uninstalls at once; a
+// napplet parks a confirmation, replacing any other one.
+func requestUninstall(n backend.Napp, busy bool) {
+	if busy {
+		return
+	}
+	c := &storeConfirm{kind: confirmUninstall, id: n.ID, target: n}
+	if !n.IsNapplet() {
+		runConfirmed(c)
+		return
+	}
+	c.name = confirmName(n)
+	parkConfirm(c)
+}
+
+// installedOr is the installed record for n's id, or n itself when there is
+// none. The installed record decides whether an entry is a napplet.
+func installedOr(st backend.State, n backend.Napp) backend.Napp {
+	for _, in := range st.Installed {
+		if in.ID == n.ID {
+			return in
+		}
+	}
+	return n
+}
+
+// stale says whether the premise of the dialog is gone: the napplet is no
+// longer installed, it is busy (something else is already updating or
+// uninstalling it), or, for an update, there is no update any more (the
+// background check may have found the latest version invalid).
+func (c *storeConfirm) stale(st backend.State) bool {
+	if slices.Contains(st.Busy, c.id) {
+		return true
+	}
+	for _, in := range st.Installed {
+		if in.ID == c.id {
+			return c.kind == confirmUpdate && in.UpdateAvailable == nil
+		}
+	}
+	return true
+}
+
+// dropStaleConfirm runs each frame before drawing: a stale confirmation is
+// cleared without acting.
+func dropStaleConfirm(st backend.State) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.confirm != nil && store.confirm.stale(st) {
+		store.confirm = nil
+	}
+}
+
+// clearStoreConfirm drops any pending confirmation without acting, for a
+// store window that closes, so a reopened store never shows an old dialog.
+func clearStoreConfirm() {
+	takeConfirm()
 }

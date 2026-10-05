@@ -292,6 +292,8 @@ func runStoreWindow() {
 
 			st := backend.Snapshot()
 			if st.Phase != backend.PhaseMain {
+				// a dialog about the old account's napplet has no place here
+				clearStoreConfirm()
 				if managerBtn.Clicked(gtx) {
 					showManager()
 				}
@@ -301,7 +303,10 @@ func runStoreWindow() {
 			}
 
 			// a pending napplet update or uninstall replaces the whole
-			// window, the way the manager's logout dialog does
+			// window, the way the manager's logout dialog does. One whose
+			// premise is gone closes first, without acting. store.confirm is
+			// only read and written under store.mu, through the helpers.
+			dropStaleConfirm(st)
 			if pendingConfirm() != nil {
 				if confirmYesBtn.Clicked(gtx) {
 					confirmYes()
@@ -432,7 +437,7 @@ func runStoreWindow() {
 				if !acted {
 					for _, i := range instVis {
 						if uninstBtns[i].Clicked(gtx) {
-							go backend.Uninstall(st.Installed[i].ID)
+							requestUninstall(st.Installed[i], busy[st.Installed[i].ID])
 							acted = true
 						}
 					}
@@ -483,14 +488,14 @@ func runStoreWindow() {
 				} else if detailPrimaryBtn.Clicked(gtx) {
 					if busy[n.ID] {
 					} else if installedSet[n.ID] {
-						go backend.Uninstall(n.ID)
+						requestUninstall(installedOr(st, n), false)
 					} else if dn, ok := backend.DiscoveredNapp(n.ID); ok {
 						go backend.Install(dn)
 					} else {
 						go backend.Install(n)
 					}
 				} else if detailUpdateBtn.Clicked(gtx) {
-					go backend.Update(n.ID)
+					requestUpdate(installedOr(st, n), false, busy[n.ID])
 				} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
 					gioHost{}.CopyText(n.Naddr())
 				} else if detailSettingsBtn.Clicked(gtx) && installedSet[n.ID] {
@@ -531,14 +536,15 @@ func runStoreWindow() {
 								continue
 							}
 							if installedSet[pn.ID] {
-								go backend.Uninstall(pn.ID)
+								// pn itself decides on the profile page
+								requestUninstall(pn, false)
 							} else {
 								go backend.Install(pn)
 							}
 							pacted = true
 						}
 						if profileUpdateBtns[i].Clicked(gtx) {
-							go backend.Install(pn)
+							requestUpdate(pn, true, busy[pn.ID])
 							pacted = true
 						}
 					}
@@ -581,6 +587,7 @@ func runStoreWindow() {
 			e.Frame(gtx.Ops)
 
 		case app.DestroyEvent:
+			clearStoreConfirm()
 			return
 		}
 	}
