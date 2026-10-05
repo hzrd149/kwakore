@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-10-05T15:25:14.473Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-10-05T15:30:03.677Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-02 (napplet update/uninstall confirm dialogs, layoutConfirm)
-state_head: f27921abd16acd4bda705383115af7b1cc97d25d
+last_activity_desc: Completed 05-03 (Linux shortcut injection fix, launch tokens)
+state_head: 6386d715d440d58bc609aa3b1ca4f64a25dba175
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 30
+  completed_plans: 31
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 3 of 12 (05-01, 05-02 complete)
+Plan: 4 of 12 (05-01, 05-02, 05-03 complete)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-02-PLAN.md (napplet update/uninstall confirm dialogs, layoutConfirm)
+Last activity: 2026-10-05 — Completed 05-03-PLAN.md (Linux shortcut injection fix: launch tokens, control-refusing Exec quoting)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -38,7 +38,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 
 **Velocity:**
 
-- Total plans completed: 28
+- Total plans completed: 31
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -91,6 +91,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 04 P06 | 11min | 2 tasks | 2 files |
 | Phase 05 P01 | 12min | 3 tasks | 17 files |
 | Phase 05 P02 | 9min | 2 tasks | 5 files |
+| Phase 05 P03 | 5min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,8 @@ Recent decisions affecting current work:
 - [Phase 5]: Phase 05-01: napplet ids are NIP-01 addresses; NAP-STORAGE keyed by address 0x00 artifactHash [0x00 instance], hex(sha256) file names in napplet-storage/, no fallback (internal-error)
 - [Phase 5]: Phase 05-01: pre-address napplet records dropped once at startup with session-only napplets-reinstall notice; napps/ untouched
 - [Phase 5]: 05-02: napplet Update/Uninstall in the desktop store park a storeConfirm (napps stay one-click); dropStaleConfirm each frame; layoutConfirm shared with logout, danger-filled confirm button
+- [Phase 5]: 05-03: napp ids reach OS shortcut files only as LaunchToken (= + base64url); parseBundleToken decodes it and still accepts legacy raw ids
+- [Phase 5]: 05-03: quoteExecField refuses control runes; every Linux .desktop/D-Bus writer quotes before its first write
 
 ### Pending Todos
 
@@ -206,6 +209,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:25:14.315Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-10-05T15:30:03.559Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
