@@ -17,8 +17,9 @@ import (
 )
 
 // backgroundSyncs tracks the shortcut and intent passes that installs,
-// uninstalls and settings changes start in the background. They read host and
-// dataDir, so tests wait on it before they swap those globals.
+// uninstalls and settings changes start in the background, and the
+// launch-time update checks. They read host, dataDir and the update check's
+// seams, so tests wait on it before they swap those globals.
 var backgroundSyncs sync.WaitGroup
 
 // refreshInstalled republishes the installed list into the launcher state.
@@ -133,6 +134,12 @@ func InstallFromDiscovery(id string) bool {
 		return true
 	}
 	if n, ok := DiscoveredNapp(id); ok {
+		if n.Unavailable != "" {
+			// refused right here: Install returns before any download, so
+			// there is nothing to run in the background
+			Install(n)
+			return true
+		}
 		go Install(n)
 		return true
 	}

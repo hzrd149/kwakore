@@ -194,6 +194,85 @@ func updateState(installed, latest Napp) *Napp {
 	return nil
 }
 
+// ─── the launch-time check ───────────────────────────────────────
+
+// launchCheckEvery is how often launching one napplet may look for a newer
+// version of it: a launch inside the window after the last check of that
+// napplet asks nobody.
+var launchCheckEvery = 30 * time.Minute
+
+// launchCheckClock is the clock the throttle reads; tests swap it.
+var launchCheckClock = time.Now
+
+// updateCheckOnline says whether a background check could reach anyone: a
+// system and at least one discovery relay. Tests swap it.
+var updateCheckOnline = func() bool { return sys != nil && len(Relays()) > 0 }
+
+var (
+	launchChecksMu sync.Mutex
+	launchChecks   = make(map[string]time.Time) // napp id -> last check start
+)
+
+// launchUpdateCheck looks for a newer version of an installed napplet that
+// was just opened, in the background (D-19, CONFORMANCE A11): the launch
+// never waits for it. It runs at most once per napplet per
+// launchCheckEvery, never sets UpdateCheckRunning, and shows nothing but its
+// result: through the update set, the installed record gains
+// UpdateAvailable or Unavailable, or loses a stale entry. Offline, a failed
+// or timed-out lookup, or no authentic event found leave the previous state
+// as it was and only reach the log.
+func launchUpdateCheck(n Napp) {
+	if !n.IsNapplet() {
+		return
+	}
+	if _, ok := InstalledNapp(n.ID); !ok || !updateCheckOnline() {
+		return
+	}
+
+	now := launchCheckClock()
+	launchChecksMu.Lock()
+	if last, ok := launchChecks[n.ID]; ok && now.Sub(last) < launchCheckEvery {
+		launchChecksMu.Unlock()
+		return
+	}
+	launchChecks[n.ID] = now
+	launchChecksMu.Unlock()
+
+	// tracked with the other background passes, so tests can wait it out
+	// before they swap the globals it reads
+	backgroundSyncs.Go(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Interface("panic", r).Str("napp", n.ID).Msg("launch-time update check panicked")
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		latest, found := latestManifest(ctx, n)
+		if !found {
+			log.Debug().Str("napp", n.ID).Err(ctx.Err()).Msg("launch-time update check found nothing")
+			return
+		}
+
+		// compared against the record as it is now: an update or uninstall
+		// may have landed while the relays were asked
+		current, ok := InstalledNapp(n.ID)
+		if !ok {
+			return
+		}
+		entry := updateState(current, latest)
+		switch {
+		case entry == nil:
+		case entry.Unavailable != "":
+			log.Info().Str("napp", n.ID).Str("event", entry.EventID).Msg("launch-time check found an invalid latest version")
+		default:
+			log.Info().Str("napp", n.ID).Str("event", entry.EventID).Msg("launch-time check found a new version")
+		}
+		mergeUpdateState(current.ID, entry)
+	})
+}
+
 // ─── applying an update ──────────────────────────────────────────
 
 // Update re-downloads an installed napp's files from its blossom servers. It

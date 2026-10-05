@@ -51,8 +51,9 @@ func (f *fakeManifests) fetch(ctx context.Context, napps []Napp) []nostr.Event {
 	return slices.Clone(f.events)
 }
 
-// newUpdateRig isolates the launcher state, empties the update set and the
-// launcher error, and swaps the relay lookup for a fake one.
+// newUpdateRig isolates the launcher state, empties the update set, the
+// discovery list, the launcher error and the launch-check throttle, and swaps
+// the relay lookup for a fake one.
 func newUpdateRig(t *testing.T) *fakeManifests {
 	t.Helper()
 	setupNapTest(t)
@@ -62,6 +63,10 @@ func newUpdateRig(t *testing.T) *fakeManifests {
 	fetchManifestEvents = f.fetch
 	resetUpdateSet()
 	SetFetchErr("")
+	resetResolved(t)
+	launchChecksMu.Lock()
+	clear(launchChecks)
+	launchChecksMu.Unlock()
 	t.Cleanup(func() {
 		// a launch-time check may still be running: it reads the seam
 		backgroundSyncs.Wait()
@@ -315,18 +320,6 @@ func fetchErr() string {
 	return ls.fetchErr
 }
 
-// waitFetchErr waits for the launcher error to become want.
-func waitFetchErr(t *testing.T, want string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for fetchErr() != want {
-		if time.Now().After(deadline) {
-			t.Fatalf("launcher error %q, want %q", fetchErr(), want)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
 func TestNewerVersionUsesNIP01Winner(t *testing.T) {
 	f := newUpdateRig(t)
 	sk := nostr.Generate()
@@ -452,7 +445,9 @@ func TestUnavailableCannotInstallOrTry(t *testing.T) {
 	if !InstallFromDiscovery(un.ID) {
 		t.Fatal("InstallFromDiscovery did not find the listed entry")
 	}
-	waitFetchErr(t, installRefused)
+	if got := fetchErr(); got != installRefused {
+		t.Errorf("InstallFromDiscovery: launcher error %q", got)
+	}
 	nothingHappened("InstallFromDiscovery")
 
 	SetFetchErr("")
@@ -494,5 +489,243 @@ func TestUnavailableCannotInstallOrTry(t *testing.T) {
 	rec, ok := saved.InstalledNapps[valid.ID]
 	if !ok || rec.EventID != valid.EventID || rec.UpdateAvailable != nil || rec.Unavailable != "" {
 		t.Fatalf("saved record: %v %+v", ok, rec)
+	}
+}
+
+// ─── the launch-time check ───────────────────────────────────────
+
+// launchRig is an update rig that is online and opens windows: an
+// installed napplet launches for real against a host whose windows always
+// open.
+func newLaunchRig(t *testing.T) *fakeManifests {
+	t.Helper()
+	f := newUpdateRig(t)
+	prevHost, prevOnline, prevClock := host, updateCheckOnline, launchCheckClock
+	host = &previewTestHost{}
+	updateCheckOnline = func() bool { return true }
+	t.Cleanup(func() {
+		backgroundSyncs.Wait()
+		host, updateCheckOnline, launchCheckClock = prevHost, prevOnline, prevClock
+	})
+	return f
+}
+
+// installNappletFiles installs the napplet of evt with an index.html on
+// disk, so it can launch.
+func installNappletFiles(t *testing.T, evt nostr.Event) Napp {
+	t.Helper()
+	n := installedFrom(t, evt)
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installRecord(t, n)
+	return n
+}
+
+// closeOnCleanup closes ci when the test ends, without offering to install
+// a trial.
+func closeOnCleanup(t *testing.T, ci *Instance) {
+	t.Helper()
+	t.Cleanup(func() {
+		ci.trial = false
+		WindowClosed(ci.instance)
+	})
+}
+
+// checkNow runs a launch-time check of n past the throttle and waits for it.
+func checkNow(n Napp) {
+	launchChecksMu.Lock()
+	delete(launchChecks, n.ID)
+	launchChecksMu.Unlock()
+	launchUpdateCheck(n)
+	backgroundSyncs.Wait()
+}
+
+func TestLaunchCheckRunsInBackground(t *testing.T) {
+	f := newLaunchRig(t)
+	sk := nostr.Generate()
+	installedEvt := validNapplet(t, sk, "app", "", 10)
+	n := installNappletFiles(t, installedEvt)
+
+	// another napplet a full check found an update for
+	otherEvt := validNapplet(t, sk, "other", "", 10)
+	other := installNappletFiles(t, otherEvt)
+	f.set(otherEvt, validNapplet(t, sk, "other", "v2", 20))
+	CheckForUpdates()
+	if installedSnapshot(t, other.ID).UpdateAvailable == nil {
+		t.Fatal("fixture: the full check found no update for the other napplet")
+	}
+
+	// the lookup blocks until released, with a newer invalid version
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	f.set(installedEvt, invalidNapplet(t, sk, "app", 20))
+	prev := fetchManifestEvents
+	fetchManifestEvents = func(ctx context.Context, napps []Napp) []nostr.Event {
+		started <- struct{}{}
+		<-release
+		return f.fetch(ctx, napps)
+	}
+	t.Cleanup(func() {
+		backgroundSyncs.Wait()
+		fetchManifestEvents = prev
+	})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+
+	launched := make(chan *Instance, 1)
+	go func() {
+		ci, err := launch(context.Background(), n)
+		if err != nil {
+			t.Error(err)
+		}
+		launched <- ci
+	}()
+	var ci *Instance
+	select {
+	case ci = <-launched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the launch waited for the update check")
+	}
+	if ci == nil {
+		t.FailNow()
+	}
+	closeOnCleanup(t, ci)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("launching an installed napplet started no update check")
+	}
+	if Snapshot().UpdateCheckRunning {
+		t.Error("the launch-time check dims the manual check button")
+	}
+	if got := installedSnapshot(t, n.ID); got.Unavailable != "" || got.UpdateAvailable != nil {
+		t.Errorf("state changed before the lookup answered: %+v", got)
+	}
+
+	close(release)
+	backgroundSyncs.Wait()
+	s := Snapshot()
+	if s.UpdateCheckRunning || s.FetchErr != "" || len(s.Notices) != 0 {
+		t.Errorf("the check showed something: running %v, error %q, notices %v", s.UpdateCheckRunning, s.FetchErr, s.Notices)
+	}
+	if got := installedSnapshot(t, n.ID); got.Unavailable != reasonRequiredTags || got.UpdateAvailable != nil {
+		t.Errorf("after the check: unavailable %q, update %v", got.Unavailable, got.UpdateAvailable)
+	}
+	if installedSnapshot(t, other.ID).UpdateAvailable == nil {
+		t.Error("the launch-time check dropped another napplet's update")
+	}
+}
+
+func TestLaunchCheckThrottled(t *testing.T) {
+	f := newLaunchRig(t)
+	sk := nostr.Generate()
+	installedEvt := validNapplet(t, sk, "app", "", 10)
+	n := installNappletFiles(t, installedEvt)
+	f.set(installedEvt)
+
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	launchCheckClock = func() time.Time { return now }
+
+	open := func() {
+		t.Helper()
+		ci, err := launch(context.Background(), n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		closeOnCleanup(t, ci)
+		backgroundSyncs.Wait()
+	}
+	open()
+	if f.count() != 1 {
+		t.Fatalf("first launch: %d lookups, want 1", f.count())
+	}
+	now = now.Add(launchCheckEvery - time.Minute)
+	open()
+	if f.count() != 1 {
+		t.Fatalf("second launch inside the interval: %d lookups, want 1", f.count())
+	}
+	now = now.Add(2 * time.Minute)
+	open()
+	if f.count() != 2 {
+		t.Fatalf("launch after the interval: %d lookups, want 2", f.count())
+	}
+
+	// trials, napps, napplets that aren't installed and an offline launcher
+	// never check
+	now = now.Add(launchCheckEvery)
+	ci, err := launchWindow(context.Background(), n, "", []byte("<!doctype html>"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, ci)
+	napp := installedFrom(t, testNappEvent(sk, "napp", "Napp", 10).Event)
+	installRecord(t, napp)
+	launchUpdateCheck(napp)
+	stranger := installedFrom(t, validNapplet(t, sk, "stranger", "", 10))
+	launchUpdateCheck(stranger)
+	updateCheckOnline = func() bool { return false }
+	launchUpdateCheck(n)
+	backgroundSyncs.Wait()
+	if f.count() != 2 {
+		t.Errorf("a trial, a napp, an uninstalled napplet or an offline launch checked: %d lookups, want 2", f.count())
+	}
+}
+
+func TestLaunchCheckOfflineKeepsState(t *testing.T) {
+	f := newLaunchRig(t)
+	sk := nostr.Generate()
+	installedEvt := validNapplet(t, sk, "app", "", 10)
+	n := installNappletFiles(t, installedEvt)
+	broken := nappFromLatest(invalidNapplet(t, sk, "app", 20))
+	newer := installedFrom(t, validNapplet(t, sk, "app", "v2", 20))
+
+	for _, prior := range []Napp{broken, newer} {
+		resetUpdateSet()
+		mergeUpdateState(n.ID, &prior)
+		want := installedSnapshot(t, n.ID)
+
+		// nothing found
+		f.set()
+		checkNow(n)
+		// offline: nobody is asked
+		updateCheckOnline = func() bool { return false }
+		calls := f.count()
+		checkNow(n)
+		updateCheckOnline = func() bool { return true }
+		if f.count() != calls {
+			t.Error("an offline launch asked the relays")
+		}
+		// the lookup panics
+		prev := fetchManifestEvents
+		fetchManifestEvents = func(context.Context, []Napp) []nostr.Event { panic("relay pool exploded") }
+		checkNow(n)
+		fetchManifestEvents = prev
+
+		got := installedSnapshot(t, n.ID)
+		if got.Unavailable != want.Unavailable || (got.UpdateAvailable == nil) != (want.UpdateAvailable == nil) {
+			t.Errorf("prior %q: state changed to unavailable %q, update %v", prior.Unavailable, got.Unavailable, got.UpdateAvailable)
+		}
+		if fetchErr() != "" {
+			t.Errorf("a failed check set the launcher error %q", fetchErr())
+		}
+
+		// the installed version is the latest again: the stale entry goes
+		f.set(installedEvt)
+		checkNow(n)
+		if got := installedSnapshot(t, n.ID); got.Unavailable != "" || got.UpdateAvailable != nil {
+			t.Errorf("prior %q: stale entry kept: unavailable %q, update %v", prior.Unavailable, got.Unavailable, got.UpdateAvailable)
+		}
 	}
 }

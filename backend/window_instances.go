@@ -772,6 +772,14 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	}
 	ci.attach(transport)
 	rememberWindow(ci)
+
+	// an installed napplet's window looks for a newer version of it in the
+	// background (D-19): every way it opens (store, shortcut, intent,
+	// reopen) passes here, and none of them waits. A trial or a dev
+	// napplet has no installed version to compare with.
+	if previewDocument == nil && devLookup(id) == nil {
+		launchUpdateCheck(napp)
+	}
 	return ci, nil
 }
 
