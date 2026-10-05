@@ -2,9 +2,13 @@ package backend
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -409,5 +413,47 @@ func TestTrialInstallWaitsForStoreInstall(t *testing.T) {
 	}
 	if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "trial-shared" {
 		t.Errorf("shared trial data = %q, %v", v, ok)
+	}
+}
+
+// TestUpdateAsksTheUserServers: an update asks the same servers an install
+// does. A manifest that names a server of its own no longer hides the
+// user's configured one, where the files are; the manifest's private
+// server is still never reached (D-20).
+func TestUpdateAsksTheUserServers(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+
+	var decoyHits atomic.Int32
+	decoy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoyHits.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(decoy.Close)
+	index := NappPath{Path: "/index.html", Sha256: blobs.add([]byte("v2"))}
+	tags := nip5dTags("app", index)
+	for _, tag := range tags {
+		if tag[0] == "server" {
+			tag[1] = decoy.URL
+		}
+	}
+	v2 := installedFrom(t, signedWith(t, sk, KindNapplet, tags, "v2", 20))
+	if !slices.Equal(v2.Servers, []string{decoy.URL}) {
+		t.Fatalf("manifest servers %v", v2.Servers)
+	}
+
+	SetFetchErr("")
+	applyUpdate(v1, v2)
+	if got := fetchErr(); got != "" {
+		t.Fatalf("launcher error %q", got)
+	}
+	assertInstalledIntact(t, v2, "v2")
+	if n := decoyHits.Load(); n != 0 {
+		t.Errorf("the manifest's private server got %d requests", n)
 	}
 }

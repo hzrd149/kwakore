@@ -337,10 +337,11 @@ func applyUpdate(current, newer Napp) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	servers := newer.Servers
-	if len(servers) == 0 {
-		servers = newer.BlossomServers(ctx)
-	}
+	// the same servers an install asks, in the same order: the user's
+	// own, then the manifest's, then the author's list. Only the user's
+	// skip the network guard (D-20), so a manifest that names a private
+	// host still cannot make the update reach it
+	servers := newer.BlossomServers(ctx)
 	// downloaded next to the install dir and swapped in only when every
 	// file is there and verified: a failed update leaves the installed
 	// version running as it was (D-10)
