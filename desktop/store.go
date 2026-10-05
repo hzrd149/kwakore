@@ -462,8 +462,10 @@ func runStoreWindow() {
 				}
 				if !acted {
 					for _, i := range vis {
-						if !installedSet[st.Discovery[i].ID] && st.Discovery[i].IsNapplet() && discoOpenBtns[i].Clicked(gtx) {
-							backend.TryNapplet(st.Discovery[i])
+						n := st.Discovery[i]
+						if tryAllowed(n, installedSet[n.ID]) && discoOpenBtns[i].Clicked(gtx) {
+							// ignored while its files are being verified
+							requestTry(n, installedSet[n.ID], busy[n.ID])
 							acted = true
 						}
 					}
@@ -483,18 +485,20 @@ func runStoreWindow() {
 					if in, ok := backend.InstalledNapp(n.ID); ok {
 						backend.Launch(in)
 					} else {
-						backend.TryNapplet(n)
+						requestTry(n, false, busy[n.ID])
 					}
 				} else if detailPrimaryBtn.Clicked(gtx) {
 					if busy[n.ID] {
 					} else if installedSet[n.ID] {
 						requestUninstall(installedOr(st, n), false)
+					} else if n.Unavailable != "" {
+						// nothing to install: the page draws no Install
 					} else if dn, ok := backend.DiscoveredNapp(n.ID); ok {
 						go backend.Install(dn)
 					} else {
 						go backend.Install(n)
 					}
-				} else if detailUpdateBtn.Clicked(gtx) {
+				} else if detailUpdateBtn.Clicked(gtx) && installedShowsUpdate(n) {
 					requestUpdate(installedOr(st, n), false, busy[n.ID])
 				} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
 					gioHost{}.CopyText(n.Naddr())
@@ -524,7 +528,7 @@ func runStoreWindow() {
 						if in, ok := backend.InstalledNapp(pn.ID); ok {
 							backend.Launch(in)
 						} else {
-							backend.TryNapplet(pn)
+							requestTry(pn, false, busy[pn.ID])
 						}
 						pacted = true
 					}
@@ -538,12 +542,12 @@ func runStoreWindow() {
 							if installedSet[pn.ID] {
 								// pn itself decides on the profile page
 								requestUninstall(pn, false)
-							} else {
+							} else if pn.Unavailable == "" {
 								go backend.Install(pn)
 							}
 							pacted = true
 						}
-						if profileUpdateBtns[i].Clicked(gtx) {
+						if profileUpdateBtns[i].Clicked(gtx) && installedShowsUpdate(pn) {
 							requestUpdate(pn, true, busy[pn.ID])
 							pacted = true
 						}
@@ -579,7 +583,7 @@ func runStoreWindow() {
 							return layoutNappsTab(gtx, th, &installedList, &installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, &checkUpdBtn, instVis, st)
 						default:
 							return layoutDiscoveryTab(gtx, th, &discoveryList, &filterEd, &fetchBtn,
-								discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, followSet(st))
+								discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, followSet(st), busy)
 						}
 					})
 				}),

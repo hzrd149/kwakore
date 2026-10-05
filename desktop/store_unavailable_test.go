@@ -176,3 +176,108 @@ func TestUnavailableTileLayout(t *testing.T) {
 		t.Fatalf("unavailable card sizes %v and %v (with description), want equal and non-empty", a.Size, b.Size)
 	}
 }
+
+// ─── Try while busy (S6) ────────────────────────────────────────────────
+
+// recordTries swaps storeTry for a recorder, putting it back at the end.
+func recordTries(t *testing.T) *[]string {
+	t.Helper()
+	var tried []string
+	old := storeTry
+	storeTry = func(n backend.Napp) { tried = append(tried, n.ID) }
+	t.Cleanup(func() { storeTry = old })
+	return &tried
+}
+
+func TestTryLabelWhileBusy(t *testing.T) {
+	n := testNapplet("clock", "Clock")
+	if got := tryLabel(n, false); got != "Try" {
+		t.Fatalf("idle label %q, want Try", got)
+	}
+	if got := tryLabel(n, true); got != "Opening…" {
+		t.Fatalf("busy label %q, want Opening…", got)
+	}
+	// the napp page and the profile list read the same
+	if got := nappPageActions(n, false, true).open; got != "Opening…" {
+		t.Fatalf("napp page Try while busy reads %q", got)
+	}
+	if open, _, _ := profileRowLabels(n, false, true); open != "Opening…" {
+		t.Fatalf("profile Try while busy reads %q", open)
+	}
+	// an installed napplet opens: busy is about its update or uninstall
+	if open, action, _ := profileRowLabels(n, true, true); open != "Open" || action != "Working…" {
+		t.Fatalf("installed busy profile row reads %q, %q", open, action)
+	}
+}
+
+func TestTryIgnoredWhileBusy(t *testing.T) {
+	tried := recordTries(t)
+	n := testNapplet("clock", "Clock")
+
+	requestTry(n, false, true)
+	if len(*tried) != 0 {
+		t.Fatalf("a Try click while busy reached the backend: %v", *tried)
+	}
+	// installed, unavailable and napp entries are never tried
+	requestTry(n, true, false)
+	bad := n
+	bad.Unavailable = "Its file list is malformed"
+	requestTry(bad, false, false)
+	requestTry(testNapp("notes", "Notes"), false, false)
+	if len(*tried) != 0 {
+		t.Fatalf("an entry without Try was tried: %v", *tried)
+	}
+
+	requestTry(n, false, false)
+	if !slices.Equal(*tried, []string{n.ID}) {
+		t.Fatalf("idle Try calls %v, want one TryNapplet(%q)", *tried, n.ID)
+	}
+}
+
+// ─── installed unavailable copies (S3) ──────────────────────────────────
+
+func TestInstalledUnavailableKeepsOpen(t *testing.T) {
+	bad := testNapplet("clock", "Clock")
+	bad.Unavailable = "Its manifest is malformed"
+	// a stale UpdateAvailable never brings an Update button back
+	bad.UpdateAvailable = &backend.Napp{ID: bad.ID}
+	if installedShowsUpdate(bad) {
+		t.Fatal("the installed tab offers Update for an unavailable record")
+	}
+	ok := testNapplet("clock", "Clock")
+	ok.UpdateAvailable = &backend.Napp{ID: ok.ID}
+	if !installedShowsUpdate(ok) {
+		t.Fatal("the installed tab lost Update for an available record")
+	}
+
+	// the installed copy draws the third line; Open stays, Update goes
+	lines := unavailableLines(bad, true)
+	if len(lines) != 3 || lines[2] != "Your installed version still works." {
+		t.Fatalf("installed lines %q", lines)
+	}
+	if unavailableDrops(bad, "Open") || unavailableDrops(bad, "Uninstall") || unavailableDrops(bad, "Settings") {
+		t.Fatal("an installed unavailable copy lost Open, Uninstall or Settings")
+	}
+	if !unavailableDrops(bad, "Update") {
+		t.Fatal("an unavailable tile still draws Update")
+	}
+
+	// the profile list: installed keeps Open and Uninstall, no Update;
+	// not installed offers nothing to try, install or update
+	open, action, update := profileRowLabels(bad, true, false)
+	if open != "Open" || action != "Uninstall" || update != "" {
+		t.Fatalf("installed profile row %q %q %q", open, action, update)
+	}
+	open, action, update = profileRowLabels(bad, false, false)
+	if open != "" || action != "" || update != "" {
+		t.Fatalf("not installed profile row %q %q %q, want nothing", open, action, update)
+	}
+	open, action, update = profileRowLabels(ok, true, false)
+	if open != "Open" || action != "Uninstall" || update != "Update" {
+		t.Fatalf("available installed profile row %q %q %q", open, action, update)
+	}
+	open, action, _ = profileRowLabels(testNapp("notes", "Notes"), false, false)
+	if open != "" || action != "Install" {
+		t.Fatalf("napp profile row %q %q", open, action)
+	}
+}

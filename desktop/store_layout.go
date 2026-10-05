@@ -224,7 +224,7 @@ func layoutNappsTab(
 				}
 				// the card opens the napp page; Open launches it
 				var updateBtn, openBtn, authorBtn, settingsBtn *widget.Clickable
-				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
+				if row < len(installedUpdateBtns) && installedShowsUpdate(st.Installed[row]) {
 					updateBtn = &installedUpdateBtns[row]
 				}
 				if row < len(openBtns) {
@@ -260,7 +260,8 @@ func layoutDiscoveryTab(
 	discovery []backend.Napp,
 	lookup *backend.AddressLookup,
 	installedSet,
-	follows map[string]bool,
+	follows,
+	busy map[string]bool,
 ) layout.Dimensions {
 	chip := func(gtx layout.Context, btn *widget.Clickable, label string, on bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
@@ -404,9 +405,9 @@ func layoutDiscoveryTab(
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, installedSet[n.ID], n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, tryLabel(n, busy[n.ID]), "", "", false, installedSet[n.ID], n)
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, "Try", "", "", false, installedSet[n.ID], n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, tryBtn, nil, nil, nil, tryLabel(n, busy[n.ID]), "", "", false, installedSet[n.ID], n)
 			}
 			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),

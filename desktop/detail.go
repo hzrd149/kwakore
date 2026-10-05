@@ -488,32 +488,20 @@ func layoutProfileDetail(
 				if i < len(cardBtns) {
 					cardBtn = &cardBtns[i]
 				}
-				if i < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
+				// no Try, Install or Update for an unavailable entry, and
+				// Try reads Opening… while its files are verified
+				openLabel, label, updLabel := profileRowLabels(n, installedSet[n.ID], busy[n.ID])
+				if i < len(openBtns) && openLabel != "" {
 					openBtn = &openBtns[i]
 				}
-				if i < len(actionBtns) {
+				if i < len(actionBtns) && label != "" {
 					actBtn = &actionBtns[i]
 				}
-				if i < len(updateBtns) && installedSet[n.ID] && n.UpdateAvailable != nil {
+				if i < len(updateBtns) && updLabel != "" {
 					updBtn = &updateBtns[i]
-				}
-				label := "Install"
-				if installedSet[n.ID] {
-					label = "Uninstall"
-				}
-				if busy[n.ID] {
-					label = "Working…"
-				}
-				updLabel := ""
-				if updBtn != nil {
-					updLabel = "Update"
 				}
 				// inside a profile the author row is the profile itself:
 				// no nested author button
-				openLabel := "Open"
-				if !installedSet[n.ID] && n.IsNapplet() {
-					openLabel = "Try"
-				}
 				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, true, installedSet[n.ID], n)
 			})
 		}),

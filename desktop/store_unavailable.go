@@ -88,13 +88,13 @@ func nappPageActions(n backend.Napp, installed, busy bool) pageActions {
 	a := pageActions{
 		settings: installed,
 		copyAddr: n.Naddr() != "",
-		update:   n.UpdateAvailable != nil && n.Unavailable == "",
+		update:   installedShowsUpdate(n),
 	}
 	switch {
 	case installed:
 		a.open = "Open"
 	case tryAllowed(n, installed):
-		a.open = "Try"
+		a.open = tryLabel(n, busy)
 	}
 	switch {
 	case installed && busy:
@@ -156,4 +156,62 @@ func layoutUnavailableBlock(gtx layout.Context, th *material.Theme, lines []stri
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// tryLabel is what a Try button for n reads: tryOpeningLabel while the
+// backend is busy downloading and verifying its files (D-13), else "Try".
+// It keeps its suggest colors either way, and requestTry ignores clicks
+// while busy.
+func tryLabel(n backend.Napp, busy bool) string {
+	if busy && n.IsNapplet() {
+		return tryOpeningLabel
+	}
+	return "Try"
+}
+
+// storeTry is what an accepted Try click runs. Tests swap it to observe the
+// call without a running backend.
+var storeTry = backend.TryNapplet
+
+// requestTry is what every store Try button does: nothing while n is busy
+// (a trial is already verifying its files) or when the store offers no Try
+// for it (installed, unavailable, or a napp), else it starts the trial.
+func requestTry(n backend.Napp, installed, busy bool) {
+	if busy || !tryAllowed(n, installed) {
+		return
+	}
+	storeTry(n)
+}
+
+// installedShowsUpdate says whether the installed tab offers Update for n.
+// The backend never sets UpdateAvailable on an unavailable record; this
+// keeps one that did from drawing the button.
+func installedShowsUpdate(n backend.Napp) bool {
+	return n.UpdateAvailable != nil && n.Unavailable == ""
+}
+
+// profileRowLabels are the labels of a profile page row's three buttons;
+// an empty one is not drawn. open is Open for an installed entry and Try (or
+// tryOpeningLabel) for a tryable napplet; action is Install, Uninstall or
+// "Working…" while busy; update is Update when there is one. An unavailable
+// entry gets no Try, Install or Update.
+func profileRowLabels(n backend.Napp, installed, busy bool) (open, action, update string) {
+	switch {
+	case installed:
+		open = "Open"
+	case tryAllowed(n, installed):
+		open = tryLabel(n, busy)
+	}
+	switch {
+	case installed && busy, !installed && busy && n.Unavailable == "":
+		action = "Working…"
+	case installed:
+		action = "Uninstall"
+	case n.Unavailable == "":
+		action = "Install"
+	}
+	if installed && installedShowsUpdate(n) {
+		update = "Update"
+	}
+	return open, action, update
 }
