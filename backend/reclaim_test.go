@@ -3,6 +3,9 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -704,5 +707,208 @@ func TestWindowDeleteDeclinedTrialLeavesNothing(t *testing.T) {
 		if onDisk(file) {
 			t.Errorf("the declined trial left %s on disk", filepath.Base(file))
 		}
+	}
+}
+
+// ─── startup sweep ───────────────────────────────────────────────
+
+// sweepFixture is a data dir as an earlier run and earlier builds leave it,
+// with the paths the sweep must keep and the ones it must remove.
+type sweepFixture struct {
+	keep, remove []string
+	outside      string // a symlink target outside the data dir
+}
+
+func writeFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newSweepFixture(t *testing.T, dir string) sweepFixture {
+	t.Helper()
+	var f sweepFixture
+	keep := func(p string) { writeFixture(t, p); f.keep = append(f.keep, p) }
+	remove := func(p string) { writeFixture(t, p); f.remove = append(f.remove, p) }
+	mkdir := func(p string) {
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.keep = append(f.keep, p)
+	}
+	symlink := func(target, link string) {
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("no symlinks here: %v", err)
+		}
+		f.keep = append(f.keep, link)
+	}
+	napletDir := filepath.Join(dir, "napplet-storage")
+	configDir := filepath.Join(dir, "config")
+	nappDir := filepath.Join(dir, "storage")
+	scopeOf := func(n Napp) string {
+		scope, err := nappletScope(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scope
+	}
+
+	installed := reclaimNappletFixture("paint", "2")
+	uninstalled := reclaimNappletFixture("paint", "1")
+	installedScope, uninstalledScope := scopeOf(installed), scopeOf(uninstalled)
+	// a record saved under a pre-address id: dropped at load, so the sweep
+	// must not count it as installed
+	legacy := reclaimNappletFixture("old", "1")
+	legacy.ID = "napplet~0123456789abcdef~old"
+
+	saved := AppState{InstalledNapps: map[string]Napp{installed.ID: installed, legacy.ID: legacy}}
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// napplet-storage/
+	keep(filepath.Join(napletDir, keyFileName(installedScope)))
+	remove(filepath.Join(napletDir, keyFileName(uninstalledScope)))
+	remove(filepath.Join(napletDir, keyFileName(installedScope+"\x00"+randomID())))
+	remove(filepath.Join(napletDir, keyFileName(scopeOf(legacy))))
+	keep(filepath.Join(napletDir, ".tmp-abc"))
+	keep(filepath.Join(napletDir, "notes.txt"))
+	mkdir(filepath.Join(napletDir, keyFileName("a directory")))
+	f.outside = filepath.Join(t.TempDir(), "outside.json")
+	writeFixture(t, f.outside)
+	f.keep = append(f.keep, f.outside)
+	symlink(f.outside, filepath.Join(napletDir, keyFileName("a symlink")))
+
+	// config/
+	keep(filepath.Join(configDir, napconfig.FileName(installedScope)))
+	remove(filepath.Join(configDir, napconfig.FileName(uninstalledScope)))
+	remove(filepath.Join(configDir, "napplet~0123456789abcdef~old.json"))
+	remove(filepath.Join(configDir, "0123456789abcdef~napp.json"))
+	keep(filepath.Join(configDir, ".tmp-abc"))
+	keep(filepath.Join(configDir, "README"))
+	mkdir(filepath.Join(configDir, "sub.json"))
+	symlink(f.outside, filepath.Join(configDir, "linked.json"))
+
+	// storage/
+	remove(filepath.Join(nappDir, "0123456789abcdef~notes.json"))
+	remove(filepath.Join(nappDir, "napplet~0123456789abcdef~old.json"))
+	remove(filepath.Join(nappDir, "napplet-"+testArtifactOf("old")+".json"))
+	keep(filepath.Join(nappDir, keyFileName("0123456789abcdef~notes")))
+	keep(filepath.Join(nappDir, ".tmp-abc"))
+	mkdir(filepath.Join(nappDir, "sub.json"))
+	symlink(f.outside, filepath.Join(nappDir, "linked.json"))
+
+	// everywhere else
+	keep(filepath.Join(dir, "napps", testArtifactOf("napps"), "index.html"))
+	keep(filepath.Join(dir, "napps", "stray.json"))
+	keep(filepath.Join(dir, "other.json"))
+	keep(filepath.Join(dir, "napplet-storage.json"))
+	return f
+}
+
+// startupSequence is what Start does with the state before it returns.
+func startupSequence() {
+	loadState()
+	dropPreAddressNapplets()
+	sweepNappletData()
+}
+
+func listTree(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		out = append(out, p)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestStartupSweep(t *testing.T) {
+	dir := withFreshStateDir(t)
+	t.Cleanup(backgroundSyncs.Wait)
+	f := newSweepFixture(t, dir)
+
+	startupSequence()
+
+	for _, p := range f.keep {
+		if _, err := os.Lstat(p); err != nil {
+			t.Errorf("swept %s: %v", strings.TrimPrefix(p, dir), err)
+		}
+	}
+	for _, p := range f.remove {
+		if _, err := os.Lstat(p); err == nil {
+			t.Errorf("kept %s", strings.TrimPrefix(p, dir))
+		}
+	}
+	if raw, err := os.ReadFile(f.outside); err != nil || string(raw) != "{}" {
+		t.Errorf("the symlink target outside the data dir changed: %q %v", raw, err)
+	}
+}
+
+func TestStartupSweepIdempotent(t *testing.T) {
+	dir := withFreshStateDir(t)
+	t.Cleanup(backgroundSyncs.Wait)
+	newSweepFixture(t, dir)
+
+	startupSequence()
+	first := listTree(t, dir)
+	sweepNappletData()
+	if second := listTree(t, dir); !slices.Equal(first, second) {
+		t.Fatalf("the second sweep changed the tree:\n%v\n%v", first, second)
+	}
+}
+
+// TestStartSweepsBeforeWindows: Start sweeps synchronously, after the state
+// is loaded and the pre-address records are dropped, and before the
+// installed list is published (nothing can open a window before that).
+func TestStartSweepsBeforeWindows(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "backend.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "Start" {
+			continue
+		}
+		for _, stmt := range fn.Body.List {
+			expr, ok := stmt.(*ast.ExprStmt)
+			if !ok {
+				continue
+			}
+			if call, ok := expr.X.(*ast.CallExpr); ok {
+				if id, ok := call.Fun.(*ast.Ident); ok {
+					order = append(order, id.Name)
+				}
+			}
+		}
+	}
+	at := func(name string) int {
+		i := slices.Index(order, name)
+		if i < 0 {
+			t.Fatalf("Start does not call %s synchronously (calls %v)", name, order)
+		}
+		return i
+	}
+	if !(at("loadState") < at("dropPreAddressNapplets") &&
+		at("dropPreAddressNapplets") < at("sweepNappletData") &&
+		at("sweepNappletData") < at("refreshInstalled")) {
+		t.Fatalf("Start calls %v", order)
 	}
 }

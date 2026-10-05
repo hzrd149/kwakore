@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"verdana/backend/fileutil"
@@ -667,6 +668,90 @@ func instancesForNapp(id string) []string {
 		add(ci.storageInstance)
 	}
 	return out
+}
+
+// ─── startup sweep ──────────────────────────────────────────────
+
+// nappletConfigDir holds the NAP-CONFIG files napconfig keeps, named
+// napconfig.FileName(scope).
+func nappletConfigDir() string { return filepath.Join(dataDir, "config") }
+
+// hex64JSON is the name keyFileName and napconfig.FileName give every file.
+var hex64JSON = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
+
+// sweepNappletData removes the storage and config files no installed
+// napplet version owns (D-08): what reclaim missed (a crash, a pending
+// reclaim when the launcher quit), instance files of earlier runs (window
+// records are session-only, so none is reachable now) and files of earlier
+// builds and id schemes. Start runs it once, synchronously, before any
+// window can open, so no writer races it.
+//
+// It deletes only what it can attribute, and nothing else:
+//   - napplet-storage/: 64-hex .json files that are not the shared file of
+//     an installed napplet's scope
+//   - config/: .json files that are not the config file of an installed
+//     napplet's scope (napconfig owns the directory; legacy names included)
+//   - storage/: .json files whose name is not 64 hex, the napp and napplet
+//     names of builds before D-04. 64-hex files there are napp localStorage,
+//     which nothing at startup can attribute (dev napps are never in state),
+//     so they always stay.
+//
+// Only regular files are touched: no symlink (nor what it points at), no
+// directory, no other file type and no .tmp-* file of an atomic write in
+// progress. It uses os.Remove, never RemoveAll, and never looks at napps/
+// (Phase 1 D-04) or anywhere outside the three directories. The expected
+// names come from keyFileName and napconfig.FileName, the helpers storage
+// and config write with, so live data can never be one byte off.
+func sweepNappletData() {
+	keepStorage := make(map[string]bool)
+	keepConfig := make(map[string]bool)
+	stateMu.Lock()
+	for _, n := range state.InstalledNapps {
+		scope, err := nappletScope(n)
+		if err != nil {
+			continue
+		}
+		keepStorage[keyFileName(scope)] = true
+		keepConfig[napconfig.FileName(scope)] = true
+	}
+	stateMu.Unlock()
+
+	removed, failed := 0, 0
+	sweep := func(dir string, garbage func(name string) bool) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Warn().Err(err).Str("dir", filepath.Base(dir)).Msg("could not sweep napplet data")
+			}
+			return
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if !e.Type().IsRegular() || strings.HasPrefix(name, ".tmp-") || !garbage(name) {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					log.Warn().Err(err).Str("dir", filepath.Base(dir)).Str("file", name).Msg("could not remove unowned napplet data")
+					failed++
+				}
+				continue
+			}
+			removed++
+		}
+	}
+	sweep(nappletStorageDir(), func(name string) bool {
+		return hex64JSON.MatchString(name) && !keepStorage[name]
+	})
+	sweep(nappletConfigDir(), func(name string) bool {
+		return strings.HasSuffix(name, ".json") && !keepConfig[name]
+	})
+	sweep(filepath.Join(dataDir, "storage"), func(name string) bool {
+		return strings.HasSuffix(name, ".json") && !hex64JSON.MatchString(name)
+	})
+	if removed > 0 || failed > 0 {
+		log.Info().Int("removed", removed).Int("failed", failed).Msg("swept storage and settings no installed napplet owns")
+	}
 }
 
 // broadcastStorage tells every other open window of the same napp about a

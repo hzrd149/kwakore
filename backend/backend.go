@@ -77,7 +77,7 @@ func Start(opts Options) (func(), error) {
 		return nil, err
 	}
 
-	napconfig.Init(filepath.Join(dataDir, "config"), log)
+	napconfig.Init(nappletConfigDir(), log)
 	bunker.SetLogger(log)
 
 	closeStores, err := initSystem(dataDir)
@@ -89,6 +89,11 @@ func Start(opts Options) (func(), error) {
 	// before anything reads the installed list: napplets installed under
 	// the ids of earlier builds are forgotten here, once (D-23)
 	dropPreAddressNapplets()
+	// once, synchronously, before refreshInstalled and before Start returns:
+	// no window can be open yet, and window records are session-only, so no
+	// instance file is live and nothing writes while the sweep deletes
+	// (D-08)
+	sweepNappletData()
 	refreshInstalled()
 	go buildUserIndex()
 
