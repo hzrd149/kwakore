@@ -20,10 +20,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-04)
+See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 04 — Frame Sandbox Lifecycle
+**Current focus:** Phase 05 — Napplet Artifact Identity and Storage Keying
 
 ## Current Position
 
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-10-05 — Phase 04 complete, transitioned to Phase 5
 
-Progress: [████░░░░░░] 38% (3/8 phases)
+Progress: [█████░░░░░] 50% (4/8 phases)
 
 ## Performance Metrics
 
@@ -176,7 +176,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4]: Research spike needed. Webview engine behavior for srcdoc frame self-navigation/reload and `frame-src` enforcement is unverified (WebKitGTK, WebView2, WKWebView); WebRTC flags are LOW-MEDIUM confidence
 - [Phase 7]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Phase 6]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
 - [All phases]: Shared-backend changes must keep `just apk` building (`GOOS=android` matches `linux` build tags); keep OS-specific code in `desktop/`
@@ -189,6 +188,7 @@ None yet.
 - [Phase 8]: IN-12 / AR-13 — identity globals (`userKeyer`/`userPubkey`, `sessionCancel`) are read unsynchronized; identity pushes can arrive out of order; `dev_publish.go` dereferences outside a recover. Phase 3 added only RPC panic recovery and single keyer reads
 - [Phase 3 residue]: First real Windows CI run not yet observed (124+ commits unpushed); Phase 3 info items IN-01..IN-11 open in 03-REVIEW.md; corrupt-state copies may keep plaintext secrets (AR-11); a downgrade on a migrated data dir must re-pair the bunker (release notes)
 - [Phase 3 UI]: 03-UI-REVIEW 20/24 follow-ups: draw the keyring-waiting Log in button disabled (login.go:89), cap/scroll the notice stack at high display scale (layout.go:273, login.go:220), click feedback for Try again / Log in again / Dismiss (retries already join in-flight loads)
+- [Phase 4 residue]: 04-UAT items 5–8 deferred to the milestone audit: WebView2 and WKWebView fixture runs (record in CONFORMANCE 5D-NG-webview2 / 5D-NG-wkwebview), Android `just apk`, first green CI xvfb smoke; SEED-002 (self-made `javascript:`/unclosed `document.open()` documents keep the session); one unexplained local smoke failure in 7 runs (04 deferred-items.md)
 - [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
 
 ## Deferred Items

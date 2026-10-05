@@ -34,6 +34,7 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - ✓ Every host `OpenLink` validates with `netguard.ExternalLink`; Windows CI job vets and tests the backend and desktop internals — Phase 3
 - ✓ Desktop login secrets live in the OS keyring after a verified read-back; no automatic path regenerates the NIP-46 client key or loses the login; unavailable keyring falls back to the 0600 file with a notice — Phase 3
 - ✓ All state writers are atomic; a corrupt `state.json` is kept aside with a notice, an unreadable one blocks saves — Phase 3
+- ✓ A napplet that reloads or navigates its own frame gets a fresh frame and session (old session reset first, replies and refusals bound to the sending frame, reload loops halted after 3 in 10 s); a document-start marker closes the delayed-load gap; the host page and every loopback response carry an enforced CSP with `frame-ancestors 'none'`; WebKitGTK napplet windows fail closed unless WebRTC, media capture and preconnect read back off — Phase 4 (self-made `javascript:`/unclosed `document.open()` documents keep the session: accepted residual, SEED-002)
 
 ### Active
 
@@ -46,9 +47,6 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - [ ] Both manifest shapes conform to their own specs: NIP-5D and WEB-NAPPLET (the future event schema)
 - [ ] Finish NAP-STORAGE artifact-hash keying (started in `18f8f81`): no address-only fallback when the hash is empty, storage cleaned up on update and uninstall, and the update UI says updating resets napplet data
 - [ ] `NAPPLETS.md` domain table reflects what is actually implemented
-
-**Napplet sandbox hardening**
-- [ ] A napplet that reloads or navigates its own frame cannot escape the CSP or keep a live session: the host page resets the session on unexpected frame loads, and its CSP replaces the ineffective `navigate-to 'self'` (`desktop/child/main.go`, `desktop/child/napplet.go`) with directives engines enforce
 
 **Robustness**
 - [ ] Malformed envelopes, manifests, and relay data are rejected cleanly with regression tests
@@ -109,6 +107,9 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 | Prompts owned by their request: ≤3 per window, ≤32 global, cancelled at the route deadline or session end; answers only from the owning window | DEC-1; closes cross-window consent forgery (review CR-01) | ✓ Good — Phase 2 |
 | libwebview copies generated from the pinned go-webview module at build time, not committed (D-17) | Keep binaries out of git while embedding verified bytes | ✓ Good — Phase 3 (desktop builds need `just webview-libs` first) |
 | Identity globals (`userKeyer`/`userPubkey`) redesign deferred; Phase 3 only recovers RPC panics and reads the keyer once | Keep Phase 3 scoped; full fix belongs with identity conformance | ⚠️ Revisit — Phase 8 (IN-12 / AR-13) |
+| Host-page CSP = NIP-5D napplet baseline + `frame-ancestors 'none'` (not `'self'` scripts) | The srcdoc inherits the host policy; a `'self'` script policy would break every napplet (measured) | ✓ Good — Phase 4 (D-17) |
+| Launcher preamble posts one document-start marker (no global, shim bytes untouched) | Closes the delayed-load window in which a replaced document talks to the old session; deliberate deviation from NIP-5D Security 5 | ✓ Good — Phase 4 (D-18, DEC-5) |
+| Engine hardening: WebKitGTK napplet windows fail closed via purego, settings best effort, napps untouched; WebView2 args for every window kind | Close `connect-src` bypasses where engines allow; one WebView2 browser process per build | ⚠️ Revisit — WebView2/WKWebView/Android unverified (04-UAT 5–8) |
 
 ## Evolution
 
@@ -128,4 +129,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-04 after Phase 3*
+*Last updated: 2026-10-05 after Phase 4*
