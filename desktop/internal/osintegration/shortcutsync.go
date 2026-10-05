@@ -8,6 +8,8 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"golang.org/x/text/unicode/norm"
+
 	"verdana/backend"
 )
 
@@ -113,36 +115,48 @@ func utf16Len(s string) int {
 	return n
 }
 
+// shortcutNameKey folds a file name the way the file systems the shortcuts
+// land on compare names, erring on the side of calling two names equal. NTFS
+// compares through its upcase table, so "Sıgnal" (dotless i) and "ſignal"
+// (long s) name the same file as "Signal", which lowercasing alone keeps
+// apart; uppercasing first and then lowercasing joins them. Case-insensitive
+// APFS, the macOS default, also ignores Unicode normalization, so a
+// decomposed "Café" is the same bundle as a precomposed one; composing first
+// joins them.
+func shortcutNameKey(name string) string {
+	return strings.ToLower(strings.ToUpper(norm.NFC.String(name)))
+}
+
 // uniqueShortcutNames gives every shortcut its file name stem. stem turns a
 // title into a bounded file name and says whether it had to be cut. A cut
-// title, or one that collides with another (case-insensitively, as both NTFS
-// and APFS compare by default), gets a short id suffix; a name still taken
-// after that (an author can choose a title that spells another entry's
-// suffix) gets the full id key. Each name is unique within the pass, so no
-// entry overwrites another's file.
+// title, or one that collides with another as shortcutNameKey compares them
+// (which covers how both NTFS and APFS compare names by default), gets a
+// short id suffix; a name still taken after that (an author can choose a
+// title that spells another entry's suffix) gets the full id key. Each name
+// is unique within the pass, so no entry overwrites another's file.
 func uniqueShortcutNames(shortcuts []backend.AppShortcut, stem func(string) (string, bool)) []string {
 	stems := make([]string, len(shortcuts))
 	cut := make([]bool, len(shortcuts))
 	counts := make(map[string]int, len(shortcuts))
 	for i, s := range shortcuts {
 		stems[i], cut[i] = stem(s.Name)
-		counts[strings.ToLower(stems[i])]++
+		counts[shortcutNameKey(stems[i])]++
 	}
 	names := make([]string, len(shortcuts))
 	used := make(map[string]bool, len(shortcuts))
 	for i, s := range shortcuts {
 		key := appShortcutKey(s.ID)
 		name := stems[i]
-		if cut[i] || counts[strings.ToLower(name)] > 1 {
+		if cut[i] || counts[shortcutNameKey(name)] > 1 {
 			name += " (" + key[:6] + ")"
 		}
-		if used[strings.ToLower(name)] {
+		if used[shortcutNameKey(name)] {
 			name = stems[i] + " (" + key + ")"
 		}
-		for n := 2; used[strings.ToLower(name)]; n++ {
+		for n := 2; used[shortcutNameKey(name)]; n++ {
 			name = fmt.Sprintf("%s (%s %d)", stems[i], key, n)
 		}
-		used[strings.ToLower(name)] = true
+		used[shortcutNameKey(name)] = true
 		names[i] = name
 	}
 	return names

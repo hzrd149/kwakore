@@ -110,14 +110,68 @@ func TestShortcutNamesStayUnique(t *testing.T) {
 	} {
 		seen := map[string]bool{}
 		for _, name := range names {
-			if seen[strings.ToLower(name)] {
+			if seen[shortcutNameKey(name)] {
 				t.Fatalf("names collide: %q", names)
 			}
-			seen[strings.ToLower(name)] = true
+			seen[shortcutNameKey(name)] = true
 		}
 	}
 	if got := windowsShortcutNames(testStartMenu, []backend.AppShortcut{victim}); got[0] != "Paint" {
 		t.Fatalf("a short unique title changed: %q", got)
+	}
+}
+
+func TestShortcutNamesFoldLikeTheFileSystem(t *testing.T) {
+	// each pair is one file on NTFS (upcase table) or case-insensitive APFS
+	// (case and normalization insensitive), though strings.ToLower keeps it
+	// apart
+	pairs := [][2]string{
+		{"Signal", "Sıgnal"},        // dotless i, U+0131
+		{"Signal", "ſignal"},        // long s, U+017F
+		{"Caf\u00e9", "Cafe\u0301"}, // precomposed against decomposed é
+	}
+	for _, pair := range pairs {
+		if strings.ToLower(pair[0]) == strings.ToLower(pair[1]) {
+			t.Fatalf("%q and %q already lowercase alike; the case proves nothing", pair[0], pair[1])
+		}
+		if shortcutNameKey(pair[0]) != shortcutNameKey(pair[1]) {
+			t.Fatalf("%q and %q fold apart", pair[0], pair[1])
+		}
+		victim := backend.AppShortcut{ID: "35129:pk:victim", Name: pair[0]}
+		other := backend.AppShortcut{ID: "35129:pk:other", Name: pair[1]}
+		for _, names := range [][]string{
+			windowsShortcutNames(testStartMenu, []backend.AppShortcut{victim, other}),
+			windowsShortcutNames(testStartMenu, []backend.AppShortcut{other, victim}),
+			darwinShortcutNames([]backend.AppShortcut{victim, other}),
+			darwinShortcutNames([]backend.AppShortcut{other, victim}),
+		} {
+			if shortcutNameKey(names[0]) == shortcutNameKey(names[1]) {
+				t.Fatalf("%q and %q share one file", names[0], names[1])
+			}
+			// neither keeps the bare title, so neither passes for the other
+			for _, name := range names {
+				if name == pair[0] || name == pair[1] {
+					t.Fatalf("a colliding title kept its bare name: %q", names)
+				}
+			}
+		}
+	}
+	// all five spellings in one pass still get five distinct files
+	all := []backend.AppShortcut{
+		{ID: "35129:pk:a", Name: "Signal"},
+		{ID: "35129:pk:b", Name: "Sıgnal"},
+		{ID: "35129:pk:c", Name: "ſignal"},
+		{ID: "35129:pk:d", Name: "Caf\u00e9"},
+		{ID: "35129:pk:e", Name: "Cafe\u0301"},
+	}
+	for _, names := range [][]string{windowsShortcutNames(testStartMenu, all), darwinShortcutNames(all)} {
+		seen := map[string]bool{}
+		for _, name := range names {
+			if seen[shortcutNameKey(name)] {
+				t.Fatalf("names collide on disk: %q", names)
+			}
+			seen[shortcutNameKey(name)] = true
+		}
 	}
 }
 
