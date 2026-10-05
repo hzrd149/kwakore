@@ -797,16 +797,26 @@ func newSweepFixture(t *testing.T, dir string) sweepFixture {
 	mkdir(filepath.Join(configDir, "sub.json"))
 	symlink(f.outside, filepath.Join(configDir, "linked.json"))
 
-	// storage/ is napp localStorage and never swept, old names included:
-	// a napp's file of a build before D-04, and napplet files of earlier
-	// builds the sweep cannot tell from napp data (WR-06)
+	// storage/ is napp localStorage and kept, old names included (WR-06):
+	// a napp's file of a build before D-04, a dev napp's, a 64-hex one and
+	// names the sweep does not know. Only the napplet files earlier builds
+	// wrote there go: napplet-<hash> and hash-less napplet~<id> (D-08)
 	keep(filepath.Join(nappDir, "0123456789abcdef~notes.json"))
-	keep(filepath.Join(nappDir, "napplet~0123456789abcdef~old.json"))
-	keep(filepath.Join(nappDir, "napplet-"+testArtifactOf("old")+".json"))
+	keep(filepath.Join(nappDir, "dev~probe.json"))
 	keep(filepath.Join(nappDir, keyFileName("0123456789abcdef~notes")))
+	keep(filepath.Join(nappDir, keyFileName(installedScope)))
+	keep(filepath.Join(nappDir, "notes.txt"))
+	keep(filepath.Join(nappDir, "unknown.json"))
+	keep(filepath.Join(nappDir, "napplet-old.txt"))
+	keep(filepath.Join(nappDir, "my-napplet-notes.json"))
+	keep(filepath.Join(nappDir, "Napplet-"+testArtifactOf("case")+".json"))
+	remove(filepath.Join(nappDir, "napplet~0123456789abcdef~old.json"))
+	remove(filepath.Join(nappDir, "napplet-"+testArtifactOf("old")+".json"))
 	keep(filepath.Join(nappDir, ".tmp-abc"))
 	mkdir(filepath.Join(nappDir, "sub.json"))
+	mkdir(filepath.Join(nappDir, "napplet-"+testArtifactOf("dir")+".json"))
 	symlink(f.outside, filepath.Join(nappDir, "linked.json"))
+	symlink(f.outside, filepath.Join(nappDir, "napplet~0123456789abcdef~linked.json"))
 
 	// everywhere else
 	keep(filepath.Join(dir, "napps", testArtifactOf("napps"), "index.html"))
