@@ -96,6 +96,13 @@ func InstallNapp(n Napp) error {
 	saveState()
 	stateMu.Unlock()
 
+	// an uninstall of this very version that was waiting for a window to
+	// close must not delete what is installed again (D-24); the reclaim
+	// itself checks the installed records too, this only tidies up
+	if scope, err := nappletScope(n); err == nil {
+		cancelPendingReclaim(scope)
+	}
+
 	refreshInstalled()
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 	return nil
@@ -103,10 +110,27 @@ func InstallNapp(n Napp) error {
 
 // Uninstall removes a napp's files and forgets it. Installed-only by
 // convention: it silently no-ops for ids the launcher doesn't know.
+//
+// A napplet goes entirely (D-06): its open windows close first (D-24), then
+// its install directory, its record, its NAP-STORAGE files (shared and every
+// instance a window of it had this run), its NAP-CONFIG file, its remembered
+// answers, its action usage and the defaults pointing at it. Its storage and
+// config wait for the last of its windows to be gone before they are
+// deleted, so nothing is removed under a window still running.
 func Uninstall(id string) {
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 	setBusy(id, true)
 	defer setBusy(id, false)
+
+	stateMu.Lock()
+	record, installed := state.InstalledNapps[id]
+	stateMu.Unlock()
+	napplet := installed && record.IsNapplet()
+	if napplet {
+		for _, ci := range runningForNapp(id) {
+			ci.Close()
+		}
+	}
 
 	// a napp whose directory cannot be named safely gets nothing removed,
 	// but is still forgotten below
@@ -116,12 +140,21 @@ func Uninstall(id string) {
 		os.RemoveAll(base)
 	}
 
+	// the record goes before the reclaim: reclaim keeps any scope that is
+	// still installed, and this one no longer is
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
 	delete(state.LastLaunched, id)
 	saveState()
 	stateMu.Unlock()
 
+	if napplet {
+		reclaimNapplet(record, instancesForNapp(id))
+	}
+
+	// what the user allowed or denied it is about the copy they had; a
+	// reinstall starts from asking again
+	ForgetPermission(id, "")
 	// a napp that isn't installed can't be anyone's habitual handler, and
 	// whatever the next one installed under that id shouldn't inherit it
 	forgetActionUsage(id)

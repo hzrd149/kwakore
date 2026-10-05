@@ -91,18 +91,81 @@ func (k RuleKey) String() string {
 }
 
 // ruleID is the key as state.json files it. Napp ids and action names are
-// whatever the network said, so the parts are joined with a separator neither
-// can hold rather than with a readable one.
+// whatever the network said, so the parts are joined with 0x1F, a separator
+// no readable name holds, and each part is escaped first (joinIDParts): a d
+// tag can hold 0x1F, and unescaped it would make a rule parse as another
+// napplet's (RESEARCH Pitfall 9), so uninstalling one would miss its own
+// rules or take someone else's. A part with neither 0x1B nor 0x1F encodes
+// exactly as before the escaping, so every key saved by an earlier build
+// still matches byte for byte. Any later change of the scheme must keep
+// decoding this one.
 func (k RuleKey) ruleID() string {
-	return strings.Join([]string{k.Napp, string(k.Permission), k.Subject}, "\x1f")
+	return joinIDParts(k.Napp, string(k.Permission), k.Subject)
 }
 
 func ruleKeyFromID(id string) RuleKey {
-	parts := strings.Split(id, "\x1f")
-	for len(parts) < 3 {
+	parts := splitIDParts(id, 3)
+	return RuleKey{Napp: parts[0], Permission: Permission(parts[1]), Subject: parts[2]}
+}
+
+// idSeparator joins the parts of a rule or usage id; idEscape starts an
+// escape inside a part: 0x1B 0x1B is a literal 0x1B, 0x1B 's' a literal 0x1F.
+const (
+	idSeparator = 0x1f
+	idEscape    = 0x1b
+)
+
+// joinIDParts escapes each part and joins them with idSeparator. The escape
+// is prefix-free and never emits idSeparator, so the result is injective:
+// two different part lists never make the same id.
+func joinIDParts(parts ...string) string {
+	var b strings.Builder
+	for i, p := range parts {
+		if i > 0 {
+			b.WriteByte(idSeparator)
+		}
+		for j := 0; j < len(p); j++ {
+			switch p[j] {
+			case idEscape:
+				b.WriteString("\x1b\x1b")
+			case idSeparator:
+				b.WriteString("\x1bs")
+			default:
+				b.WriteByte(p[j])
+			}
+		}
+	}
+	return b.String()
+}
+
+// splitIDParts undoes joinIDParts, padding to at least n parts. It splits
+// only on unescaped separators. An escape byte not followed by one of the
+// two escaped bytes is kept as it is (no earlier build wrote one, but a
+// hand-edited state file must not fail to load).
+func splitIDParts(id string, n int) []string {
+	parts := make([]string, 0, n)
+	var cur strings.Builder
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c == idEscape && i+1 < len(id) && id[i+1] == idEscape:
+			cur.WriteByte(idEscape)
+			i++
+		case c == idEscape && i+1 < len(id) && id[i+1] == 's':
+			cur.WriteByte(idSeparator)
+			i++
+		case c == idSeparator:
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	parts = append(parts, cur.String())
+	for len(parts) < n {
 		parts = append(parts, "")
 	}
-	return RuleKey{Napp: parts[0], Permission: Permission(parts[1]), Subject: parts[2]}
+	return parts
 }
 
 // Rule is what an answer says: the verdict, plus the napp a dispatch should

@@ -2,7 +2,6 @@ package backend
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
@@ -44,17 +43,15 @@ type usageKey struct {
 }
 
 // usageID is the key as state.json files it, same shape as RuleKey.ruleID:
-// napp ids and action names are whatever the network said, so the parts are
-// joined with a separator neither can hold.
+// napp ids and action names are whatever the network said, so each part is
+// escaped and the parts are joined with 0x1F (joinIDParts). Keys saved by
+// earlier builds, whose parts held neither 0x1B nor 0x1F, are unchanged.
 func (k usageKey) usageID() string {
-	return strings.Join([]string{k.Napp, k.Action, k.Target}, "\x1f")
+	return joinIDParts(k.Napp, k.Action, k.Target)
 }
 
 func usageKeyFromID(id string) usageKey {
-	parts := strings.Split(id, "\x1f")
-	for len(parts) < 3 {
-		parts = append(parts, "")
-	}
+	parts := splitIDParts(id, 3)
 	return usageKey{Napp: parts[0], Action: parts[1], Target: parts[2]}
 }
 

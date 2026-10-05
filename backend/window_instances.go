@@ -282,6 +282,19 @@ func (ci *Instance) Close() {
 	}
 }
 
+// isGone says whether the window has closed (WindowClosed ran for it).
+func (ci *Instance) isGone() bool {
+	if ci.gone == nil {
+		return false
+	}
+	select {
+	case <-ci.gone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (ci *Instance) focus() {
 	ci.sendMu.Lock()
 	t := ci.transport
@@ -553,6 +566,10 @@ func WindowClosed(instance string) {
 		// was just told it was closed before it ran
 		go finishNappletTrial(ci)
 	}
+	// an update or uninstall that waited for this window can go now: it
+	// has left the live list, so the last window of its version may be
+	// gone (D-24)
+	runPendingReclaims()
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }

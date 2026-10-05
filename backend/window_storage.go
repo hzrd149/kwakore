@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"verdana/backend/fileutil"
+	"verdana/backend/napconfig"
 )
 
 // localStorageQuota caps one napp's localStorage, like browsers do (~5MB).
@@ -26,6 +27,10 @@ type nappStorage struct {
 	mu   sync.Mutex
 	data map[string]string
 	size int // sum of len(key)+len(value) in bytes, utf-8
+	// dead is set, under mu, once the store's file was reclaimed and the
+	// store evicted from storages: a writer that took the store before the
+	// eviction must not write the file back (D-24).
+	dead bool
 }
 
 // storages holds every open store, napp localStorage and napplet
@@ -213,9 +218,32 @@ func storageSet(nappID, key, value string) error {
 // the caller's choosing: napps get localStorage's 5MB, napplets
 // NAP-STORAGE's smaller one.
 func storageSetQuota(file, key, value string, quota int, errQuota error) error {
-	s := storageFor(file)
+	return storageFor(file).set(file, key, value, quota, errQuota, nil)
+}
+
+// errStoreReclaimed is a write to a store whose file was reclaimed, or from
+// a window that is already gone. Writing would re-create a file reclaim just
+// removed, so the napplet gets internal-error instead (storageFailed).
+var errStoreReclaimed = errors.New("napplet storage was reclaimed")
+
+// writableLocked says whether a write may go ahead, with s.mu held. gone,
+// when not nil, reports whether the writing window has closed: a handler
+// still running for a closed window must not write either, since reclaim
+// may already have run for it (it runs once the last window is gone).
+func (s *nappStorage) writableLocked(gone func() bool) error {
+	if s.dead || (gone != nil && gone()) {
+		return errStoreReclaimed
+	}
+	return nil
+}
+
+// set writes one key of s, the store behind file.
+func (s *nappStorage) set(file, key, value string, quota int, errQuota error, gone func() bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.writableLocked(gone); err != nil {
+		return err
+	}
 	old, ok := s.data[key]
 	delta := len(key) + len(value)
 	if ok {
@@ -259,9 +287,16 @@ func storageKeys(file string) []string {
 }
 
 func storageRemove(file, key string) (bool, error) {
-	s := storageFor(file)
+	return storageFor(file).remove(file, key, nil)
+}
+
+// remove deletes one key of s, the store behind file.
+func (s *nappStorage) remove(file, key string, gone func() bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.writableLocked(gone); err != nil {
+		return false, err
+	}
 	if old, ok := s.data[key]; ok {
 		next := make(map[string]string, len(s.data)-1)
 		for k, v := range s.data {
@@ -283,6 +318,9 @@ func storageClear(file string) (bool, error) {
 	s := storageFor(file)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.writableLocked(nil); err != nil {
+		return false, err
+	}
 	if len(s.data) == 0 {
 		return false, nil
 	}
@@ -320,7 +358,7 @@ func napStorageGetValue(ci *Instance, file, key string) (string, bool) {
 
 func napStorageSetValue(ci *Instance, file, key, value string) error {
 	if !ci.trial {
-		return storageSetQuota(file, key, value, nappletStorageQuota, errNappletQuota)
+		return storageFor(file).set(file, key, value, nappletStorageQuota, errNappletQuota, ci.isGone)
 	}
 	s := trialStorageFor(ci, file)
 	s.mu.Lock()
@@ -340,7 +378,7 @@ func napStorageSetValue(ci *Instance, file, key, value string) error {
 
 func napStorageRemoveValue(ci *Instance, file, key string) (bool, error) {
 	if !ci.trial {
-		return storageRemove(file, key)
+		return storageFor(file).remove(file, key, ci.isGone)
 	}
 	s := trialStorageFor(ci, file)
 	s.mu.Lock()
@@ -384,6 +422,10 @@ func persistTrialStorage(ci *Instance) error {
 
 		permanent := storageFor(file)
 		permanent.mu.Lock()
+		if err := permanent.writableLocked(nil); err != nil {
+			permanent.mu.Unlock()
+			return err
+		}
 		if err := storagePersistLocked(file, data); err != nil {
 			permanent.mu.Unlock()
 			return err
@@ -416,6 +458,184 @@ func trialHasData(ci *Instance) bool {
 func discardTrialStorage(ci *Instance) {
 	ci.trialStorage = make(map[string]*nappStorage)
 	ci.trial = false
+}
+
+// ─── reclaim ────────────────────────────────────────────────────
+
+// Every artifact hash and every window instance gets its own NAP-STORAGE
+// file, and every hash its own config file, so an update, an uninstall or a
+// deleted window leaves files nobody can reach again. Reclaim removes them
+// (D-05, D-06, D-07), but never under a window that still runs that version
+// (D-24): while one is open the reclaim is pending, and WindowClosed runs it
+// once the last such window is gone. NAP-STORAGE: "Instance storage lives as
+// long as the instance; the shell MAY reclaim it on destroy."
+//
+// A scope that is installed again is live data, never garbage: every reclaim
+// checks the installed records right before it deletes, and an install
+// cancels a pending reclaim of the scope it installs.
+
+// pendingReclaim is a reclaim waiting for the last window of its scope: the
+// napplet version and the storage instances whose files go with it.
+type pendingReclaim struct {
+	napp      Napp
+	instances map[string]bool
+}
+
+var (
+	// reclaimMu serializes reclaims and guards pendingReclaims. It is taken
+	// before stateMu, instancesMu, storagesMu and any store's mu, never
+	// after them.
+	reclaimMu       sync.Mutex
+	pendingReclaims = make(map[string]*pendingReclaim)
+)
+
+// reclaimNapplet removes a napplet version's shared storage file, the
+// instance files of storageInstances and its config file, or records that
+// for later while a live window still runs that version.
+func reclaimNapplet(n Napp, storageInstances []string) {
+	scope, err := nappletScope(n)
+	if err != nil {
+		log.Warn().Err(err).Str("napp", n.ID).Msg("napplet data not reclaimed")
+		return
+	}
+	reclaimMu.Lock()
+	defer reclaimMu.Unlock()
+	p := pendingReclaims[scope]
+	if p == nil {
+		p = &pendingReclaim{napp: n, instances: make(map[string]bool)}
+	}
+	for _, inst := range storageInstances {
+		if inst != "" {
+			p.instances[inst] = true
+		}
+	}
+	if scopeHasWindow(scope) {
+		pendingReclaims[scope] = p
+		log.Info().Str("napp", n.ID).Msg("napplet data reclaim waits for its windows to close")
+		return
+	}
+	delete(pendingReclaims, scope)
+	reclaimScopeLocked(scope, p)
+}
+
+// runPendingReclaims runs every pending reclaim whose last window is gone.
+// WindowClosed calls it once the closed window has left the live list.
+func runPendingReclaims() {
+	reclaimMu.Lock()
+	defer reclaimMu.Unlock()
+	for scope, p := range pendingReclaims {
+		if scopeHasWindow(scope) {
+			continue
+		}
+		delete(pendingReclaims, scope)
+		reclaimScopeLocked(scope, p)
+	}
+}
+
+// cancelPendingReclaim forgets a pending reclaim of scope: the scope was
+// installed again, so its files are live data.
+func cancelPendingReclaim(scope string) {
+	reclaimMu.Lock()
+	defer reclaimMu.Unlock()
+	if _, ok := pendingReclaims[scope]; ok {
+		delete(pendingReclaims, scope)
+		log.Info().Msg("pending napplet data reclaim cancelled by a reinstall")
+	}
+}
+
+// scopeHasWindow says whether a live window (trials and dev windows
+// included) runs the napplet version scope names.
+func scopeHasWindow(scope string) bool {
+	for _, ci := range allInstances() {
+		if s, err := nappletScope(ci.napp); err == nil && s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeInstalledLocked says whether an installed record runs scope. stateMu
+// is held.
+func scopeInstalledLocked(scope string) bool {
+	for _, n := range state.InstalledNapps {
+		if s, err := nappletScope(n); err == nil && s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// reclaimScopeLocked deletes the files of a pending reclaim, with reclaimMu
+// held. It holds stateMu across the check and the deletion, so an install
+// of the same version either lands first and keeps every file or lands after
+// they are gone, never in between.
+func reclaimScopeLocked(scope string, p *pendingReclaim) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if scopeInstalledLocked(scope) {
+		log.Info().Str("napp", p.napp.ID).Msg("napplet data kept: that version is installed again")
+		return
+	}
+	if key, err := nappletStorageKey(p.napp, "shared", ""); err == nil {
+		reclaimStoreKey(key)
+	}
+	for inst := range p.instances {
+		if key, err := nappletStorageKey(p.napp, "instance", inst); err == nil {
+			reclaimStoreKey(key)
+		}
+	}
+	if err := napconfig.Forget(scope); err != nil {
+		log.Warn().Err(err).Str("napp", p.napp.ID).Msg("could not remove a reclaimed napplet's config")
+	}
+	log.Info().Str("napp", p.napp.ID).Int("instances", len(p.instances)).Msg("reclaimed napplet data")
+}
+
+// reclaimStoreKey removes the NAP-STORAGE file of key and evicts its store,
+// marking it dead so a writer that already holds it fails instead of writing
+// the file back.
+func reclaimStoreKey(key string) {
+	file, err := nappletStorageFile(key)
+	if err != nil {
+		log.Warn().Err(err).Msg("napplet storage file not reclaimed")
+		return
+	}
+	storagesMu.Lock()
+	s := storages[file]
+	delete(storages, file)
+	storagesMu.Unlock()
+	if s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.dead = true
+	}
+	// removed with the store's lock held: a writer that locked it first has
+	// finished writing, and one that comes after sees it dead
+	if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Warn().Err(err).Str("file", filepath.Base(file)).Msg("could not remove reclaimed napplet storage")
+	}
+}
+
+// instancesForNapp is every storage instance a window of the napp has had
+// this run: the window records (closed windows listed for reopening
+// included) and the live windows.
+func instancesForNapp(id string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(inst string) {
+		if inst != "" && !seen[inst] {
+			seen[inst] = true
+			out = append(out, inst)
+		}
+	}
+	for _, rec := range windowRecords() {
+		if rec.NappID == id {
+			add(rec.StorageInstance)
+		}
+	}
+	for _, ci := range runningForNapp(id) {
+		add(ci.storageInstance)
+	}
+	return out
 }
 
 // broadcastStorage tells every other open window of the same napp about a
