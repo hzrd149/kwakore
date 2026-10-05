@@ -42,6 +42,7 @@ type containmentRig struct {
 	blobs   map[string][]byte
 	missing atomic.Bool // answer 404 for everything
 	server  *httptest.Server
+	hits    atomic.Int64 // requests the server got
 }
 
 func newContainmentRig(t *testing.T) *containmentRig {
@@ -60,6 +61,7 @@ func newContainmentRig(t *testing.T) *containmentRig {
 	}
 
 	r.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.hits.Add(1)
 		if r.missing.Load() {
 			http.NotFound(w, req)
 			return
@@ -74,6 +76,12 @@ func newContainmentRig(t *testing.T) *containmentRig {
 		_, _ = w.Write(data)
 	}))
 	t.Cleanup(r.server.Close)
+	// the rig's loopback server is one of the user's own Blossom servers
+	// (D-20): manifest server tags and author lists are public-only, so
+	// that is the only way a loopback server may serve blobs
+	stateMu.Lock()
+	state.BlossomServers = []string{r.server.URL}
+	stateMu.Unlock()
 	return r
 }
 
@@ -155,7 +163,6 @@ func TestHostileDTagInstallStaysInsideDataDir(t *testing.T) {
 	if !ok {
 		t.Fatal("napp event rejected")
 	}
-	n.Servers = []string{r.server.URL}
 	if n.D != "../../.." || n.ID != evt.PubKey.Hex()[:16]+"~../../.." {
 		t.Fatalf("d or id rewritten: d=%q id=%q", n.D, n.ID)
 	}
@@ -185,7 +192,6 @@ func TestHostileDTagInstallStaysInsideDataDir(t *testing.T) {
 	if !ok {
 		t.Fatal("napp event rejected")
 	}
-	n.Servers = []string{r.server.URL}
 	if n.D != "/../x" {
 		t.Fatalf("d rewritten: %q", n.D)
 	}
@@ -354,6 +360,9 @@ var hostileShapes = []hostileShape{
 var hostileDs = []string{"..", "../../..", "a/b", "/../x"}
 
 // hostileNapp parses evt the way discovery does and points it at the rig.
+// The rig's loopback server is also a user Blossom server: that, not the
+// server tag, is what lets it serve (D-20). applyUpdate fetches from a
+// manifest's own servers only when it names any, so the tag stays.
 func (r *containmentRig) hostileNapp(t *testing.T, evt nostr.Event) Napp {
 	t.Helper()
 	n, ok := nappFromEvent(evt)

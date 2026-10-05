@@ -25,9 +25,6 @@ func (h *previewTestHost) OpenWindow(spec WindowSpec) (Transport, error) {
 
 func TestTryNappletLaunchesVerifiedDocumentWithoutInstalling(t *testing.T) {
 	setupNapTest(t)
-	stateMu.Lock()
-	state.BlossomServers = []string{}
-	stateMu.Unlock()
 	document := []byte("<!doctype html><title>preview</title>")
 	sum := sha256.Sum256(document)
 	hash := hex.EncodeToString(sum[:])
@@ -39,6 +36,17 @@ func TestTryNappletLaunchesVerifiedDocumentWithoutInstalling(t *testing.T) {
 		_, _ = w.Write(document)
 	}))
 	defer server.Close()
+	// a loopback server only serves blobs as one of the user's own Blossom
+	// servers (D-20); the manifest's server tag alone would be refused
+	stateMu.Lock()
+	previousServers := state.BlossomServers
+	state.BlossomServers = []string{server.URL}
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		state.BlossomServers = previousServers
+		stateMu.Unlock()
+	})
 
 	previousHost := host
 	h := &previewTestHost{}

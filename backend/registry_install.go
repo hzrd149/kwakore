@@ -7,13 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"fiatjaf.com/nostr"
+
 	"verdana/backend/fileutil"
+	"verdana/backend/netguard"
 )
 
 // backgroundSyncs tracks the shortcut and intent passes that installs,
@@ -345,51 +349,135 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 // failed the entire napp instead of being skipped for the next one.
 var blobAttemptTimeout = 20 * time.Second
 
+// blobMaxBytes caps one blob. Napp files are pages, scripts and images; a
+// server that sends more (by Content-Length or by just streaming on) is
+// skipped for the next one rather than read into memory without end.
+var blobMaxBytes int64 = 64 << 20
+
+// blobMaxRedirects is how many redirects one blob request may follow.
+const blobMaxRedirects = 3
+
+// blobRedirect keeps a blob request's redirects short, and never lets an
+// https request continue over anything weaker.
+func blobRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > blobMaxRedirects {
+		return errors.New("too many redirects")
+	}
+	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("redirect away from https")
+	}
+	return nil
+}
+
+// blobClient fetches from the servers a manifest named (its server tags) and
+// the ones its author lists (kind 10063). Those are author input, so it dials
+// public addresses only, on every connection and every redirect hop, and a
+// manifest cannot point installs, trials or icon fetches at the user's
+// machine, LAN or a cloud metadata address. Proxy is nil on purpose, as for
+// NAP-RESOURCE: a proxy would dial on our behalf and the address check would
+// never see where the request goes. Users behind a proxy only reach the
+// servers they configured themselves (trustedBlobClient).
+var blobClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           netguard.DialContext,
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          32,
+		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+	CheckRedirect: blobRedirect,
+}
+
+// trustedBlobClient fetches from the launcher's own Blossom servers (the ones
+// the user configured, or the defaults when they set none). The user may run
+// one on the LAN or on this machine on purpose, so it dials anything; the
+// size cap, timeouts and redirect rules are the same. A manifest naming one
+// of those servers in its own tags gets nothing it could not already have.
+var trustedBlobClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          32,
+		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+	CheckRedirect: blobRedirect,
+}
+
+// userBlobServers is the launcher's own Blossom servers, normalized the way
+// Napp.BlossomServers normalizes every server, so a manifest's copy of the
+// same url matches.
+func userBlobServers() map[string]bool {
+	trusted := make(map[string]bool)
+	for _, raw := range BlossomServers() {
+		if u, err := nostr.NormalizeHTTPURL(raw); err == nil && u != "" {
+			trusted[u] = true
+		}
+	}
+	return trusted
+}
+
 // downloadBlob fetches a blob from the first server that has it and verifies
 // it against its hash before returning it. Every server gets its own deadline,
-// so an unreachable or stalling one is skipped rather than waited out.
+// so an unreachable or stalling one is skipped rather than waited out. Only
+// the user's own servers are fetched with trustedBlobClient; every other one
+// goes through the public-only blobClient.
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
+	trusted := userBlobServers()
 	var lastErr error = errors.New("no servers")
 	for _, srv := range servers {
-		attemptCtx, cancel := context.WithTimeout(ctx, blobAttemptTimeout)
-
-		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, srv+"/"+sha, nil)
+		client := blobClient
+		if norm, err := nostr.NormalizeHTTPURL(srv); err == nil && trusted[norm] {
+			client = trustedBlobClient
+		}
+		data, err := fetchBlobFrom(ctx, client, srv, sha)
 		if err != nil {
-			cancel()
+			log.Debug().Str("server", srv).Err(err).Msg("blob download failed, trying the next")
 			lastErr = err
-			continue
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			cancel()
-			log.Debug().Str("server", srv).Err(err).Msg("blob download failed")
-			lastErr = err
-			continue
-		}
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		cancel()
-		if err != nil {
-			log.Debug().Str("server", srv).Err(err).Msg("blob download failed")
-			lastErr = err
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			lastErr = errors.New(srv + ": status " + resp.Status)
-			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
-				Msg("blob server does not have it, trying the next")
-			continue
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != sha {
-			lastErr = errors.New(srv + ": sha256 mismatch")
-			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
-				Msg("blob server sent the wrong bytes, trying the next")
 			continue
 		}
 		log.Debug().Str("server", srv).Msg("blob downloaded and verified")
 		return data, nil
 	}
-	return nil, errors.New("could not fetch/verify " + sha + ": " + lastErr.Error())
+	return nil, fmt.Errorf("could not fetch/verify %s: %w", sha, lastErr)
+}
+
+// fetchBlobFrom is one server attempt: its own deadline, at most
+// blobMaxBytes, a 200 and the right sha256, or an error.
+func fetchBlobFrom(ctx context.Context, client *http.Client, srv, sha string) ([]byte, error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, blobAttemptTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, srv+"/"+sha, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(srv + ": status " + resp.Status)
+	}
+	if resp.ContentLength > blobMaxBytes {
+		return nil, fmt.Errorf("%s: blob of %d bytes is over the %d byte limit", srv, resp.ContentLength, blobMaxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, blobMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > blobMaxBytes {
+		return nil, fmt.Errorf("%s: blob is over the %d byte limit", srv, blobMaxBytes)
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != sha {
+		return nil, errors.New(srv + ": sha256 mismatch")
+	}
+	return data, nil
 }
