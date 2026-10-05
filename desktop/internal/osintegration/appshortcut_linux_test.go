@@ -104,3 +104,36 @@ func TestAppShortcutHostileIDOneExecLine(t *testing.T) {
 		t.Fatalf("X-Verdana-Napp-ID = %q, want the launch token %q", napID, shortcut.Token)
 	}
 }
+
+func TestAppShortcutHostileNameSingleLine(t *testing.T) {
+	useAppShortcutDirs(t)
+	if got := appShortcutText("Plain  Name"); got != "Plain Name" {
+		t.Fatalf("plain name became %q", got)
+	}
+	shortcut := backend.AppShortcut{
+		ID:          "napp-one",
+		Token:       backend.LaunchToken("napp-one"),
+		Name:        "Evil\x00Name\nExec=/bin/evil",
+		Description: "line\x1bone\nIcon=/tmp/x\u202eflipped",
+	}
+	if err := SyncAppShortcuts([]backend.AppShortcut{shortcut}, "/opt/verdana"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(applicationsDir(), appShortcutPrefix+appShortcutKey(shortcut.ID)+".desktop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := string(raw)
+	for _, key := range []string{"Name", "Comment", "Exec", "Icon"} {
+		if lines := strings.Count("\n"+data, "\n"+key+"="); lines != 1 {
+			t.Fatalf("want one %s= line, got %d:\n%s", key, lines, data)
+		}
+	}
+	if strings.ContainsAny(data, "\x00\x1b\u202e") {
+		t.Fatalf("control or format rune written:\n%q", data)
+	}
+	if !strings.Contains(data, "Name=Evil Name Exec=/bin/evil\n") ||
+		!strings.Contains(data, "Comment=line one Icon=/tmp/x flipped\n") {
+		t.Fatalf("names were not flattened onto one line:\n%s", data)
+	}
+}

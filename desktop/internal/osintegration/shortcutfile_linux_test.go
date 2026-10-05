@@ -85,3 +85,37 @@ func TestLinuxWritersRefuseControlExe(t *testing.T) {
 		}
 	}
 }
+
+// keyLines returns every line of a desktop entry that starts with key=.
+func keyLines(data, key string) []string {
+	var out []string
+	for _, line := range strings.Split(data, "\n") {
+		if strings.HasPrefix(line, key+"=") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func TestBundleShortcutHostileName(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	token := backend.LaunchToken("napp-one")
+	path, err := WriteShortcutFile("work\nExec=/bin/evil\x1b\u202e", "/opt/verdana", token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := string(raw)
+	if names, execs := keyLines(data, "Name"), keyLines(data, "Exec"); len(names) != 1 || len(execs) != 1 {
+		t.Fatalf("want one Name and one Exec line, got %q and %q:\n%s", names, execs, data)
+	}
+	if strings.ContainsAny(data, "\x1b\u202e") {
+		t.Fatalf("control or format rune written:\n%q", data)
+	}
+	if _, got, ok := parseDesktopShortcut(raw); !ok || got != token {
+		t.Fatalf("token read back as %q (ok=%v), want %q", got, ok, token)
+	}
+}
