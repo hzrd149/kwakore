@@ -45,7 +45,9 @@ func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 			name += " (" + key[:6] + ")"
 		}
 		path := filepath.Join(dir, name+".lnk")
-		arguments := `--background --launch-napp "` + strings.ReplaceAll(shortcut.ID, `"`, `\"`) + `"`
+		// the launch token is base64url after "=", so it holds no quote or
+		// backslash that could break out of the quoted argument
+		arguments := `--background --launch-napp "` + shortcut.Token + `"`
 		ps := fmt.Sprintf(
 			`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(%s); $s.TargetPath = %s; $s.Arguments = %s; $s.Description = %s; $s.IconLocation = %s; $s.Save()`,
 			psSingleQuote(path), psSingleQuote(exe), psSingleQuote(arguments),

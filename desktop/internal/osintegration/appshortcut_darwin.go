@@ -64,7 +64,7 @@ func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 		if err := writeAtomic(filepath.Join(appDir, "Contents", "Info.plist"), []byte(plist), 0644); err != nil {
 			return err
 		}
-		script := "#!/bin/sh\nexec " + shellQuote(exe) + " --background --launch-napp " + shellQuote(shortcut.ID) + "\n"
+		script := "#!/bin/sh\nexec " + shellQuote(exe) + " --background --launch-napp " + shellQuote(shortcut.Token) + "\n"
 		if err := writeAtomic(filepath.Join(macOSDir, "launch"), []byte(script), 0755); err != nil {
 			return err
 		}
