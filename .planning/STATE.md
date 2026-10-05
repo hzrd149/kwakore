@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-10-05T15:30:03.677Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-10-05T15:43:20.567Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-03 (Linux shortcut injection fix, launch tokens)
-state_head: 6386d715d440d58bc609aa3b1ca4f64a25dba175
+last_activity_desc: Completed 05-04 (NAP-CONFIG keyed by artifact scope, hex config files)
+state_head: 51677c5e814ce38478f43e172a778dad3454417e
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 31
+  completed_plans: 32
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 4 of 12 (05-01, 05-02, 05-03 complete)
+Plan: 5 of 12 (05-01, 05-02, 05-03, 05-04 complete)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-03-PLAN.md (Linux shortcut injection fix: launch tokens, control-refusing Exec quoting)
+Last activity: 2026-10-05 — Completed 05-04-PLAN.md (NAP-CONFIG keyed by (address, artifact hash) scope, hex config file names, settings windows and pushes bound to one version)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -92,6 +92,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P01 | 12min | 3 tasks | 17 files |
 | Phase 05 P02 | 9min | 2 tasks | 5 files |
 | Phase 05 P03 | 5min | 3 tasks | 12 files |
+| Phase 05 P04 | 11min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -177,6 +178,9 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-02: napplet Update/Uninstall in the desktop store park a storeConfirm (napps stay one-click); dropStaleConfirm each frame; layoutConfirm shared with logout, danger-filled confirm button
 - [Phase 5]: 05-03: napp ids reach OS shortcut files only as LaunchToken (= + base64url); parseBundleToken decodes it and still accepts legacy raw ids
 - [Phase 5]: 05-03: quoteExecField refuses control runes; every Linux .desktop/D-Bus writer quotes before its first write
+- [Phase 5]: 05-04: NAP-CONFIG scope = nappletScope (address 0x00 artifact hash); an update starts from defaults, no $version carry-forward (A7)
+- [Phase 5]: 05-04: config files are napconfig.FileName(scope) = hex(sha256(scope)).json; napconfig.Forget(scope) for reclaim/promotion; empty scope refused
+- [Phase 5]: 05-04: settings windows kept by settingsKey{nappID, scope}; gear opens the window's scope, store button the installed scope
 
 ### Pending Todos
 
@@ -209,6 +213,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:30:03.559Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-10-05T15:43:20.432Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
