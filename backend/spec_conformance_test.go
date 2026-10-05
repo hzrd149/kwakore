@@ -286,6 +286,35 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 		}
 	}
 
+	// Phase 5 closed the file-name collision (KEY-04) and the identity and
+	// manifest-selection conflicts (KEY-01..04, KEY-02, REG-01)
+	if tb, ok := tableIn("Runtime baseline"); ok {
+		rows := rowsByID(tb)
+		if row, ok := rows["CF-2"]; !ok {
+			t.Error("Runtime baseline: row CF-2 is missing")
+		} else if st := cell(row, tb.col("Status")); !strings.HasPrefix(st, "fixed (Phase 5)") {
+			t.Errorf("Runtime baseline: row CF-2 has status %q, want fixed (Phase 5)", st)
+		}
+		// the CF-2 residue is gone from the rows that used to point at it
+		for _, id := range []string{"CRIT-01"} {
+			if row, ok := rows[id]; ok && strings.Contains(cell(row, tb.col("Reason")), "lossy") {
+				t.Errorf("Runtime baseline: row %s still describes the CF-2 residue", id)
+			}
+		}
+	}
+	if tb, ok := tableIn(pinSection["WEB-NAPPLET"]); ok {
+		if row, ok := rowsByID(tb)["W-1"]; ok && strings.Contains(cell(row, tb.col("Reason")), "still normalize") {
+			t.Error("section WEB-NAPPLET: row W-1 still describes the CF-2 residue")
+		}
+	}
+	if tb, ok := tableIn("Conflicts"); ok && conflicts != nil {
+		for _, id := range []string{"A4", "A7", "A11"} {
+			if row, ok := conflicts[id]; ok && !strings.HasPrefix(cell(row, tb.col("Owner")), "fixed (Phase 5)") {
+				t.Errorf("Conflicts: %s has owner %q, want fixed (Phase 5)", id, cell(row, tb.col("Owner")))
+			}
+		}
+	}
+
 	// the marker-less self-replacement (a javascript: URL result, an
 	// unclosed document.open) is a recorded, open residual, and the rows
 	// that close the reload clause point at it instead of claiming it
