@@ -1,8 +1,10 @@
 package backend
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // Notices are the launcher-level problems the manager window shows above its
@@ -34,6 +36,14 @@ const (
 	noticeStateCorruptPrefix = "state-corrupt:"
 	noticeNappletsReinstall  = "napplets-reinstall"
 
+	// the napplet-scoped notices (05-UI-SPEC S4). The two prefixed ones are
+	// followed by the napplet's address, one slot per address; the trial
+	// failure has one shared slot. desktop/notices.go filters the store
+	// strip by these exact strings.
+	noticeNappletRequiresPrefix = "napplet-requires:"
+	noticeTrialDataPrefix       = "trial-data-discarded:"
+	noticeTrialFailed           = "napplet-trial-failed"
+
 	noticeKindWarning = "warning"
 	noticeKindError   = "error"
 )
@@ -63,29 +73,60 @@ const (
 	nappletsReinstallTitle  = "Napplets need to be installed again"
 	nappletsReinstallDetail = "Verdana now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover."
 
+	// napplet-requires: a NIP-5D napplet that opened although it asks for
+	// NAP domains this launcher does not implement (D-15, REG-04). The
+	// window still opens: NIP-5D lets the shell warn instead of refusing.
+	nappletRequiresTitle  = "Unsupported features in %s"
+	nappletRequiresDetail = "%s asks for features Verdana doesn't support: %s; it may not work."
+
+	// trial-data-discarded: the data a trial saved was not carried into the
+	// installed napplet (D-09 different version, D-25 existing data)
+	trialDataTitle            = "Trial data from %s wasn't kept"
+	trialDataDifferentVersion = "It was saved by a different version than the one now installed, so Verdana discarded it."
+	trialDataExistingData     = "This napplet already had saved data on this device. Verdana kept that and discarded the trial's data."
+
+	// napplet-trial-failed: a Try that opened no window (D-13, S3)
+	trialFailedTitle       = "Couldn't try %s"
+	trialFailedBlob        = "One of its files couldn't be downloaded or didn't match its manifest, so Verdana didn't open it. Check your connection and try again."
+	trialFailedUnavailable = "Its latest version is invalid, so Verdana didn't open it."
+
 	// childUnavailableFetchErr is the store's FetchErr line for a launch
 	// that failed closed (lowercase, Go error convention).
 	childUnavailableFetchErr = "launch failed: the napp window program is missing or was modified; reinstall Verdana"
 )
 
-// noticeRank is the fixed display order: the errors first, then the
-// corrupt-state warning, the keyring fallback, and the one-start napplet
-// reinstall warning.
+// noticeRank is the fixed display order (05-UI-SPEC S4): the errors first
+// (the window program, engine hardening, a failed Try), then the
+// corrupt-state warning, the keyring fallback, the one-start napplet
+// reinstall warning, and last the per-napplet warnings.
 func noticeRank(id string) int {
 	switch {
 	case id == noticeChildUnavailable:
 		return 0
 	case id == noticeNappletHardening:
 		return 1
-	case strings.HasPrefix(id, noticeStateCorruptPrefix):
+	case id == noticeTrialFailed:
 		return 2
-	case id == noticeKeyringFallback:
+	case strings.HasPrefix(id, noticeStateCorruptPrefix):
 		return 3
-	case id == noticeNappletsReinstall:
+	case id == noticeKeyringFallback:
 		return 4
-	default:
+	case id == noticeNappletsReinstall:
 		return 5
+	case isNappletNotice(id):
+		return 6
+	default:
+		return 7
 	}
+}
+
+// maxNappletNotices caps the per-napplet warnings live together, so a run
+// of launches cannot bury the launcher-level notices under them.
+const maxNappletNotices = 3
+
+// isNappletNotice says whether id is one of the capped per-napplet warnings.
+func isNappletNotice(id string) bool {
+	return strings.HasPrefix(id, noticeNappletRequiresPrefix) || strings.HasPrefix(id, noticeTrialDataPrefix)
 }
 
 // sameNoticeSlot says whether two IDs occupy the same place in the stack.
@@ -97,8 +138,11 @@ func sameNoticeSlot(a, b string) bool {
 	return a == b
 }
 
-// addNotice shows n, replacing a notice already in its slot. It takes ls.mu
-// and does not notify: callers call notifyState once no lock is held.
+// addNotice shows n, replacing a notice already in its slot. A new
+// per-napplet warning that would make one more than maxNappletNotices drops
+// the oldest of them first; replacing one in its slot does not count. It
+// takes ls.mu and does not notify: callers call notifyState once no lock is
+// held.
 func addNotice(n Notice) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
@@ -106,6 +150,21 @@ func addNotice(n Notice) {
 		if sameNoticeSlot(ls.notices[i].ID, n.ID) {
 			ls.notices[i] = n
 			return
+		}
+	}
+	if isNappletNotice(n.ID) {
+		live := 0
+		for _, have := range ls.notices {
+			if isNappletNotice(have.ID) {
+				live++
+			}
+		}
+		if live >= maxNappletNotices {
+			// ls.notices is in insertion order, so the first one is the
+			// oldest
+			if i := slices.IndexFunc(ls.notices, func(have Notice) bool { return isNappletNotice(have.ID) }); i >= 0 {
+				ls.notices = slices.Delete(ls.notices, i, i+1)
+			}
 		}
 	}
 	ls.notices = append(ls.notices, n)
@@ -167,6 +226,81 @@ func raiseNappletsReinstall() {
 		Kind:   noticeKindWarning,
 		Title:  nappletsReinstallTitle,
 		Detail: nappletsReinstallDetail,
+	})
+	notifyState()
+}
+
+// ─── napplet notices ────────────────────────────────────────────
+
+// maxNoticeNameRunes is where a napplet's name is cut in a notice.
+const maxNoticeNameRunes = 48
+
+// maxNoticeDomains is how many missing domains the requires notice names
+// before it summarises the rest as "+N more".
+const maxNoticeDomains = 8
+
+// noticeName is author text made safe for a notice: control and format
+// runes (bidi overrides among them) become spaces, whitespace collapses,
+// and the result is cut to 48 runes plus "…". An empty title falls back to
+// d cleaned the same way, and an empty d to "Unnamed napplet".
+func noticeName(name, d string) string {
+	if out := noticeText(name); out != "" {
+		return out
+	}
+	if out := noticeText(d); out != "" {
+		return out
+	}
+	return "Unnamed napplet"
+}
+
+func noticeText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if runes := []rune(s); len(runes) > maxNoticeNameRunes {
+		s = string(runes[:maxNoticeNameRunes]) + "…"
+	}
+	return s
+}
+
+// noticeDomains is the requires notice's domain list: in manifest order,
+// each once, joined with ", ", and after maxNoticeDomains the rest as
+// "+N more". The tokens were checked against the domain grammar when the
+// manifest was read.
+func noticeDomains(domains []string) string {
+	var unique []string
+	for _, d := range domains {
+		if !slices.Contains(unique, d) {
+			unique = append(unique, d)
+		}
+	}
+	if len(unique) <= maxNoticeDomains {
+		return strings.Join(unique, ", ")
+	}
+	return strings.Join(unique[:maxNoticeDomains], ", ") + fmt.Sprintf(", +%d more", len(unique)-maxNoticeDomains)
+}
+
+// raiseNappletRequires warns that a NIP-5D napplet which just opened asks
+// for NAP domains Verdana does not implement (D-15, REG-04). Every launch
+// raises it again in its address's slot, even after a dismissal. It never
+// raises the manager window: the napplet's own window just opened and
+// keeps the focus. A WEB-NAPPLET's R and O tags never get here, since
+// MissingDomains is empty for that schema.
+func raiseNappletRequires(n Napp) {
+	missing := n.MissingDomains()
+	if len(missing) == 0 {
+		return
+	}
+	name := noticeName(n.Name, n.D)
+	addNotice(Notice{
+		ID:     noticeNappletRequiresPrefix + n.Address(),
+		Kind:   noticeKindWarning,
+		Title:  fmt.Sprintf(nappletRequiresTitle, name),
+		Detail: fmt.Sprintf(nappletRequiresDetail, name, noticeDomains(missing)),
 	})
 	notifyState()
 }

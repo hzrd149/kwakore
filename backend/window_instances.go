@@ -773,6 +773,13 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	ci.attach(transport)
 	rememberWindow(ci)
 
+	// a NIP-5D napplet that asks for domains this launcher lacks still
+	// runs (NIP-5D: reject or warn), but the user is told what may not
+	// work. A trial is a launch too.
+	if napp.IsNapplet() && len(napp.MissingDomains()) > 0 {
+		raiseNappletRequires(napp)
+	}
+
 	// an installed napplet's window looks for a newer version of it in the
 	// background (D-19): every way it opens (store, shortcut, intent,
 	// reopen) passes here, and none of them waits. A trial or a dev
