@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"slices"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -14,13 +16,10 @@ import (
 
 // CheckForUpdates looks for a newer manifest of every installed napp — on
 // the discovery relays and on each author's outbox relays — and marks the
-// napps it found new versions for. Non-blocking: watch UpdateCheckRunning and
-// the per-napp UpdateAvailable flags in the state for the outcome.
+// napps it found new versions for, or whose latest version is invalid.
+// Non-blocking: watch UpdateCheckRunning and the per-napp UpdateAvailable and
+// Unavailable fields in the state for the outcome.
 func CheckForUpdates() {
-	if len(state.InstalledNapps) == 0 {
-		return
-	}
-
 	// the check runs from a copy of the installed list: an install or
 	// uninstall starting meanwhile doesn't change what this round asks
 	stateMu.Lock()
@@ -29,6 +28,9 @@ func CheckForUpdates() {
 		napps = append(napps, n)
 	}
 	stateMu.Unlock()
+	if len(napps) == 0 {
+		return
+	}
 
 	updateChecking.Store(true)
 	defer func() {
@@ -37,78 +39,159 @@ func CheckForUpdates() {
 	}()
 	notifyState()
 
-	if updated := checkAllUpdates(napps); len(updated) > 0 {
-		ids := make([]string, 0, len(updated))
-		for _, upd := range updated {
-			ids = append(ids, upd.ID)
-		}
-
-		log.Info().Strs("ids", ids).Msg("update check found new versions")
-		setUpdateAvailable(updated)
+	states := checkAllUpdates(napps)
+	if len(states) == 0 {
+		return
 	}
+	var newer, unavailable []string
+	for id, entry := range states {
+		switch {
+		case entry == nil:
+		case entry.Unavailable != "":
+			unavailable = append(unavailable, id)
+		default:
+			newer = append(newer, id)
+		}
+	}
+	if len(newer) > 0 {
+		log.Info().Strs("ids", newer).Msg("update check found new versions")
+	}
+	if len(unavailable) > 0 {
+		log.Info().Strs("ids", unavailable).Msg("update check found invalid latest versions")
+	}
+	mergeUpdateStates(states)
 }
 
-// checkAllUpdates asks the relays about every napp at once (one filter per
-// relay set, so the outbox queries stay separate from the discovery query),
-// then refreshes the update cache. Returns whether every relay answered.
-func checkAllUpdates(napps []Napp) map[string]Napp {
+// checkAllUpdates asks the relays about every napp at once and works out
+// each one's update state from what came back (see updateStates).
+func checkAllUpdates(napps []Napp) map[string]*Napp {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+	return updateStates(napps, fetchManifestEvents(ctx, napps))
+}
 
-	// what a newer version must beat: the created_at of what we know
-	known := make(map[string]nostr.Timestamp, len(napps))
-	for _, n := range napps {
-		known[n.ID] = n.CreatedAt
+// fetchManifestEvents gathers every manifest event the relays hold for the
+// addresses of napps, unvalidated: selection (latestByAddress) decides what
+// counts. It asks the discovery relays for all of them at once, by kind,
+// author and d, and each author's outbox relays for each napp's own
+// manifest. Every event every relay sent is kept: a single-result query
+// returns whichever relay answered first, not the NIP-01 winner. Tests swap
+// it to hand events in directly.
+var fetchManifestEvents = func(ctx context.Context, napps []Napp) []nostr.Event {
+	if sys == nil || len(napps) == 0 {
+		return nil
 	}
-	found := make(map[string]Napp, len(napps))
 
-	ds := make([]string, 0, len(napps))
-	for _, n := range napps {
-		ds = append(ds, n.D)
+	var (
+		mu  sync.Mutex
+		out []nostr.Event
+		wg  sync.WaitGroup
+	)
+	collect := func(urls []string, f nostr.Filter) {
+		if len(urls) == 0 {
+			return
+		}
+		for re := range sys.Pool.FetchMany(ctx, urls, f, nostr.SubscriptionOptions{
+			Label: "verdana-napp-update",
+		}) {
+			mu.Lock()
+			out = append(out, re.Event)
+			mu.Unlock()
+		}
 	}
 
-	for re := range sys.Pool.FetchMany(ctx, Relays(), nostr.Filter{
-		Kinds: napKinds,
-		Tags:  nostr.TagMap{"d": ds},
-	}, nostr.SubscriptionOptions{}) {
-		napp, ok := nappFromEvent(re.Event)
+	// the discovery relays: named napps and napplets by d, and root napplets
+	// (no d tag, which a #d filter would never match) by author alone
+	relays := Relays()
+	var ds []string
+	var named, roots []Napp
+	for _, n := range napps {
+		if addressable(n.ManifestKind()) {
+			named = append(named, n)
+			ds = append(ds, n.D)
+		} else {
+			roots = append(roots, n)
+		}
+	}
+	if len(named) > 0 {
+		wg.Go(func() {
+			collect(relays, nostr.Filter{
+				Kinds:   napKinds,
+				Authors: nappAuthors(named),
+				Tags:    nostr.TagMap{"d": ds},
+			})
+		})
+	}
+	if len(roots) > 0 {
+		wg.Go(func() {
+			collect(relays, nostr.Filter{
+				Kinds:   []nostr.Kind{KindRootNapplet},
+				Authors: nappAuthors(roots),
+			})
+		})
+	}
+
+	// each napp's own manifest on its author's outbox relays, a few at a time
+	sem := make(chan struct{}, 8)
+	for _, n := range napps {
+		wg.Go(func() {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			collect(sys.FetchWriteRelays(ctx, n.Author), manifestFilter(n))
+		})
+	}
+	wg.Wait()
+	return out
+}
+
+// updateStates works out what the update set should say about each
+// installed record from the events fetched for it: the NIP-01 winner of the
+// record's address among them is the latest version (D-10). The result
+// holds an entry only for records with at least one authentic event at
+// their address; one with nothing found keeps whatever state it had.
+//   - a winner older than the installed record changes nothing but clears a
+//     stale entry (nil): the installed version is the latest
+//   - an invalid winner is an unavailable entry: the installed copy keeps
+//     running, and no update is offered
+//   - a valid winner that is NIP-01-newer is the update
+//   - otherwise the installed version is the latest (nil)
+func updateStates(installed []Napp, events []nostr.Event) map[string]*Napp {
+	winners := latestByAddress{}
+	for _, evt := range events {
+		winners.add(evt)
+	}
+	states := make(map[string]*Napp, len(installed))
+	for _, n := range installed {
+		evt, ok := winners[n.Address()]
 		if !ok {
 			continue
 		}
-		if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
-			known[napp.ID] = napp.CreatedAt
-			found[napp.ID] = napp
-		}
+		states[n.ID] = updateState(n, nappFromLatest(evt))
 	}
-
-	for _, napp := range napps {
-		re := sys.Pool.QuerySingle(ctx, sys.FetchWriteRelays(ctx, napp.Author), manifestFilter(napp), nostr.SubscriptionOptions{
-			Label: "verdana-napp-update",
-		})
-
-		if re != nil {
-			napp, ok := nappFromEvent(re.Event)
-			if !ok {
-				continue
-			}
-			if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
-				known[napp.ID] = napp.CreatedAt
-				found[napp.ID] = napp
-			}
-		}
-	}
-
-	return found
+	return states
 }
 
-// scanRelays queries one relay set for the current manifest of the given
-// napps and feeds every event to handle. It returns false when the round was
-// cut short (a relay that never answered), so the caller can keep its old
-// cache instead of narrowing it to what a truncated round saw.
-func scanRelays(ctx context.Context, urls []string, napps []Napp, handle func(nostr.Event)) bool {
-	complete := true
-
-	return complete
+// updateState is the update-set entry for an installed record given the
+// latest version of its address: the unavailable entry, the newer version,
+// or nil when the installed version is the latest. Either entry carries the
+// id the launcher knows the record by.
+func updateState(installed, latest Napp) *Napp {
+	if nappNewer(installed, latest) {
+		return nil
+	}
+	if latest.Unavailable != "" {
+		latest.ID = installed.ID
+		return &latest
+	}
+	if nappNewer(latest, installed) {
+		latest.ID = installed.ID
+		return &latest
+	}
+	return nil
 }
 
 // ─── applying an update ──────────────────────────────────────────
@@ -170,37 +253,22 @@ func applyUpdate(current, newer Napp) {
 	stateMu.Unlock()
 
 	// the previously available update is now the installed version
-	updateSet.Load().Delete(current.ID)
+	mergeUpdateState(current.ID, nil)
 
 	refreshInstalled()
 	log.Info().Str("napp", current.ID).Msg("update complete")
 }
 
 // newerVersion returns the best known newer version of an installed napp:
-// from the in-memory cache a check round built, falling back to a live relay
-// lookup on the discovery relays and the author's outbox.
+// the valid update a check round found, falling back to a live relay lookup
+// on the author's outbox.
 func newerVersion(n Napp) *Napp {
-	if latest, ok := updateSet.Load().Load(n.ID); ok && latest.CreatedAt > n.CreatedAt {
+	if latest, ok := updateSet.Load().Load(n.ID); ok && latest.Unavailable == "" && nappNewer(latest, n) {
 		return &latest
 	}
-
-	if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
-		if evt := fetchCurrentEvent(n); evt != nil {
-			if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
-				return &nn
-			}
-		}
-		return nil
-	}
-
-	// nothing cached: ask the relays right now
-	if found := checkAllUpdates([]Napp{n}); len(found) > 0 {
-		if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
-			if evt := fetchCurrentEvent(n); evt != nil {
-				if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
-					return &nn
-				}
-			}
+	if evt := fetchCurrentEvent(n); evt != nil {
+		if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
+			return &nn
 		}
 	}
 	return nil
@@ -227,14 +295,15 @@ func fetchCurrentEvent(n Napp) *nostr.Event {
 	return nil
 }
 
-// updateCache remembers newest created_at seen per napp id from last complete check round.
-var updateCache = cacheOrNil(newCache[string, nostr.Timestamp](4096))
-
 // ─── helpers ─────────────────────────────────────────────────────
+
+// nappAuthors is the distinct authors of napps, in first-seen order.
 func nappAuthors(napps []Napp) []nostr.PubKey {
 	out := make([]nostr.PubKey, 0, len(napps))
 	for _, n := range napps {
-		out = append(out, n.Author)
+		if !slices.Contains(out, n.Author) {
+			out = append(out, n.Author)
+		}
 	}
 	return out
 }

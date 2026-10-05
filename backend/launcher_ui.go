@@ -174,27 +174,53 @@ type launcherState struct {
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
 
 // The Napp model crosses the gomobile boundary by value, so per-napp "an
-// update is out there" flags can't be shared mutable state on it: Snapshot()
-// stamps them from this atomic set instead, keyed by napp id.
+// update is out there" and "the latest version is invalid" flags can't be
+// shared mutable state on it: Snapshot() stamps them from this atomic set
+// instead, keyed by napp id. An entry with Unavailable set says the latest
+// version is invalid; any other entry is the newer version on offer.
 //
-// The set is swapped whole rather than refilled in place, so a snapshot never
-// catches a check halfway through replacing it.
+// The set is swapped whole rather than changed in place, so a snapshot never
+// catches a check halfway through. Writers take updateSetMu and copy the set
+// before they change it, so a full check and a launch-time check that finish
+// together never drop each other's ids.
 var (
 	updateSet      atomic.Pointer[xsync.MapOf[string, Napp]]
+	updateSetMu    sync.Mutex
 	updateChecking atomic.Bool
 )
 
 func init() { updateSet.Store(xsync.NewMapOf[string, Napp]()) }
 
-// setUpdateAvailable replaces the "has an update" set and republishes the
-// launcher state.
-func setUpdateAvailable(apps map[string]Napp) {
+// mergeUpdateStates applies changes to the update set: a non-nil entry is
+// stored under its id, a nil one removes the id, and ids not in changes keep
+// what they had. It republishes the launcher state and never touches
+// updateChecking.
+func mergeUpdateStates(changes map[string]*Napp) {
+	if len(changes) == 0 {
+		return
+	}
+	updateSetMu.Lock()
 	next := xsync.NewMapOf[string, Napp]()
-	for id, n := range apps {
+	for id, n := range updateSet.Load().Range {
 		next.Store(id, n)
 	}
+	for id, entry := range changes {
+		if entry == nil {
+			next.Delete(id)
+			continue
+		}
+		e := *entry
+		e.UpdateAvailable = nil
+		next.Store(id, e)
+	}
 	updateSet.Store(next)
+	updateSetMu.Unlock()
 	notifyState()
+}
+
+// mergeUpdateState is mergeUpdateStates for one id.
+func mergeUpdateState(id string, entry *Napp) {
+	mergeUpdateStates(map[string]*Napp{id: entry})
 }
 
 // Snapshot is the current launcher state, safe to hold on to and read from a
@@ -234,9 +260,25 @@ func Snapshot() State {
 	s.ManagedWindows = ManagedWindows()
 	s.Shortcuts = shortcuts()
 	s.UpdateCheckRunning = updateChecking.Load()
+	updates := updateSet.Load()
 	for i := range s.Installed {
-		if newVersion, ok := updateSet.Load().Load(s.Installed[i].ID); ok {
-			s.Installed[i].UpdateAvailable = &newVersion
+		// both are Snapshot's to set: a saved record never carries them
+		s.Installed[i].UpdateAvailable = nil
+		s.Installed[i].Unavailable = ""
+		entry, ok := updates.Load(s.Installed[i].ID)
+		if !ok {
+			continue
+		}
+		// an entry only counts against the record it was worked out for: a
+		// record installed since then (a newer version, or the same one
+		// reinstalled) is not shown an older entry
+		switch {
+		case entry.Unavailable != "":
+			if !nappNewer(s.Installed[i], entry) {
+				s.Installed[i].Unavailable = entry.Unavailable
+			}
+		case nappNewer(entry, s.Installed[i]):
+			s.Installed[i].UpdateAvailable = &entry
 		}
 	}
 	// author names resolve in the background and are stamped on every
