@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-10-05T15:18:56.289Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-10-05T15:25:14.473Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-01 (address ids, (address, artifact) storage keying, D-23 drop)
-state_head: c64ad80bf55fdc1cc096bf5b173d3c0e46110850
+last_activity_desc: Completed 05-02 (napplet update/uninstall confirm dialogs, layoutConfirm)
+state_head: f27921abd16acd4bda705383115af7b1cc97d25d
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 29
+  completed_plans: 30
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 2 of 12 (05-01 complete)
-Status: Executing
-Last activity: 2026-10-05 — Completed 05-01-PLAN.md (address ids, (address, artifact) storage keying, D-23 drop)
+Plan: 3 of 12 (05-01, 05-02 complete)
+Status: Ready to execute
+Last activity: 2026-10-05 — Completed 05-02-PLAN.md (napplet update/uninstall confirm dialogs, layoutConfirm)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -90,6 +90,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 04 P05 | 18min | 3 tasks | 5 files |
 | Phase 04 P06 | 11min | 2 tasks | 2 files |
 | Phase 05 P01 | 12min | 3 tasks | 17 files |
+| Phase 05 P02 | 9min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -172,6 +173,7 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-06: DEC-5 records the document-start marker as a no-global deviation from NIP-5D Security 5; DEC-6 records the engine hardening scope
 - [Phase 5]: Phase 05-01: napplet ids are NIP-01 addresses; NAP-STORAGE keyed by address 0x00 artifactHash [0x00 instance], hex(sha256) file names in napplet-storage/, no fallback (internal-error)
 - [Phase 5]: Phase 05-01: pre-address napplet records dropped once at startup with session-only napplets-reinstall notice; napps/ untouched
+- [Phase 5]: 05-02: napplet Update/Uninstall in the desktop store park a storeConfirm (napps stay one-click); dropStaleConfirm each frame; layoutConfirm shared with logout, danger-filled confirm button
 
 ### Pending Todos
 
@@ -204,6 +206,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:18:56.159Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-10-05T15:25:14.315Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
