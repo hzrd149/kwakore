@@ -216,3 +216,139 @@ func TestLayoutConfirmCapsWidth(t *testing.T) {
 		t.Fatalf("centered dialog size %v, want the 1000x720 window", dims.Size)
 	}
 }
+
+// ─── stale guard ────────────────────────────────────────────────────────
+
+func TestStoreConfirmStaleGuard(t *testing.T) {
+	calls := recordConfirmCalls(t)
+	pixel := testNapplet("pixel", "Pixel")
+	newer := pixel
+	withUpdate := pixel
+	withUpdate.UpdateAvailable = &newer
+	live := backend.State{Installed: []backend.Napp{withUpdate}}
+
+	up := &storeConfirm{kind: confirmUpdate, id: pixel.ID, name: "Pixel"}
+	un := &storeConfirm{kind: confirmUninstall, id: pixel.ID, name: "Pixel"}
+	for _, tc := range []struct {
+		desc      string
+		c         *storeConfirm
+		st        backend.State
+		wantStale bool
+	}{
+		{"update, installed with an update", up, live, false},
+		{"uninstall, installed", un, live, false},
+		{"update, no longer installed", up, backend.State{}, true},
+		{"uninstall, no longer installed", un, backend.State{}, true},
+		{"update, busy", up, backend.State{Installed: live.Installed, Busy: []string{pixel.ID}}, true},
+		{"uninstall, busy", un, backend.State{Installed: live.Installed, Busy: []string{pixel.ID}}, true},
+		// the background check found the latest version invalid
+		{"update, update gone", up, backend.State{Installed: []backend.Napp{pixel}}, true},
+		{"uninstall, no update needed", un, backend.State{Installed: []backend.Napp{pixel}}, false},
+		{"another napplet busy", up, backend.State{Installed: live.Installed, Busy: []string{"35129:" + testConfirmPubkey + ":other"}}, false},
+	} {
+		if got := tc.c.stale(tc.st); got != tc.wantStale {
+			t.Errorf("%s: stale = %v, want %v", tc.desc, got, tc.wantStale)
+		}
+	}
+
+	// a stale dialog closes by itself without acting, and a click that
+	// lands after that does nothing either
+	requestUpdate(withUpdate, false, false)
+	dropStaleConfirm(live)
+	if pendingConfirm() == nil {
+		t.Fatal("a live confirmation was dropped")
+	}
+	dropStaleConfirm(backend.State{Installed: []backend.Napp{pixel}})
+	if pendingConfirm() != nil {
+		t.Fatal("a confirmation whose update disappeared stayed up")
+	}
+	confirmYes()
+	if calls.total() != 0 {
+		t.Fatalf("a stale confirmation reached the backend: %+v", calls)
+	}
+
+	// closing the store window clears it, so a reopened store shows none
+	requestUninstall(pixel, false)
+	if pendingConfirm() == nil {
+		t.Fatal("napplet uninstall parked no confirmation")
+	}
+	clearStoreConfirm()
+	if pendingConfirm() != nil || calls.total() != 0 {
+		t.Fatalf("after closing the store: confirm %v, calls %+v", pendingConfirm(), calls)
+	}
+}
+
+// ─── busy, origins and replacement ──────────────────────────────────────
+
+func TestStoreConfirmIgnoredWhileBusy(t *testing.T) {
+	calls := recordConfirmCalls(t)
+	pixel := testNapplet("pixel", "Pixel")
+	napp := testNapp("notes", "Notes")
+
+	// a click while busy opens nothing and calls nothing, for either kind
+	requestUpdate(pixel, false, true)
+	requestUpdate(pixel, true, true)
+	requestUninstall(pixel, true)
+	requestUpdate(napp, false, true)
+	requestUninstall(napp, true)
+	if pendingConfirm() != nil || calls.total() != 0 {
+		t.Fatalf("busy clicks: confirm %v, calls %+v", pendingConfirm(), calls)
+	}
+
+	// installed tile and napp page Update: confirming runs Update(id)
+	requestUpdate(pixel, false, false)
+	confirmYes()
+	// profile list Update: confirming installs the version the profile shows
+	shown := pixel
+	shown.Name = "Pixel 2"
+	requestUpdate(shown, true, false)
+	if c := pendingConfirm(); c == nil || !c.viaInstall || c.target.Name != "Pixel 2" {
+		t.Fatalf("profile update parked %+v, want viaInstall with the profile napplet", c)
+	}
+	confirmYes()
+	if len(calls.updates) != 1 || calls.updates[0] != pixel.ID ||
+		len(calls.installs) != 1 || calls.installs[0] != pixel.ID {
+		t.Fatalf("update calls %+v, want one Update and one Install of %q", calls, pixel.ID)
+	}
+
+	// Uninstall (installed tile, napp page, profile list): a napplet asks,
+	// "Keep napplet" keeps it, "Uninstall napplet" uninstalls it once
+	requestUninstall(pixel, false)
+	if c := pendingConfirm(); c == nil || c.kind != confirmUninstall || c.id != pixel.ID {
+		t.Fatalf("napplet uninstall parked %+v", c)
+	}
+	confirmNo()
+	requestUninstall(pixel, false)
+	confirmYes()
+	confirmYes()
+	if len(calls.uninstalls) != 1 || calls.uninstalls[0] != pixel.ID {
+		t.Fatalf("uninstall calls %v, want one Uninstall(%q)", calls.uninstalls, pixel.ID)
+	}
+
+	// a napp uninstalls in one click, as before
+	requestUninstall(napp, false)
+	if pendingConfirm() != nil || len(calls.uninstalls) != 2 || calls.uninstalls[1] != napp.ID {
+		t.Fatalf("napp uninstall: confirm %v, calls %v", pendingConfirm(), calls.uninstalls)
+	}
+
+	// a second request replaces the first: one dialog, the latest one
+	other := testNapplet("other", "Other")
+	requestUpdate(pixel, false, false)
+	requestUninstall(other, false)
+	if c := pendingConfirm(); c == nil || c.kind != confirmUninstall || c.id != other.ID {
+		t.Fatalf("second request left %+v up, want the uninstall of %q", c, other.ID)
+	}
+	confirmYes()
+	if len(calls.updates) != 1 || len(calls.uninstalls) != 3 || calls.uninstalls[2] != other.ID {
+		t.Fatalf("after replacing: calls %+v", calls)
+	}
+
+	// the installed record decides napplet versus napp on the napp page
+	st := backend.State{Installed: []backend.Napp{pixel}}
+	if got := installedOr(st, backend.Napp{ID: pixel.ID}); !got.IsNapplet() {
+		t.Fatal("installedOr did not return the installed napplet record")
+	}
+	if got := installedOr(st, napp); got.ID != napp.ID {
+		t.Fatalf("installedOr for a napp that is not installed returned %q", got.ID)
+	}
+}
