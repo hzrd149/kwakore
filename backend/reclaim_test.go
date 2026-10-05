@@ -1086,6 +1086,162 @@ func TestLaunchRacingReclaim(t *testing.T) {
 	}
 }
 
+// ─── uninstall racing a launch (iteration 2, WR-02) ──────────────
+
+// gatedHost opens every window on a closingTransport. With entered set, each
+// OpenWindow reports in and waits for release, so a test can act while a
+// window is registered but has no transport yet.
+type gatedHost struct {
+	previewTestHost
+	entered chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	opened  []*closingTransport
+}
+
+func (h *gatedHost) OpenWindow(spec WindowSpec) (Transport, error) {
+	if h.entered != nil {
+		h.entered <- struct{}{}
+		<-h.release
+	}
+	tr := &closingTransport{recTransport: newRecTransport(), closed: make(chan struct{})}
+	h.mu.Lock()
+	h.opened = append(h.opened, tr)
+	h.mu.Unlock()
+	return tr, nil
+}
+
+func (h *gatedHost) transports() []*closingTransport {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]*closingTransport(nil), h.opened...)
+}
+
+// newUninstallLaunchRig is a launch rig on a gatedHost, with no pending
+// reclaims before or after.
+func newUninstallLaunchRig(t *testing.T, h *gatedHost) {
+	t.Helper()
+	newLaunchRig(t)
+	resetPending := func() {
+		reclaimMu.Lock()
+		pendingReclaims = make(map[string]*pendingReclaim)
+		reclaimMu.Unlock()
+	}
+	resetPending()
+	t.Cleanup(resetPending)
+	prev := host
+	host = h
+	t.Cleanup(func() { backgroundSyncs.Wait(); host = prev })
+}
+
+type launchResult struct {
+	ci  *Instance
+	err error
+}
+
+// TestUninstallClosesLaunchInProgress: a launch has re-read the installed
+// record and not yet registered its window when Uninstall runs. Uninstall
+// waits for the registration and closes the window, instead of listing the
+// windows before it exists.
+func TestUninstallClosesLaunchInProgress(t *testing.T) {
+	h := &gatedHost{}
+	newUninstallLaunchRig(t, h)
+	n := installNappletFiles(t, validNapplet(t, nostr.Generate(), "app", "", 10))
+
+	atRead, proceed := make(chan struct{}), make(chan struct{})
+	launchReadHook = func() {
+		close(atRead)
+		<-proceed
+	}
+	t.Cleanup(func() { launchReadHook = nil })
+	launched := make(chan launchResult, 1)
+	go func() {
+		ci, err := launch(context.Background(), n)
+		launched <- launchResult{ci, err}
+	}()
+	<-atRead
+
+	uninstalled := make(chan struct{})
+	go func() {
+		Uninstall(n.ID)
+		close(uninstalled)
+	}()
+	// give the uninstall every chance to run ahead of the registration
+	select {
+	case <-uninstalled:
+		t.Error("uninstall finished while a launch held the installed record")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(proceed)
+	r := <-launched
+	<-uninstalled
+	if r.err != nil {
+		t.Fatalf("the launch read the record first, so it opens: %v", r.err)
+	}
+	closeOnCleanup(t, r.ci)
+	trs := h.transports()
+	if len(trs) != 1 || !trs[0].wasClosed() {
+		t.Fatal("the window that registered during the uninstall was left open")
+	}
+	if _, ok := InstalledNapp(n.ID); ok {
+		t.Fatal("the napplet is still installed")
+	}
+}
+
+// TestUninstallClosesWindowStillOpening: the window registered, but its
+// transport is not attached yet when Uninstall closes it. It closes as soon
+// as it attaches.
+func TestUninstallClosesWindowStillOpening(t *testing.T) {
+	h := &gatedHost{entered: make(chan struct{}), release: make(chan struct{})}
+	newUninstallLaunchRig(t, h)
+	n := installNappletFiles(t, validNapplet(t, nostr.Generate(), "app", "", 10))
+
+	launched := make(chan launchResult, 1)
+	go func() {
+		ci, err := launch(context.Background(), n)
+		launched <- launchResult{ci, err}
+	}()
+	<-h.entered
+	Uninstall(n.ID)
+	close(h.release)
+	r := <-launched
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	closeOnCleanup(t, r.ci)
+	if trs := h.transports(); len(trs) != 1 || !trs[0].wasClosed() {
+		t.Fatal("a window still opening when the uninstall closed it stayed open")
+	}
+}
+
+// TestUninstallRacingLaunch: a launch and an uninstall run at once. Whatever
+// the order, the launch either opens nothing or its window is closed.
+func TestUninstallRacingLaunch(t *testing.T) {
+	h := &gatedHost{}
+	newUninstallLaunchRig(t, h)
+	evt := validNapplet(t, nostr.Generate(), "app", "", 10)
+	for i := 0; i < 20; i++ {
+		n := installNappletFiles(t, evt)
+		before := len(h.transports())
+		var wg sync.WaitGroup
+		var r launchResult
+		wg.Go(func() {
+			r.ci, r.err = launch(context.Background(), n)
+		})
+		wg.Go(func() { Uninstall(n.ID) })
+		wg.Wait()
+		if r.err != nil {
+			continue
+		}
+		trs := h.transports()
+		if len(trs) != before+1 || !trs[before].wasClosed() {
+			t.Fatalf("round %d: a window opened by a launch racing the uninstall stayed open", i)
+		}
+		WindowClosed(r.ci.instance)
+		backgroundSyncs.Wait()
+	}
+}
+
 // TestTrialPromotionAfterUninstallWritesNothing: the trial closed while its
 // napplet was installed, and the uninstall landed before promotion wrote.
 func TestTrialPromotionAfterUninstallWritesNothing(t *testing.T) {

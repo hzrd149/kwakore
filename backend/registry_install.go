@@ -183,10 +183,14 @@ func Uninstall(id string) {
 	defer setBusy(id, false)
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 
-	// the record goes first: no napplet window opens on a version that is
-	// not installed (launchWindow re-reads it), so the close below reaches
-	// every window there will be, and the reclaim, which keeps any scope
-	// that is still installed, sees this one gone
+	// the record goes first, and it goes together with listing the windows
+	// to close, under reclaimMu: launchWindow re-reads the record and
+	// registers its window under the same lock, so a launch in progress
+	// either registered before this and is closed below, or reads the
+	// record gone and opens nothing. The reclaim, which keeps any scope
+	// that is still installed, then sees this one gone. Lock order:
+	// reclaimMu, then stateMu, then the instance list.
+	reclaimMu.Lock()
 	stateMu.Lock()
 	record, installed := state.InstalledNapps[id]
 	delete(state.InstalledNapps, id)
@@ -194,10 +198,15 @@ func Uninstall(id string) {
 	saveState()
 	stateMu.Unlock()
 	napplet := installed && record.IsNapplet()
+	var closing []*Instance
 	if napplet {
-		for _, ci := range runningForNapp(id) {
-			ci.Close()
-		}
+		closing = runningForNapp(id)
+	}
+	reclaimMu.Unlock()
+	// a window registered but not yet attached to its transport closes as
+	// soon as it attaches (Instance.Close)
+	for _, ci := range closing {
+		ci.Close()
 	}
 
 	// a napp whose directory cannot be named safely gets nothing removed,

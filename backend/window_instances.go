@@ -53,6 +53,9 @@ type Instance struct {
 	sendMu    sync.Mutex
 	transport Transport
 	queued    []WireMsg
+	// closeRequested is set by Close, so a transport attached after it is
+	// closed at once. Guarded by sendMu.
+	closeRequested bool
 
 	// gone is closed when the window is gone, so nothing waits on a dead
 	// window (an action dispatch, say) longer than it has to.
@@ -267,7 +270,13 @@ func (ci *Instance) attach(t Transport) {
 	ci.transport = t
 	queued := ci.queued
 	ci.queued = nil
+	closing := ci.closeRequested
 	ci.sendMu.Unlock()
+	if closing {
+		// Close ran while the window was still opening
+		t.Close()
+		return
+	}
 	for _, m := range queued {
 		t.Send(m)
 	}
@@ -279,8 +288,13 @@ func (ci *Instance) eval(code string) {
 
 // Close asks the window to go away (the header ×, napp.close(), the launcher
 // closing a tab).
+//
+// A window registered but still opening has no transport yet; it is closed
+// as soon as attach gives it one, so a close (an uninstall's) never misses a
+// window that is opening.
 func (ci *Instance) Close() {
 	ci.sendMu.Lock()
+	ci.closeRequested = true
 	t := ci.transport
 	ci.sendMu.Unlock()
 	if t != nil {
@@ -698,6 +712,11 @@ func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string
 // napplet that keeps launching copies of itself (or of others that launch it
 // back) never gets a fresh bucket per copy. A window the user opens starts a
 // chain of its own.
+// launchReadHook, when set by a test, runs in launchWindow after an
+// installed napplet's record is re-read and before its window is registered,
+// with reclaimMu held.
+var launchReadHook func()
+
 func launchWindow(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte, coldLaunch *rate.Limiter) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
@@ -754,6 +773,9 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		}
 		napp = current
 		unlockReclaim = reclaimMu.Unlock
+		if launchReadHook != nil {
+			launchReadHook()
+		}
 	}
 
 	themeName, themeVars := Theme()
