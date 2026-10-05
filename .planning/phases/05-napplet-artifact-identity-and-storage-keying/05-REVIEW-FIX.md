@@ -1,140 +1,81 @@
 ---
 phase: 05-napplet-artifact-identity-and-storage-keying
-fixed_at: 2026-10-05T19:18:51Z
+fixed_at: 2026-10-05T19:29:37Z
 review_path: .planning/phases/05-napplet-artifact-identity-and-storage-keying/05-REVIEW.md
-iteration: 2
-findings_in_scope: 5
-fixed: 5
+iteration: 3
+findings_in_scope: 2
+fixed: 2
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 5: Code Review Fix Report
 
-**Fixed at:** 2026-10-05T19:18:51Z
+**Fixed at:** 2026-10-05T19:29:37Z
 **Source review:** .planning/phases/05-napplet-artifact-identity-and-storage-keying/05-REVIEW.md
-**Iteration:** 2
+**Iteration:** 3
 
 **Summary:**
-- Findings in scope: 5. That is WR-01 and WR-02, plus the Info items IN-09, IN-10 and IN-11, which were in scope only if small and safe.
-- Fixed: 5. IN-10 is only partly fixed; see its section.
+- Findings in scope: 2 (WR-02 and IN-14, as the orchestrator chose).
+- Fixed: 2.
 - Skipped: 0.
-- Not in scope: IN-01..IN-06 and IN-08, carried forward from iteration 1.
+- Left open by orchestrator decision, not attempted:
+  - WR-01 (Android pending close). Android is being removed next milestone, per user decision D-17.
+  - Info items IN-01, IN-02, IN-03, IN-04, IN-05, IN-06, IN-08, IN-10, IN-12 and IN-13.
 
-Each fix is its own commit on master. Each commit builds and passes its package's tests. The work was done directly in the main checkout, as instructed, with no worktree.
+Each fix is its own commit on master. The work was done directly in the main checkout, as instructed, with no worktree.
 
 ## Fixed Issues
 
-### WR-01: One discovery entry with a long title or description breaks the whole Windows Start-menu sync
+### WR-02: Shortcut names are de-duplicated with `strings.ToLower`, which doesn't match how NTFS or APFS compare names
 
-**Files modified:**
-- `desktop/internal/osintegration/shortcutsync.go` (new)
-- `desktop/internal/osintegration/shortcutsync_test.go` (new)
-- `desktop/internal/osintegration/main_linux_test.go` (new)
-- `desktop/internal/osintegration/lnkscript.go`
-- `desktop/internal/osintegration/lnkscript_test.go`
-- `desktop/internal/osintegration/search_integration_windows.go`
-- `desktop/internal/osintegration/appshortcut_windows.go`
-- `desktop/internal/osintegration/search_integration_darwin.go`
-- `desktop/internal/osintegration/appshortcut_darwin.go`
-- `desktop/internal/osintegration/appshortcut_linux.go`
-- `desktop/internal/osintegration/appshortcut_linux_test.go`
-
-**Commits:** 954849a, cbcaf09 (test-only follow-up)
+**Files modified:** `desktop/internal/osintegration/shortcutsync.go`, `desktop/internal/osintegration/shortcutsync_test.go`, `desktop/go.mod`
+**Commit:** 46dd0fb
 
 **Applied fix:**
-- **Link names on Windows.** Names are cut at a rune boundary with `truncateText`, which never splits a surrogate pair, and end with "…". The budget is what fits under MAX_PATH after the folder, minus a 16-unit margin and room for the suffix, and never more than 64 UTF-16 units (`lnkNameBudget`).
-- **Unique names.** A name that was cut always gets the short id suffix. Any name that is still taken after that gets the full 16-hex id key (`uniqueShortcutNames`). This also covers a title that spells another entry's suffix.
-- **Link comments on Windows.** Comments are cut to 512 units, which is below INFOTIPSIZE and far below the environment-variable limit.
-- **macOS.** Bundle names are bounded to 64 UTF-8 bytes, which leaves room for NFD expansion under the 255-byte limit. Descriptions are bounded to 1024 bytes.
-- **Sync loops.** Every loop now goes through `writeShortcutEntries`: Windows search links, Windows app links, macOS search bundles, macOS app bundles and Linux `.desktop` entries. A failed entry is skipped instead of ending the pass. The first 3 failures in a pass are logged as Warn, and the rest are only counted in the returned error ("N of M … could not be written: <first>"), which the backend logs once. Stale entries are still removed. A failed entry keeps the file an earlier pass wrote for it, so a temporary failure doesn't remove a working link.
-- **Linux token check.** The token check is now done per entry. The exe check still refuses the whole pass before anything is written.
-- **Testable on every OS.** The Windows loops moved to untagged `syncSearchLinks` and `syncAppLinks`, which take the link writer as a parameter.
+- **Fold key.** A new `shortcutNameKey(name)` returns `strings.ToLower(strings.ToUpper(norm.NFC.String(name)))`. `uniqueShortcutNames` uses it for both `counts` and `used`, so it now covers the Windows link names and the macOS bundle names.
+  - Uppercasing first joins `Sıgnal` (dotless ı) and `ſignal` (long s) with `Signal`, as the NTFS upcase table does.
+  - Composing to NFC first joins NFD `Café` and NFC `Café`, as case-insensitive APFS does.
+  - The key errs on the side of calling two names equal. The only cost is an extra id suffix.
+- **Dependency.** `golang.org/x/text` was already in the desktop module as an indirect dependency at v0.42.0, with both go.sum hashes.
+  - The only go.mod change drops its `// indirect` marker. The version is the same and go.sum is unchanged.
+  - `go mod download -json golang.org/x/text@v0.42.0` reports the pinned `h1:JbOZXgfe…` sum.
+  - `go mod verify` exits 1 with `verdana/backend v0.0.0: missing ziphash`. That is the local `replace verdana/backend => ../backend` module. The same error happens with the HEAD go.mod, so it predates this fix. It reports nothing for any other module.
 - **Tests:**
-  - A 1000-character title and description, mixing ASCII, 2-byte and astral runes, stay within MAX_PATH minus the margin, within the 512-unit comment limit and within the macOS byte limit, and never split a rune.
-  - Two identical long titles and a title that spells a suffix still get unique names.
-  - Search and app syncs with a failing entry in the middle write the entries around it, keep the failing entry's earlier link and remove the stale link. The fake writer refuses what Windows would refuse, so the long-title entry would fail without the bounds.
-  - On Linux, an entry with a refused token is skipped while the others are written and the stale one is removed.
-- **Follow-up (cbcaf09).** `RefreshShortcutParent` starts `update-desktop-database` without waiting for it. That process wrote into the test's TempDir while it was being removed, and `TestSyncAppShortcutsCreatesAndReconcilesDesktopEntries` failed once in the full `-race` run with "directory not empty". This flake existed before the fix, and the new tests make it more likely. The package's Linux tests now clear PATH in `TestMain`.
-- **Not done:** the reviewer's optional opt-in setting for Windows and macOS system search. That is a product change.
+  - `TestShortcutNamesFoldLikeTheFileSystem` covers `Signal`/`Sıgnal`, `Signal`/`ſignal`, and NFC `Café`/NFD `Café`. For each pair, it first checks that `strings.ToLower` keeps the two names apart, so the case tests something. It then checks that both orderings, through both `windowsShortcutNames` and `darwinShortcutNames`, give two names with different fold keys and that neither name keeps the bare title. All five spellings in one pass get five distinct files.
+  - `TestShortcutNamesStayUnique` now also checks collisions with the fold key.
+  - With the old lowercase key, the new test fails.
+- **Residual:** this fix keeps names unique within one pass. IN-12 is still open: stale removal compares paths exactly. A link whose title changes only by case, or now also by ı/ſ or normalization, can therefore be written over the old file under the old on-disk spelling and then removed as stale. That item was left open by the orchestrator.
 
-### WR-02: Uninstall can still miss a window that is launching
+### IN-14: `update-desktop-database` is started and never waited on, which leaves a zombie per Linux app-shortcut sync
 
-**Files modified:** `backend/registry_install.go`, `backend/window_instances.go`, `backend/reclaim_test.go`
-**Commit:** 26274f5
-**Status:** fixed: requires human verification (lock-ordering and race logic)
+**Files modified:** `desktop/internal/osintegration/shortcutfile.go`, `desktop/internal/osintegration/shortcutfile_linux_test.go`, `desktop/internal/osintegration/main_linux_test.go`
+**Commit:** f86fac1
 
 **Applied fix:**
-- **Lock order.** Uninstall now holds reclaimMu while it deletes the record (under stateMu) and lists the open windows (`runningForNapp`). It closes them after unlocking. The order is reclaimMu → stateMu, released → instance list. No lock that comes later is held when reclaimMu is taken. A launch in progress therefore either registered first and is closed, or reads the record as gone and opens nothing.
-- **Second gap, not in the review.** `Instance.Close()` did nothing on a window that was registered but not yet attached to a transport. That is the time between `addInstance` and `host.OpenWindow` returning. So even with the lock, a window registered just before the listing could stay open. `Close` now sets `closeRequested` under sendMu, and `attach` closes a transport that arrives after that point.
-- **Test seam.** `launchReadHook` runs after the record re-read and before registration, with reclaimMu held.
-- **Tests:**
-  - `TestUninstallClosesLaunchInProgress`: a launch is held at the seam. Uninstall must not finish until the launch is released, and the window is then closed.
-  - `TestUninstallClosesWindowStillOpening`: the window is held inside OpenWindow, and it is closed when it attaches.
-  - `TestUninstallRacingLaunch`: 20 racing rounds under `-race`.
-- **Checked against the old code:** with each half of the fix reverted, the first two tests fail.
-
-### IN-09: Trial data the user chose to keep is dropped when the install loses a race
-
-**Files modified:** `backend/registry_install.go`, `backend/registry_address.go`, `backend/registry_install_test.go`
-**Commit:** 8b6ce0b
-**Status:** fixed: requires human verification (concurrency logic)
-
-**Applied fix:**
-- **`finishNappletTrial`.** On `errBusy` or `errOlderVersion`, it waits for the busy claim to clear (`waitNotBusy`, polling every 50 ms, at most 2 minutes, in the trial's own goroutine). It then re-reads the installed record and promotes the trial against it if that record is at least as new as the target.
-- **Retry.** If the claim was held by something that left no record at least that new, such as an uninstall, the install is tried once more.
-- **`openResolved`.** On `errOlderVersion` it launches the installed newer version instead of reporting a failure.
-- **Test:** `TestTrialInstallWaitsForStoreInstall` covers a store install that holds the claim while the user accepts. The trial waits, and its data lands in the installed store. The old code finishes immediately with "busy", which fails the test.
-- **No test for the `openResolved` change.** Testing it needs the install prompt flow.
-
-### IN-10: A window registered on a superseded version can't boot, and the presence check races the swap
-
-**Files modified:** `backend/window_instances.go`, `backend/reclaim_test.go`
-**Commit:** fa75fc0
-**Status:** partly fixed
-
-**Applied fix:**
-- **Presence check.** `launchWindow`'s check for `index.html` now runs under stateMu, which `swapInstallDir` holds. For an installed napplet it runs together with the record re-read, under reclaimMu. It can no longer look in the instant between the swap's two renames.
-- **No `MkdirAll`.** `launchWindow` no longer creates the install dir for a 35130 napp. That empty dir could keep the new copy from being renamed in on Windows, and the rollback from working.
-- **Test:** `TestLaunchNeverCreatesInstallDir`.
-- **Not done:** the first case is unchanged. A window registered on the old version still fails its `nap.boot` hash check once the swap lands, and the same happens on a reload. Keeping `.old-*` until the superseded scope's last window closes is a larger change. No data is lost.
-
-### IN-11: The directory swap has no retry for transient Windows rename failures
-
-**Files modified:** `backend/registry_install.go`, `backend/registry_install_test.go`
-**Commit:** 9dc498c
-
-**Applied fix:**
-- **Retries.** Every rename in `swapInstallDir`, including the rollback, goes through `renameInstallDirRetrying`. On Windows that makes up to 5 attempts with a linear backoff (20, 40, 60, 80 ms). The swap holds stateMu, so that is at most 200 ms per rename.
-- **No retry when the source is missing.** A missing source is not retried.
-- **Logging.** A rename that succeeds after retrying is logged with its attempt count, and an error after retries carries the count.
-- **Other platforms** keep one attempt.
-- **Test:** `TestSwapRetriesTransientRenameFailure` sets 3 attempts:
-  - a rename that fails once succeeds, with 4 rename calls in total;
-  - a rename that keeps failing stops after exactly 3 attempts and puts the installed copy back.
+- **Reaping.** `RefreshShortcutParent` still returns without blocking. Its callers are the sync passes and `gioHost.DeleteShortcutFile`. It now starts the child with `exec.CommandContext` and a 30-second `refreshTimeout`, then calls `cmd.Wait()` in a goroutine. That reaps the child, and the context kills it if it hangs. Start and Wait failures are logged at Debug.
+- **Test setup from cbcaf09.** The empty-PATH `TestMain` is kept: a refresh running in the background can still write into a TempDir that is being removed. Its comment now says so, and says that a test which needs the tool puts a stand-in on PATH with `t.Setenv`.
+- **Test:** `TestRefreshShortcutParentReapsChild` puts a `#!/bin/sh exit 0` stand-in on PATH and calls `RefreshShortcutParent` three times. It then polls `/proc/*/stat` until this process has no `update-desktop-` child left, running or zombie, with a 10-second deadline. With the old code it fails, listing the 3 unreaped pids.
 
 ## Verification
 
-Every gate ran in the main checkout at cbcaf09. `desktop/child/child` was rebuilt there. Logs are in the session scratchpad under `p5fix2/` (`backend.txt`, `android.txt`, `desktop.txt`, `vet-win.txt`, `vet-darwin.txt`).
-
-**Backend:**
-- `gofmt -l .` is clean.
-- `go vet ./...` passes.
-- `VERDANA_REQUIRE_NODE=1 go test -count=1 ./...` passes.
-- `go test -race -count=1 .` passes.
-- `GOOS=windows CGO_ENABLED=0 go vet .` passes; this checks the IN-11 `runtime` gate.
-
-**Android:**
-- `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...` passes.
+Every gate ran in the main checkout at f86fac1. `desktop/child/child` was rebuilt there. The desktop gates also passed at 46dd0fb (WR-02) before IN-14 was started, and neither commit touches the backend. Logs are in the session scratchpad under `p5fix3/`.
 
 **Desktop:**
-- `go generate ./internal/webviewlib && go build -o child/child ./child && go test -race -tags novulkan ./...` passes. It failed once before cbcaf09 because of the `update-desktop-database` cleanup flake described under WR-01.
+- `go generate ./internal/webviewlib && go build -o child/child ./child && go test -race -tags novulkan ./...` passes.
 - `GOOS=windows CGO_ENABLED=0 go vet -tags novulkan ./...` passes.
 - `GOOS=darwin CGO_ENABLED=0 go vet ./internal/...` passes.
-- The Windows and macOS sync code is only vetted. Its loop logic is shared with, and tested through, the untagged helpers.
+- `gofmt -l internal/osintegration` is clean.
+
+**Backend:**
+- `go vet ./...` passes.
+- `VERDANA_REQUIRE_NODE=1 go test -count=1 ./...` passes.
+
+**Android:**
+- `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...` passes in `backend/`.
 
 ---
 
-_Fixed: 2026-10-05T19:18:51Z_
+_Fixed: 2026-10-05T19:29:37Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
