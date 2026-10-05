@@ -350,3 +350,64 @@ func TestSwapRetriesTransientRenameFailure(t *testing.T) {
 	}
 	assertInstalledIntact(t, v2, "v2")
 }
+
+// TestTrialInstallWaitsForStoreInstall: the user clicked Install in the
+// store while "Did you like X?" was up, and that install still holds the
+// napplet when they accept. The trial waits for it and keeps its data in
+// the version it installed, instead of failing with "busy" (IN-09).
+func TestTrialInstallWaitsForStoreInstall(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	trial := installedFrom(t, evt)
+	s := newTrialSession(t, trial)
+
+	// the store's install of the same version is running
+	if !trySetBusy(trial.ID) {
+		t.Fatal("could not claim the napplet")
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			setBusy(trial.ID, false)
+		}
+	})
+	done := make(chan struct{})
+	go func() {
+		finishNappletTrial(s.ci)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	var p *Prompt
+	for p == nil {
+		if p = CurrentPrompt(); p == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("no install prompt")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	AnswerPrompt(p.ID, Answer{OK: true, Scope: ScopeOnce})
+	select {
+	case <-done:
+		t.Fatal("the trial gave up while the store install was running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	// the store install finishes
+	installRecord(t, trial)
+	setBusy(trial.ID, false)
+	released = true
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the trial did not finish")
+	}
+	backgroundSyncs.Wait()
+
+	if got := fetchErr(); got != "" {
+		t.Errorf("launcher error %q", got)
+	}
+	if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "trial-shared" {
+		t.Errorf("shared trial data = %q, %v", v, ok)
+	}
+}

@@ -318,6 +318,12 @@ func openResolved(n Napp) error {
 		return nil
 	}
 	if err := InstallNapp(n); err != nil {
+		// a newer version got installed meanwhile (the store, another
+		// open): run that one rather than report a failure
+		if current, ok := InstalledNapp(n.ID); ok && errors.Is(err, errOlderVersion) {
+			Launch(current)
+			return nil
+		}
 		return err
 	}
 	Launch(n)

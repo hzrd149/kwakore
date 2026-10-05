@@ -488,7 +488,23 @@ func finishNappletTrial(ci *Instance) {
 		promoteTrial(ci, current, "could not keep trial data: ")
 		return
 	}
-	if err := InstallNapp(target); err != nil {
+	err := InstallNapp(target)
+	if errors.Is(err, errBusy) || errors.Is(err, errOlderVersion) {
+		// a store Install or Update of the same napplet ran at the same
+		// time: wait for it, then settle the trial against what it left
+		// installed, as when it finished before the question was answered
+		waitNotBusy(ci.napp.ID, trialInstallWait)
+		if current, ok := InstalledNapp(ci.napp.ID); ok && !nappNewer(target, current) {
+			promoteTrial(ci, current, "could not keep trial data: ")
+			return
+		}
+		if errors.Is(err, errBusy) {
+			// what held the claim (an uninstall, an older install) left
+			// nothing at least as new: the user still asked to install
+			err = InstallNapp(target)
+		}
+	}
+	if err != nil {
 		SetFetchErr("install failed: " + err.Error())
 		forgetWindow(ci)
 		dropTrial(ci)
@@ -499,6 +515,18 @@ func finishNappletTrial(ci *Instance) {
 		installed = target
 	}
 	promoteTrial(ci, installed, "installed, but could not keep trial data: ")
+}
+
+// trialInstallWait bounds how long a trial waits for another install of its
+// napplet to finish; an install downloads, so it may take a while.
+var trialInstallWait = 2 * time.Minute
+
+// waitNotBusy waits until id has no busy claim, or for at most max.
+func waitNotBusy(id string, max time.Duration) {
+	deadline := time.Now().Add(max)
+	for IsBusy(id) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // promoteTrial settles a closed trial's data against the installed record.
