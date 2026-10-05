@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-10-05T16:44:16.629Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-10-05T17:02:25.805Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-09 (requires warning at launch; trials verify every path blob; trial data promoted only under the installed hash, never over existing data)
-state_head: cd6da32911398f93a07e3cac216ed42c1e390bf4
+last_activity_desc: Completed 05-10 (reclaim on uninstall/update/window delete deferred while a window uses the data; escaped rule and usage ids; startup sweep)
+state_head: 20883f880c7973186552c756bf714d82524c9a1f
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 38
+  completed_plans: 39
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 11 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-08, 05-09, 05-12 complete; 05-10 next)
+Plan: 12 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-08, 05-09, 05-10, 05-12 complete; 05-11 next)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-09-PLAN.md (NIP-5D napplets with unsupported requires open with a session-only napplet-requires warning; Try downloads and sha256-verifies every path behind an atomic trySetBusy before opening; trial data kept only when the installed artifact hash equals the trial's and the installed shared store is empty, else trial-data-discarded; S4 notice ranks and cap of 3)
+Last activity: 2026-10-05 — Completed 05-10-PLAN.md (Uninstall closes a napplet's windows and removes its storage, config, rules, usage and directory; updates and installs over another hash reclaim the superseded version; auxiliary/failed windows take their instance store; reclaims wait for the last window of the version and never delete a reinstalled scope; dead stores refuse writes; rule/usage ids escape 0x1B/0x1F per part, legacy keys unchanged; Start sweeps unowned napplet-storage/config files and pre-D-04 storage names)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -99,6 +99,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P07 | 8min | 3 tasks | 10 files |
 | Phase 05 P08 | 8min | 2 tasks | 7 files |
 | Phase 05 P09 | 10min | 3 tasks | 8 files |
+| Phase 05 P10 | 13min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,11 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-09: trial promotion installs the NIP-01 winner of the relays' latest event and the trial's own event, never an older one
 - [Phase 5]: 05-09: Try goroutines run under backgroundSyncs; a Try that loses trySetBusy returns nil and shows nothing
 - [Phase 5]: 05-09: dropTrial keeps the trial's config scope when the installed copy or another open window runs the same artifact
+- [Phase 5]: [05-10] Reclaim of a napplet version's storage and config is deferred while a live window runs that (address, hash) and re-checked against installed records under stateMu right before deleting; InstallNapp/applyUpdate cancel a pending reclaim of the scope they install
+- [Phase 5]: [05-10] Evicted stores are dead and napplet writes from a gone window are refused (errStoreReclaimed -> internal-error), so no late writer re-creates a reclaimed file
+- [Phase 5]: [05-10] Uninstall closes a napplet's windows (napps keep their flow), reclaims shared/instance storage and config, and calls ForgetPermission(id, "")
+- [Phase 5]: [05-10] Rule and usage ids escape each part (0x1B -> 0x1B 0x1B, 0x1F -> 0x1B 's') before the 0x1F join; parts without either byte, i.e. every legacy key, encode byte-identically
+- [Phase 5]: [05-10] Start runs sweepNappletData synchronously after dropPreAddressNapplets and before refreshInstalled: regular files only, os.Remove only, napplet-storage/ and config/ unexpected names, storage/ non-64-hex names; napps/ and 64-hex napp localStorage never touched
 
 ### Pending Todos
 
@@ -235,6 +241,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T16:44:16.485Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-10-05T17:02:25.675Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None
