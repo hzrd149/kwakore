@@ -27,12 +27,8 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 		return "", err
 	}
 	target := filepath.Join(startMenu, shortcutPrefix+shortcutSlug(name)+".lnk")
-	ps := fmt.Sprintf(
-		`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '%s'; $s.Save()`,
-		target, psSingleQuote(exe), psSingleQuote(token),
-	)
-	if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput(); err != nil {
-		return target, fmt.Errorf("creating shortcut failed: %v: %s", err, out)
+	if err := writeLnk(lnkSpec{Path: target, Target: exe, Arguments: token}); err != nil {
+		return target, fmt.Errorf("creating shortcut failed: %w", err)
 	}
 	if err := nameLnkFile(target, name); err != nil {
 		log.Warn().Err(err).Str("path", target).Msg("could not name the shortcut file")
@@ -110,9 +106,19 @@ func ListShortcutFiles() []backend.ShortcutFile {
 	return out
 }
 
-// psSingleQuote wraps a string in the powershell single-quote literal form.
-func psSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+// writeLnk writes spec with the constant script from lnkCommand; every value
+// travels in the child's environment, never in powershell source.
+func writeLnk(spec lnkSpec) error {
+	args, env, err := lnkCommand(spec)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("powershell.exe", args...)
+	cmd.Env = append(os.Environ(), env...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, out)
+	}
+	return nil
 }
 
 func userStartMenuPrograms() (string, error) {

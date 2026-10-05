@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"verdana/backend"
@@ -26,11 +25,8 @@ func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 	}
 	desiredLinks := make(map[string]bool, len(shortcuts))
 	desiredIcons := make(map[string]bool, len(shortcuts))
-	nameCounts := make(map[string]int, len(shortcuts))
-	for _, shortcut := range shortcuts {
-		nameCounts[strings.ToLower(windowsShortcutName(shortcut.Name))]++
-	}
-	for _, shortcut := range shortcuts {
+	names := windowsShortcutNames(shortcuts)
+	for i, shortcut := range shortcuts {
 		key := appShortcutKey(shortcut.ID)
 		iconPath := filepath.Join(icons, key+".ico")
 		var icon bytes.Buffer
@@ -40,49 +36,17 @@ func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 		if err := writeAtomic(iconPath, icon.Bytes(), 0644); err != nil {
 			return err
 		}
-		name := windowsShortcutName(shortcut.Name)
-		if nameCounts[strings.ToLower(name)] > 1 {
-			name += " (" + key[:6] + ")"
+		spec := appLnkSpec(dir, names[i], exe, iconPath, shortcut)
+		if err := writeLnk(spec); err != nil {
+			return fmt.Errorf("creating app shortcut failed: %w", err)
 		}
-		path := filepath.Join(dir, name+".lnk")
-		// the launch token is base64url after "=", so it holds no quote or
-		// backslash that could break out of the quoted argument
-		arguments := `--background --launch-napp "` + shortcut.Token + `"`
-		ps := fmt.Sprintf(
-			`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(%s); $s.TargetPath = %s; $s.Arguments = %s; $s.Description = %s; $s.IconLocation = %s; $s.Save()`,
-			psSingleQuote(path), psSingleQuote(exe), psSingleQuote(arguments),
-			psSingleQuote(appShortcutText(shortcut.Description)), psSingleQuote(iconPath+",0"),
-		)
-		if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput(); err != nil {
-			return fmt.Errorf("creating app shortcut failed: %v: %s", err, out)
-		}
-		desiredLinks[path] = true
+		desiredLinks[spec.Path] = true
 		desiredIcons[iconPath] = true
 	}
 	if err := removeStaleWindowsFiles(dir, ".lnk", desiredLinks); err != nil {
 		return err
 	}
 	return removeStaleWindowsFiles(icons, ".ico", desiredIcons)
-}
-
-func windowsShortcutName(name string) string {
-	name = strings.Map(func(r rune) rune {
-		if strings.ContainsRune(`<>:"/\|?*`, r) || r < 32 {
-			return '-'
-		}
-		return r
-	}, appShortcutText(name))
-	name = strings.Trim(name, " .")
-	if name == "" {
-		return "Verdana App"
-	}
-	stem := strings.ToUpper(strings.TrimSuffix(name, filepath.Ext(name)))
-	reserved := stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
-		len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9'
-	if reserved {
-		name = "Verdana " + name
-	}
-	return name
 }
 
 func removeStaleWindowsFiles(dir, suffix string, desired map[string]bool) error {

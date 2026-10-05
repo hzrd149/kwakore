@@ -25,3 +25,18 @@ func TestSystemSearchEntriesIncludeDiscoveryAndInstalledNapplets(t *testing.T) {
 		t.Fatalf("search description = %q", got[1].Description)
 	}
 }
+
+func TestSystemSearchEntriesSkipUnavailableDiscovery(t *testing.T) {
+	broken := Napp{ID: "broken", Name: "x’; Start-Process calc; ’", Format: FormatNapplet, Unavailable: "latest version is invalid"}
+	installedBroken := Napp{ID: "kept", Name: "Kept", Format: FormatNapplet, Unavailable: "latest version is invalid"}
+
+	got := systemSearchEntries(State{
+		Discovery: []Napp{broken, installedBroken},
+		Installed: []Napp{installedBroken},
+	})
+	// the unavailable discovery entry is left out; an installed copy whose
+	// latest event is invalid still runs, so it keeps its entry
+	if len(got) != 1 || got[0].ID != "kept" {
+		t.Fatalf("search entries = %+v", got)
+	}
+}

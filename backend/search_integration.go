@@ -57,9 +57,17 @@ func SyncSystemSearch() {
 func systemSearchEntries(st State) []AppShortcut {
 	seen := make(map[string]bool, len(st.Discovery)+len(st.Installed))
 	entries := make([]AppShortcut, 0, len(st.Discovery)+len(st.Installed))
-	for _, list := range [][]Napp{st.Discovery, st.Installed} {
+	for li, list := range [][]Napp{st.Discovery, st.Installed} {
 		for _, n := range list {
 			if seen[n.ID] || !n.IsNapplet() {
+				continue
+			}
+			// a discovered napplet whose latest event is invalid can never
+			// be tried, so it gets no search entry. Its name and description
+			// are arbitrary author text, and the OS writers
+			// should only ever see what the store would let a user open. An
+			// installed copy still runs, so the installed list keeps it.
+			if li == 0 && n.Unavailable != "" {
 				continue
 			}
 			seen[n.ID] = true

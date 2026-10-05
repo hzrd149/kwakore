@@ -5,9 +5,7 @@ package osintegration
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"verdana/backend"
 )
 
@@ -24,29 +22,13 @@ func SyncSearchNapplets(napplets []backend.AppShortcut, exe string) error {
 		return err
 	}
 	desired := make(map[string]bool, len(napplets))
-	nameCounts := make(map[string]int, len(napplets))
-	for _, napplet := range napplets {
-		nameCounts[strings.ToLower(windowsShortcutName(napplet.Name))]++
-	}
-	for _, napplet := range napplets {
-		name := windowsShortcutName(napplet.Name)
-		key := appShortcutKey(napplet.ID)
-		if nameCounts[strings.ToLower(name)] > 1 {
-			name += " (" + key[:6] + ")"
+	names := windowsShortcutNames(napplets)
+	for i, napplet := range napplets {
+		spec := searchLnkSpec(dir, names[i], exe, napplet)
+		if err := writeLnk(spec); err != nil {
+			return fmt.Errorf("creating search shortcut failed: %w", err)
 		}
-		path := filepath.Join(dir, name+".lnk")
-		// the launch token is base64url after "=", so it holds no quote or
-		// backslash that could break out of the quoted argument
-		arguments := `--background --try-napplet "` + napplet.Token + `"`
-		ps := fmt.Sprintf(
-			`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(%s); $s.TargetPath = %s; $s.Arguments = %s; $s.Description = %s; $s.Save()`,
-			psSingleQuote(path), psSingleQuote(exe), psSingleQuote(arguments),
-			psSingleQuote(appShortcutText(napplet.Description)),
-		)
-		if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput(); err != nil {
-			return fmt.Errorf("creating search shortcut failed: %v: %s", err, out)
-		}
-		desired[path] = true
+		desired[spec.Path] = true
 	}
 	return removeStaleWindowsFiles(dir, ".lnk", desired)
 }
