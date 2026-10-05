@@ -177,10 +177,44 @@ Plans:
   2. Updating, uninstalling or deleting a window instance reclaims the storage of superseded hashes, and installing from a trial window carries its storage over under the installed artifact's hash
   3. The desktop update UI tells the user that updating a napplet resets its saved data, and launching a napplet whose `requires` lists domains Verdana does not support shows a warning
   4. The registry picks the latest manifest event by NIP-01 rules before validating it. When that event is invalid, the napplet shows as unavailable instead of falling back to an older version
-  5. Manifests whose `source` URL is relative or has no host are rejected, manifest blob downloads go through the public-internet guard, and a trial window fetches and hash-verifies every `path` blob of a NIP-5D manifest before launch
+  5. A relative or host-less `source` URL is never accepted (a NIP-5D manifest with one is rejected; a WEB-NAPPLET manifest drops the `source`, per its spec), manifest blob downloads go through the public-internet guard (servers the user configured excepted), and a trial window fetches and hash-verifies every `path` blob of a NIP-5D manifest before launch
 
-**Plans**: TBD
+**Plans**: 12 plans
 **UI hint**: yes
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Napplet ids become full addresses; NAP-STORAGE keyed by (address, artifact hash) with no fallback in hex-named napplet-storage/ files; old-id records dropped once with a notice (wave 1)
+- [ ] 05-02-PLAN.md — Desktop update and uninstall confirmations for napplets (layoutConfirm, stale guard, filled destructive button) (wave 1)
+- [ ] 05-03-PLAN.md — Linux shortcut files carry encoded launch tokens, never raw ids; quoteExecField refuses control characters in every Linux writer (D-21) (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-04-PLAN.md — NAP-CONFIG keyed by the storage scope with hex file names; pushes and settings windows follow the version (wave 2)
+- [ ] 05-05-PLAN.md — NIP-01 latest selection (CheckID first) before validation; unavailable entries with fixed reasons in discovery, address lookups and author pages (wave 2)
+- [ ] 05-12-PLAN.md — macOS and Windows app shortcuts and search launchers carry the launch token; --try-napplet decodes it (D-21) (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-06-PLAN.md — Update checks and Update on the selection helper, unavailable installed copies, install/try refusals, launch-time background check (wave 3)
+- [ ] 05-07-PLAN.md — Desktop unavailable state, "Opening…" Try, per-window notices and the store notice strip (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-08-PLAN.md — Per-schema `source` validation; blob downloads through netguard with size cap, user-configured servers trusted (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-09-PLAN.md — Requires warning at launch, trials verify every path, trial promotion only under the installed hash (wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 05-10-PLAN.md — Reclaim on uninstall, update and window delete (deferred while windows run), escaped rule ids, startup sweep (wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 05-11-PLAN.md — CONFORMANCE close-out (CF-2, A11, A4, A7, new gap rows, DEC-7, DEC-8), NAPPLETS.md and the end-of-phase smoke list (wave 7)
 
 ### Phase 6: Relay, Outbox, Intent and INC Conformance
 
