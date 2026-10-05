@@ -19,11 +19,13 @@ import (
 //
 // A bundle token is a single string of space-separated fields:
 //
-//	<napp-id> +<action> +<action> <napp-id> +<action> …
+//	=<napp-id> +<action> +<action> =<napp-id> +<action> …
 //
-// A field starting with "+" is one action for the napp that came just before
-// it (a base64url-encoded {"type":…,"payload":…} object, or a bare action
-// name); any other field starts a new napp entry. The launcher (this very
+// A field starting with "=" starts a new napp entry and carries the napp id
+// as a launch token (see LaunchToken). A field starting with "+" is one
+// action for the napp that came just before it (a base64url-encoded
+// {"type":…,"payload":…} object, or a bare action name). Any other field is a
+// raw napp id, as shortcut files written by earlier builds still carry. The launcher (this very
 // process, or the running one a second invocation forwards to) walks the
 // list, opening each napp and dispatching its actions in order.
 
@@ -53,16 +55,46 @@ type ShortcutInfo struct {
 
 // ─── bundle tokens ───────────────────────────────────────────────
 
-// bundleToken encodes entries as launcher arguments. Actions go in as one
-// base64url word each, so the token survives a .desktop Exec line, a
-// powershell argument and a shell script line without any quoting games.
+// LaunchToken is how a napp id travels through an OS shortcut file and back
+// on the launcher's command line: "=" followed by the base64url (no padding)
+// of the raw id. Napplet ids carry the author's d tag, which may hold
+// whitespace, newlines or quotes; encoded, the id is one inert word that no
+// .desktop key, Exec line or shell argument can be broken by. No raw napp id
+// starts with "=" (napp ids start with pubkey hex, napplet ids with their
+// kind, dev ids with "dev~"), so the prefix never shadows one.
+func LaunchToken(id string) string {
+	return "=" + base64.RawURLEncoding.EncodeToString([]byte(id))
+}
+
+// launchIDFromToken turns one napp field of a bundle token back into the raw
+// id: a "="-prefixed launch token is decoded, any other field is a raw id
+// from a shortcut file an earlier build wrote and is returned unchanged.
+func launchIDFromToken(field string) (string, error) {
+	encoded, ok := strings.CutPrefix(field, "=")
+	if !ok {
+		return field, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", errors.New("bundle token has a malformed napp id")
+	}
+	if len(raw) == 0 {
+		return "", errors.New("bundle token has an empty napp id")
+	}
+	return string(raw), nil
+}
+
+// bundleToken encodes entries as launcher arguments: each napp id as its
+// launch token, each action as one base64url word, so the token survives
+// strings.Fields, a .desktop Exec line, a powershell argument and a shell
+// script line without any quoting games, whatever the ids hold.
 func bundleToken(entries []ShortcutEntry) string {
 	var fields []string
 	for _, e := range entries {
 		if e.NappID == "" {
 			continue
 		}
-		fields = append(fields, e.NappID)
+		fields = append(fields, LaunchToken(e.NappID))
 		for _, a := range e.Actions {
 			raw, err := json.Marshal(a)
 			if err != nil {
@@ -84,7 +116,11 @@ func parseBundleToken(token string) ([]ShortcutEntry, error) {
 	var entries []ShortcutEntry
 	for _, field := range strings.Fields(token) {
 		if !strings.HasPrefix(field, "+") {
-			entries = append(entries, ShortcutEntry{NappID: field})
+			id, err := launchIDFromToken(field)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, ShortcutEntry{NappID: id})
 			continue
 		}
 		if len(entries) == 0 {

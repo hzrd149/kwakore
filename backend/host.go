@@ -188,8 +188,14 @@ type ShortcutFile struct {
 
 // AppShortcut is one installed napp or napplet exposed as a native system
 // application entry. Icon may be nil; platforms then use Verdana's icon.
+//
+// ID is the in-memory key (platforms may hash it for a file name); Token is
+// LaunchToken(ID). Writers put Token, never ID, into shortcut files and
+// command lines: ID carries an author-controlled d tag that may hold
+// newlines, quotes or whitespace.
 type AppShortcut struct {
 	ID          string
+	Token       string
 	Name        string
 	Description string
 	Icon        []byte

@@ -70,7 +70,7 @@ func systemSearchEntries(st State) []AppShortcut {
 				}
 				description += "by " + n.AuthorName
 			}
-			entries = append(entries, AppShortcut{ID: n.ID, Name: n.Label(), Description: description})
+			entries = append(entries, AppShortcut{ID: n.ID, Token: LaunchToken(n.ID), Name: n.Label(), Description: description})
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {

@@ -63,7 +63,7 @@ func syncAppShortcuts() {
 		if naming == AppShortcutNameHosted {
 			name += " — Verdana"
 		}
-		shortcut := AppShortcut{ID: napp.ID, Name: name, Description: napp.Description}
+		shortcut := AppShortcut{ID: napp.ID, Token: LaunchToken(napp.ID), Name: name, Description: napp.Description}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		shortcut.Icon, _ = napp.IconBlob(ctx)
 		cancel()

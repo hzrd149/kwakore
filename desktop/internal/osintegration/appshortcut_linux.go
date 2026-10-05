@@ -12,6 +12,11 @@ import (
 	"verdana/backend"
 )
 
+// SyncAppShortcuts writes one .desktop entry per shortcut and removes the
+// managed entries no longer wanted. The napp id only ever reaches the file as
+// shortcut.Token (an encoded launch token): the raw id carries the author's d
+// tag, and a newline in it would otherwise add keys such as a second Exec=.
+// The file name stays keyed on the raw id, so existing installs keep theirs.
 func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
 	dir := applicationsDir()
 	icons := appShortcutIconDir()
@@ -38,7 +43,7 @@ Icon=%s
 Terminal=false
 Categories=Network;
 X-Verdana-Napp-ID=%s
-`, appShortcutText(shortcut.Name), appShortcutText(shortcut.Description), quoteExecField(exe), quoteExecField(shortcut.ID), iconPath, shortcut.ID)
+`, appShortcutText(shortcut.Name), appShortcutText(shortcut.Description), quoteExecField(exe), quoteExecField(shortcut.Token), iconPath, shortcut.Token)
 		if err := writeAtomic(path, []byte(data), 0644); err != nil {
 			return err
 		}
