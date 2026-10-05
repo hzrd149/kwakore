@@ -107,7 +107,7 @@ func setupConfigTest(t *testing.T) *settingsTestHost {
 	host = h
 	t.Cleanup(func() {
 		settingsMu.Lock()
-		settingsWins = map[string]*settingsWindow{}
+		settingsWins = map[settingsKey]*settingsWindow{}
 		settingsMu.Unlock()
 	})
 	return h
