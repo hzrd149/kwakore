@@ -35,6 +35,13 @@ func refreshInstalled() {
 	backgroundSyncs.Go(syncAppShortcuts)
 }
 
+// errUnavailable refuses to install, update to, try or open an entry whose
+// latest manifest is invalid (Napp.Unavailable): there is nothing valid to
+// download. Fixed text, so the launcher error reads "install failed: the
+// latest version is invalid" and never the validator's own error, which can
+// quote author input.
+var errUnavailable = errors.New("the latest version is invalid")
+
 // Install downloads a napp's files and records it as installed. Blocking:
 // call it from a goroutine (progress shows up as IsBusy). It also takes
 // updates: an already-installed napp is simply re-downloaded over. A failure
@@ -45,8 +52,17 @@ func Install(n Napp) {
 	}
 }
 
-// InstallNapp is Install for a caller that handles the failure itself.
+// InstallNapp is Install for a caller that handles the failure itself. An
+// unavailable entry is refused before anything is downloaded. The saved
+// record keeps its EventID and never carries UpdateAvailable or
+// Unavailable: those are Snapshot's to stamp.
 func InstallNapp(n Napp) error {
+	if n.Unavailable != "" {
+		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Str("reason", n.Unavailable).
+			Msg("refusing to install an invalid latest version")
+		return errUnavailable
+	}
+	n.UpdateAvailable = nil
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
@@ -127,6 +143,12 @@ func InstallFromDiscovery(id string) bool {
 // Its document stays in memory for the lifetime of the window and the napp is
 // never added to InstalledNapps.
 func TryNapplet(n Napp) {
+	if n.Unavailable != "" {
+		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Str("reason", n.Unavailable).
+			Msg("refusing to try an invalid latest version")
+		SetFetchErr("try failed: the latest version is invalid")
+		return
+	}
 	go func() {
 		if err := tryNapplet(context.Background(), n); err != nil {
 			log.Error().Err(err).Str("napp", n.ID).Msg("napplet preview failed")
@@ -136,6 +158,9 @@ func TryNapplet(n Napp) {
 }
 
 func tryNapplet(ctx context.Context, n Napp) error {
+	if n.Unavailable != "" {
+		return errUnavailable
+	}
 	if !n.IsNapplet() {
 		return errors.New("only napplets can be tried without installing")
 	}
@@ -160,7 +185,8 @@ func tryNapplet(ctx context.Context, n Napp) error {
 }
 
 // TryNappletFromDiscovery resolves an uninstalled discovery result and opens
-// it ephemerally. Installed napplets are opened normally. The argument is a
+// it ephemerally. Installed napplets are opened normally. An unavailable
+// discovery entry is refused by TryNapplet and opens nothing. The argument is a
 // launch token (what the macOS and Windows search launchers pass) or a raw id
 // (GNOME search, Android and launchers written by earlier builds); a token
 // that does not decode is refused and starts nothing.

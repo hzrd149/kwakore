@@ -90,11 +90,6 @@ func (n Napp) Naddr() string {
 // resolveTimeout bounds one address lookup across every relay asked.
 const resolveTimeout = 15 * time.Second
 
-// errUnavailable refuses to open or install an address whose latest
-// manifest is invalid. Fixed text: the validator's own error can quote
-// author input.
-var errUnavailable = errors.New("the latest version is invalid")
-
 // ResolveNappAddress finds the current manifest at an address, its NIP-01
 // latest event (registry_select.go), in the local store, on the address's
 // relay hints, the author's write relays and the launcher's relays. When

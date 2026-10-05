@@ -197,8 +197,9 @@ func updateState(installed, latest Napp) *Napp {
 // ─── applying an update ──────────────────────────────────────────
 
 // Update re-downloads an installed napp's files from its blossom servers. It
-// requires knowing a newer version: the discovery list, a check round, or the
-// relay lookup this triggers when neither has one.
+// requires knowing a newer version: the one a check round found, or the
+// relay lookup this triggers when there is none. Only the NIP-01 latest
+// version is ever installed, and only when it is valid.
 func Update(id string) {
 	n, ok := InstalledNapp(id)
 	if !ok {
@@ -223,6 +224,14 @@ func Update(id string) {
 // setBusy held. newer needs the full event shape; Paths and Servers are the
 // parts that matter for the download itself.
 func applyUpdate(current, newer Napp) {
+	if newer.Unavailable != "" {
+		// newerVersion never returns one; this keeps any other caller from
+		// downloading an invalid manifest's files
+		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).
+			Msg("refusing to update to an invalid latest version")
+		SetFetchErr("update failed: " + errUnavailable.Error())
+		return
+	}
 	base, err := nappBaseDir(current.ID)
 	if err != nil {
 		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
@@ -246,6 +255,7 @@ func applyUpdate(current, newer Napp) {
 	// id the launcher knows it by (the id is author~d, so it is already the
 	// same — this only guards against a weird event)
 	newer.ID = current.ID
+	newer.UpdateAvailable = nil
 	stateMu.Lock()
 	state.InstalledNapps[current.ID] = newer
 	delete(state.LastLaunched, current.ID)
@@ -259,40 +269,49 @@ func applyUpdate(current, newer Napp) {
 	log.Info().Str("napp", current.ID).Msg("update complete")
 }
 
-// newerVersion returns the best known newer version of an installed napp:
-// the valid update a check round found, falling back to a live relay lookup
-// on the author's outbox.
+// newerVersion returns the version Update installs: the NIP-01 latest
+// version of the napp's address when it is valid and newer than what is
+// installed. A valid update the last check found is used as is; otherwise
+// the relays are asked right now. A latest version that turns out invalid
+// marks the napp unavailable and gives nothing to install.
 func newerVersion(n Napp) *Napp {
 	if latest, ok := updateSet.Load().Load(n.ID); ok && latest.Unavailable == "" && nappNewer(latest, n) {
 		return &latest
 	}
-	if evt := fetchCurrentEvent(n); evt != nil {
-		if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
-			return &nn
-		}
-	}
-	return nil
-}
 
-// fetchCurrentEvent fetches the current manifest of a napp (or napplet) from
-// its author's outbox relays (falling back to the discovery relays).
-func fetchCurrentEvent(n Napp) *nostr.Event {
-	author := n.Author
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-
-	urls := sys.FetchOutboxRelays(ctx, author, 4)
-	if len(urls) == 0 {
-		urls = Relays()
+	latest, found := latestManifest(ctx, n)
+	if !found {
+		return nil
 	}
-
-	for re := range sys.Pool.FetchMany(ctx, urls, manifestFilter(n), nostr.SubscriptionOptions{
-		Label: "verdana-napp-update",
-	}) {
-		evt := re.Event
-		return &evt
+	entry := updateState(n, latest)
+	if entry == nil {
+		// the installed version is the latest: a stale entry goes
+		mergeUpdateState(n.ID, nil)
+		return nil
 	}
-	return nil
+	mergeUpdateState(n.ID, entry)
+	if entry.Unavailable != "" {
+		return nil
+	}
+	return entry
+}
+
+// latestManifest is the NIP-01 latest version of n's address among what the
+// relays hold, read with nappFromLatest: an invalid one comes back with
+// Unavailable set. found is false when no authentic event of the address
+// came back (offline, a timeout, or nothing published).
+func latestManifest(ctx context.Context, n Napp) (Napp, bool) {
+	winners := latestByAddress{}
+	for _, evt := range fetchManifestEvents(ctx, []Napp{n}) {
+		winners.add(evt)
+	}
+	evt, ok := winners[n.Address()]
+	if !ok {
+		return Napp{}, false
+	}
+	return nappFromLatest(evt), true
 }
 
 // ─── helpers ─────────────────────────────────────────────────────
