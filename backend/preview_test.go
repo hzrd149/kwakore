@@ -114,9 +114,14 @@ func TestTryNappletRejectsNapps(t *testing.T) {
 
 func TestNappletTrialStorageIsEphemeralUntilPromoted(t *testing.T) {
 	setupNapTest(t)
+	isolateState(t)
 	n := Napp{D: "trial", Format: FormatNapplet, Kind: KindNapplet,
 		Author: testNappletKey.Public(), ArtifactHash: testArtifactOf("trial")}
 	n.ID = n.Address()
+	// promotion writes only for a version that is installed
+	stateMu.Lock()
+	state.InstalledNapps = map[string]Napp{n.ID: n}
+	stateMu.Unlock()
 	ci := &Instance{napp: n, trial: true, trialStorage: make(map[string]*nappStorage)}
 	key, err := nappletStorageKey(n, "shared", "")
 	if err != nil {

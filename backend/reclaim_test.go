@@ -988,3 +988,124 @@ func TestStartSweepsBeforeWindows(t *testing.T) {
 		t.Fatalf("Start calls %v", order)
 	}
 }
+
+// ─── launches and promotions racing a reclaim (WR-04) ────────────
+
+// TestLaunchOnStaleRecordRunsInstalledVersion: a launch that captured the
+// record before an update landed (and reclaimed the old version) opens on
+// the installed version, so nothing writes the reclaimed files back. One
+// that captured it before an uninstall fails instead of opening.
+func TestLaunchOnStaleRecordRunsInstalledVersion(t *testing.T) {
+	newLaunchRig(t)
+	resetPending := func() {
+		reclaimMu.Lock()
+		pendingReclaims = make(map[string]*pendingReclaim)
+		reclaimMu.Unlock()
+	}
+	resetPending()
+	t.Cleanup(resetPending)
+	sk := nostr.Generate()
+	v1 := installNappletFiles(t, validNapplet(t, sk, "app", "", 10))
+	old := seedNapplet(t, v1, randomID())
+
+	// the update lands between the click and the launch
+	v2 := installedFrom(t, validNapplet(t, sk, "app", "v2", 20))
+	installRecord(t, v2)
+	reclaimNapplet(v1, nil)
+	assertFiles(t, "reclaimed version", []string{old.shared, old.config}, false)
+
+	ci, err := launch(context.Background(), v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, ci)
+	if ci.napp.EventID != v2.EventID || ci.napp.ArtifactHash != v2.ArtifactHash {
+		t.Fatalf("the window runs %s, want the installed %s", ci.napp.EventID, v2.EventID)
+	}
+	if err := napStorageSetValue(ci, storeFileOf(t, ci.napp, "shared", ""), "k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	assertFiles(t, "reclaimed version after a write", []string{old.shared}, false)
+
+	// a reclaim of the version the window runs now waits for it
+	reclaimNapplet(v2, nil)
+	if pendingCount() != 1 {
+		t.Fatalf("%d reclaims pending, want 1 while the window runs", pendingCount())
+	}
+	resetPending()
+
+	// the uninstall removed the record after this launch checked the
+	// directory: it opens nothing
+	stateMu.Lock()
+	delete(state.InstalledNapps, v2.ID)
+	stateMu.Unlock()
+	if ci, err := launch(context.Background(), v2); err == nil {
+		closeOnCleanup(t, ci)
+		t.Fatal("a napplet that is no longer installed opened a window")
+	}
+}
+
+// TestLaunchRacingReclaim: launches and an update's reclaim of the version
+// they captured run at once. Whatever the order, the reclaimed version's
+// files are gone at the end, and every window runs the installed version.
+func TestLaunchRacingReclaim(t *testing.T) {
+	newLaunchRig(t)
+	sk := nostr.Generate()
+	v1 := installNappletFiles(t, validNapplet(t, sk, "app", "", 10))
+	v2 := installedFrom(t, validNapplet(t, sk, "app", "v2", 20))
+
+	for i := 0; i < 20; i++ {
+		old := seedNapplet(t, v1, randomID())
+		installRecord(t, v1)
+		var wg sync.WaitGroup
+		opened := make(chan *Instance, 1)
+		wg.Go(func() {
+			ci, err := launch(context.Background(), v1)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			// a window of the old version writes as soon as it runs
+			_ = napStorageSetValue(ci, storeFileOf(t, ci.napp, "shared", ""), "k", "v")
+			opened <- ci
+		})
+		wg.Go(func() {
+			stateMu.Lock()
+			state.InstalledNapps[v2.ID] = v2
+			stateMu.Unlock()
+			reclaimNapplet(v1, nil)
+		})
+		wg.Wait()
+		ci := <-opened
+		WindowClosed(ci.instance)
+		backgroundSyncs.Wait()
+		if pendingCount() != 0 {
+			t.Fatalf("round %d: %d reclaims pending with every window closed", i, pendingCount())
+		}
+		assertFiles(t, "reclaimed version", []string{old.shared, old.config}, false)
+	}
+}
+
+// TestTrialPromotionAfterUninstallWritesNothing: the trial closed while its
+// napplet was installed, and the uninstall landed before promotion wrote.
+func TestTrialPromotionAfterUninstallWritesNothing(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	installed := installedFrom(t, evt)
+	installRecord(t, installed)
+	s := newTrialSession(t, installed)
+
+	stateMu.Lock()
+	delete(state.InstalledNapps, installed.ID)
+	stateMu.Unlock()
+	promoteTrial(s.ci, installed, "could not keep trial data: ")
+	if onDisk(s.shared) || onDisk(s.instance) {
+		t.Error("promotion wrote trial data for an uninstalled napplet")
+	}
+	if got := fetchErr(); got != "" {
+		t.Errorf("launcher error %q", got)
+	}
+	// installRecord started shortcut syncs that read the rig's host
+	backgroundSyncs.Wait()
+}

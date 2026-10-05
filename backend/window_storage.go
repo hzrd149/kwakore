@@ -413,6 +413,11 @@ func napStorageKeyList(ci *Instance, file string) []string {
 // (D-25).
 var errInstalledHasData = errors.New("the installed napplet already has saved data")
 
+// errTrialNotInstalled refuses to promote a trial whose version is not
+// installed (any more): an uninstall or update landed after the trial
+// closed, and its files would be nobody's.
+var errTrialNotInstalled = errors.New("that version of the napplet is not installed")
+
 // persistTrialStorage promotes the in-memory stores from a successful trial
 // into the files the installed napplet uses: the trial keyed its stores by
 // the same file paths, so promotion writes them where they belong.
@@ -423,6 +428,23 @@ var errInstalledHasData = errors.New("the installed napplet already has saved da
 // nothing is written and errInstalledHasData is returned. Any other store
 // that already holds data is left as it is too.
 func persistTrialStorage(ci *Instance) error {
+	// under reclaimMu, and only while the trial's version is installed: an
+	// uninstall or update that lands meanwhile reclaims after this returns,
+	// and takes what was written with it, instead of this writing back
+	// files a reclaim already removed (D-24)
+	scope, err := nappletScope(ci.napp)
+	if err != nil {
+		return err
+	}
+	reclaimMu.Lock()
+	defer reclaimMu.Unlock()
+	stateMu.Lock()
+	installed := scopeInstalledLocked(scope)
+	stateMu.Unlock()
+	if !installed {
+		return errTrialNotInstalled
+	}
+
 	sharedFile := ""
 	if key, err := nappletStorageKey(ci.napp, "shared", ""); err == nil {
 		if file, err := nappletStorageFile(key); err == nil {

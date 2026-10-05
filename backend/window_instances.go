@@ -142,10 +142,16 @@ var windows = xsync.NewMapOf[string, windowRecord]()
 // ─── registry ────────────────────────────────────────────────────
 
 func registerInstance(ci *Instance) {
+	addInstance(ci)
+	notifyState()
+}
+
+// addInstance is registerInstance without the state nudge, for a caller
+// holding reclaimMu (launchWindow), which must not call out to the host.
+func addInstance(ci *Instance) {
 	instancesMu.Lock()
 	instances = append(instances, ci)
 	instancesMu.Unlock()
-	notifyState()
 }
 
 func lookupInstance(instance string) *Instance {
@@ -727,6 +733,29 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		}
 	}
 
+	// an installed napplet's window opens on the version installed right
+	// now, re-read under reclaimMu and registered before it is released:
+	// the record the caller holds may be from before an update or an
+	// uninstall, and a reclaim decides from the live windows under the same
+	// lock. So a reclaim either ran first, and this window runs the version
+	// that replaced the reclaimed one (or fails when there is none), or runs
+	// after, sees this window and waits for it (D-24). Without it a window
+	// could open on a reclaimed version and write its files back.
+	installedNapplet := napp.IsNapplet() && previewDocument == nil && devLookup(id) == nil
+	unlockReclaim := func() {}
+	if installedNapplet {
+		reclaimMu.Lock()
+		stateMu.Lock()
+		current, ok := state.InstalledNapps[id]
+		stateMu.Unlock()
+		if !ok || !current.IsNapplet() {
+			reclaimMu.Unlock()
+			return nil, fmt.Errorf("napplet %s is not installed", id)
+		}
+		napp = current
+		unlockReclaim = reclaimMu.Unlock
+	}
+
 	themeName, themeVars := Theme()
 	winW, winH := napp.WindowSize()
 	instance := requestedInstance
@@ -758,7 +787,9 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 
 	// registered before the window exists, so a napp that starts talking
 	// immediately is never talking to nobody
-	registerInstance(ci)
+	addInstance(ci)
+	unlockReclaim()
+	notifyState()
 
 	log.Info().Str("napp", id).Str("name", napp.Name).Str("instance", ci.instance).
 		Msg("launch napp")

@@ -182,8 +182,15 @@ func Uninstall(id string) {
 	defer setBusy(id, false)
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 
+	// the record goes first: no napplet window opens on a version that is
+	// not installed (launchWindow re-reads it), so the close below reaches
+	// every window there will be, and the reclaim, which keeps any scope
+	// that is still installed, sees this one gone
 	stateMu.Lock()
 	record, installed := state.InstalledNapps[id]
+	delete(state.InstalledNapps, id)
+	delete(state.LastLaunched, id)
+	saveState()
 	stateMu.Unlock()
 	napplet := installed && record.IsNapplet()
 	if napplet {
@@ -193,21 +200,13 @@ func Uninstall(id string) {
 	}
 
 	// a napp whose directory cannot be named safely gets nothing removed,
-	// but is still forgotten below
+	// but is still forgotten
 	if base, err := nappBaseDir(id); err != nil {
 		log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
 	} else {
 		os.RemoveAll(base)
 		removeStaleStaging(base)
 	}
-
-	// the record goes before the reclaim: reclaim keeps any scope that is
-	// still installed, and this one no longer is
-	stateMu.Lock()
-	delete(state.InstalledNapps, id)
-	delete(state.LastLaunched, id)
-	saveState()
-	stateMu.Unlock()
 
 	if napplet {
 		reclaimNapplet(record, instancesForNapp(id))
@@ -514,6 +513,11 @@ func promoteTrial(ci *Instance, installed Napp, errPrefix string) {
 		if had {
 			raiseTrialDataDiscarded(ci.napp, trialDataExistingData)
 		}
+	case errors.Is(err, errTrialNotInstalled):
+		// uninstalled or updated since the trial closed: its data would
+		// be written for a version nothing runs
+		log.Info().Str("napp", ci.napp.ID).Msg("trial data dropped: its version is no longer installed")
+		dropTrial(ci)
 	case err != nil:
 		SetFetchErr(errPrefix + err.Error())
 	}
