@@ -79,3 +79,20 @@ Every gate ran in the main checkout at f86fac1. `desktop/child/child` was rebuil
 _Fixed: 2026-10-05T19:29:37Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 3_
+
+## Verification gap closure
+
+This closes the gap and the two warnings in `05-VERIFICATION.md`. Each commit is on master in the main checkout.
+
+| Commit | Item | Change | Test |
+| ------ | ---- | ------ | ---- |
+| cdc78ef | GAP: D-08 / 05-10 sweep truth / smoke item 1 | The startup sweep now also removes regular `.json` files in `storage/` named `napplet-*` or `napplet~*`, which are the NAP-STORAGE files of earlier builds. Every other file in `storage/` stays: 64-hex names, old `pk16~d` and `dev~` napp names, and unknown names. The CR-02 holds still apply, and so does the regular-file-only rule: no symlinks, directories or `.tmp-*` files are touched. CONFORMANCE CF-2 is updated to match. | `TestStartupSweep` fixture: removes `napplet-<hash>.json` and `napplet~…json`, and keeps napp, dev, 64-hex and unknown names, `Napplet-…` (case), `napplet-old.txt`, and a `napplet-…` directory and symlink. `TestStartupSweepHeldOnCorruptState` and `…HeldOnUnreadableState` check that nothing is removed. |
+| 984ca49 | WARNING: 05-07 copy rules | `failureLine` maps install, update, try, launch, shortcut and trial-promotion failures, plus the gomobile Install/Try/OpenAddress lines, to fixed copy. Fixed refusals keep their own text: busy, older, unavailable, `errNotInstalled`, and `errFilesFailed` (which wraps download failures). Anything else gets a fixed fallback, and the raw error is logged at Warn. "Not installed" lines no longer show the id. "No update found" uses `fetchErrName`, the notice-name sanitizer. | `TestFetchErrLinesHideRawDetail`: a missing blob, a failed swap and not-installed cases for update, launch-by-id, launch and shortcut. No hash, server URL, path, injected text or address appears. Also `TestFailureLineKeepsFixedErrors`, `TestFetchErrNameNeverShowsTheAddress`, and the updated `TestChildUnavailableOnlyForItsError`. |
+| 4aea1f4 | WARNING: 05-08 deferred item | `applyUpdate` uses `newer.BlossomServers(ctx)` like install does: the user's servers, then the manifest's, then the author's list. The per-server D-20 trust in `downloadBlob` is unchanged. | `TestUpdateAsksTheUserServers`: a manifest that names its own (private, TLS) server updates from the user's server, and the manifest's server gets no requests. The test fails on the old code. |
+
+**Verification:** run in the main checkout at 4aea1f4.
+- Backend: `gofmt -l .`, `go vet ./...`, `VERDANA_REQUIRE_NODE=1 go test -count=1 ./...` and `go test -race -count=1 .` all pass.
+- Android: `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...` passes.
+- Desktop: `go generate ./internal/webviewlib && go build -o child/child ./child && go test -race -count=1 -tags novulkan ./...` passes.
+
+**Known flake (not new):** `TestNapDeliversDMsAsSigned` has a 3 s wait that sometimes fails under `-race` load. It failed 1 of 5 full race runs at cdc78ef, a commit that does not touch that code, and passed on rerun.
