@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -580,6 +581,46 @@ const (
 // renameInstallDir is os.Rename, swappable in tests.
 var renameInstallDir = os.Rename
 
+// On Windows a directory whose files were just written, or are being read
+// (an antivirus or indexer handle, a window's file server), can refuse a
+// rename for a moment. A swap tries each rename installRenameAttempts times
+// there, waiting a little longer each time (installRenameBackoff, then
+// twice that, and so on), before it gives up. The swap holds stateMu, so the
+// waits stay short: at most 200ms per rename.
+var (
+	installRenameAttempts = 1
+	installRenameBackoff  = 20 * time.Millisecond
+)
+
+func init() {
+	if runtime.GOOS == "windows" {
+		installRenameAttempts = 5
+	}
+}
+
+// renameInstallDirRetrying is renameInstallDir with the retries above. A
+// source that is not there is not retried.
+func renameInstallDirRetrying(from, to string) error {
+	attempt := 1
+	for {
+		err := renameInstallDir(from, to)
+		if err == nil {
+			if attempt > 1 {
+				log.Info().Int("attempts", attempt).Str("dir", filepath.Base(to)).Msg("install directory renamed after retrying")
+			}
+			return nil
+		}
+		if errors.Is(err, os.ErrNotExist) || attempt >= installRenameAttempts {
+			if attempt > 1 {
+				return fmt.Errorf("%w (after %d attempts)", err, attempt)
+			}
+			return err
+		}
+		time.Sleep(time.Duration(attempt) * installRenameBackoff)
+		attempt++
+	}
+}
+
 // stageNappFiles downloads every file of n into a new directory next to
 // base and returns it. On failure nothing is left behind and base is never
 // touched. The caller holds n's busy claim.
@@ -617,15 +658,15 @@ func swapInstallDir(staging, base string) (func(), error) {
 	old := ""
 	if _, err := os.Lstat(base); err == nil {
 		old = base + oldInfix + randomID()[:8]
-		if err := renameInstallDir(base, old); err != nil {
+		if err := renameInstallDirRetrying(base, old); err != nil {
 			return nil, fmt.Errorf("could not move the installed copy aside: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if err := renameInstallDir(staging, base); err != nil {
+	if err := renameInstallDirRetrying(staging, base); err != nil {
 		if old != "" {
-			if rerr := renameInstallDir(old, base); rerr != nil {
+			if rerr := renameInstallDirRetrying(old, base); rerr != nil {
 				log.Error().Err(rerr).Str("dir", filepath.Base(base)).Msg("could not put the installed copy back")
 			}
 		}

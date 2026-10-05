@@ -292,3 +292,61 @@ func TestInstallClearsStaleStaging(t *testing.T) {
 		t.Error("another napp's staging directory was removed")
 	}
 }
+
+// TestSwapRetriesTransientRenameFailure: a rename the OS refuses for a
+// moment (Windows, with a handle open on the directory) is tried again
+// instead of failing the whole update (IN-11). One that keeps failing still
+// fails, after the set number of attempts, and the installed copy stays.
+func TestSwapRetriesTransientRenameFailure(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	v2 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v2", 20))
+	v3 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v3", 30))
+
+	prevRename, prevAttempts, prevBackoff := renameInstallDir, installRenameAttempts, installRenameBackoff
+	t.Cleanup(func() {
+		renameInstallDir, installRenameAttempts, installRenameBackoff = prevRename, prevAttempts, prevBackoff
+	})
+	installRenameAttempts, installRenameBackoff = 3, time.Millisecond
+
+	// every rename fails once, then works
+	failed := map[string]bool{}
+	calls := 0
+	renameInstallDir = func(from, to string) error {
+		calls++
+		if !failed[from] {
+			failed[from] = true
+			return errors.New("injected sharing violation")
+		}
+		return os.Rename(from, to)
+	}
+	if err := InstallNapp(v2); err != nil {
+		t.Fatalf("a rename that failed once failed the update: %v", err)
+	}
+	assertInstalledIntact(t, v2, "v2")
+	if calls != 4 {
+		t.Fatalf("%d renames, want two renames tried twice each", calls)
+	}
+
+	// the new copy never moves in: three attempts, then the old copy back
+	staging := 0
+	renameInstallDir = func(from, to string) error {
+		if strings.Contains(filepath.Base(from), stagingInfix) {
+			staging++
+			return errors.New("injected sharing violation")
+		}
+		return os.Rename(from, to)
+	}
+	if err := InstallNapp(v3); err == nil {
+		t.Fatal("an install whose swap kept failing succeeded")
+	}
+	if staging != 3 {
+		t.Fatalf("%d attempts to move the new copy in, want 3", staging)
+	}
+	assertInstalledIntact(t, v2, "v2")
+}
