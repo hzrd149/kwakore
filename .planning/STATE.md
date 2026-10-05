@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-10-05T15:55:01.335Z"
+stopped_at: Completed 05-12-PLAN.md
+last_updated: "2026-10-05T15:59:00.694Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-05 (NIP-01 latest-event selection, unavailable entries with catalogue reasons)
-state_head: 2e2c6375836d92162ee755dfc2db7cc10810b1ef
+last_activity_desc: Completed 05-12 (macOS and Windows shortcuts and search launchers carry launch tokens; --try-napplet decodes them)
+state_head: e18749ed941737cf200c9e80fa78616f49e0a211
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 33
+  completed_plans: 34
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 6 of 12 (05-01, 05-02, 05-03, 05-04, 05-05 complete)
+Plan: 7 of 12 (05-01, 05-02, 05-03, 05-04, 05-05, 05-12 complete; wave 2 done, 05-06 next)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-05-PLAN.md (NIP-01 latest-event selection with CheckID first on discovery, address lookups, resolved cache and author pages; an invalid latest is listed unavailable with a fixed catalogue reason, never an older version)
+Last activity: 2026-10-05 — Completed 05-12-PLAN.md (macOS and Windows app shortcuts and search launchers pass launch tokens, never raw ids; --try-napplet decodes tokens and refuses undecodable ones; D-21 done on every desktop OS)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -94,6 +94,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P03 | 5min | 3 tasks | 12 files |
 | Phase 05 P04 | 11min | 2 tasks | 7 files |
 | Phase 05 P05 | 7min | 3 tasks | 11 files |
+| Phase 05 P12 | 4min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -185,6 +186,7 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-05: latestByAddress requires CheckID and VerifySignature before comparing, so a forged id never wins a NIP-01 tie
 - [Phase 5]: 05-05: only the NIP-01 winner of an address is validated; an invalid winner is listed unavailable with a fixed catalogue phrase and never falls back to an older valid event
 - [Phase 5]: 05-05: nappNewer treats equal CreatedAt with an unknown EventID as not newer, so pre-EventID records never flip-flop
+- [Phase 5]: 05-12: --try-napplet arguments resolve through trialTarget, which decodes launch tokens first; raw ids (GNOME, Android, older launchers) still resolve and undecodable tokens start nothing
 
 ### Pending Todos
 
@@ -217,6 +219,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:55:01.205Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-10-05T15:59:00.573Z
+Stopped at: Completed 05-12-PLAN.md
 Resume file: None
