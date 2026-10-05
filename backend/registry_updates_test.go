@@ -735,3 +735,36 @@ func TestLaunchCheckOfflineKeepsState(t *testing.T) {
 		}
 	}
 }
+
+// TestLookupNappMatchesSnapshot: a napp page reads an installed napp through
+// LookupNapp, so it carries the same UpdateAvailable and Unavailable as the
+// snapshot entry; the saved record carries neither (WR-07).
+func TestLookupNappMatchesSnapshot(t *testing.T) {
+	newUpdateRig(t)
+	sk := nostr.Generate()
+	n := installedFrom(t, validNapplet(t, sk, "app", "", 10))
+	installRecord(t, n)
+	newer := installedFrom(t, validNapplet(t, sk, "app", "v2", 20))
+
+	mergeUpdateState(n.ID, &newer)
+	got, ok := LookupNapp(n.ID)
+	if !ok || got.UpdateAvailable == nil || got.UpdateAvailable.EventID != newer.EventID {
+		t.Fatalf("LookupNapp = %v %+v, want the update on offer", ok, got.UpdateAvailable)
+	}
+	if snap := installedSnapshot(t, n.ID); snap.UpdateAvailable == nil || snap.UpdateAvailable.EventID != got.UpdateAvailable.EventID {
+		t.Fatalf("snapshot and lookup disagree: %+v", snap.UpdateAvailable)
+	}
+	if rec, _ := InstalledNapp(n.ID); rec.UpdateAvailable != nil || rec.Unavailable != "" {
+		t.Fatal("the saved record was stamped")
+	}
+
+	broken := nappFromLatest(invalidNapplet(t, sk, "app", 30))
+	mergeUpdateState(n.ID, &broken)
+	got, _ = LookupNapp(n.ID)
+	if got.Unavailable == "" || got.UpdateAvailable != nil {
+		t.Fatalf("LookupNapp: unavailable %q, update %v", got.Unavailable, got.UpdateAvailable)
+	}
+	if snap := installedSnapshot(t, n.ID); snap.Unavailable != got.Unavailable {
+		t.Fatalf("snapshot unavailable %q, lookup %q", snap.Unavailable, got.Unavailable)
+	}
+}

@@ -120,6 +120,10 @@ func authorNapps(pk nostr.PubKey, events []nostr.Event) []Napp {
 // or dev — by id, so a detail tab can refresh its copy every frame.
 func LookupNapp(id string) (Napp, bool) {
 	if n, ok := InstalledNapp(id); ok {
+		// stamped like Snapshot's entry: the saved record never carries
+		// UpdateAvailable or Unavailable, and a napp page built from it
+		// could never offer Update or say the latest version is invalid
+		stampUpdateState(&n, updateSet.Load())
 		return n, true
 	}
 	if n, ok := DiscoveredNapp(id); ok {

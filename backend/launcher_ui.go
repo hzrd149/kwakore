@@ -223,6 +223,30 @@ func mergeUpdateState(id string, entry *Napp) {
 	mergeUpdateStates(map[string]*Napp{id: entry})
 }
 
+// stampUpdateState sets an installed record's UpdateAvailable and
+// Unavailable from updates. Both are only ever stamped on a copy: a saved
+// record never carries them. Snapshot and LookupNapp both go through here,
+// so every view of an installed napp shows the same state.
+func stampUpdateState(n *Napp, updates *xsync.MapOf[string, Napp]) {
+	n.UpdateAvailable = nil
+	n.Unavailable = ""
+	entry, ok := updates.Load(n.ID)
+	if !ok {
+		return
+	}
+	// an entry only counts against the record it was worked out for: a
+	// record installed since then (a newer version, or the same one
+	// reinstalled) is not shown an older entry
+	switch {
+	case entry.Unavailable != "":
+		if !nappNewer(*n, entry) {
+			n.Unavailable = entry.Unavailable
+		}
+	case nappNewer(entry, *n):
+		n.UpdateAvailable = &entry
+	}
+}
+
 // Snapshot is the current launcher state, safe to hold on to and read from a
 // render loop.
 func Snapshot() State {
@@ -262,24 +286,7 @@ func Snapshot() State {
 	s.UpdateCheckRunning = updateChecking.Load()
 	updates := updateSet.Load()
 	for i := range s.Installed {
-		// both are Snapshot's to set: a saved record never carries them
-		s.Installed[i].UpdateAvailable = nil
-		s.Installed[i].Unavailable = ""
-		entry, ok := updates.Load(s.Installed[i].ID)
-		if !ok {
-			continue
-		}
-		// an entry only counts against the record it was worked out for: a
-		// record installed since then (a newer version, or the same one
-		// reinstalled) is not shown an older entry
-		switch {
-		case entry.Unavailable != "":
-			if !nappNewer(s.Installed[i], entry) {
-				s.Installed[i].Unavailable = entry.Unavailable
-			}
-		case nappNewer(entry, s.Installed[i]):
-			s.Installed[i].UpdateAvailable = &entry
-		}
+		stampUpdateState(&s.Installed[i], updates)
 	}
 	// author names resolve in the background and are stamped on every
 	// snapshot, so the UIs get them for free (display and filtering).

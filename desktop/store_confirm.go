@@ -28,10 +28,6 @@ type storeConfirm struct {
 	id string
 	// name is the napplet's display name for the dialog (see confirmName).
 	name string
-	// target is what Install gets when viaInstall is set: the profile list
-	// updates a napplet by installing the version it shows.
-	target     backend.Napp
-	viaInstall bool
 }
 
 // The backend calls the store makes after a confirmation, or straight away
@@ -39,7 +35,6 @@ type storeConfirm struct {
 // without a running backend.
 var (
 	storeUpdate    = func(id string) { go backend.Update(id) }
-	storeInstall   = func(n backend.Napp) { go backend.Install(n) }
 	storeUninstall = func(id string) { go backend.Uninstall(id) }
 )
 
@@ -82,19 +77,20 @@ func (c *storeConfirm) dialogCopy() (title, body, yesLabel, noLabel string) {
 		"Update and reset data", "Keep current version"
 }
 
-// requestUpdate is what every store Update button does. While the napp is
-// busy it does nothing. A napp updates at once; a napplet parks a
-// confirmation, replacing any other one. viaInstall updates by installing n
-// itself (the profile list) rather than through backend.Update.
-func requestUpdate(n backend.Napp, viaInstall, busy bool) {
+// requestUpdate is what every store Update button does (installed tile, napp
+// page, profile list). While the napp is busy it does nothing. A napp updates
+// at once; a napplet parks a confirmation, replacing any other one. Either
+// way the update is backend.Update, which installs the newer version the
+// snapshot entry n offers.
+func requestUpdate(n backend.Napp, busy bool) {
 	if busy {
 		return
 	}
 	if !n.IsNapplet() {
-		runConfirmed(&storeConfirm{kind: confirmUpdate, id: n.ID, target: n, viaInstall: viaInstall})
+		runConfirmed(&storeConfirm{kind: confirmUpdate, id: n.ID})
 		return
 	}
-	parkConfirm(&storeConfirm{kind: confirmUpdate, id: n.ID, name: confirmName(n), target: n, viaInstall: viaInstall})
+	parkConfirm(&storeConfirm{kind: confirmUpdate, id: n.ID, name: confirmName(n)})
 }
 
 // parkConfirm puts c up as the store's one pending confirmation. The click
@@ -143,8 +139,6 @@ func runConfirmed(c *storeConfirm) {
 	switch {
 	case c.kind == confirmUninstall:
 		storeUninstall(c.id)
-	case c.viaInstall:
-		storeInstall(c.target)
 	default:
 		storeUpdate(c.id)
 	}
@@ -157,7 +151,7 @@ func requestUninstall(n backend.Napp, busy bool) {
 	if busy {
 		return
 	}
-	c := &storeConfirm{kind: confirmUninstall, id: n.ID, target: n}
+	c := &storeConfirm{kind: confirmUninstall, id: n.ID}
 	if !n.IsNapplet() {
 		runConfirmed(c)
 		return
@@ -175,6 +169,17 @@ func installedOr(st backend.State, n backend.Napp) backend.Napp {
 		}
 	}
 	return n
+}
+
+// profileEntries is a profile page's list with every installed napp
+// replaced by its snapshot entry (installedOr), which alone carries
+// UpdateAvailable and Unavailable for it. The list itself is not changed.
+func profileEntries(st backend.State, napps []backend.Napp) []backend.Napp {
+	out := make([]backend.Napp, len(napps))
+	for i, n := range napps {
+		out[i] = installedOr(st, n)
+	}
+	return out
 }
 
 // stale says whether the premise of the dialog is gone: the napplet is no

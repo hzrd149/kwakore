@@ -429,7 +429,7 @@ func runStoreWindow() {
 				if !acted {
 					for _, i := range instVis {
 						if installedUpdateBtns[i].Clicked(gtx) {
-							requestUpdate(st.Installed[i], false, busy[st.Installed[i].ID])
+							requestUpdate(st.Installed[i], busy[st.Installed[i].ID])
 							acted = true
 						}
 					}
@@ -478,7 +478,7 @@ func runStoreWindow() {
 					}
 				}
 			} else if page.kind == "napp" {
-				n := detailNapp(page)
+				n := detailNapp(st, page)
 				if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
 					openProfilePage(n.Author.Hex())
 				} else if detailOpenBtn.Clicked(gtx) && (installedSet[n.ID] || n.IsNapplet()) {
@@ -499,7 +499,7 @@ func runStoreWindow() {
 						go backend.Install(n)
 					}
 				} else if detailUpdateBtn.Clicked(gtx) && installedShowsUpdate(n) {
-					requestUpdate(installedOr(st, n), false, busy[n.ID])
+					requestUpdate(installedOr(st, n), busy[n.ID])
 				} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
 					gioHost{}.CopyText(n.Naddr())
 				} else if detailSettingsBtn.Clicked(gtx) && installedSet[n.ID] {
@@ -516,6 +516,9 @@ func runStoreWindow() {
 				}
 				// size the buttons to the profile's napps list
 				pan, _, _ := cachedAuthorNapps(page.pubkey)
+				// installed entries as the snapshot stamps them, the
+				// same ones the rows draw (layoutProfileDetail)
+				pan = profileEntries(st, pan)
 				for len(profileCardBtns) < len(pan) {
 					profileCardBtns = append(profileCardBtns, widget.Clickable{})
 					profileOpenBtns = append(profileOpenBtns, widget.Clickable{})
@@ -548,7 +551,7 @@ func runStoreWindow() {
 							pacted = true
 						}
 						if profileUpdateBtns[i].Clicked(gtx) && installedShowsUpdate(pn) {
-							requestUpdate(pn, true, busy[pn.ID])
+							requestUpdate(pn, busy[pn.ID])
 							pacted = true
 						}
 					}
@@ -588,7 +591,7 @@ func runStoreWindow() {
 							})
 						case page != nil:
 							return readableColumn(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layoutProfileDetail(gtx, th, page, &profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
+								return layoutProfileDetail(gtx, th, page, &profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, st)
 							})
 						case view == storeInstalled:
 							return layoutNappsTab(gtx, th, &installedList, &installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, &checkUpdBtn, instVis, st)

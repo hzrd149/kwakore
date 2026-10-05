@@ -281,3 +281,52 @@ func TestInstalledUnavailableKeepsOpen(t *testing.T) {
 		t.Fatalf("napp profile row %q %q", open, action)
 	}
 }
+
+// TestDetailAndProfileReadSnapshotEntries: the napp page and the profile
+// list draw an installed napplet from the snapshot entry, which alone
+// carries UpdateAvailable and Unavailable, so Update (D-14) and the
+// unavailable status show there; the saved record or the profile's own
+// copy never carries them (WR-07).
+func TestDetailAndProfileReadSnapshotEntries(t *testing.T) {
+	saved := testAuthored(testNapplet("clock", "Clock"))
+	newer := saved
+	newer.Name = "Clock 2"
+	withUpdate := saved
+	withUpdate.UpdateAvailable = &newer
+	st := backend.State{Installed: []backend.Napp{withUpdate}}
+
+	// the page was opened from a copy without the stamp
+	page := &storePage{kind: "napp", nappID: saved.ID, napp: saved}
+	n := detailNapp(st, page)
+	if !installedShowsUpdate(n) {
+		t.Fatalf("napp page entry %+v shows no update", n)
+	}
+	if got := nappPageActions(n, true, false).labels(); !slices.Contains(got, "Update") {
+		t.Fatalf("napp page actions %q have no Update", got)
+	}
+
+	broken := saved
+	broken.Unavailable = "its manifest is missing required tags"
+	st = backend.State{Installed: []backend.Napp{broken}}
+	n = detailNapp(st, page)
+	if lines := unavailableLines(n, true); len(lines) == 0 {
+		t.Fatal("napp page shows no unavailable status for an installed napplet")
+	}
+
+	// not installed: the page's own copy, as before
+	if got := detailNapp(backend.State{}, page); got.ID != saved.ID || got.UpdateAvailable != nil {
+		t.Fatalf("uninstalled page entry %+v", got)
+	}
+
+	// the profile list: its installed rows become the snapshot entries,
+	// the others stay as fetched
+	other := testAuthored(testNapplet("notes", "Notes"))
+	st = backend.State{Installed: []backend.Napp{withUpdate}}
+	rows := profileEntries(st, []backend.Napp{newer, other})
+	if !installedShowsUpdate(rows[0]) || rows[1].ID != other.ID || rows[1].UpdateAvailable != nil {
+		t.Fatalf("profile rows %+v", rows)
+	}
+	if _, _, update := profileRowLabels(rows[0], true, false); update != "Update" {
+		t.Fatalf("profile row update label %q", update)
+	}
+}

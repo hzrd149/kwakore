@@ -139,12 +139,21 @@ func ensureAuthorNapps(pubkeyHex string) {
 	}()
 }
 
-// detailNapp resolves the napp a napp page shows: the freshest copy the
-// launcher knows (so install/uninstall/update reflect immediately),
-// falling back to the copy taken when the page was opened.
-func detailNapp(tab *storePage) backend.Napp {
+// detailNapp resolves the napp a napp page shows. An installed napp is its
+// entry in st, the snapshot this frame draws: only the snapshot (and
+// LookupNapp, which stamps the same way) carries UpdateAvailable and
+// Unavailable, so a saved record would never show Update or the
+// unavailable status. Otherwise it is the freshest copy the launcher knows
+// (so install/uninstall reflect immediately), falling back to the copy taken
+// when the page was opened.
+func detailNapp(st backend.State, tab *storePage) backend.Napp {
 	if tab == nil {
 		return backend.Napp{}
+	}
+	for _, in := range st.Installed {
+		if in.ID == tab.nappID {
+			return in
+		}
 	}
 	if n, ok := backend.LookupNapp(tab.nappID); ok {
 		return n
@@ -186,7 +195,7 @@ func layoutNappDetail(
 	busy map[string]bool,
 	st backend.State,
 ) layout.Dimensions {
-	n := detailNapp(tab)
+	n := detailNapp(st, tab)
 	if n.ID == "" {
 		l := material.Body2(th, "Napp not found.")
 		l.Color = currentTheme().muted
@@ -402,6 +411,7 @@ func layoutProfileDetail(
 	cardBtns, openBtns, actionBtns, updateBtns []widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
+	st backend.State,
 ) layout.Dimensions {
 	pubkey := ""
 	if tab != nil {
@@ -483,7 +493,9 @@ func layoutProfileDetail(
 				return layout.Dimensions{}
 			}
 			return material.List(th, list).Layout(gtx, len(napps), func(gtx layout.Context, i int) layout.Dimensions {
-				n := napps[i]
+				// an installed entry as the snapshot stamps it, so its
+				// Update button and unavailable status show here too
+				n := installedOr(st, napps[i])
 				var cardBtn, openBtn, actBtn, updBtn *widget.Clickable
 				if i < len(cardBtns) {
 					cardBtn = &cardBtns[i]

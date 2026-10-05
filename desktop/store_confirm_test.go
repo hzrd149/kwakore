@@ -19,12 +19,11 @@ import (
 // confirmCalls records the backend calls the store made, in order.
 type confirmCalls struct {
 	updates    []string
-	installs   []string
 	uninstalls []string
 }
 
 func (c *confirmCalls) total() int {
-	return len(c.updates) + len(c.installs) + len(c.uninstalls)
+	return len(c.updates) + len(c.uninstalls)
 }
 
 // recordConfirmCalls swaps the store's backend calls for recorders and gives
@@ -32,16 +31,15 @@ func (c *confirmCalls) total() int {
 func recordConfirmCalls(t *testing.T) *confirmCalls {
 	t.Helper()
 	calls := &confirmCalls{}
-	oldUpdate, oldInstall, oldUninstall := storeUpdate, storeInstall, storeUninstall
+	oldUpdate, oldUninstall := storeUpdate, storeUninstall
 	storeUpdate = func(id string) { calls.updates = append(calls.updates, id) }
-	storeInstall = func(n backend.Napp) { calls.installs = append(calls.installs, n.ID) }
 	storeUninstall = func(id string) { calls.uninstalls = append(calls.uninstalls, id) }
 	store.mu.Lock()
 	oldConfirm := store.confirm
 	store.confirm = nil
 	store.mu.Unlock()
 	t.Cleanup(func() {
-		storeUpdate, storeInstall, storeUninstall = oldUpdate, oldInstall, oldUninstall
+		storeUpdate, storeUninstall = oldUpdate, oldUninstall
 		store.mu.Lock()
 		store.confirm = oldConfirm
 		store.mu.Unlock()
@@ -72,7 +70,7 @@ func TestStoreConfirmOnlyForNapplets(t *testing.T) {
 
 	// a napp updates in one click, as before: nothing is parked
 	napp := testNapp("notes", "Notes")
-	requestUpdate(napp, false, false)
+	requestUpdate(napp, false)
 	if pendingConfirm() != nil {
 		t.Fatal("a napp update parked a confirmation")
 	}
@@ -82,7 +80,7 @@ func TestStoreConfirmOnlyForNapplets(t *testing.T) {
 
 	// a napplet update parks a confirmation and calls nothing yet
 	pixel := testNapplet("pixel", "Pixel")
-	requestUpdate(pixel, false, false)
+	requestUpdate(pixel, false)
 	c := pendingConfirm()
 	if c == nil {
 		t.Fatal("a napplet update parked no confirmation")
@@ -101,7 +99,7 @@ func TestStoreConfirmOnlyForNapplets(t *testing.T) {
 	}
 
 	// the destructive button clears it first, then updates exactly once
-	requestUpdate(pixel, false, false)
+	requestUpdate(pixel, false)
 	storeUpdate = func(id string) {
 		if pendingConfirm() != nil {
 			t.Error("the update ran while the dialog was still pending")
@@ -165,7 +163,7 @@ func TestStoreConfirmCopy(t *testing.T) {
 
 	// the name parked by a request is the sanitized one
 	recordConfirmCalls(t)
-	requestUpdate(testNapplet("pixel", "Pixel‮Paint"), false, false)
+	requestUpdate(testNapplet("pixel", "Pixel‮Paint"), false)
 	if c := pendingConfirm(); c == nil || c.name != "PixelPaint" {
 		t.Fatalf("parked %+v, want the name PixelPaint", c)
 	}
@@ -253,7 +251,7 @@ func TestStoreConfirmStaleGuard(t *testing.T) {
 
 	// a stale dialog closes by itself without acting, and a click that
 	// lands after that does nothing either
-	requestUpdate(withUpdate, false, false)
+	requestUpdate(withUpdate, false)
 	dropStaleConfirm(live)
 	if pendingConfirm() == nil {
 		t.Fatal("a live confirmation was dropped")
@@ -286,29 +284,20 @@ func TestStoreConfirmIgnoredWhileBusy(t *testing.T) {
 	napp := testNapp("notes", "Notes")
 
 	// a click while busy opens nothing and calls nothing, for either kind
-	requestUpdate(pixel, false, true)
-	requestUpdate(pixel, true, true)
+	requestUpdate(pixel, true)
 	requestUninstall(pixel, true)
-	requestUpdate(napp, false, true)
+	requestUpdate(napp, true)
 	requestUninstall(napp, true)
 	if pendingConfirm() != nil || calls.total() != 0 {
 		t.Fatalf("busy clicks: confirm %v, calls %+v", pendingConfirm(), calls)
 	}
 
-	// installed tile and napp page Update: confirming runs Update(id)
-	requestUpdate(pixel, false, false)
+	// installed tile, napp page and profile list Update: confirming runs
+	// Update(id), which installs the version the snapshot entry offers
+	requestUpdate(pixel, false)
 	confirmYes()
-	// profile list Update: confirming installs the version the profile shows
-	shown := pixel
-	shown.Name = "Pixel 2"
-	requestUpdate(shown, true, false)
-	if c := pendingConfirm(); c == nil || !c.viaInstall || c.target.Name != "Pixel 2" {
-		t.Fatalf("profile update parked %+v, want viaInstall with the profile napplet", c)
-	}
-	confirmYes()
-	if len(calls.updates) != 1 || calls.updates[0] != pixel.ID ||
-		len(calls.installs) != 1 || calls.installs[0] != pixel.ID {
-		t.Fatalf("update calls %+v, want one Update and one Install of %q", calls, pixel.ID)
+	if len(calls.updates) != 1 || calls.updates[0] != pixel.ID {
+		t.Fatalf("update calls %+v, want one Update of %q", calls, pixel.ID)
 	}
 
 	// Uninstall (installed tile, napp page, profile list): a napplet asks,
@@ -333,7 +322,7 @@ func TestStoreConfirmIgnoredWhileBusy(t *testing.T) {
 
 	// a second request replaces the first: one dialog, the latest one
 	other := testNapplet("other", "Other")
-	requestUpdate(pixel, false, false)
+	requestUpdate(pixel, false)
 	requestUninstall(other, false)
 	if c := pendingConfirm(); c == nil || c.kind != confirmUninstall || c.id != other.ID {
 		t.Fatalf("second request left %+v up, want the uninstall of %q", c, other.ID)
