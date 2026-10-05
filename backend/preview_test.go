@@ -5,17 +5,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"fiatjaf.com/nostr"
+
+	"verdana/backend/napconfig"
 )
 
 type previewTestHost struct {
@@ -597,5 +601,373 @@ func TestTryNappletUnavailableRaisesTrialFailed(t *testing.T) {
 	TryNapplet(un)
 	if got := liveNotices(noticeTrialFailed); len(got) != 1 {
 		t.Errorf("after dismissal: %v", got)
+	}
+}
+
+// ─── trial promotion (D-09, D-25) ────────────────────────────────
+
+// event is a signed NIP-5D manifest for d at time at, its files served by
+// the rig.
+func (r *trialRig) event(t *testing.T, d string, at nostr.Timestamp, files ...trialFile) nostr.Event {
+	t.Helper()
+	var paths []NappPath
+	for _, f := range files {
+		r.srv.set(hashOf(f.data), []byte(f.data))
+		paths = append(paths, NappPath{Path: f.path, Sha256: hashOf(f.data)})
+	}
+	tags := nip5dTags(d, paths...)
+	tags = append(tags, nostr.Tag{"title", "Pixel Paint"})
+	tags = slices.DeleteFunc(tags, func(tag nostr.Tag) bool { return tag[0] == "title" && tag[1] == "T" })
+	return signedWith(t, testNappletKey, KindNapplet, tags, "", at)
+}
+
+// trialSession is a closed trial window of n that saved a shared value, an
+// instance value and registered a config schema on disk.
+type trialSession struct {
+	ci       *Instance
+	shared   string // the shared store file
+	instance string // the instance store file
+	config   string // the config file of the trial's scope
+}
+
+func newTrialSession(t *testing.T, n Napp) *trialSession {
+	t.Helper()
+	ci := &Instance{
+		instance:        "trial-" + randomID()[:6],
+		storageInstance: randomID(),
+		napp:            n,
+		trial:           true,
+		trialStorage:    make(map[string]*nappStorage),
+	}
+	s := &trialSession{ci: ci}
+	for _, scope := range []string{"shared", "instance"} {
+		key, err := nappletStorageKey(n, scope, ci.storageInstance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := nappletStorageFile(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := napStorageSetValue(ci, file, "drawing", "trial-"+scope); err != nil {
+			t.Fatal(err)
+		}
+		if scope == "shared" {
+			s.shared = file
+		} else {
+			s.instance = file
+		}
+	}
+	scope, err := nappletScope(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, cerr := napconfig.Register(scope, json.RawMessage(`{"type":"object","properties":{"color":{"type":"string","default":"red"}}}`), nil); cerr != nil {
+		t.Fatalf("register: %v", cerr)
+	}
+	s.config = filepath.Join(dataDir, "config", napconfig.FileName(scope))
+	if _, err := os.Stat(s.config); err != nil {
+		t.Fatalf("trial config not on disk: %v", err)
+	}
+	putWindow(windowRecord{Instance: ci.instance, NappID: n.ID})
+	return s
+}
+
+// resetTrialPrompts empties the prompt queue now and when the test ends.
+func resetTrialPrompts(t *testing.T) {
+	reset := func() {
+		promptMu.Lock()
+		promptActive = nil
+		promptQueue = nil
+		promptMu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// finish closes the trial: it runs finishNappletTrial and, when a prompt
+// comes up, answers it with accept. It returns whether a prompt was shown.
+func (s *trialSession) finish(t *testing.T, accept bool) bool {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		finishNappletTrial(s.ci)
+		close(done)
+	}()
+	prompted := false
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case <-done:
+			backgroundSyncs.Wait()
+			return prompted
+		default:
+		}
+		if p := CurrentPrompt(); p != nil && !prompted {
+			if p.AcceptLabel != "Install" || p.RejectLabel != "Not now" ||
+				p.Title != "Did you like "+s.ci.napp.Label()+"?" ||
+				p.Detail != "Install it to keep the data it saved while you tried it." {
+				t.Errorf("trial prompt changed: %+v", p)
+			}
+			prompted = true
+			AnswerPrompt(p.ID, Answer{OK: accept, Scope: ScopeOnce})
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("trial did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func onDisk(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
+}
+
+// storedValue is a key of a store file as it is on disk.
+func storedValue(t *testing.T, file, key string) (string, bool) {
+	t.Helper()
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return "", false
+	}
+	var data map[string]string
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := data[key]
+	return v, ok
+}
+
+// trialDataNotice is the trial-data-discarded notice of n, if one is up.
+func trialDataNotice(n Napp) []Notice { return liveNotices(noticeTrialDataPrefix + n.Address()) }
+
+func TestTrialPromotionSameHashPersists(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	r.manifests.set(evt)
+	trial := installedFrom(t, evt)
+	s := newTrialSession(t, trial)
+
+	if !s.finish(t, true) {
+		t.Fatal("no install prompt")
+	}
+	installed, ok := InstalledNapp(trial.ID)
+	if !ok || installed.ArtifactHash != trial.ArtifactHash {
+		t.Fatalf("installed: %v %+v", ok, installed)
+	}
+	if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "trial-shared" {
+		t.Errorf("shared trial data = %q, %v", v, ok)
+	}
+	if v, ok := storedValue(t, s.instance, "drawing"); !ok || v != "trial-instance" {
+		t.Errorf("instance trial data = %q, %v", v, ok)
+	}
+	if !onDisk(s.config) {
+		t.Error("the installed version's config was forgotten")
+	}
+	if n := trialDataNotice(trial); len(n) != 0 {
+		t.Errorf("notice raised: %v", n)
+	}
+}
+
+func TestTrialPromotionDifferentHashDiscards(t *testing.T) {
+	t.Run("newer version installed", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		old := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		newer := r.event(t, "paint", 20, trialFile{"/index.html", "<!doctype html>v2"})
+		r.manifests.set(old, newer)
+		trial := installedFrom(t, old)
+		want := installedFrom(t, newer)
+		s := newTrialSession(t, trial)
+
+		if !s.finish(t, true) {
+			t.Fatal("no install prompt")
+		}
+		installed, ok := InstalledNapp(trial.ID)
+		if !ok || installed.ArtifactHash != want.ArtifactHash || installed.EventID != want.EventID {
+			t.Fatalf("installed %v %+v, want the latest event", ok, installed)
+		}
+		if onDisk(s.shared) || onDisk(s.instance) {
+			t.Error("trial data was written under the trial's scope")
+		}
+		if installedHasData(installed) {
+			t.Error("trial data reached the installed version")
+		}
+		if onDisk(s.config) {
+			t.Error("the trial's config was not forgotten")
+		}
+		n := trialDataNotice(trial)
+		if len(n) != 1 || n[0].Kind != noticeKindWarning ||
+			n[0].Title != "Trial data from Pixel Paint wasn't kept" ||
+			n[0].Detail != "It was saved by a different version than the one now installed, so Verdana discarded it." {
+			t.Errorf("notice = %+v", n)
+		}
+	})
+
+	t.Run("already installed at another version", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		old := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		newer := r.event(t, "paint", 20, trialFile{"/index.html", "<!doctype html>v2"})
+		trial := installedFrom(t, old)
+		installRecord(t, installedFrom(t, newer))
+		s := newTrialSession(t, trial)
+
+		if s.finish(t, true) {
+			t.Error("an installed napplet's trial asked to install")
+		}
+		if onDisk(s.shared) || onDisk(s.instance) || onDisk(s.config) {
+			t.Error("trial data or config was kept")
+		}
+		if n := trialDataNotice(trial); len(n) != 1 || n[0].Detail != trialDataDifferentVersion {
+			t.Errorf("notice = %+v", n)
+		}
+	})
+}
+
+func TestTrialPromotionKeepsExistingInstalledData(t *testing.T) {
+	t.Run("already installed with data", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		trial := installedFrom(t, evt)
+		installRecord(t, trial)
+		s := newTrialSession(t, trial)
+		if err := storageSetQuota(s.shared, "drawing", "mine", nappletStorageQuota, errNappletQuota); err != nil {
+			t.Fatal(err)
+		}
+
+		if s.finish(t, true) {
+			t.Error("an installed napplet's trial asked to install")
+		}
+		if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "mine" {
+			t.Errorf("installed data = %q, %v", v, ok)
+		}
+		if onDisk(s.instance) {
+			t.Error("the trial's instance data was kept")
+		}
+		if !onDisk(s.config) {
+			t.Error("the installed version's config was forgotten")
+		}
+		n := trialDataNotice(trial)
+		if len(n) != 1 || n[0].Detail != "This napplet already had saved data on this device. Verdana kept that and discarded the trial's data." {
+			t.Errorf("notice = %+v", n)
+		}
+	})
+
+	t.Run("already installed and empty", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		trial := installedFrom(t, evt)
+		installRecord(t, trial)
+		s := newTrialSession(t, trial)
+
+		s.finish(t, true)
+		if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "trial-shared" {
+			t.Errorf("shared trial data = %q, %v", v, ok)
+		}
+		if n := trialDataNotice(trial); len(n) != 0 {
+			t.Errorf("notice raised: %v", n)
+		}
+	})
+
+	t.Run("installed from the prompt over data", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		r.manifests.set(evt)
+		trial := installedFrom(t, evt)
+		s := newTrialSession(t, trial)
+		// data left on this device by an earlier install of the same version
+		if err := storageSetQuota(s.shared, "drawing", "mine", nappletStorageQuota, errNappletQuota); err != nil {
+			t.Fatal(err)
+		}
+
+		if !s.finish(t, true) {
+			t.Fatal("no install prompt")
+		}
+		if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "mine" {
+			t.Errorf("installed data = %q, %v", v, ok)
+		}
+		if n := trialDataNotice(trial); len(n) != 1 || n[0].Detail != trialDataExistingData {
+			t.Errorf("notice = %+v", n)
+		}
+	})
+}
+
+func TestTrialPromotionUnavailableLatestRefused(t *testing.T) {
+	t.Run("unavailable", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		r.manifests.set(evt, invalidNapplet(t, testNappletKey, "paint", 20))
+		trial := installedFrom(t, evt)
+		s := newTrialSession(t, trial)
+
+		if !s.finish(t, true) {
+			t.Fatal("no install prompt")
+		}
+		if _, ok := InstalledNapp(trial.ID); ok {
+			t.Error("installed although the latest version is invalid")
+		}
+		if got := fetchErr(); got != "install failed: the latest version is invalid" {
+			t.Errorf("launcher error %q", got)
+		}
+		if onDisk(s.shared) || onDisk(s.instance) || onDisk(s.config) {
+			t.Error("trial data or config was kept")
+		}
+		if _, ok := windows.Load(s.ci.instance); ok {
+			t.Error("the refused trial stayed in the window history")
+		}
+	})
+
+	t.Run("offline installs the trial's own event", func(t *testing.T) {
+		r := newTrialRig(t)
+		resetTrialPrompts(t)
+		evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+		trial := installedFrom(t, evt)
+		s := newTrialSession(t, trial)
+
+		if !s.finish(t, true) {
+			t.Fatal("no install prompt")
+		}
+		installed, ok := InstalledNapp(trial.ID)
+		if !ok || installed.EventID != trial.EventID {
+			t.Fatalf("installed %v %+v", ok, installed)
+		}
+		if v, ok := storedValue(t, s.shared, "drawing"); !ok || v != "trial-shared" {
+			t.Errorf("shared trial data = %q, %v", v, ok)
+		}
+	})
+}
+
+func TestTrialDeclinedForgetsTrialConfig(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	r.manifests.set(evt)
+	trial := installedFrom(t, evt)
+	s := newTrialSession(t, trial)
+
+	if !s.finish(t, false) {
+		t.Fatal("no install prompt")
+	}
+	if _, ok := InstalledNapp(trial.ID); ok {
+		t.Error("declined trial was installed")
+	}
+	if onDisk(s.shared) || onDisk(s.instance) {
+		t.Error("declined trial data was kept")
+	}
+	if onDisk(s.config) {
+		t.Error("declined trial's config was not forgotten")
+	}
+	if _, ok := windows.Load(s.ci.instance); ok {
+		t.Error("declined trial remained in the window history")
+	}
+	if n := trialDataNotice(trial); len(n) != 0 {
+		t.Errorf("declining raised %v", n)
 	}
 }

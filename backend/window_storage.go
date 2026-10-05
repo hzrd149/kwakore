@@ -397,6 +397,27 @@ func persistTrialStorage(ci *Instance) error {
 	return nil
 }
 
+// trialHasData says whether a trial window saved anything.
+func trialHasData(ci *Instance) bool {
+	for _, s := range ci.trialStorage {
+		s.mu.Lock()
+		n := len(s.data)
+		s.mu.Unlock()
+		if n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// discardTrialStorage drops a trial's in-memory stores without writing
+// anything: the data was saved by another version than the one installed,
+// or the installed one already has data of its own (D-09, D-25).
+func discardTrialStorage(ci *Instance) {
+	ci.trialStorage = make(map[string]*nappStorage)
+	ci.trial = false
+}
+
 // broadcastStorage tells every other open window of the same napp about a
 // mutation, so its shim applies it and fires the storage event browsers
 // fire in every document sharing a store except the one that wrote.

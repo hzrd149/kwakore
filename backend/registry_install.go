@@ -17,6 +17,7 @@ import (
 	"fiatjaf.com/nostr"
 
 	"verdana/backend/fileutil"
+	"verdana/backend/napconfig"
 	"verdana/backend/netguard"
 )
 
@@ -331,12 +332,13 @@ func trialTarget(arg string) (n Napp, installed bool, ok bool) {
 
 // finishNappletTrial asks whether a just-closed preview should become an
 // installation. Trial NAP storage remains in memory while the question is up;
-// it is persisted only after the napplet itself installs successfully.
+// it is kept only under the version actually installed (D-09) and never over
+// data that version already has on this device (D-25). The prompt copy is
+// shared with Android and stays as it is (UI-D10); when the data is not
+// kept, a notice says why.
 func finishNappletTrial(ci *Instance) {
-	if _, installed := InstalledNapp(ci.napp.ID); installed {
-		if err := persistTrialStorage(ci); err != nil {
-			SetFetchErr("could not keep trial data: " + err.Error())
-		}
+	if installed, ok := InstalledNapp(ci.napp.ID); ok {
+		promoteTrial(ci, installed, "could not keep trial data: ")
 		return
 	}
 	p := newPrompt(
@@ -350,16 +352,110 @@ func finishNappletTrial(ci *Instance) {
 	p.CloseOnReject = true
 	enqueuePrompt(p)
 	if !p.wait().OK {
+		dropTrial(ci)
 		windows.Delete(ci.instance)
 		return
 	}
-	if err := InstallNapp(ci.napp); err != nil {
+
+	// install what the address holds now, not what the trial ran: the
+	// trial's event may have been replaced since discovery
+	target := ci.napp
+	lookup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	latest, found := latestManifest(lookup, ci.napp)
+	cancel()
+	if found && !nappNewer(ci.napp, latest) {
+		if latest.Unavailable != "" {
+			log.Warn().Str("napp", ci.napp.ID).Str("event", latest.EventID).Str("reason", latest.Unavailable).
+				Msg("refusing to install a trial whose latest version is invalid")
+			SetFetchErr("install failed: " + errUnavailable.Error())
+			dropTrial(ci)
+			windows.Delete(ci.instance)
+			return
+		}
+		target = latest
+	}
+	// not found (offline, or no relay has it any more): the trial's own
+	// event is the newest thing known
+	if err := InstallNapp(target); err != nil {
 		SetFetchErr("install failed: " + err.Error())
+		dropTrial(ci)
 		windows.Delete(ci.instance)
+		return
+	}
+	installed, ok := InstalledNapp(target.ID)
+	if !ok {
+		installed = target
+	}
+	promoteTrial(ci, installed, "installed, but could not keep trial data: ")
+}
+
+// promoteTrial settles a closed trial's data against the installed record.
+// Only data saved by the same artifact goes in, and only into an empty
+// shared store; anything else is dropped with a notice that says why.
+// errPrefix starts the launcher error for a write that failed.
+func promoteTrial(ci *Instance, installed Napp, errPrefix string) {
+	if installed.ArtifactHash != ci.napp.ArtifactHash {
+		had := trialHasData(ci)
+		dropTrial(ci)
+		if had {
+			raiseTrialDataDiscarded(ci.napp, trialDataDifferentVersion)
+		}
+		return
+	}
+	if installedHasData(installed) {
+		had := trialHasData(ci)
+		dropTrial(ci)
+		if had {
+			raiseTrialDataDiscarded(ci.napp, trialDataExistingData)
+		}
 		return
 	}
 	if err := persistTrialStorage(ci); err != nil {
-		SetFetchErr("installed, but could not keep trial data: " + err.Error())
+		SetFetchErr(errPrefix + err.Error())
+	}
+}
+
+// installedHasData says whether the installed napplet's shared store holds
+// anything. A record with no valid scope has nothing to keep.
+func installedHasData(installed Napp) bool {
+	key, err := nappletStorageKey(installed, "shared", "")
+	if err != nil {
+		return false
+	}
+	file, err := nappletStorageFile(key)
+	if err != nil {
+		return false
+	}
+	s := storageFor(file)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data) > 0
+}
+
+// dropTrial discards a closed trial's data: its in-memory stores and, unless
+// the installed copy or another open window runs the same artifact, the
+// config its version registered on disk.
+func dropTrial(ci *Instance) {
+	discardTrialStorage(ci)
+	scope, err := nappletScope(ci.napp)
+	if err != nil {
+		return
+	}
+	if installed, ok := InstalledNapp(ci.napp.ID); ok {
+		if s, err := nappletScope(installed); err == nil && s == scope {
+			return
+		}
+	}
+	for _, other := range runningForNapp(ci.napp.ID) {
+		if other == ci {
+			continue
+		}
+		if s, err := nappletScope(other.napp); err == nil && s == scope {
+			return
+		}
+	}
+	if err := napconfig.Forget(scope); err != nil {
+		log.Warn().Err(err).Str("napp", ci.napp.ID).Msg("could not forget a trial's config")
 	}
 }
 

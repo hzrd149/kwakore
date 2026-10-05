@@ -319,6 +319,20 @@ func raiseTrialFailed(n Napp, detail string) {
 	notifyState()
 }
 
+// raiseTrialDataDiscarded tells the user that the data a trial saved was not
+// kept, and why (detail: trialDataDifferentVersion or
+// trialDataExistingData). One slot per address: the newest outcome
+// replaces the last.
+func raiseTrialDataDiscarded(n Napp, detail string) {
+	addNotice(Notice{
+		ID:     noticeTrialDataPrefix + n.Address(),
+		Kind:   noticeKindWarning,
+		Title:  fmt.Sprintf(trialDataTitle, noticeName(n.Name, n.D)),
+		Detail: detail,
+	})
+	notifyState()
+}
+
 // setKeyringFallbackNotice shows (on) or withdraws (off) the notice that
 // secrets live in a private file because the keyring was unavailable.
 // Turning it off also forgets an earlier dismissal, so a later fallback is
