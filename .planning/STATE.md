@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 5
 current_phase_name: Napplet Artifact Identity and Storage Keying
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-10-05T15:43:20.567Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-10-05T15:55:01.335Z"
 last_activity: 2026-10-05
-last_activity_desc: Completed 05-04 (NAP-CONFIG keyed by artifact scope, hex config files)
-state_head: 51677c5e814ce38478f43e172a778dad3454417e
+last_activity_desc: Completed 05-05 (NIP-01 latest-event selection, unavailable entries with catalogue reasons)
+state_head: 2e2c6375836d92162ee755dfc2db7cc10810b1ef
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 40
-  completed_plans: 32
+  completed_plans: 33
   percent: 50
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 ## Current Position
 
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — EXECUTING
-Plan: 5 of 12 (05-01, 05-02, 05-03, 05-04 complete)
+Plan: 6 of 12 (05-01, 05-02, 05-03, 05-04, 05-05 complete)
 Status: Ready to execute
-Last activity: 2026-10-05 — Completed 05-04-PLAN.md (NAP-CONFIG keyed by (address, artifact hash) scope, hex config file names, settings windows and pushes bound to one version)
+Last activity: 2026-10-05 — Completed 05-05-PLAN.md (NIP-01 latest-event selection with CheckID first on discovery, address lookups, resolved cache and author pages; an invalid latest is listed unavailable with a fixed catalogue reason, never an older version)
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -93,6 +93,7 @@ Progress: [█████░░░░░] 50% (4/8 phases)
 | Phase 05 P02 | 9min | 2 tasks | 5 files |
 | Phase 05 P03 | 5min | 3 tasks | 12 files |
 | Phase 05 P04 | 11min | 2 tasks | 7 files |
+| Phase 05 P05 | 7min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -181,6 +182,9 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-04: NAP-CONFIG scope = nappletScope (address 0x00 artifact hash); an update starts from defaults, no $version carry-forward (A7)
 - [Phase 5]: 05-04: config files are napconfig.FileName(scope) = hex(sha256(scope)).json; napconfig.Forget(scope) for reclaim/promotion; empty scope refused
 - [Phase 5]: 05-04: settings windows kept by settingsKey{nappID, scope}; gear opens the window's scope, store button the installed scope
+- [Phase 5]: 05-05: latestByAddress requires CheckID and VerifySignature before comparing, so a forged id never wins a NIP-01 tie
+- [Phase 5]: 05-05: only the NIP-01 winner of an address is validated; an invalid winner is listed unavailable with a fixed catalogue phrase and never falls back to an older valid event
+- [Phase 5]: 05-05: nappNewer treats equal CreatedAt with an unknown EventID as not newer, so pre-EventID records never flip-flop
 
 ### Pending Todos
 
@@ -213,6 +217,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T15:43:20.432Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-10-05T15:55:01.205Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None
