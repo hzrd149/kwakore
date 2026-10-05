@@ -84,6 +84,11 @@ func SetGNOMESearchIntegration(enabled bool, exe string) error {
 	if providerPath == "" {
 		return errors.New("GNOME search needs a user-writable directory in XDG_DATA_DIRS")
 	}
+	// quoted before the write loop, so a refused exe leaves no partial set
+	quotedExe, err := quoteExecField(exe)
+	if err != nil {
+		return fmt.Errorf("GNOME search integration not written: %w", err)
+	}
 
 	desktop := fmt.Sprintf(`[Desktop Entry]
 Version=1.0
@@ -95,7 +100,7 @@ Icon=applications-internet
 Terminal=false
 Categories=Network;
 Keywords=Nostr;Napp;Napplet;
-`, quoteExecField(exe))
+`, quotedExe)
 	provider := `[Shell Search Provider]
 DesktopId=com.verdana.Verdana.desktop
 BusName=com.verdana.Verdana.SearchProvider
@@ -105,7 +110,7 @@ Version=2
 	service := fmt.Sprintf(`[D-BUS Service]
 Name=com.verdana.Verdana.SearchProvider
 Exec=%s --background
-`, quoteExecField(exe))
+`, quotedExe)
 	for _, file := range []struct {
 		kind string
 		path string

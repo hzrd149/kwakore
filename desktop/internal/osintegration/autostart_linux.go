@@ -35,6 +35,10 @@ func SetAutostart(enabled bool, exe string) error {
 		}
 		return nil
 	}
+	quotedExe, err := quoteExecField(exe)
+	if err != nil {
+		return fmt.Errorf("autostart entry not written: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -45,6 +49,6 @@ Comment=Run Verdana in the background
 Exec=%s --background
 Terminal=false
 X-GNOME-Autostart-enabled=true
-`, quoteExecField(exe))
+`, quotedExe)
 	return fileutil.WriteFileAtomic(path, []byte(data), 0644)
 }

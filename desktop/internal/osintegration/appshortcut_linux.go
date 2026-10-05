@@ -18,11 +18,23 @@ import (
 // tag, and a newline in it would otherwise add keys such as a second Exec=.
 // The file name stays keyed on the raw id, so existing installs keep theirs.
 func SyncAppShortcuts(shortcuts []backend.AppShortcut, exe string) error {
+	// Every Exec value is quoted before the first write, so a refused one
+	// leaves the installed shortcuts as they were.
+	quotedExe, err := quoteExecField(exe)
+	if err != nil {
+		return fmt.Errorf("app shortcut executable: %w", err)
+	}
+	quotedTokens := make([]string, len(shortcuts))
+	for i, shortcut := range shortcuts {
+		if quotedTokens[i], err = quoteExecField(shortcut.Token); err != nil {
+			return fmt.Errorf("app shortcut token: %w", err)
+		}
+	}
 	dir := applicationsDir()
 	icons := appShortcutIconDir()
 	desiredFiles := make(map[string]bool, len(shortcuts))
 	desiredIcons := make(map[string]bool, len(shortcuts))
-	for _, shortcut := range shortcuts {
+	for i, shortcut := range shortcuts {
 		key := appShortcutKey(shortcut.ID)
 		iconPath := filepath.Join(icons, key+".png")
 		var icon bytes.Buffer
@@ -43,7 +55,7 @@ Icon=%s
 Terminal=false
 Categories=Network;
 X-Verdana-Napp-ID=%s
-`, appShortcutText(shortcut.Name), appShortcutText(shortcut.Description), quoteExecField(exe), quoteExecField(shortcut.Token), iconPath, shortcut.Token)
+`, appShortcutText(shortcut.Name), appShortcutText(shortcut.Description), quotedExe, quotedTokens[i], iconPath, shortcut.Token)
 		if err := writeAtomic(path, []byte(data), 0644); err != nil {
 			return err
 		}

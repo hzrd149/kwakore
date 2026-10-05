@@ -3,10 +3,12 @@
 package osintegration
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"verdana/backend"
 )
 
@@ -22,7 +24,15 @@ func WriteShortcutFile(name, exe, token string) (string, error) {
 			exe = resolved
 		}
 	}
-	data := fmt.Sprintf(desktopTemplate, name, quoteExecField(exe), quoteExecField(token))
+	quotedExe, err := quoteExecField(exe)
+	if err != nil {
+		return "", fmt.Errorf("bundle shortcut executable: %w", err)
+	}
+	quotedToken, err := quoteExecField(token)
+	if err != nil {
+		return "", fmt.Errorf("bundle shortcut token: %w", err)
+	}
+	data := fmt.Sprintf(desktopTemplate, name, quotedExe, quotedToken)
 	if err := os.MkdirAll(applicationsDir(), 0755); err != nil {
 		return "", err
 	}
@@ -144,16 +154,30 @@ func applicationsDir() string {
 	return filepath.Join(home, ".local", "share", "applications")
 }
 
+// errExecControl is what quoteExecField refuses with. It never quotes the
+// value: that may be an author-controlled id or a path worth not logging.
+var errExecControl = errors.New("an Exec value holds a control character, which a desktop entry cannot carry")
+
 // quoteExecField wraps one value of an Exec= line, per the desktop entry
 // spec: double quotes with backslash escapes on the special characters.
-func quoteExecField(value string) string {
+//
+// Control characters are refused, not escaped. A desktop entry value is one
+// line, so a newline would end the Exec key and start a new one (and GLib's
+// KeyFile lets the last duplicate Exec win); the spec has no escape that
+// carries a tab, NUL, ESC or DEL inside a quoted Exec argument either. Every
+// caller quotes before writing anything, so a refused value means that entry
+// is not written and the caller's error says so.
+func quoteExecField(value string) (string, error) {
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", errExecControl
+	}
 	escaped := strings.NewReplacer(
 		`\`, `\\`,
 		`"`, `\"`,
 		"`", "\\`",
 		`$`, `\$`,
 	).Replace(value)
-	return `"` + escaped + `"`
+	return `"` + escaped + `"`, nil
 }
 
 const desktopTemplate = `[Desktop Entry]
