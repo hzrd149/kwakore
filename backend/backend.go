@@ -86,6 +86,9 @@ func Start(opts Options) (func(), error) {
 	}
 
 	loadState()
+	// before anything reads the installed list: napplets installed under
+	// the ids of earlier builds are forgotten here, once (D-23)
+	dropPreAddressNapplets()
 	refreshInstalled()
 	go buildUserIndex()
 

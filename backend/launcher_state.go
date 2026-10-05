@@ -200,6 +200,49 @@ func loadState() {
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }
 
+// dropPreAddressNapplets forgets napplets installed under the id scheme
+// before napplet ids became their NIP-01 address (napplet~{pk16}~{d}): a
+// napplet record whose key is not its Address(), or whose id is not its key.
+// Nothing is migrated (D-01, D-23), so they would otherwise linger as
+// installed napplets nothing can launch, update or key data by. Everything
+// filed under a dropped id goes with it: last-launched, remembered answers
+// (saved and this session's), action usage and dispatch defaults pointing at
+// it. Install directories under napps/ are left alone (Phase 1 D-04 forbids
+// sweeping napps/); napps (35130) are never touched.
+//
+// It runs once at startup, after loadState and before anything reads the
+// installed list. The save makes it a one-time event: the next start finds
+// nothing to drop and raises no notice.
+func dropPreAddressNapplets() {
+	stateMu.Lock()
+	var dropped []string
+	for key, n := range state.InstalledNapps {
+		if n.IsNapplet() && (key != n.Address() || n.ID != key) {
+			dropped = append(dropped, key)
+		}
+	}
+	for _, id := range dropped {
+		delete(state.InstalledNapps, id)
+		delete(state.LastLaunched, id)
+	}
+	if len(dropped) > 0 {
+		saveState()
+	}
+	stateMu.Unlock()
+	if len(dropped) == 0 {
+		return
+	}
+
+	// these take stateMu themselves and clear the session layer too
+	for _, id := range dropped {
+		ForgetPermission(id, "")
+		forgetActionUsage(id)
+		forgetDispatchTarget(id)
+	}
+	log.Info().Int("napplets", len(dropped)).Msg("dropped napplets installed under pre-address ids")
+	raiseNappletsReinstall()
+}
+
 // keepCorruptState moves a state.json that failed to parse to
 // state.json.corrupt-<unix>, so the launcher can start from defaults without
 // destroying the user's data. If the move fails, saving is blocked for the

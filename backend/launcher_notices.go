@@ -32,6 +32,7 @@ const (
 	noticeChildUnavailable   = "child-unavailable"
 	noticeNappletHardening   = "napplet-hardening"
 	noticeStateCorruptPrefix = "state-corrupt:"
+	noticeNappletsReinstall  = "napplets-reinstall"
 
 	noticeKindWarning = "warning"
 	noticeKindError   = "error"
@@ -57,13 +58,19 @@ const (
 	nappletHardeningTitle  = "A napplet was closed before it ran"
 	nappletHardeningDetail = "Verdana couldn't switch off unsafe features of this system's web engine, so it did not run the napplet. Updating Verdana or the system web engine may help."
 
+	// napplets-reinstall: the one start that dropped napplets installed
+	// under the old ids (05-UI-SPEC.md S4, UI-D7)
+	nappletsReinstallTitle  = "Napplets need to be installed again"
+	nappletsReinstallDetail = "Verdana now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover."
+
 	// childUnavailableFetchErr is the store's FetchErr line for a launch
 	// that failed closed (lowercase, Go error convention).
 	childUnavailableFetchErr = "launch failed: the napp window program is missing or was modified; reinstall Verdana"
 )
 
 // noticeRank is the fixed display order: the errors first, then the
-// corrupt-state warning, then the keyring fallback.
+// corrupt-state warning, the keyring fallback, and the one-start napplet
+// reinstall warning.
 func noticeRank(id string) int {
 	switch {
 	case id == noticeChildUnavailable:
@@ -74,8 +81,10 @@ func noticeRank(id string) int {
 		return 2
 	case id == noticeKeyringFallback:
 		return 3
-	default:
+	case id == noticeNappletsReinstall:
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -144,6 +153,20 @@ func raiseNappletHardening() {
 		Kind:   noticeKindError,
 		Title:  nappletHardeningTitle,
 		Detail: nappletHardeningDetail,
+	})
+	notifyState()
+}
+
+// raiseNappletsReinstall shows the warning that napplets installed under the
+// old ids were removed and need installing again (D-23). It is session-only
+// (DismissNotice does not remember it): the start that raises it saves the
+// state without those records, so no later start raises it again.
+func raiseNappletsReinstall() {
+	addNotice(Notice{
+		ID:     noticeNappletsReinstall,
+		Kind:   noticeKindWarning,
+		Title:  nappletsReinstallTitle,
+		Detail: nappletsReinstallDetail,
 	})
 	notifyState()
 }
