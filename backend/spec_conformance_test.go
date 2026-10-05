@@ -415,7 +415,7 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 	if tb, ok := tableIn("Decisions"); ok && decisions != nil {
 		for id, wants := range map[string][]string{
 			"DEC-7": {"WEB-NAPPLET", "NIP-5D", "scp-like", "`git+ssh://`"},
-			"DEC-8": {"user-configured or default", "kind 10063", "netguard", "proxy"},
+			"DEC-8": {"the user configured in settings", "built-in defaults", "redirect", "kind 10063", "netguard", "proxy"},
 		} {
 			row, ok := decisions[id]
 			if !ok {

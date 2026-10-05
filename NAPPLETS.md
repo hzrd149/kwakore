@@ -80,8 +80,10 @@ napplet window (desktop child process / Android NappActivity)
    under `napps/{hex(sha256(address))}/`. Blobs from the servers a manifest
    names and from the author's kind 10063 list are fetched from public
    addresses only (checked on every connection and redirect hop). Only the
-   launcher's own Blossom servers, user-configured or default, may be on the
-   LAN or this machine. Each blob is capped at 64 MiB, a request follows at
+   Blossom servers the user configured in settings may be on the LAN or this
+   machine; the built-in defaults, used when none are configured, get the
+   public-only check, and so does a redirect from a configured server unless
+   it lands on another one. Each blob is capped at 64 MiB, a request follows at
    most 3 redirects and never away from https, and proxy settings are not
    used. A **trial** (Try) downloads and verifies every path of the manifest
    before its window opens; if one is missing or wrong, nothing opens and

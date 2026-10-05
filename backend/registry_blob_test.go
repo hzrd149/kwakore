@@ -145,18 +145,85 @@ func TestBlobDownloadTrustsUserServers(t *testing.T) {
 		t.Fatalf("requests: %d", n)
 	}
 
-	// the defaults count as the user's when none were set
+	// the built-in defaults are used when none were set, but they are not
+	// servers the user configured: they get the public-only check (D-20)
 	stateMu.Lock()
 	state.BlossomServers = nil
 	stateMu.Unlock()
+	if got := BlossomServers(); len(got) == 0 {
+		t.Fatal("no default servers to fetch from")
+	}
 	trusted := userBlobServers()
 	for _, d := range defaultBlossomServers {
-		if !trusted[d] {
-			t.Errorf("default %s not trusted", d)
+		if trusted[d] {
+			t.Errorf("default %s is trusted", d)
 		}
 	}
 	if trusted[srv.URL] {
 		t.Error("a server the user did not list is trusted")
+	}
+	before := srv.hits.Load()
+	if _, err := downloadBlob(t.Context(), []string{srv.URL}, blobHash(blob)); !errors.Is(err, netguard.ErrPrivateAddress) {
+		t.Fatalf("an unconfigured loopback server: %v, want the private-address error", err)
+	}
+	if srv.hits.Load() != before {
+		t.Fatal("an unconfigured loopback server got a request")
+	}
+}
+
+// TestTrustedBlobRedirectsStayGuarded: a server the user configured may be
+// private, but a redirect from it to a private address the user did not
+// configure is refused; one to another configured server is followed
+// (WR-05).
+func TestTrustedBlobRedirectsStayGuarded(t *testing.T) {
+	blob := []byte("a blob behind a trusted redirect")
+	hash := blobHash(blob)
+	// stands in for the LAN or a cloud metadata address
+	private := newCountingBlobServer(t, serveBlob(blob))
+	mine := newCountingBlobServer(t, serveBlob(blob))
+	redirectTo := func(target *countingBlobServer) *countingBlobServer {
+		return newCountingBlobServer(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+		})
+	}
+	toPrivate, toMine := redirectTo(private), redirectTo(mine)
+	setUserBlobServers(t, toPrivate.URL, toMine.URL, mine.URL)
+
+	_, err := fetchBlobFrom(t.Context(), trustedBlobClient, toPrivate.URL, hash)
+	if !errors.Is(err, netguard.ErrPrivateAddress) {
+		t.Fatalf("redirect to an unconfigured private host: %v, want the private-address error", err)
+	}
+	if n := private.hits.Load(); n != 0 {
+		t.Fatalf("the unconfigured private host got %d requests", n)
+	}
+	if _, err := downloadBlob(t.Context(), []string{toPrivate.URL}, hash); err == nil || private.hits.Load() != 0 {
+		t.Fatalf("downloadBlob followed the redirect: %v, %d requests", err, private.hits.Load())
+	}
+
+	got, err := fetchBlobFrom(t.Context(), trustedBlobClient, toMine.URL, hash)
+	if err != nil || !bytes.Equal(got, blob) {
+		t.Fatalf("redirect to another configured server: %q, %v", got, err)
+	}
+	if mine.hits.Load() != 1 {
+		t.Fatalf("the configured target got %d requests", mine.hits.Load())
+	}
+}
+
+func TestBlobHostKey(t *testing.T) {
+	for _, c := range []struct{ host, port, want string }{
+		{"Example.COM:443", "", "example.com:443"},
+		{"[::1]:8080", "", "[::1]:8080"},
+		{"::1", "8080", "[::1]:8080"},
+		{"127.0.0.1", "80", "127.0.0.1:80"},
+	} {
+		if got, ok := blobHostKey(c.host, c.port); !ok || got != c.want {
+			t.Errorf("blobHostKey(%q, %q) = %q, %v, want %q", c.host, c.port, got, ok, c.want)
+		}
+	}
+	setUserBlobServers(t, "https://Blossom.Example", "http://192.168.1.5:3000/")
+	hosts := userBlobHosts()
+	if !hosts["blossom.example:443"] || !hosts["192.168.1.5:3000"] || len(hosts) != 2 {
+		t.Fatalf("user blob hosts = %v", hosts)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -754,8 +755,9 @@ func blobRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// blobClient fetches from the servers a manifest named (its server tags) and
-// the ones its author lists (kind 10063). Those are author input, so it dials
+// blobClient fetches from the servers a manifest named (its server tags), the
+// ones its author lists (kind 10063) and the built-in default servers. The
+// first two are author input, so it dials
 // public addresses only, on every connection and every redirect hop, and a
 // manifest cannot point installs, trials or icon fetches at the user's
 // machine, LAN or a cloud metadata address. Proxy is nil on purpose, as for
@@ -775,14 +777,18 @@ var blobClient = &http.Client{
 	CheckRedirect: blobRedirect,
 }
 
-// trustedBlobClient fetches from the launcher's own Blossom servers (the ones
-// the user configured, or the defaults when they set none). The user may run
-// one on the LAN or on this machine on purpose, so it dials anything; the
-// size cap, timeouts and redirect rules are the same. A manifest naming one
-// of those servers in its own tags gets nothing it could not already have.
+// trustedBlobClient fetches from the Blossom servers the user configured in
+// settings (D-20). The user may run one on the LAN or on this machine on
+// purpose, so a connection to one of those servers is dialed without the
+// public-address check. Every other connection it makes, which can only be
+// a redirect hop, goes through netguard like blobClient's: a configured
+// server cannot send the launcher to a private address the user never
+// named. The size cap, timeouts and redirect rules are the same. A manifest
+// naming one of those servers in its own tags gets nothing it could not
+// already have.
 var trustedBlobClient = &http.Client{
 	Transport: &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:           trustedBlobDial,
 		Proxy:                 nil,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          32,
@@ -793,12 +799,29 @@ var trustedBlobClient = &http.Client{
 	CheckRedirect: blobRedirect,
 }
 
-// userBlobServers is the launcher's own Blossom servers, normalized the way
-// Napp.BlossomServers normalizes every server, so a manifest's copy of the
-// same url matches.
+var trustedBlobDialer = &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+
+// trustedBlobDial dials address unchecked only when it is the host and port
+// of a server the user configured, and through netguard otherwise. The
+// transport has no proxy, so address is where the request really goes.
+func trustedBlobDial(ctx context.Context, network, address string) (net.Conn, error) {
+	if key, ok := blobHostKey(address, ""); ok && userBlobHosts()[key] {
+		return trustedBlobDialer.DialContext(ctx, network, address)
+	}
+	return netguard.DialContext(ctx, network, address)
+}
+
+// userBlobServers is the Blossom servers the user configured in settings,
+// normalized the way Napp.BlossomServers normalizes every server, so a
+// manifest's copy of the same url matches. The built-in defaults are not
+// among them: the user never named those, and they are public hosts that
+// gain nothing from skipping the check (D-20).
 func userBlobServers() map[string]bool {
+	stateMu.Lock()
+	configured := append([]string(nil), state.BlossomServers...)
+	stateMu.Unlock()
 	trusted := make(map[string]bool)
-	for _, raw := range BlossomServers() {
+	for _, raw := range configured {
 		if u, err := nostr.NormalizeHTTPURL(raw); err == nil && u != "" {
 			trusted[u] = true
 		}
@@ -806,11 +829,56 @@ func userBlobServers() map[string]bool {
 	return trusted
 }
 
+// userBlobHosts is the host:port of every server userBlobServers trusts,
+// as blobHostKey spells it.
+func userBlobHosts() map[string]bool {
+	hosts := make(map[string]bool)
+	for raw := range userBlobServers() {
+		u, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		port := u.Port()
+		if port == "" {
+			switch u.Scheme {
+			case "https":
+				port = "443"
+			case "http":
+				port = "80"
+			default:
+				continue
+			}
+		}
+		if key, ok := blobHostKey(u.Hostname(), port); ok {
+			hosts[key] = true
+		}
+	}
+	return hosts
+}
+
+// blobHostKey is host and port as one comparable key: the host lowercased,
+// with no brackets around an IPv6 literal. With port empty, host is a
+// host:port pair to split.
+func blobHostKey(host, port string) (string, bool) {
+	if port == "" {
+		h, p, err := net.SplitHostPort(host)
+		if err != nil {
+			return "", false
+		}
+		host, port = h, p
+	}
+	if host == "" || port == "" {
+		return "", false
+	}
+	return net.JoinHostPort(strings.ToLower(host), port), true
+}
+
 // downloadBlob fetches a blob from the first server that has it and verifies
 // it against its hash before returning it. Every server gets its own deadline,
 // so an unreachable or stalling one is skipped rather than waited out. Only
-// the user's own servers are fetched with trustedBlobClient; every other one
-// goes through the public-only blobClient.
+// the servers the user configured are fetched with trustedBlobClient; every
+// other one, the built-in defaults included, goes through the public-only
+// blobClient.
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	trusted := userBlobServers()
