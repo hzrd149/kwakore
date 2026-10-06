@@ -8,15 +8,15 @@ updated: 2026-10-05T19:54:53Z
 
 ## Current Test
 
-number: 1
-name: Old data dir
+number: 2
+name: Persistence
 awaiting: user response
 
 ## Tests
 
 ### 1. Old data dir
 expected: Start on a data dir from an earlier build with napplets installed: the reinstall notice shows once; napplet-storage/ and config/ have no old files; storage/ has no napplet-* or napplet~* files but keeps napp files; napps/ untouched; nothing is swept when a state.json.corrupt-* copy exists; a restart shows no notice
-result: [pending]
+result: pass
 
 ### 2. Persistence
 expected: Napplet storage and settings survive a relaunch (one 64-hex file each in napplet-storage/ and config/); napp localStorage survives a relaunch
@@ -75,7 +75,7 @@ expected: A nostr: or relative source shows unavailable with the source reason
 result: [pending]
 
 ### 16. Linux shortcuts
-expected: Expose installed apps: .desktop Exec and X-Verdana-Napp-ID hold tokens under the same names; menu launches work; old and new bundles open; no zombie update-desktop-database processes
+expected: Expose installed apps: .desktop Exec and X-Verdana-Napp-ID hold tokens under the same names; menu launches work; new bundles open (old-build bundles not tested: no deployments); no zombie update-desktop-database processes
 result: [pending]
 
 ### 17. Dialogs

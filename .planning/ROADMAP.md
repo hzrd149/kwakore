@@ -344,7 +344,7 @@ Plans:
 
 ### Phase 999.7: Move Verdana data and napplet storage to the correct per-OS folders (BACKLOG)
 
-**Goal:** Verdana's data directory (today Gio `app.DataDir()` + `Verdana`, i.e. `~/.config/Verdana` on Linux, including `state.json`, `napplet-storage/`, `storage/`, `config/`, `napps/`) follows each platform's conventions: XDG on Linux (data and napplet storage under `$XDG_DATA_HOME`, settings under `$XDG_CONFIG_HOME`, caches under `$XDG_CACHE_HOME`), `~/Library/Application Support` (and `Caches`) on macOS, and `%LocalAppData%`/`%AppData%` on Windows, with a one-time move of existing data from the old location.
+**Goal:** Verdana's data directory (today Gio `app.DataDir()` + `Verdana`, i.e. `~/.config/Verdana` on Linux, including `state.json`, `napplet-storage/`, `storage/`, `config/`, `napps/`) follows each platform's conventions: XDG on Linux (data and napplet storage under `$XDG_DATA_HOME`, settings under `$XDG_CONFIG_HOME`, caches under `$XDG_CACHE_HOME`), `~/Library/Application Support` (and `Caches`) on macOS, and `%LocalAppData%`/`%AppData%` on Windows. There are no existing deployments, so no move of old data is needed.
 **Requirements:** TBD
 **Plans:** 0 plans
 
@@ -364,7 +364,7 @@ Plans:
 
 ### Phase 999.9: Rename the project to KwakCore (BACKLOG)
 
-**Goal:** Rename Verdana to KwakCore, since it integrates napplets into the user's existing desktop operating system. Covers the user-facing name, window titles, notices and copy; Go module paths (`verdana/backend`, `fiatjaf.com/verdana/desktop`); binary, shortcut, bundle and desktop-entry identifiers (`com.verdana.*`, `X-Verdana-Napp-ID`, `--launch-napp` tokens); keyring service and account names; single-instance socket and pipe names; per-user child cache directory; environment variables (`VERDANA_*`); data-directory names (coordinate with backlog 999.7, which moves data to per-OS folders, so the rename and the move happen in one migration); CI, packaging, docs and planning files.
+**Goal:** Rename Verdana to KwakCore, since it integrates napplets into the user's existing desktop operating system. Covers the user-facing name, window titles, notices and copy; Go module paths (`verdana/backend`, `fiatjaf.com/verdana/desktop`); binary, shortcut, bundle and desktop-entry identifiers (`com.verdana.*`, `X-Verdana-Napp-ID`, `--launch-napp` tokens); keyring service and account names; single-instance socket and pipe names; per-user child cache directory; environment variables (`VERDANA_*`); data-directory names (do it together with backlog 999.7, which moves data to per-OS folders). There are no existing deployments, so no migration of old names, shortcuts, keyring items or data is needed; CI, packaging, docs and planning files.
 **Requirements:** TBD
 **Plans:** 0 plans
 
