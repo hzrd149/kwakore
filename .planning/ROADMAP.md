@@ -361,3 +361,13 @@ Plans:
 Plans:
 
 - [ ] TBD (promote with $gsd-review-backlog when ready)
+
+### Phase 999.9: Rename the project to KwakCore (BACKLOG)
+
+**Goal:** Rename Verdana to KwakCore, since it integrates napplets into the user's existing desktop operating system. Covers the user-facing name, window titles, notices and copy; Go module paths (`verdana/backend`, `fiatjaf.com/verdana/desktop`); binary, shortcut, bundle and desktop-entry identifiers (`com.verdana.*`, `X-Verdana-Napp-ID`, `--launch-napp` tokens); keyring service and account names; single-instance socket and pipe names; per-user child cache directory; environment variables (`VERDANA_*`); data-directory names (coordinate with backlog 999.7, which moves data to per-OS folders, so the rename and the move happen in one migration); CI, packaging, docs and planning files.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with $gsd-review-backlog when ready)
