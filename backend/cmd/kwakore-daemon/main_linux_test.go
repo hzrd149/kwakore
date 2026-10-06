@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -214,4 +215,111 @@ func TestValidateMissingAndInvalidConfig(t *testing.T) {
 	if err := run([]string{"validate"}); err == nil {
 		t.Fatal("secret field accepted")
 	}
+}
+
+func TestOfflineReportsOnlyFileObservations(t *testing.T) {
+	root := t.TempDir()
+	configRoot := filepath.Join(root, "config")
+	dataRoot := filepath.Join(root, "data")
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_DATA_HOME", dataRoot)
+	check := func(command, configStatus, overrideStatus, storageStatus string) {
+		t.Helper()
+		out, err := captureRunOutput([]string{command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			ObservedFrom   string   `json:"observed_from"`
+			Ready          *bool    `json:"ready"`
+			UptimeSeconds  *float64 `json:"uptime_seconds"`
+			ActiveWindows  *int     `json:"active_windows"`
+			ConfigStatus   string   `json:"config_status"`
+			OverrideStatus string   `json:"override_status"`
+			StorageStatus  string   `json:"storage_status"`
+		}
+		if err := json.Unmarshal(out, &report); err != nil {
+			t.Fatalf("%s output %q: %v", command, out, err)
+		}
+		if report.ObservedFrom != "files" || report.Ready != nil || report.UptimeSeconds != nil || report.ActiveWindows != nil {
+			t.Fatalf("%s claimed live state: %s", command, out)
+		}
+		if report.ConfigStatus != configStatus || report.OverrideStatus != overrideStatus || report.StorageStatus != storageStatus {
+			t.Fatalf("%s file status: %s", command, out)
+		}
+	}
+	check("status", "missing", "missing", "missing")
+	check("diagnostics", "missing", "missing", "missing")
+	if _, err := os.Stat(configRoot); !os.IsNotExist(err) {
+		t.Fatalf("inspection created config directory or failed to stat: %v", err)
+	}
+	if _, err := os.Stat(dataRoot); !os.IsNotExist(err) {
+		t.Fatalf("inspection created data directory or failed to stat: %v", err)
+	}
+	dataDir := filepath.Join(dataRoot, "kwakore")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "daemon.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("status", "missing", "missing", "private")
+	check("diagnostics", "missing", "missing", "private")
+}
+
+func TestValidateUsesStrictConfigAndOverrideLoader(t *testing.T) {
+	root := t.TempDir()
+	configRoot := filepath.Join(root, "config")
+	dataRoot := filepath.Join(root, "data")
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_DATA_HOME", dataRoot)
+	configPath := filepath.Join(configRoot, "kwakore", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relays":["not-a-relay"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureRunOutput([]string{"validate"}); err == nil || !strings.Contains(err.Error(), "config.json") || !strings.Contains(err.Error(), "relays") {
+		t.Fatalf("invalid config feedback: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relays":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(dataRoot, "kwakore")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	overridePath := filepath.Join(dataDir, "settings-overrides.json")
+	if err := os.WriteFile(overridePath, []byte(`{"discover_on_user_relays":null}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureRunOutput([]string{"validate"}); err == nil || !strings.Contains(err.Error(), "settings-overrides.json") || !strings.Contains(err.Error(), "discover_on_user_relays") {
+		t.Fatalf("invalid override feedback: %v", err)
+	}
+	if err := os.WriteFile(overridePath, []byte(`{"discover_on_user_relays":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureRunOutput([]string{"validate"}); err != nil || string(out) != "valid\n" {
+		t.Fatalf("valid files: output=%q error=%v", out, err)
+	}
+}
+
+func captureRunOutput(args []string) ([]byte, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	old := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = old }()
+	runErr := run(args)
+	writer.Close()
+	var buf bytes.Buffer
+	_, copyErr := buf.ReadFrom(reader)
+	reader.Close()
+	if copyErr != nil {
+		return nil, copyErr
+	}
+	return buf.Bytes(), runErr
 }
