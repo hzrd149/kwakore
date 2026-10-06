@@ -11,11 +11,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"verdana/backend"
 	"verdana/backend/serviceconfig"
 )
 
@@ -105,6 +107,105 @@ func TestDaemonSettingsAndReload(t *testing.T) {
 	}
 	if s.Diagnostics().Warning != "" || len(s.Manager().Effective().Relays) != 0 {
 		t.Fatal("reload not applied")
+	}
+}
+
+func TestDaemonSettingUsesLiveConfigWithoutLegacyWrite(t *testing.T) {
+	p := daemonPaths(t)
+	if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(p.DataDir, "state.json")
+	if err := os.WriteFile(statePath, []byte(`{"relays":["legacy.example"],"blossom_servers":["https://legacy.example"],"discover_on_user_relays":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting("relays", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting("blossom_servers", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting("discover_on_user_relays", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.Relays(); len(got) != 0 {
+		t.Fatalf("service relays: %v", got)
+	}
+	if got := backend.BlossomServers(); len(got) != 0 {
+		t.Fatalf("service Blossom servers: %v", got)
+	}
+	if backend.DiscoverOnUserRelays() {
+		t.Fatal("user relay discovery still enabled")
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("service setting mutated legacy state: %s", after)
+	}
+	if err := s.ClearSetting("relays"); err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.Relays(); !reflect.DeepEqual(got, []string{"wss://file.example"}) || len(backend.BlossomServers()) != 0 || backend.DiscoverOnUserRelays() {
+		t.Fatalf("clearing relays altered other settings: %+v", s.Manager().Effective())
+	}
+	s.Close()
+	s, err = Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got := backend.Relays(); !reflect.DeepEqual(got, []string{"wss://file.example"}) || len(backend.BlossomServers()) != 0 || backend.DiscoverOnUserRelays() {
+		t.Fatalf("legacy state overrode service config on restart: %+v", s.Manager().Effective())
+	}
+}
+
+type settingsChangeHost struct {
+	backend.Host
+	changes int
+}
+
+func (h *settingsChangeHost) StateChanged() { h.changes++ }
+
+func TestDaemonSettingNotifiesOnlyForEffectiveChange(t *testing.T) {
+	p := daemonPaths(t)
+	if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	m, err := serviceconfig.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &settingsChangeHost{}
+	closeBackend, err := backend.Start(backend.Options{DataDir: p.DataDir, ServiceConfig: m, Host: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBackend()
+	s := &Service{manager: m}
+	if err := s.SetSetting("relays", []string{"wss://changed.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.changes != 1 {
+		t.Fatalf("effective relay change sent %d notifications, want one", h.changes)
+	}
+	if err := s.SetSetting("relays", []string{"wss://changed.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.changes != 1 {
+		t.Fatalf("unchanged relays sent notification: %d", h.changes)
 	}
 }
 
