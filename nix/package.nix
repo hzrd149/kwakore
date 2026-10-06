@@ -170,11 +170,16 @@ buildGoModule {
   # no LD_LIBRARY_PATH: that would leak into every program the launcher spawns
   # (xdg-open, browsers, media players) and override their own RUNPATHs, which
   # is why library lookup is baked into RUNPATHs instead. xdg-utils is a
-  # suffix so the system's own xdg-open wins.
+  # suffix so the system's own xdg-open wins. VERDANA_EXECUTABLE points the
+  # Exec lines of entries Verdana writes at this wrapper rather than at
+  # .verdana-wrapped, which /proc/self/exe names; a session value (the NixOS
+  # module's stable path) wins over it.
   dontWrapGApps = true;
   postFixup = ''
     patchelf --add-rpath "${lib.makeLibraryPath [ libGL ]}" "$out/bin/verdana"
-    wrapGApp "$out/bin/verdana" --suffix PATH : "${lib.makeBinPath [ xdg-utils ]}"
+    wrapGApp "$out/bin/verdana" \
+      --suffix PATH : "${lib.makeBinPath [ xdg-utils ]}" \
+      --set-default VERDANA_EXECUTABLE "$out/bin/verdana"
   '';
 
   # The Go suites run in CI and through `go test` in the repo. The sandbox has
@@ -199,6 +204,7 @@ buildGoModule {
       exit 1
     fi
     grep -qF GIO_EXTRA_MODULES "$out/bin/verdana"
+    grep -qF VERDANA_EXECUTABLE "$out/bin/verdana"
     if grep -qF LD_LIBRARY_PATH "$out/bin/verdana"; then
       echo "the wrapper must not set LD_LIBRARY_PATH" >&2
       exit 1

@@ -117,11 +117,36 @@ func (gioHost) AmberRequest(string, string, string, string, string, string) bool
 	return false
 }
 
+// executableEnv names a launcher path for the Exec lines of the OS entries
+// verdana writes: shortcuts, autostart, app shortcuts and search providers.
+const executableEnv = "VERDANA_EXECUTABLE"
+
+// launcherExecutable is the program OS entries should run. Under a packaging
+// wrapper such as Nix's makeWrapper, /proc/self/exe names the wrapped binary,
+// which skips the wrapper's environment and lives at a store path that
+// disappears after an upgrade and garbage collection. Packagers point
+// VERDANA_EXECUTABLE at a stable launcher path instead. It is honored only as
+// an absolute path to an executable regular file (symlinks followed for the
+// check, but returned as given so a stable link stays stable); anything else
+// falls back to the running binary. The value still goes through
+// quoteExecField, which refuses control characters.
+func launcherExecutable() (string, error) {
+	if path := os.Getenv(executableEnv); path != "" {
+		if filepath.IsAbs(path) {
+			if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0 {
+				return path, nil
+			}
+		}
+		log.Warn().Msg("ignoring VERDANA_EXECUTABLE, it is not an absolute path to an executable file")
+	}
+	return os.Executable()
+}
+
 // CreateShortcutFile writes an OS shortcut whose whole job is calling
 // verdana with one quoted argument: the bundle token. The OS-specific file
 // shapes live in the shortcutfile_<goos>.go files.
 func (gioHost) CreateShortcutFile(name, token string) (string, error) {
-	exe, err := os.Executable()
+	exe, err := launcherExecutable()
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +177,7 @@ func (gioHost) AutostartSupported() bool { return true }
 func (gioHost) AutostartEnabled() bool { return osintegration.AutostartEnabled() }
 
 func (gioHost) SetAutostart(enabled bool) error {
-	exe, err := os.Executable()
+	exe, err := launcherExecutable()
 	if err != nil {
 		return err
 	}
@@ -162,7 +187,7 @@ func (gioHost) SetAutostart(enabled bool) error {
 func (gioHost) AppShortcutsSupported() bool { return true }
 
 func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
-	exe, err := os.Executable()
+	exe, err := launcherExecutable()
 	if err != nil {
 		return err
 	}
@@ -170,7 +195,7 @@ func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 }
 
 func (gioHost) SyncSearchNapplets(napplets []backend.AppShortcut) error {
-	exe, err := os.Executable()
+	exe, err := launcherExecutable()
 	if err != nil {
 		return err
 	}
@@ -180,7 +205,7 @@ func (gioHost) SyncSearchNapplets(napplets []backend.AppShortcut) error {
 func (gioHost) GNOMESearchSupported() bool { return osintegration.GnomeSearchSupported() }
 
 func (gioHost) SetGNOMESearchIntegration(enabled bool) error {
-	exe, err := os.Executable()
+	exe, err := launcherExecutable()
 	if err != nil {
 		return err
 	}

@@ -108,6 +108,42 @@ sha256sum --check SHA256SUMS --ignore-missing
 To play media for apps that ask for it (NAP-MEDIA), install
 [mpv](https://mpv.io) or [VLC](https://www.videolan.org).
 
+### NixOS
+
+The repository is a Nix flake for x86-64 and ARM64 Linux. Add it as an input
+of your system flake, following your nixpkgs so Verdana shares its GTK and
+WebKit with the rest of the system:
+
+```nix
+{
+  inputs.verdana = {
+    url = "github:hzrd149/verdana";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  outputs = { nixpkgs, verdana, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        verdana.nixosModules.default
+        {
+          programs.verdana.enable = true;
+          # optional: start Verdana in the background at login
+          programs.verdana.autostart = true;
+        }
+      ];
+    };
+  };
+}
+```
+
+The module installs Verdana with its desktop entry and icon. To try it without
+installing, run `nix run github:hzrd149/verdana`.
+
+Packagers who wrap the binary can set `VERDANA_EXECUTABLE` to a stable,
+absolute launcher path; Verdana writes that path into the shortcuts,
+autostart and search entries it creates instead of the wrapped binary's own
+path. The NixOS module sets it to `/run/current-system/sw/bin/verdana`.
+
 ### Android
 
 Android 8.0 (API 26) or newer is required. Android builds are paused for now
