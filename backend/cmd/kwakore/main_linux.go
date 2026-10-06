@@ -105,7 +105,19 @@ func run(args []string) error {
 		if json.Unmarshal(rpcError, &remote) != nil || remote.Code == 0 || remote.Message == "" {
 			return errors.New("invalid daemon response")
 		}
-		return rpcFailure{RPC: *controlprotocol.FixedError(remote.Code)}
+		fixed := controlprotocol.FixedError(remote.Code)
+		if remote.Code == controlprotocol.PartialCleanup {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rpcError, &fields) != nil {
+				return errors.New("invalid daemon response")
+			}
+			data, ok := parsePartialCleanupData(fields["data"], params)
+			if method != "napplet.uninstall" || !ok {
+				return errors.New("invalid daemon response")
+			}
+			fixed.Data = data
+		}
+		return rpcFailure{RPC: *fixed}
 	}
 	if len(result) == 0 {
 		return errors.New("invalid daemon response")
@@ -159,6 +171,28 @@ func globalOptions(args []string) ([]string, string, time.Duration, error) {
 type rpcFailure struct{ RPC controlprotocol.Error }
 
 func (e rpcFailure) Error() string { return e.RPC.Message }
+
+func parsePartialCleanupData(raw, params json.RawMessage) (controlprotocol.PartialCleanupData, bool) {
+	var data controlprotocol.PartialCleanupData
+	if len(raw) == 0 || raw[0] != '{' || controlprotocol.ValidateNamedParams(raw, "address", "record_removed", "cleanup_complete") != nil {
+		return data, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || len(fields) != 3 ||
+		!bytes.Equal(bytes.TrimSpace(fields["record_removed"]), []byte("true")) ||
+		!bytes.Equal(bytes.TrimSpace(fields["cleanup_complete"]), []byte("false")) ||
+		json.Unmarshal(fields["address"], &data.Address) != nil || data.Address == "" {
+		return data, false
+	}
+	var requested struct {
+		Address string `json:"address"`
+	}
+	if json.Unmarshal(params, &requested) != nil || data.Address != requested.Address {
+		return data, false
+	}
+	data.RecordRemoved = true
+	return data, true
+}
 
 type inputFailure string
 
@@ -322,6 +356,11 @@ func writeCLIError(w io.Writer, err error) {
 		rpcErr = &controlprotocol.Error{Code: controlprotocol.Timeout, Message: timeout.Error()}
 	} else if errors.As(err, &remote) {
 		rpcErr = controlprotocol.FixedError(remote.RPC.Code)
+		if rpcErr.Code == controlprotocol.PartialCleanup {
+			if data, ok := remote.RPC.Data.(controlprotocol.PartialCleanupData); ok && data.Address != "" && data.RecordRemoved && !data.CleanupComplete {
+				rpcErr.Data = data
+			}
+		}
 	} else if errors.As(err, &input) {
 		rpcErr = controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
