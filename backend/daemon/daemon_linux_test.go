@@ -386,7 +386,8 @@ func TestDaemonCorrectedRestartAfterInvalidConfig(t *testing.T) {
 }
 
 func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
-	s, err := Open(daemonPaths(t), "test")
+	paths := daemonPaths(t)
+	s, err := Open(paths, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,6 +406,10 @@ func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
 		t.Fatal("stores closed while RPC lease active")
 	default:
 	}
+	if next, err := Open(paths, "test"); err == nil {
+		next.Close()
+		t.Fatal("data lock released before lease drained")
+	}
 	leaseDone()
 	select {
 	case <-finished:
@@ -412,6 +417,11 @@ func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
 		t.Fatal("close did not drain")
 	}
 	s.Close()
+	next, err := Open(paths, "test")
+	if err != nil {
+		t.Fatalf("data lock not released after close: %v", err)
+	}
+	next.Close()
 }
 
 func TestShutdownDuringRPCCancelsWork(t *testing.T) {
