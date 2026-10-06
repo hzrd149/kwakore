@@ -9,9 +9,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"verdana/backend/controlprotocol"
 )
 
 func TestCLISettingsCommands(t *testing.T) {
@@ -77,6 +81,131 @@ func TestCLISettingsCommands(t *testing.T) {
 				t.Fatalf("request %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestCLIContract(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	build := exec.Command("go", "build", "-o", cli, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	for _, tc := range []struct {
+		name           string
+		args           []string
+		method, params string
+	}{
+		{"status", []string{"status"}, "service.status", ""},
+		{"diagnostics", []string{"diagnostics"}, "service.diagnostics", ""},
+		{"get", []string{"settings", "get"}, "settings.get", ""},
+		{"reload", []string{"settings", "reload"}, "settings.reload", ""},
+		{"set", []string{"settings", "set", "relays", `[]`}, "settings.set", `{"field":"relays","value":[]}`},
+		{"clear", []string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
+		{"discover", []string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "3"}, "napplet.discover", `{"query":"hello","refresh":true,"offset":2,"limit":3}`},
+		{"installed", []string{"installed", "--offset", "2", "--limit", "3"}, "napplet.installed", `{"offset":2,"limit":3}`},
+		{"install", []string{"install", address}, "napplet.install", `{"address":"` + address + `"}`},
+		{"update", []string{"update", address}, "napplet.update", `{"address":"` + address + `"}`},
+		{"uninstall", []string{"uninstall", "--yes", address}, "napplet.uninstall", `{"address":"` + address + `","confirm":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan []byte, 1)
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					seen <- nil
+					return
+				}
+				defer conn.Close()
+				line, _ := bufio.NewReader(conn).ReadBytes('\n')
+				seen <- line
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"method":"` + tc.method + `"}}` + "\n"))
+			}()
+			cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, tc.args...)...)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			if err != nil || stderr.Len() != 0 || string(out) != `{"method":"`+tc.method+`"}`+"\n" {
+				t.Fatalf("out=%q stderr=%q err=%v", out, stderr.String(), err)
+			}
+			var request controlprotocol.Request
+			if err := json.Unmarshal(<-seen, &request); err != nil || request.JSONRPC != "2.0" || string(request.ID) != "1" || request.Method != tc.method || string(request.Params) != tc.params {
+				t.Fatalf("request=%+v, err=%v", request, err)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, response string }{
+		{"wrong ID", `{"jsonrpc":"2.0","id":2,"result":true}`},
+		{"missing version", `{"id":1,"result":true}`},
+		{"both fields", `{"jsonrpc":"2.0","id":1,"result":true,"error":{"code":1004,"message":"Unavailable"}}`},
+		{"malformed", `{`},
+		{"remote error", `{"jsonrpc":"2.0","id":1,"error":{"code":1006,"message":"secret"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				_, _ = bufio.NewReader(conn).ReadBytes('\n')
+				_, _ = conn.Write([]byte(tc.response + "\n"))
+			}()
+			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "status")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+				t.Fatalf("accepted response: %q %v", stdout.String(), err)
+			}
+			var got struct {
+				Error controlprotocol.Error `json:"error"`
+			}
+			if err := json.Unmarshal(stderr.Bytes(), &got); err != nil || got.Error.Code == 0 || bytes.Contains(stderr.Bytes(), []byte("secret")) || bytes.Count(stderr.Bytes(), []byte{'\n'}) != 1 {
+				t.Fatalf("stderr=%q err=%v", stderr.String(), err)
+			}
+		})
+	}
+	for _, args := range [][]string{{"--timeout", "0s", "status"}, {"--timeout", "garbage", "status"}, {"status"}} {
+		cmd := exec.Command(cli, args...)
+		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+			t.Fatalf("accepted %v: %v", args, err)
+		}
+		var got struct {
+			Error controlprotocol.Error `json:"error"`
+		}
+		if err := json.Unmarshal(stderr.Bytes(), &got); err != nil || got.Error.Code == 0 {
+			t.Fatalf("stderr=%q err=%v", stderr.String(), err)
+		}
+	}
+	go func() {
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = bufio.NewReader(conn).ReadBytes('\n')
+		time.Sleep(100 * time.Millisecond)
+	}()
+	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "--timeout", "10ms", "install", address)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+		t.Fatalf("timeout accepted: %v, %q", err, stdout.String())
+	}
+	var timed struct {
+		Error controlprotocol.Error `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &timed); err != nil || timed.Error.Code != controlprotocol.Timeout || !strings.Contains(strings.ToLower(timed.Error.Message), "unknown") || !strings.Contains(strings.ToLower(timed.Error.Message), "installed") {
+		t.Fatalf("timeout stderr=%q err=%v", stderr.String(), err)
 	}
 }
 
