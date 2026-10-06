@@ -5,7 +5,6 @@ package daemon
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -186,18 +185,7 @@ func (l *Listener) serve(s *Service) {
 				<-l.connections
 				l.work.Done()
 			}()
-			handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
-				if method != "service.status" {
-					return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
-				}
-				if rpcErr := controlprotocol.ValidateNamedParams(params); rpcErr != nil {
-					return nil, rpcErr
-				}
-				return struct {
-					ProtocolVersion int    `json:"protocol_version"`
-					Health          Health `json:"health"`
-				}{controlprotocol.Version, s.Health()}, nil
-			})
+			handleSocketConn(conn, s.dispatchRPC)
 		}()
 	}
 }
