@@ -128,9 +128,51 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(updateErr)
 		}
 		return result, nil
+	case "napplet.uninstall":
+		address, confirmed, err := decodeUninstallParams(params)
+		if err != nil {
+			return nil, err
+		}
+		if !confirmed {
+			return nil, controlprotocol.FixedError(controlprotocol.ConfirmationRequired)
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		result, uninstallErr := backend.ServiceUninstall(ctx, address)
+		if errors.Is(uninstallErr, backend.ErrServicePartialCleanup) {
+			rpcErr := controlprotocol.FixedError(controlprotocol.PartialCleanup)
+			rpcErr.Data = struct {
+				Address         string `json:"address"`
+				RecordRemoved   bool   `json:"record_removed"`
+				CleanupComplete bool   `json:"cleanup_complete"`
+			}{result.Address, result.RecordRemoved, result.CleanupComplete}
+			return nil, rpcErr
+		}
+		if uninstallErr != nil {
+			return nil, mutationError(uninstallErr)
+		}
+		return result, nil
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
 	}
+}
+
+func decodeUninstallParams(params json.RawMessage) (string, bool, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address", "confirm"); err != nil {
+		return "", false, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", false, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	address, err := decodeAddressParams(json.RawMessage(`{"address":` + string(fields["address"]) + `}`))
+	if err != nil {
+		return "", false, err
+	}
+	return address, bytes.Equal(fields["confirm"], []byte("true")), nil
 }
 
 func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error) {

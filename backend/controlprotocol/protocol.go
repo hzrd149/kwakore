@@ -35,6 +35,7 @@ const (
 type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`

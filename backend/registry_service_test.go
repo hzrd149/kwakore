@@ -355,3 +355,51 @@ func TestServiceUpdateRecoversFromCachedInvalidLatest(t *testing.T) {
 		t.Fatalf("valid winner after stale invalid cache: %+v %v", result, err)
 	}
 }
+
+func TestServiceUninstallResultAndLegacyID(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	v1.ID = sk.Public().Hex()[:16] + "~app"
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ServiceUninstall(t.Context(), "15129:"+sk.Public().Hex()+":"); !errors.Is(err, ErrServiceNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if !trySetBusy(v1.ID) {
+		t.Fatal("busy setup")
+	}
+	if _, err := ServiceUninstall(t.Context(), v1.Address()); !errors.Is(err, ErrServiceBusy) {
+		t.Fatalf("busy: %v", err)
+	}
+	setBusy(v1.ID, false)
+	result, err := ServiceUninstall(t.Context(), v1.Address())
+	if err != nil || result.Address != v1.Address() || result.Outcome != "removed" || result.PreviousVersion.EventID != v1.EventID || !result.CleanupComplete || !result.RecordRemoved {
+		t.Fatalf("removed: %+v %v", result, err)
+	}
+	if _, ok := InstalledNapp(v1.ID); ok {
+		t.Fatal("legacy record remains")
+	}
+}
+
+func TestServiceUninstallPartialCleanup(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1 := installedFrom(t, blobs.servedNapplet(t, sk, "app", "v1", 10))
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	previous := removeNappInstall
+	removeNappInstall = func(string) error { return errors.New("secret directory path") }
+	t.Cleanup(func() { removeNappInstall = previous })
+	result, err := ServiceUninstall(t.Context(), v1.Address())
+	if !errors.Is(err, ErrServicePartialCleanup) || !result.RecordRemoved || result.CleanupComplete || result.Outcome != "" {
+		t.Fatalf("partial: %+v %v", result, err)
+	}
+	if _, ok := InstalledNapp(v1.ID); ok {
+		t.Fatal("removed record returned")
+	}
+}

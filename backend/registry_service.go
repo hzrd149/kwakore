@@ -31,6 +31,7 @@ var (
 	ErrServiceNoUpdate       = errors.New("no update")
 	ErrServiceTimeout        = errors.New("service mutation timeout")
 	ErrServiceConflict       = errors.New("service mutation conflict")
+	ErrServicePartialCleanup = errors.New("service uninstall partial cleanup")
 )
 
 type ServiceInstallResult struct {
@@ -44,6 +45,43 @@ type ServiceUpdateResult struct {
 	Outcome          string         `json:"outcome"`
 	PreviousVersion  ServiceVersion `json:"previous_version"`
 	InstalledVersion ServiceVersion `json:"installed_version"`
+}
+
+type ServiceUninstallResult struct {
+	Address         string         `json:"address"`
+	Outcome         string         `json:"outcome,omitempty"`
+	PreviousVersion ServiceVersion `json:"previous_version,omitempty"`
+	RecordRemoved   bool           `json:"record_removed"`
+	CleanupComplete bool           `json:"cleanup_complete"`
+}
+
+func ServiceUninstall(ctx context.Context, address string) (ServiceUninstallResult, error) {
+	if _, err := ParseCanonicalServiceAddress(address); err != nil {
+		return ServiceUninstallResult{}, err
+	}
+	if ctx.Err() != nil {
+		return ServiceUninstallResult{}, ErrServiceTimeout
+	}
+	stateMu.Lock()
+	var id string
+	for key, n := range state.InstalledNapps {
+		if n.Address() == address {
+			id = key
+			break
+		}
+	}
+	stateMu.Unlock()
+	if id == "" {
+		return ServiceUninstallResult{}, ErrServiceNotFound
+	}
+	result, err := uninstallNapp(id)
+	if errors.Is(err, errNotInstalled) {
+		return ServiceUninstallResult{}, ErrServiceNotFound
+	}
+	if errors.Is(err, ErrServicePartialCleanup) {
+		return result, err
+	}
+	return result, serviceMutationError(ctx, err)
 }
 
 func serviceVersion(n Napp) ServiceVersion {

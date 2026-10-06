@@ -114,6 +114,17 @@ func TestCLIUpdateCommand(t *testing.T) {
 	}
 }
 
+func TestCLIUninstallRequiresYes(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	if _, _, _, err := command([]string{"uninstall", address}); err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("unconfirmed: %v", err)
+	}
+	method, params, _, err := command([]string{"uninstall", "--yes", address})
+	if err != nil || method != "napplet.uninstall" || string(params) != `{"address":"`+address+`","confirm":true}` {
+		t.Fatalf("confirmed: %s %s %v", method, params, err)
+	}
+}
+
 func TestCLIDiscoveryCommand(t *testing.T) {
 	method, params, _, err := command([]string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "50"})
 	if err != nil || method != "napplet.discover" || string(params) != `{"query":"hello","refresh":true,"offset":2,"limit":50}` {

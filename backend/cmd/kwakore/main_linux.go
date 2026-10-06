@@ -44,7 +44,7 @@ func run(args []string) error {
 	if method == "napplet.discover" && bytes.Contains(params, []byte(`"refresh":true`)) {
 		deadline = 30 * time.Second
 	}
-	if method == "napplet.install" || method == "napplet.update" {
+	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" {
 		deadline = 180 * time.Second
 	}
 	_ = conn.SetDeadline(time.Now().Add(deadline))
@@ -147,6 +147,22 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{args[1]})
 		return "napplet." + args[0], params, socketPath, nil
 	}
+	if len(args) >= 1 && args[0] == "uninstall" {
+		flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		yes := flags.Bool("yes", false, "confirm removal")
+		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 1 || len(flags.Args()[0]) == 0 || len(flags.Args()[0]) > 4096 {
+			return "", nil, "", inputFailure("usage: uninstall --yes ADDRESS")
+		}
+		if !*yes {
+			return "", nil, "", inputFailure("uninstall requires --yes")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+			Confirm bool   `json:"confirm"`
+		}{flags.Args()[0], true})
+		return "napplet.uninstall", params, socketPath, nil
+	}
 	if len(args) >= 2 && args[0] == "settings" {
 		switch args[1] {
 		case "get":
@@ -178,7 +194,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {

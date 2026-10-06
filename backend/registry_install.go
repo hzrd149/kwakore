@@ -198,10 +198,20 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 // config wait for the last of its windows to be gone before they are
 // deleted, so nothing is removed under a window still running.
 func Uninstall(id string) {
+	_, err := uninstallNapp(id)
+	if err != nil {
+		SetFetchErr("uninstall failed: " + err.Error())
+	}
+}
+
+// removeNappInstall is replaceable in tests to prove partial cleanup without
+// relying on platform-dependent directory permissions.
+var removeNappInstall = os.RemoveAll
+
+func uninstallNapp(id string) (ServiceUninstallResult, error) {
 	if !trySetBusy(id) {
 		log.Warn().Str("napp", id).Msg("napp is busy, not uninstalling")
-		SetFetchErr("uninstall failed: " + errBusy.Error())
-		return
+		return ServiceUninstallResult{}, errBusy
 	}
 	defer setBusy(id, false)
 	log.Info().Str("napp", id).Msg("uninstalling napp")
@@ -216,9 +226,24 @@ func Uninstall(id string) {
 	reclaimMu.Lock()
 	stateMu.Lock()
 	record, installed := state.InstalledNapps[id]
+	if !installed {
+		stateMu.Unlock()
+		reclaimMu.Unlock()
+		return ServiceUninstallResult{}, errNotInstalled
+	}
+	result := ServiceUninstallResult{Address: record.Address(), PreviousVersion: serviceVersion(record), RecordRemoved: true}
+	lastLaunched, hadLastLaunched := state.LastLaunched[id]
 	delete(state.InstalledNapps, id)
 	delete(state.LastLaunched, id)
-	saveState()
+	if err := saveState(); err != nil {
+		state.InstalledNapps[id] = record
+		if hadLastLaunched {
+			state.LastLaunched[id] = lastLaunched
+		}
+		stateMu.Unlock()
+		reclaimMu.Unlock()
+		return ServiceUninstallResult{}, err
+	}
 	stateMu.Unlock()
 	napplet := installed && record.IsNapplet()
 	var closing []*Instance
@@ -234,10 +259,15 @@ func Uninstall(id string) {
 
 	// a napp whose directory cannot be named safely gets nothing removed,
 	// but is still forgotten
+	var cleanupErr error
 	if base, err := nappBaseDir(id); err != nil {
 		log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
+		cleanupErr = err
 	} else {
-		os.RemoveAll(base)
+		if err := removeNappInstall(base); err != nil {
+			log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
+			cleanupErr = err
+		}
 		removeStaleStaging(base)
 	}
 
@@ -255,6 +285,12 @@ func Uninstall(id string) {
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
+	result.CleanupComplete = cleanupErr == nil
+	if cleanupErr != nil {
+		return result, ErrServicePartialCleanup
+	}
+	result.Outcome = "removed"
+	return result, nil
 }
 
 // InstallFromDiscovery resolves an id the launcher knows — installed or just

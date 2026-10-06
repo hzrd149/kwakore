@@ -328,5 +328,7 @@ func TestRPCUninstallRequiresConfirmation(t *testing.T) {
 		}
 	}
 	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.uninstall", `{"address":"`+address+`","confirm":true}`)
-	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound { t.Fatalf("confirmed missing: %+v", rpcErr) }
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
+		t.Fatalf("confirmed missing: %+v", rpcErr)
+	}
 }
