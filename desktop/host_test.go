@@ -115,3 +115,53 @@ func assertFile(t *testing.T, path, want string) {
 		t.Fatalf("%s holds %q, want %q", path, got, want)
 	}
 }
+
+func TestLauncherExecutable(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "verdana")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "current", "verdana")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, link); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name, env, want string
+	}{
+		{"unset", "", self},
+		{"executable file", exe, exe},
+		// a stable symlink such as /run/current-system/sw/bin/verdana must
+		// survive upgrades, so it is returned as given, not resolved
+		{"symlink to executable", link, link},
+		{"relative", "verdana", self},
+		{"missing", filepath.Join(dir, "missing"), self},
+		{"directory", dir, self},
+		{"not executable", plain, self},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(executableEnv, tt.env)
+			got, err := launcherExecutable()
+			if err != nil {
+				t.Fatalf("launcherExecutable: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("launcherExecutable() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
