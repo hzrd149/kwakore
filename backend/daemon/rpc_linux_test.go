@@ -264,3 +264,28 @@ func TestRPCInstalledPageAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestRPCDiscoveryCachedAndValidation(t *testing.T) {
+	s, reader, conn, _ := rpcService(t)
+	result, rpcErr, raw := rpcCall(t, reader, conn, "napplet.discover", `{}`)
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	var page backend.ServiceDiscoveryPage
+	if err := json.Unmarshal(result, &page); err != nil || page.Items == nil || page.Complete || page.FetchedAt != nil {
+		t.Fatalf("uncached catalog: %s %v", raw, err)
+	}
+	for _, params := range []string{`{"query":null}`, `{"query":4}`, `{"refresh":null}`, `{"refresh":"true"}`, `{"limit":501}`, `{"offset":-1}`, `{"query":"x","query":"y"}`, `{"extra":1}`} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.discover", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted params %s: %+v", params, rpcErr)
+		}
+	}
+	if err := s.SetSetting("relays", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	_, rpcErr, _ = rpcCall(t, reader, conn, "napplet.discover", `{"refresh":true}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable {
+		t.Fatalf("no relay refresh: %+v", rpcErr)
+	}
+}

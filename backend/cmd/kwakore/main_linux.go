@@ -40,7 +40,11 @@ func run(args []string) error {
 	if err != nil || uid != uint32(os.Geteuid()) {
 		return errors.New("unauthorized server")
 	}
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	deadline := 5 * time.Second
+	if method == "napplet.discover" && bytes.Contains(params, []byte(`"refresh":true`)) {
+		deadline = 30 * time.Second
+	}
+	_ = conn.SetDeadline(time.Now().Add(deadline))
 	request, err := json.Marshal(controlprotocol.Request{JSONRPC: "2.0", Method: method, Params: params, ID: json.RawMessage("1")})
 	if err != nil {
 		return errors.New("invalid command parameters")
@@ -113,6 +117,24 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{*offset, *limit})
 		return "napplet.installed", params, socketPath, nil
 	}
+	if len(args) >= 1 && args[0] == "discover" {
+		flags := flag.NewFlagSet("discover", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		query := flags.String("query", "", "catalog query")
+		refresh := flags.Bool("refresh", false, "wait for relay refresh")
+		offset := flags.Int("offset", 0, "page offset")
+		limit := flags.Int("limit", 100, "page size")
+		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 0 || len(*query) > 4096 || *offset < 0 || *limit < 1 || *limit > 500 {
+			return "", nil, "", inputFailure("invalid discover parameters")
+		}
+		params, _ := json.Marshal(struct {
+			Query   string `json:"query"`
+			Refresh bool   `json:"refresh"`
+			Offset  int    `json:"offset"`
+			Limit   int    `json:"limit"`
+		}{*query, *refresh, *offset, *limit})
+		return "napplet.discover", params, socketPath, nil
+	}
 	if len(args) >= 2 && args[0] == "settings" {
 		switch args[1] {
 		case "get":
@@ -144,7 +166,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {

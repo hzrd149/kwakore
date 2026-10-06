@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 
@@ -71,6 +72,28 @@ func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *cont
 		}
 		defer done()
 		return backend.ServiceInstalled(offset, limit), nil
+	case "napplet.discover":
+		query, refresh, offset, limit, err := decodeDiscoveryParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		result, discoverErr := backend.ServiceDiscover(context.Background(), query, refresh, offset, limit)
+		if discoverErr != nil {
+			switch {
+			case errors.Is(discoverErr, backend.ErrDiscoveryUnavailable):
+				return nil, controlprotocol.FixedError(controlprotocol.Unavailable)
+			case errors.Is(discoverErr, backend.ErrDiscoveryTimeout):
+				return nil, controlprotocol.FixedError(controlprotocol.Timeout)
+			default:
+				return nil, controlprotocol.FixedError(controlprotocol.Conflict)
+			}
+		}
+		return result, nil
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
 	}
@@ -80,14 +103,18 @@ func decodePageParams(params json.RawMessage) (int, int, *controlprotocol.Error)
 	if err := controlprotocol.ValidateNamedParams(params, "offset", "limit"); err != nil {
 		return 0, 0, err
 	}
-	offset, limit := 0, 100
 	if len(params) == 0 {
-		return offset, limit, nil
+		return 0, 100, nil
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(params, &fields) != nil {
 		return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
+	return decodePageFields(fields)
+}
+
+func decodePageFields(fields map[string]json.RawMessage) (int, int, *controlprotocol.Error) {
+	offset, limit := 0, 100
 	if raw, ok := fields["offset"]; ok {
 		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &offset) != nil || offset < 0 {
 			return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
@@ -99,6 +126,36 @@ func decodePageParams(params json.RawMessage) (int, int, *controlprotocol.Error)
 		}
 	}
 	return offset, limit, nil
+}
+
+func decodeDiscoveryParams(params json.RawMessage) (string, bool, int, int, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "query", "refresh", "offset", "limit"); err != nil {
+		return "", false, 0, 0, err
+	}
+	if len(params) == 0 {
+		return "", false, 0, 100, nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	offset, limit, pageErr := decodePageFields(fields)
+	if pageErr != nil {
+		return "", false, 0, 0, pageErr
+	}
+	var query string
+	if raw, ok := fields["query"]; ok {
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &query) != nil || len(query) > 4096 {
+			return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+	}
+	var refresh bool
+	if raw, ok := fields["refresh"]; ok {
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &refresh) != nil || (len(raw) > 0 && raw[0] != 't' && raw[0] != 'f') {
+			return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+	}
+	return query, refresh, offset, limit, nil
 }
 
 type settingsResult struct {

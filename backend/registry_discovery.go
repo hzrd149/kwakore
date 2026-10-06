@@ -16,6 +16,9 @@ var (
 	// so nothing it found lands on top of the new run's list.
 	discoverMu     sync.Mutex
 	cancelDiscover context.CancelFunc
+	discoverRun    uint64
+	catalog        []Napp
+	catalogFetched *time.Time
 )
 
 var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
@@ -36,41 +39,48 @@ var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.
 const discoveryFlushInterval = 250 * time.Millisecond
 
 func Discover() {
-	discoverMu.Lock()
-	if cancelDiscover != nil {
-		cancelDiscover()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelDiscover = cancel
-	setFetching(true)
-	discoverMu.Unlock()
-
 	// a first login's relay list is still on its way: give it a moment, so
 	// this run asks the user's relays too instead of a second run redoing it
 	waitUserRelays(userRelayWait)
 	urls := discoveryRelays()
+	ctx, cancel, run := beginDiscovery(context.Background())
+	defer cancel()
+	discoverMu.Lock()
+	if run == discoverRun && ctx.Err() == nil {
+		setFetching(true)
+	}
+	discoverMu.Unlock()
 	go refreshFollows(ctx)
 	log.Info().Strs("relays", urls).Strs("settings", Relays()).Strs("user", UserWriteRelays()).
 		Bool("userRelays", DiscoverOnUserRelays()).Msg("fetching napps from relays")
 
-	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
-		nostr.Filter{
-			Kinds: napKinds,
-		},
-		nostr.SubscriptionOptions{
-			Label:          "verdana-discovery",
-			MaxWaitForEOSE: time.Second * 20,
-		},
-	)
+	if len(urls) == 0 {
+		discoverMu.Lock()
+		if run == discoverRun {
+			setFetching(false)
+		}
+		discoverMu.Unlock()
+		return
+	}
+	events, eose, err := subscribeDiscovery(ctx, urls)
+	if err != nil {
+		discoverMu.Lock()
+		if run == discoverRun {
+			setFetching(false)
+		}
+		discoverMu.Unlock()
+		return
+	}
 
-	collectDiscovery(events, eose, discoveryFlushInterval, func(list []Napp, done bool) {
+	collectDiscoveryContext(ctx, events, eose, discoveryFlushInterval, false, func(list []Napp, done bool) {
 		discoverMu.Lock()
 		defer discoverMu.Unlock()
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || run != discoverRun {
 			return
 		}
 		setDiscovery(list)
 		if done {
+			cacheDiscoveryLocked(list)
 			log.Info().Int("count", len(list)).Msg("fetch complete")
 			setFetching(false)
 			go SyncSystemSearch()
@@ -78,6 +88,65 @@ func Discover() {
 	})
 
 	log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
+}
+
+func beginDiscovery(parent context.Context) (context.Context, context.CancelFunc, uint64) {
+	discoverMu.Lock()
+	defer discoverMu.Unlock()
+	if cancelDiscover != nil {
+		cancelDiscover()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	cancelDiscover = cancel
+	discoverRun++
+	return ctx, cancel, discoverRun
+}
+
+func cacheDiscoveryLocked(list []Napp) {
+	catalog = append([]Napp(nil), list...)
+	now := time.Now().UTC()
+	catalogFetched = &now
+}
+
+// RefreshDiscovery waits for EOSE or stream completion and returns the final
+// catalog. A newer run cancels this one and cannot be overwritten by it.
+func RefreshDiscovery(parent context.Context) error {
+	urls := discoveryRelays()
+	if len(urls) == 0 {
+		return ErrDiscoveryUnavailable
+	}
+	deadlineCtx, deadlineCancel := context.WithTimeout(parent, 25*time.Second)
+	defer deadlineCancel()
+	ctx, cancel, run := beginDiscovery(deadlineCtx)
+	defer cancel()
+	discoverMu.Lock()
+	if run == discoverRun {
+		setFetching(false)
+	}
+	discoverMu.Unlock()
+	events, eose, err := subscribeDiscovery(ctx, urls)
+	if err != nil {
+		return ErrDiscoveryUnavailable
+	}
+	var final []Napp
+	complete := collectDiscoveryContext(ctx, events, eose, discoveryFlushInterval, true, func(list []Napp, done bool) {
+		if done {
+			final = list
+		}
+	})
+	if !complete {
+		if deadlineCtx.Err() == context.DeadlineExceeded {
+			return ErrDiscoveryTimeout
+		}
+		return ErrDiscoveryConflict
+	}
+	discoverMu.Lock()
+	defer discoverMu.Unlock()
+	if ctx.Err() != nil || run != discoverRun {
+		return ErrDiscoveryConflict
+	}
+	cacheDiscoveryLocked(final)
+	return nil
 }
 
 // refreshFollows loads who the user follows for the discovery tab's friends
@@ -106,6 +175,10 @@ func refreshFollows(ctx context.Context) {
 // collapse into its NIP-01 winner (registry_select.go), which is listed
 // even when it is invalid: then as unavailable, never as an older version.
 func collectDiscovery(events <-chan nostr.RelayEvent, eose <-chan struct{}, flush time.Duration, publish func(list []Napp, done bool)) {
+	collectDiscoveryContext(context.Background(), events, eose, flush, false, publish)
+}
+
+func collectDiscoveryContext(ctx context.Context, events <-chan nostr.RelayEvent, eose <-chan struct{}, flush time.Duration, stopAtEOSE bool, publish func(list []Napp, done bool)) bool {
 	var list []Napp
 	latest := latestByAddress{}
 	index := make(map[string]int) // address -> position in list
@@ -116,12 +189,14 @@ func collectDiscovery(events <-chan nostr.RelayEvent, eose <-chan struct{}, flus
 
 	for {
 		select {
+		case <-ctx.Done():
+			return false
 		case re, ok := <-events:
 			if !ok {
 				if dirty || !finished {
 					publish(list, true)
 				}
-				return
+				return true
 			}
 			if !latest.add(re.Event) {
 				continue
@@ -145,6 +220,9 @@ func collectDiscovery(events <-chan nostr.RelayEvent, eose <-chan struct{}, flus
 			finished = true
 			publish(append([]Napp(nil), list...), true)
 			dirty = false
+			if stopAtEOSE {
+				return true
+			}
 		}
 	}
 }

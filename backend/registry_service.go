@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 	"unicode"
 )
@@ -43,24 +44,56 @@ type ServiceDiscoveryPage struct {
 }
 
 func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, limit int) (ServiceDiscoveryPage, error) {
-	return ServiceDiscoveryPage{ServicePage: ServicePage{Items: []ServiceDescriptor{}}}, nil
+	if refresh {
+		if err := RefreshDiscovery(ctx); err != nil {
+			return ServiceDiscoveryPage{}, err
+		}
+	}
+	discoverMu.Lock()
+	items := append([]Napp(nil), catalog...)
+	fetched := catalogFetched
+	discoverMu.Unlock()
+	result := ServiceDiscoveryPage{FetchedAt: fetched, Complete: fetched != nil}
+	query = strings.ToLower(strings.TrimSpace(query))
+	descriptors := make([]ServiceDescriptor, 0, len(items))
+	for _, n := range items {
+		if n.MatchesQuery(query) {
+			descriptors = append(descriptors, serviceDescriptor(n))
+		}
+	}
+	sort.Slice(descriptors, func(i, j int) bool { return descriptors[i].Address < descriptors[j].Address })
+	result.ServicePage = servicePage(descriptors, offset, limit)
+	return result, nil
 }
 
 func ServiceInstalled(offset, limit int) ServicePage {
 	stateMu.Lock()
-	items := make([]ServiceDescriptor, 0, len(state.InstalledNapps))
-	for _, n := range state.InstalledNapps {
-		items = append(items, serviceDescriptor(n))
+	type storedDescriptor struct {
+		key        string
+		descriptor ServiceDescriptor
+	}
+	stored := make([]storedDescriptor, 0, len(state.InstalledNapps))
+	for key, n := range state.InstalledNapps {
+		stored = append(stored, storedDescriptor{key: key, descriptor: serviceDescriptor(n)})
 	}
 	stateMu.Unlock()
-	sort.Slice(items, func(i, j int) bool { return items[i].Address < items[j].Address })
+	sort.Slice(stored, func(i, j int) bool {
+		if stored[i].descriptor.Address == stored[j].descriptor.Address {
+			return stored[i].key < stored[j].key
+		}
+		return stored[i].descriptor.Address < stored[j].descriptor.Address
+	})
+	items := make([]ServiceDescriptor, len(stored))
+	for i, row := range stored {
+		items[i] = row.descriptor
+	}
 	return servicePage(items, offset, limit)
 }
 
 func serviceDescriptor(n Napp) ServiceDescriptor {
-	format := n.Format
-	if format == "" {
-		format = "napp"
+	format := "napp"
+	if n.IsNapplet() {
+		format = FormatNapplet
 	}
 	name := make([]rune, 0, 256)
 	for _, r := range n.Name {

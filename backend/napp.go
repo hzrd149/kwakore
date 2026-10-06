@@ -285,7 +285,7 @@ func (n Napp) AuthorProfile(ctx context.Context) (string, string) {
 // re-notifies the state when it lands) and "" is returned meanwhile. It never
 // blocks, so a render loop can call it per-napp per-frame.
 func (n Napp) AuthorShortName() string {
-	if n.Author == nostr.ZeroPK {
+	if n.Author == nostr.ZeroPK || sys == nil {
 		return ""
 	}
 

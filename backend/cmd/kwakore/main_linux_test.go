@@ -92,6 +92,18 @@ func TestCLIInstalledCommand(t *testing.T) {
 	}
 }
 
+func TestCLIDiscoveryCommand(t *testing.T) {
+	method, params, _, err := command([]string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "50"})
+	if err != nil || method != "napplet.discover" || string(params) != `{"query":"hello","refresh":true,"offset":2,"limit":50}` {
+		t.Fatalf("discover command: %s %s %v", method, params, err)
+	}
+	for _, args := range [][]string{{"discover", "--offset", "-1"}, {"discover", "--limit", "501"}, {"discover", "--refresh=maybe"}, {"discover", "extra"}} {
+		if _, _, _, err := command(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
 func TestCLISettingsStructuredErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"settings", "set", "relays", `null`},
