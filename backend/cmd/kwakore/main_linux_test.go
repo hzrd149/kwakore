@@ -98,6 +98,41 @@ func TestCLISettingsStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestCLISettingsRemoteErrorIsFixed(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	child := filepath.Join(runtimeDir, "kwakore")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(child, "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = bufio.NewReader(conn).ReadBytes('\n')
+		_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":1006,"message":"private-url.invalid/secret"}}` + "\n"))
+	}()
+	err = run([]string{"settings", "reload"})
+	<-done
+	if err == nil {
+		t.Fatal("remote error accepted")
+	}
+	var out bytes.Buffer
+	writeCLIError(&out, err)
+	if !strings.Contains(out.String(), `"code":1006`) || strings.Contains(out.String(), "private-url.invalid") {
+		t.Fatalf("unsafe error: %s", out.String())
+	}
+}
+
 func TestCLIReadMethods(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	child := filepath.Join(runtimeDir, "kwakore")
