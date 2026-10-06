@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -19,13 +20,27 @@ import (
 )
 
 func run(args []string) error {
-	method, params, socketOverride, err := command(args)
+	args, socketOverride, timeoutOverride, err := globalOptions(args)
+	if err != nil {
+		return err
+	}
+	method, params, _, err := command(args)
 	if err != nil {
 		return err
 	}
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if socketOverride == "" && (runtimeDir == "" || !filepath.IsAbs(runtimeDir)) {
 		return errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
+	}
+	if socketOverride == "" {
+		info, err := os.Lstat(runtimeDir)
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
+		}
+		owner, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || owner.Uid != uint32(os.Geteuid()) {
+			return errors.New("XDG_RUNTIME_DIR must be owned by the current user")
+		}
 	}
 	socketPath := socketOverride
 	if socketPath == "" {
@@ -36,16 +51,16 @@ func run(args []string) error {
 		return errors.New("daemon unavailable")
 	}
 	defer conn.Close()
-	uid, err := peerUID(conn)
+	uid, err := serverPeerUID(conn)
 	if err != nil || uid != uint32(os.Geteuid()) {
 		return errors.New("unauthorized server")
 	}
-	deadline := 5 * time.Second
-	if method == "napplet.discover" && bytes.Contains(params, []byte(`"refresh":true`)) {
-		deadline = 30 * time.Second
-	}
+	deadline := 30 * time.Second
 	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" {
 		deadline = 180 * time.Second
+	}
+	if timeoutOverride > 0 {
+		deadline = timeoutOverride
 	}
 	_ = conn.SetDeadline(time.Now().Add(deadline))
 	request, err := json.Marshal(controlprotocol.Request{JSONRPC: "2.0", Method: method, Params: params, ID: json.RawMessage("1")})
@@ -54,32 +69,91 @@ func run(args []string) error {
 	}
 	request = append(request, '\n')
 	if n, err := conn.Write(request); err != nil || n != len(request) {
+		if isTimeout(err) {
+			return timeoutFailure{}
+		}
 		return errors.New("daemon unavailable")
 	}
-	line, err := bufio.NewReader(io.LimitReader(conn, controlprotocol.MaxResponseLine+1)).ReadBytes('\n')
+	line, err := bufio.NewReader(io.LimitReader(conn, controlprotocol.MaxResponseLine+2)).ReadBytes('\n')
+	if len(line) > controlprotocol.MaxResponseLine+1 {
+		return errors.New("invalid daemon response")
+	}
 	if err != nil {
+		if isTimeout(err) {
+			return timeoutFailure{}
+		}
+		if len(line) != 0 {
+			return errors.New("invalid daemon response")
+		}
 		return errors.New("daemon unavailable")
 	}
-	if len(line) > controlprotocol.MaxResponseLine {
+	if len(line) == 0 || line[len(line)-1] != '\n' {
 		return errors.New("invalid daemon response")
 	}
-	var response struct {
-		JSONRPC string                 `json:"jsonrpc"`
-		ID      json.RawMessage        `json:"id"`
-		Result  json.RawMessage        `json:"result"`
-		Error   *controlprotocol.Error `json:"error"`
-	}
-	if json.Unmarshal(line, &response) != nil || response.JSONRPC != "2.0" || !bytes.Equal(response.ID, []byte("1")) {
+	var response map[string]json.RawMessage
+	if json.Unmarshal(line, &response) != nil || response == nil ||
+		!bytes.Equal(response["jsonrpc"], []byte(`"2.0"`)) || !bytes.Equal(response["id"], []byte("1")) {
 		return errors.New("invalid daemon response")
 	}
-	if response.Error != nil {
-		return rpcFailure{RPC: *controlprotocol.FixedError(response.Error.Code)}
-	}
-	if len(response.Result) == 0 {
+	result, hasResult := response["result"]
+	rpcError, hasError := response["error"]
+	if hasResult == hasError || len(response) != 3 {
 		return errors.New("invalid daemon response")
 	}
-	_, err = os.Stdout.Write(append(response.Result, '\n'))
+	if hasError {
+		var remote controlprotocol.Error
+		if json.Unmarshal(rpcError, &remote) != nil || remote.Code == 0 || remote.Message == "" {
+			return errors.New("invalid daemon response")
+		}
+		return rpcFailure{RPC: *controlprotocol.FixedError(remote.Code)}
+	}
+	if len(result) == 0 {
+		return errors.New("invalid daemon response")
+	}
+	_, err = os.Stdout.Write(append(result, '\n'))
 	return err
+}
+
+var serverPeerUID = peerUID
+
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.Is(err, os.ErrDeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
+}
+
+type timeoutFailure struct{}
+
+func (timeoutFailure) Error() string {
+	return "client timeout; operation outcome unknown; check status or installed state"
+}
+
+func globalOptions(args []string) ([]string, string, time.Duration, error) {
+	var socket string
+	var timeout time.Duration
+	for len(args) > 0 {
+		switch args[0] {
+		case "--socket", "--timeout":
+			if len(args) < 2 {
+				return nil, "", 0, inputFailure("missing global option value")
+			}
+			if args[0] == "--socket" {
+				if socket != "" || !filepath.IsAbs(args[1]) {
+					return nil, "", 0, inputFailure("--socket requires an absolute path")
+				}
+				socket = args[1]
+			} else {
+				value, err := time.ParseDuration(args[1])
+				if err != nil || value <= 0 || timeout != 0 {
+					return nil, "", 0, inputFailure("--timeout requires a positive duration")
+				}
+				timeout = value
+			}
+			args = args[2:]
+		default:
+			return args, socket, timeout, nil
+		}
+	}
+	return args, socket, timeout, nil
 }
 
 type rpcFailure struct{ RPC controlprotocol.Error }
@@ -194,7 +268,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {
@@ -243,7 +317,10 @@ func writeCLIError(w io.Writer, err error) {
 	rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
 	var remote rpcFailure
 	var input inputFailure
-	if errors.As(err, &remote) {
+	var timeout timeoutFailure
+	if errors.As(err, &timeout) {
+		rpcErr = &controlprotocol.Error{Code: controlprotocol.Timeout, Message: timeout.Error()}
+	} else if errors.As(err, &remote) {
 		rpcErr = controlprotocol.FixedError(remote.RPC.Code)
 	} else if errors.As(err, &input) {
 		rpcErr = controlprotocol.FixedError(controlprotocol.InvalidParams)

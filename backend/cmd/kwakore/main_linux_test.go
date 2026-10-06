@@ -209,6 +209,30 @@ func TestCLIContract(t *testing.T) {
 	}
 }
 
+func TestCLIContractPeerUIDOverride(t *testing.T) {
+	root := t.TempDir()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	old := serverPeerUID
+	serverPeerUID = func(*net.UnixConn) (uint32, error) { return uint32(os.Geteuid() + 1), nil }
+	defer func() { serverPeerUID = old }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.AcceptUnix()
+		if err == nil {
+			defer conn.Close()
+		}
+	}()
+	if err := run([]string{"--socket", listener.Addr().String(), "status"}); err == nil || !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("foreign peer accepted: %v", err)
+	}
+	<-done
+}
+
 func TestCLIInstalledCommand(t *testing.T) {
 	method, params, _, err := command([]string{"installed", "--offset", "2", "--limit", "50"})
 	if err != nil || method != "napplet.installed" || string(params) != `{"offset":2,"limit":50}` {

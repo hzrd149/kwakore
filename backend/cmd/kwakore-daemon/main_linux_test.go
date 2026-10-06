@@ -115,7 +115,135 @@ func TestForegroundHelper(t *testing.T) {
 	if err := run(nil); err != nil {
 		t.Fatal(err)
 	}
+	if path := os.Getenv("KWAKORE_FOREGROUND_CHECK_SOCKET"); path != "" {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("socket still exists before foreground exit: %v", err)
+		}
+	}
 	os.Exit(0)
+}
+
+func TestForegroundClientParity(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan string, 1)
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- scan.Text()
+		}
+	}()
+	select {
+	case line := <-ready:
+		if !strings.Contains(line, "ready") {
+			t.Fatalf("readiness: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
+	}
+	cli := filepath.Join(root, "kwakore")
+	build := exec.Command("go", "build", "-o", cli, "../kwakore")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		key  string
+	}{
+		{"status", []string{"status"}, "protocol_version"},
+		{"diagnostics", []string{"diagnostics"}, "observed_from"},
+		{"settings", []string{"settings", "get"}, "relays"},
+		{"discover", []string{"discover", "--query", "test"}, "items"},
+		{"installed", []string{"installed"}, "items"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := exec.Command(cli, tc.args...)
+			call.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
+			var errout bytes.Buffer
+			call.Stderr = &errout
+			out, err := call.Output()
+			if err != nil || errout.Len() != 0 || bytes.Count(out, []byte{'\n'}) != 1 {
+				t.Fatalf("output=%q stderr=%q err=%v", out, errout.String(), err)
+			}
+			var result map[string]json.RawMessage
+			if err := json.Unmarshal(out, &result); err != nil || len(result[tc.key]) == 0 {
+				t.Fatalf("result=%q err=%v", out, err)
+			}
+		})
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("shutdown: %v stderr=%s", err, stderr.String())
+	}
+}
+
+func TestForegroundSocketShutdown(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "KWAKORE_FOREGROUND_CHECK_SOCKET="+socketPath, "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan struct{}, 1)
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- struct{}{}
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
+	}
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// An incomplete frame holds a foreground client read while SIGTERM closes it.
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","method":"napplet.discover","params":{"refresh":true},"id":9`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("shutdown with held call: %v stderr=%s", err, stderr.String())
+	}
+	if _, err := os.Lstat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("socket remained: %v", err)
+	}
 }
 
 func TestSocketStatusCLIEndToEnd(t *testing.T) {
