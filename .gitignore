@@ -13,3 +13,7 @@ android/local.properties
 
 # GSD research tool cache
 .planning/research/.cache/
+
+# nix build outputs
+/result
+/result-*
