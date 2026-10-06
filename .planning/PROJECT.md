@@ -1,8 +1,8 @@
-# Verdana
+# Kwakore (currently Verdana)
 
 ## What This Is
 
-Verdana is a per-user Linux service for discovering, installing, and running Nostr napps and napplets with native operating-system integration. It exposes control through a user-only Unix socket and configuration files so distributions and users can build their own settings applications. The existing Gio manager/store UI and Android app are being retired in v0.2.
+Kwakore is the v0.2 name for the project currently called Verdana. It is becoming a per-user Linux service for discovering, installing, and running Nostr napps and napplets with native operating-system integration. It exposes control through a user-only Unix socket and configuration files so distributions and users can build their own settings applications. The existing Gio manager/store UI and Android app are being retired in v0.2.
 
 ## Current State
 
@@ -17,6 +17,7 @@ Verdana is a per-user Linux service for discovering, installing, and running Nos
 - Documented Unix socket control for service status/configuration, napplet discovery and lifecycle, permissions, and Nostr signer options.
 - File-based configuration with clear locations, validation, reload behavior, and safe handling of signer secrets.
 - Retire the Gio manager/store UI and Android app while retaining the napplet runtime and native window integration needed to launch content.
+- Rename the project and all supported Linux-facing identifiers to `kwakore`.
 
 ## Core Value
 
@@ -59,6 +60,7 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 - [ ] Control the daemon's features and settings through a documented, user-only Unix socket and configuration files.
 - [ ] Manage Nostr signer options without exposing secrets through the control interface.
 - [ ] Remove the Gio manager/store UI and Android app while preserving native napplet integration.
+- [ ] Rename Verdana to kwakore across code, package identifiers, Linux integration, documentation, and CI.
 
 **Deferred from v0.1 (backlog 999.10-999.12, unmet requirements listed in `milestones/v0.1-REQUIREMENTS.md`):**
 - Relay, outbox, intent and INC domains conform strictly (RELY-01..06, INTN-01..03)
@@ -103,6 +105,7 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 |----------|-----------|---------|
 | Per-user systemd service with a user-only Unix socket | Keeps control and napplet state within each user's session and lets native clients integrate without a bundled settings UI | — Pending v0.2 |
 | Retire Gio manager/store UI and Android app | Reduce product scope around the Linux service and its reusable runtime | — Pending v0.2 |
+| Rename the project to `kwakore` in v0.2 | Align the product name and native identifiers with the service pivot | — Pending v0.2 |
 | Conformance measured against NIP-5D + naps (`napplet/naps`), WEB-NAPPLET from `hzrd149/naps` | NIP-5D defines the runtime contract, naps the per-domain messages; WEB-NAPPLET is the future event schema | ✓ Good — v0.1 (`spec/pinned/`, `spec/CONFORMANCE.md`) |
 | Pin specs to upstream heads by SHA | Reproducible audit against a moving target | ✓ Good — Phase 1 (`spec/pinned/`) |
 | Conform strictly, including storage keyed by artifact hash | Public release as a spec-correct runtime; accept one-time data reset with a notice | ✓ Good — v0.1 Phase 5 (update/uninstall confirm dialogs) |

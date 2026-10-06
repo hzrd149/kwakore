@@ -1,4 +1,4 @@
-# Requirements: Verdana v0.2 Linux Service Pivot
+# Requirements: Kwakore v0.2 Linux Service Pivot
 
 **Defined:** 2026-10-06
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
@@ -7,7 +7,7 @@
 
 ### Service and Runtime
 
-- [ ] **SRVC-01**: A Linux user can start, stop, restart, and inspect a Verdana daemon through their per-user systemd manager.
+- [ ] **SRVC-01**: A Linux user can start, stop, restart, and inspect the Kwakore daemon through their per-user systemd manager.
 - [ ] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
 - [ ] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
 - [ ] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
@@ -34,10 +34,11 @@
 ### Linux Delivery and Cleanup
 
 - [ ] **LNXS-01**: A user on a common systemd Linux distribution can install user service and socket units and run the daemon without the Gio manager/store.
-- [ ] **LNXS-02**: A NixOS user can install and configure Verdana declaratively through a module that creates the same per-user service and socket behavior.
+- [ ] **LNXS-02**: A NixOS user can install and configure Kwakore declaratively through a module that creates the same per-user service and socket behavior.
 - [ ] **LNXS-03**: A user can launch installed napplets through native desktop entries backed by the daemon's stable control interface.
 - [ ] **CLNP-01**: The Gio manager/store UI, Android application and bindings, and obsolete build paths are removed without breaking backend tests or the Linux napplet runtime.
 - [ ] **CLNP-02**: Installation, configuration, socket API, CLI, signer handling, and graphical-session behavior are documented for users and third-party client authors.
+- [ ] **NAME-01**: Linux users and developers see `kwakore` consistently in binaries, Go module paths, systemd units, socket/config/data locations, desktop entries, keyring identifiers, CI, and documentation, with obsolete Verdana identifiers removed from supported paths.
 
 ## Future Requirements
 
@@ -56,7 +57,17 @@
 
 ## Traceability
 
-To be populated after roadmap approval. Every v0.2 requirement maps to exactly one phase.
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| SRVC-02, SRVC-05 | 6 | Pending |
+| CONF-01, CONF-02, CONF-03 | 6 | Pending |
+| SOCK-01, SOCK-02, SOCK-03, SOCK-04, SOCK-05 | 7 | Pending |
+| SRVC-03, SRVC-04 | 8 | Pending |
+| SOCK-06, SIGN-01, SIGN-02, SIGN-03 | 8 | Pending |
+| SRVC-01, LNXS-01, LNXS-02, LNXS-03 | 9 | Pending |
+| CLNP-01, CLNP-02, NAME-01 | 9 | Pending |
+
+**Coverage:** 23 v0.2 requirements; 23 mapped to exactly one phase; 0 unmapped.
 
 ---
 *Requirements defined: 2026-10-06*

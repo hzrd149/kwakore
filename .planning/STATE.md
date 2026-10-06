@@ -1,16 +1,18 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.2
-milestone_name: Linux Service Pivot
+milestone_name: Linux Service Pivot and Kwakore Rename
 status: planning
 last_updated: "2026-10-06T18:46:39.809Z"
 last_activity: 2026-10-06
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
+current_phase: 6
+current_phase_name: Daemon Core and Configuration
 ---
 
 # Project State
@@ -19,15 +21,15 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-10-06)
 
-**Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Planning next milestone (project direction changing; v0.1 Hardening archived)
+**Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
+**Current focus:** v0.2 Linux Service Pivot and Kwakore Rename, Phase 6: Daemon Core and Configuration
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 6 of 9 — Daemon Core and Configuration
 Plan: —
-Status: Defining requirements
-Last activity: 2026-10-06 — Milestone v0.2 started
+Status: Ready to discuss and plan
+Last activity: 2026-10-06 — v0.2 roadmap drafted
 
 ## Performance Metrics
 
