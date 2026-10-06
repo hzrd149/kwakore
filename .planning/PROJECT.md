@@ -2,19 +2,25 @@
 
 ## What This Is
 
-Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, installs, and runs **napps** (kind `35130` file trees in a webview) and **napplets** (kinds `35129`/`15129` single-file HTML in a sandboxed iframe that reaches the launcher only through NAP messages). Android is deprioritized and slated for removal (backlog 999.8).
+Verdana is a per-user Linux service for discovering, installing, and running Nostr napps and napplets with native operating-system integration. It exposes control through a user-only Unix socket and configuration files so distributions and users can build their own settings applications. The existing Gio manager/store UI and Android app are being retired in v0.2.
 
 ## Current State
 
 **v0.1 Hardening shipped 2026-10-06** (Phases 1-5, 40 plans). The napplet runtime is contained (no `d`-tag path escape), every NAP request runs through one gated and bounded dispatcher, the desktop process boundary and secrets are hardened, frame reloads reset the sandbox session, and napplet storage and config are keyed by address plus artifact hash. The milestone was closed early for a change of project direction: relay/outbox/intent/INC conformance, resource/upload/media policy and the trusted-prompt and audit close-out work (24 requirements) moved to backlog 999.10-999.12. See `.planning/MILESTONES.md`.
 
-## Next Milestone Goals
+## Current Milestone: v0.2 Linux Service Pivot
 
-To be set with `/gsd-new-milestone`. The project direction is changing. Backlog candidates include the Omarchy integration items (999.1-999.6), per-OS data folders (999.7), removing Android (999.8), the kwakore rename (999.9) and the deferred conformance work (999.10-999.12).
+**Goal:** Deliver a simple, per-user Linux napplet service that can be fully controlled through a Unix socket and configuration files, with NixOS as a first-class installation target.
+
+**Target features:**
+- Per-user systemd service and Linux distribution packaging, including NixOS integration.
+- Documented Unix socket control for service status/configuration, napplet discovery and lifecycle, permissions, and Nostr signer options.
+- File-based configuration with clear locations, validation, reload behavior, and safe handling of signer secrets.
+- Retire the Gio manager/store UI and Android app while retaining the napplet runtime and native window integration needed to launch content.
 
 ## Core Value
 
-A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
+A Linux user can run an untrusted napplet through a simple, controllable local service without giving the napplet or another local process access to capabilities or secrets beyond those explicitly allowed.
 
 ## Requirements
 
@@ -49,7 +55,10 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 <!-- Empty between milestones. Define with /gsd-new-milestone. -->
 
-(None. Next milestone not defined yet.)
+- [ ] Run the napplet runtime as a per-user systemd service on common Linux distributions, with NixOS support.
+- [ ] Control the daemon's features and settings through a documented, user-only Unix socket and configuration files.
+- [ ] Manage Nostr signer options without exposing secrets through the control interface.
+- [ ] Remove the Gio manager/store UI and Android app while preserving native napplet integration.
 
 **Deferred from v0.1 (backlog 999.10-999.12, unmet requirements listed in `milestones/v0.1-REQUIREMENTS.md`):**
 - Relay, outbox, intent and INC domains conform strictly (RELY-01..06, INTN-01..03)
@@ -60,7 +69,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 ### Out of Scope
 
 - Implementing unimplemented NAP domains (`keys`, `lists`, `dm`, `count`) — v0.1 conformed what exists; revisit with the new direction
-- Android work of any kind — Android is deprioritized and slated for removal (backlog 999.8)
+- Android support — removed in v0.2 to focus on Linux service integration
+- Bundled settings/store GUI — third-party clients use the documented socket API and configuration files
 - Fuzz testing — robustness is covered by explicit limits and regression tests
 - Upstreaming spec fixes — ambiguities are resolved by choosing the strictest reasonable reading and recording it in the checklist
 - Keeping address-keyed storage — strict conformance chosen over data continuity across napplet updates
@@ -82,8 +92,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 ## Constraints
 
-- **Tech stack:** Go backend and desktop, plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
-- **Compatibility:** shared backend changes keep `GOOS=android` Go builds compiling until Android is removed (backlog 999.8); no Android UI or Kotlin work
+- **Tech stack:** Go backend and Linux runtime host; plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
+- **Compatibility:** Linux distributions with a per-user systemd instance; NixOS is a first-class target
 - **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Verdana deviates on purpose today
 - **Testing:** Changes to parsing, permissions, storage, networking, or napplet lifecycle include focused regression tests (`CLAUDE.md`); backend and desktop test commands pass before each merge
 
@@ -91,6 +101,8 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| Per-user systemd service with a user-only Unix socket | Keeps control and napplet state within each user's session and lets native clients integrate without a bundled settings UI | — Pending v0.2 |
+| Retire Gio manager/store UI and Android app | Reduce product scope around the Linux service and its reusable runtime | — Pending v0.2 |
 | Conformance measured against NIP-5D + naps (`napplet/naps`), WEB-NAPPLET from `hzrd149/naps` | NIP-5D defines the runtime contract, naps the per-domain messages; WEB-NAPPLET is the future event schema | ✓ Good — v0.1 (`spec/pinned/`, `spec/CONFORMANCE.md`) |
 | Pin specs to upstream heads by SHA | Reproducible audit against a moving target | ✓ Good — Phase 1 (`spec/pinned/`) |
 | Conform strictly, including storage keyed by artifact hash | Public release as a spec-correct runtime; accept one-time data reset with a notice | ✓ Good — v0.1 Phase 5 (update/uninstall confirm dialogs) |
@@ -134,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-06 after v0.1 milestone*
+*Last updated: 2026-10-06 after defining v0.2 milestone direction*
