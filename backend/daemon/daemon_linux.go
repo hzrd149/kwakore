@@ -30,6 +30,9 @@ type Service struct {
 	start        time.Time
 	version      string
 	warning      string
+	recentErrors [32]DiagnosticError
+	errorNext    int
+	errorCount   int
 	manager      *serviceconfig.Manager
 	closeBackend func()
 	lock         *os.File
@@ -146,6 +149,7 @@ func (s *Service) SetSetting(field string, value any) error {
 	defer s.operationMu.Unlock()
 	before := s.manager.Effective()
 	if err := s.manager.SetOverride(field, value); err != nil {
+		s.recordError("setting_update", "setting update rejected")
 		return err
 	}
 	s.notifySettingsChange(before)
@@ -162,6 +166,7 @@ func (s *Service) ClearSetting(field string) error {
 	defer s.operationMu.Unlock()
 	before := s.manager.Effective()
 	if err := s.manager.ClearOverride(field); err != nil {
+		s.recordError("setting_update", "setting clear rejected")
 		return err
 	}
 	s.notifySettingsChange(before)
@@ -192,6 +197,7 @@ func (s *Service) Reload() error {
 		s.warning = ""
 	} else {
 		s.warning = reloadWarning(s.manager.Paths().ConfigFile, err)
+		s.recordErrorLocked("config_reload", s.warning)
 	}
 	warning := s.warning
 	s.mu.Unlock()
