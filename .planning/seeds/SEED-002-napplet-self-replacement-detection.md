@@ -5,6 +5,10 @@ planted: 2026-10-04
 planted_during: Phase 04 (Frame Sandbox Lifecycle) — hardening & conformance milestone
 trigger_when: a webview engine exposes a per-document or document-replaced signal for sandboxed srcdoc sub-frames, or NIP-5D tightens the reload clause
 scope: small-to-medium
+audit_acknowledged:
+  milestone: v0.1
+  at: 2026-10-06
+  status: dormant
 ---
 
 # SEED-002: Detect a napplet replacing its own document without a navigation or load

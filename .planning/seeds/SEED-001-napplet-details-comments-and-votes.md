@@ -5,6 +5,10 @@ planted: 2026-10-03
 planted_during: Phase 02 (Gated NAP Dispatcher) — hardening & conformance milestone
 trigger_when: when relevant
 scope: unknown
+audit_acknowledged:
+  milestone: v0.1
+  at: 2026-10-06
+  status: dormant
 ---
 
 # SEED-001: The napplet details page on the store should show NIP-22 comments on napplets and up/down vote reaction totals

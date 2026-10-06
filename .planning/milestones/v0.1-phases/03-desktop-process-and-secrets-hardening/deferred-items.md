@@ -12,3 +12,5 @@ Out-of-scope discoveries logged during execution. Not fixed by the plan that fou
   about 12 runs). The process is also never reaped. A fix would route it through a seam like
   `desktop/host.go` `startCommand` (Start plus `go c.Wait()`) and stub it in tests. This was already
   the case before 03-02; it is not caused by the switch to `fileutil.WriteFileAtomic`.
+- **Status:** acknowledged
+- **Deferred:** at v0.1 milestone close, 2026-10-06
