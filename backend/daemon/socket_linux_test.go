@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,4 +90,93 @@ func TestSocketFramesOversize(t *testing.T) {
 	if err != nil || !bytes.Contains(line, []byte(`"code":-32600`)) {
 		t.Fatalf("oversize: %s, %v", line, err)
 	}
+}
+
+func TestSocketAccessRuntimeValidation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("missing runtime directory accepted")
+	}
+	t.Setenv("XDG_RUNTIME_DIR", "relative")
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("relative runtime directory accepted")
+	}
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("public runtime directory accepted")
+	}
+	if err := os.Chmod(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(runtimeDir, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(root, "link"))
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("symlinked runtime directory accepted")
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	if err := os.Symlink(filepath.Join(root, "other"), filepath.Join(runtimeDir, "kwakore")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("symlinked child accepted")
+	}
+}
+
+func TestSocketClosePreservesUnexpectedInode(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	s := &Service{}
+	listener, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	if _, err := s.Listen(); err == nil {
+		t.Fatal("second listener replaced active socket")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("replacement"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "replacement" {
+		t.Fatalf("replacement removed: %q, %v", got, err)
+	}
+}
+
+func TestSocketAccessReplacesOwnedStaleSocket(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	child := filepath.Join(runtimeDir, "kwakore")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	path := filepath.Join(child, "daemon.sock")
+	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SetUnlinkOnClose(false)
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := (&Service{}).Listen()
+	if err != nil {
+		t.Fatalf("owned stale socket was not replaced: %v", err)
+	}
+	defer listener.Close()
 }
