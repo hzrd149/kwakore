@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -366,6 +367,89 @@ func TestCLISettingsRemoteErrorIsFixed(t *testing.T) {
 	if !strings.Contains(out.String(), `"code":1006`) || strings.Contains(out.String(), "private-url.invalid") {
 		t.Fatalf("unsafe error: %s", out.String())
 	}
+}
+
+func TestCLIPartialCleanupErrorData(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	for _, tc := range []struct {
+		name, data string
+		code       int
+		wantCode   int
+		wantData   bool
+	}{
+		{"valid", `{"address":"` + address + `","record_removed":true,"cleanup_complete":false}`, controlprotocol.PartialCleanup, controlprotocol.PartialCleanup, true},
+		{"wrong address", `{"address":"35129:` + strings.Repeat("b", 64) + `:app","record_removed":true,"cleanup_complete":false}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"extra field", `{"address":"` + address + `","record_removed":true,"cleanup_complete":false,"private":"/home/user/secret"}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"missing field", `{"address":"` + address + `","record_removed":true}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"false removal", `{"address":"` + address + `","record_removed":false,"cleanup_complete":false}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"completed cleanup", `{"address":"` + address + `","record_removed":true,"cleanup_complete":true}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"wrong type", `{"address":"` + address + `","record_removed":"true","cleanup_complete":false}`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"null data", `null`, controlprotocol.PartialCleanup, controlprotocol.Unavailable, false},
+		{"other code", `{"address":"` + address + `","record_removed":true,"cleanup_complete":false,"private":"/home/user/secret"}`, controlprotocol.ConfigInvalid, controlprotocol.ConfigInvalid, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan []byte, 1)
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					seen <- nil
+					return
+				}
+				defer conn.Close()
+				line, _ := bufio.NewReader(conn).ReadBytes('\n')
+				seen <- line
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":` + fmt.Sprint(tc.code) + `,"message":"private cleanup path /home/user/secret","data":` + tc.data + `}}` + "\n"))
+			}()
+			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "uninstall", "--yes", address)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+				t.Fatalf("status=%v stdout=%q", err, stdout.String())
+			}
+			var request controlprotocol.Request
+			if err := json.Unmarshal(<-seen, &request); err != nil || request.Method != "napplet.uninstall" || string(request.Params) != `{"address":"`+address+`","confirm":true}` {
+				t.Fatalf("request=%+v err=%v", request, err)
+			}
+			var outer map[string]json.RawMessage
+			if err := json.Unmarshal(stderr.Bytes(), &outer); err != nil || len(outer) != 1 || bytes.Count(stderr.Bytes(), []byte{'\n'}) != 1 {
+				t.Fatalf("stderr=%q err=%v", stderr.String(), err)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(outer["error"], &got); err != nil {
+				t.Fatal(err)
+			}
+			if string(got["code"]) != fmt.Sprint(tc.wantCode) || string(got["message"]) != `"`+controlprotocol.FixedError(tc.wantCode).Message+`"` {
+				t.Fatalf("error fields: %s", stderr.String())
+			}
+			_, hasData := got["data"]
+			if hasData != tc.wantData || len(got) != 2+boolInt(tc.wantData) {
+				t.Fatalf("error data: %s", stderr.String())
+			}
+			if tc.wantData && string(got["data"]) != tc.data {
+				t.Fatalf("error data mismatch: %s", stderr.String())
+			}
+			if bytes.Contains(stderr.Bytes(), []byte("private")) || bytes.Contains(stderr.Bytes(), []byte("/home/user/secret")) {
+				t.Fatalf("leak: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func TestCLIReadMethods(t *testing.T) {
