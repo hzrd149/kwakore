@@ -174,3 +174,16 @@ func TestServiceInstalledCanonicalSafePages(t *testing.T) {
 		t.Fatalf("unsafe result: %s %v", wire, err)
 	}
 }
+
+func TestServiceInstallCanonicalAddress(t *testing.T) {
+	pk := nostr.Generate().Public().Hex()
+	valid := "15129:" + pk + ":"
+	if _, err := ParseCanonicalServiceAddress(valid); err != nil {
+		t.Fatalf("canonical root refused: %v", err)
+	}
+	for _, input := range []string{" " + valid, "15129:" + strings.ToUpper(pk) + ":", "15129:" + pk, "35129:" + pk[:16] + ":app", strings.Repeat("x", 4097)} {
+		if _, err := ParseCanonicalServiceAddress(input); err == nil {
+			t.Fatalf("accepted noncanonical address %q", input)
+		}
+	}
+}
