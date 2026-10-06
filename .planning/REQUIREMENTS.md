@@ -59,13 +59,29 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRVC-02, SRVC-05 | 6 | Pending |
-| CONF-01, CONF-02, CONF-03 | 6 | Pending |
-| SOCK-01, SOCK-02, SOCK-03, SOCK-04, SOCK-05 | 7 | Pending |
-| SRVC-03, SRVC-04 | 8 | Pending |
-| SOCK-06, SIGN-01, SIGN-02, SIGN-03 | 8 | Pending |
-| SRVC-01, LNXS-01, LNXS-02, LNXS-03 | 9 | Pending |
-| CLNP-01, CLNP-02, NAME-01 | 9 | Pending |
+| SRVC-01 | 9 | Pending |
+| SRVC-02 | 6 | Complete |
+| SRVC-03 | 8 | Pending |
+| SRVC-04 | 8 | Pending |
+| SRVC-05 | 6 | Complete |
+| SOCK-01 | 7 | Pending |
+| SOCK-02 | 7 | Pending |
+| SOCK-03 | 7 | Pending |
+| SOCK-04 | 7 | Pending |
+| SOCK-05 | 7 | Pending |
+| SOCK-06 | 8 | Pending |
+| CONF-01 | 6 | Complete |
+| CONF-02 | 6 | Complete |
+| CONF-03 | 6 | Complete |
+| SIGN-01 | 8 | Pending |
+| SIGN-02 | 8 | Pending |
+| SIGN-03 | 8 | Pending |
+| LNXS-01 | 9 | Pending |
+| LNXS-02 | 9 | Pending |
+| LNXS-03 | 9 | Pending |
+| CLNP-01 | 9 | Pending |
+| CLNP-02 | 9 | Pending |
+| NAME-01 | 9 | Pending |
 
 **Coverage:** 23 v0.2 requirements; 23 mapped to exactly one phase; 0 unmapped.
 
