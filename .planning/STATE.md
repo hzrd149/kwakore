@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 7
 current_phase_name: Unix Socket and CLI
-current_plan: Not started
-status: planning
-stopped_at: Phase 6 complete, ready to plan Phase 7
-last_updated: "2026-10-06T20:33:29.201Z"
+current_plan: 07-07 complete
+status: verification_deferred_human
+stopped_at: Phase 7 automated verification passed; live UAT deferred by user
+last_updated: "2026-10-06T23:51:30Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 6 complete, transitioned to Phase 7
+last_activity_desc: Phase 7 implementation complete; live UAT deferred
 state_head: 0829d6eba56a32e318b7e314ae22a6999242c58d
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 11
+  completed_plans: 11
   percent: 25
 ---
 
@@ -26,13 +26,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** v0.2 Linux Service Pivot and Kwakore Rename, Phase 6: Daemon Core and Configuration
+**Current focus:** v0.2 Linux Service Pivot and Kwakore Rename, Phase 7 live verification
 
 ## Current Position
 
 Phase: 7 — Unix Socket and CLI
-Current Plan: Not started
-Status: Ready to plan
+Current Plan: 07-07 complete
+Status: Live verification deferred by user; see 07-UAT.md
 **Progress:** 1/4 plans ([███░░░░░░░] 25%)
 Last activity: 2026-10-06 — Phase 6 complete, transitioned to Phase 7
 
@@ -172,12 +172,20 @@ Items acknowledged and deferred at milestone close, most recent first:
 | deferred_items | 05/deferred-items.md: applyUpdate skips user's Blossom servers when manifest names any | acknowledged | 2026-10-06 | v0.1 |
 | deferred_items | 05/deferred-items.md: NAPPLETS.md pre-Phase-5 text (shell.ready, shim 0.29.2, notify) | acknowledged | 2026-10-06 | v0.1 |
 
+## Deferred Verification
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 7 | verification_deferred_human | $gsd-verify-work 7 |
+
+Phase 7 automated verification covers 18/18 must-haves. The user deferred the two live external relay/blob checks in `07-UAT.md` on 2026-10-06. Phase 7 remains incomplete until those checks pass.
+
 ## Session Continuity
 
-Last session: 2026-10-06T20:29:47.852Z
-Stopped at: Phase 6 complete, ready to plan Phase 7
-Resume file: None
+Last session: 2026-10-06T23:51:30Z
+Stopped at: Phase 7 live UAT deferred by user
+Resume file: .planning/phases/07-unix-socket-and-cli/07-UAT.md
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Complete `$gsd-verify-work 7`, then resume `$gsd-autonomous --from 7`.
