@@ -4,17 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 06
 current_phase_name: Daemon Core and Configuration
-status: planning
-stopped_at: Phase 6 context gathered
-last_updated: "2026-10-06T19:41:23.139Z"
+current_plan: 2 of 4
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-10-06T20:07:00.264Z"
 last_activity: 2026-10-06
 last_activity_desc: v0.2 roadmap drafted
-state_head: 5d60d94b501fc6b5f77a2d97cc7a408402e1bbc7
+state_head: 6bbdf9a3361c6bd5a0d891f38a1c49afad511988
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -29,10 +30,11 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Phase: 06 (Daemon Core and Configuration) — READY TO EXECUTE
-Plan: —
-Status: Ready to discuss and plan
-Last activity: 2026-10-06 — v0.2 roadmap drafted
+Phase: 06 (Daemon Core and Configuration) — EXECUTING
+Current Plan: 2 of 4
+Status: Plan 06-01 complete
+**Progress:** 1/4 plans ([░░░░░░░░░░] 0%)
+Last activity: 2026-10-06 — foreground daemon and config validated
 
 ## Performance Metrics
 
@@ -102,12 +104,16 @@ Last activity: 2026-10-06 — v0.2 roadmap drafted
 | Phase 05 P09 | 10min | 3 tasks | 8 files |
 | Phase 05 P10 | 13min | 3 tasks | 8 files |
 | Phase 05 P11 | 6min | 2 tasks | 4 files |
+| Phase 06 P01 | 6min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
 ### Decisions
 
 Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase decisions are in `.planning/milestones/v0.1-phases/*/` SUMMARY files, and spec pins are in `.planning/research/SPEC-PINS.md`.
+
+- [Phase 06]: Reject explicit JSON null for optional service settings; omit a key to use its default.
+- [Phase 06]: Discard legacy file-mode login fields when service mode loads or saves state.json.
 
 ### Pending Todos
 
@@ -158,9 +164,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T19:15:29.835Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-daemon-core-and-configuration/06-CONTEXT.md
+Last session: 2026-10-06T20:06:41.468Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

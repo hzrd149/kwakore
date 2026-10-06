@@ -8,7 +8,7 @@
 ### Service and Runtime
 
 - [ ] **SRVC-01**: A Linux user can start, stop, restart, and inspect the Kwakore daemon through their per-user systemd manager.
-- [ ] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
+- [x] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
 - [ ] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
 - [ ] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
 - [ ] **SRVC-05**: A client can inspect daemon health, version, active windows, and actionable diagnostic information.
@@ -24,8 +24,8 @@
 
 ### Configuration and Signers
 
-- [ ] **CONF-01**: A user can configure service behavior with documented files under XDG configuration paths and see effective non-secret settings through the socket.
-- [ ] **CONF-02**: A user can validate configuration and reload supported changes without losing the last known valid configuration.
+- [x] **CONF-01**: A user can configure service behavior with documented files under XDG configuration paths and see effective non-secret settings through the socket.
+- [x] **CONF-02**: A user can validate configuration and reload supported changes without losing the last known valid configuration.
 - [ ] **CONF-03**: A client can change supported general service settings through the socket, with documented precedence relative to declarative files and atomic persistence.
 - [ ] **SIGN-01**: A user can configure the existing supported Nostr signer modes through files and the socket using a documented, consistent schema.
 - [ ] **SIGN-02**: A client can inspect signer mode and connection state without reading private keys, tokens, or bunker client secrets.

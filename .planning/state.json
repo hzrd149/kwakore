@@ -1,0 +1,33 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v0.2 — Linux Service Pivot",
+  "phases": [
+    {
+      "number": "6",
+      "name": "Daemon Core and Configuration",
+      "status": "pending"
+    },
+    {
+      "number": "7",
+      "name": "Unix Socket and CLI",
+      "status": "pending"
+    },
+    {
+      "number": "8",
+      "name": "Runtime and Signer Integration",
+      "status": "pending"
+    },
+    {
+      "number": "9",
+      "name": "Linux Packaging, Rename and Cleanup",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 06 of 4 · 0% · executing"
+  },
+  "updated_at": "2026-10-06T20:07:00.277Z"
+}
