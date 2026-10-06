@@ -351,3 +351,13 @@ Plans:
 Plans:
 
 - [ ] TBD (promote with $gsd-review-backlog when ready)
+
+### Phase 999.8: Remove the Android build and focus on desktop platforms only (BACKLOG)
+
+**Goal:** Remove the Android app and its build path (`android/`, `backend/mobile` gomobile binding, `just aar`/`just apk`/`just install`, the Android CI workflow and AAR job, Android-only shims such as Android equivalents of host headers) and make the project desktop-only (Linux, macOS, Windows): update CLAUDE.md, .claude/CLAUDE.md, PROJECT.md constraints, README/NAPPLETS.md and CONFORMANCE rows that mention Android (e.g. 5D-NG-android), and drop the `GOOS=android` build gate.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with $gsd-review-backlog when ready)
