@@ -35,6 +35,7 @@ A user can run an untrusted napplet and it gets exactly what the specs allow and
 - ✓ Desktop login secrets live in the OS keyring after a verified read-back; no automatic path regenerates the NIP-46 client key or loses the login; unavailable keyring falls back to the 0600 file with a notice — Phase 3
 - ✓ All state writers are atomic; a corrupt `state.json` is kept aside with a notice, an unreadable one blocks saves — Phase 3
 - ✓ A napplet that reloads or navigates its own frame gets a fresh frame and session (old session reset first, replies and refusals bound to the sending frame, reload loops halted after 3 in 10 s); a document-start marker closes the delayed-load gap; the host page and every loopback response carry an enforced CSP with `frame-ancestors 'none'`; WebKitGTK napplet windows fail closed unless WebRTC, media capture and preconnect read back off — Phase 4 (self-made `javascript:`/unclosed `document.open()` documents keep the session: accepted residual, SEED-002)
+- ✓ Every napplet's data is bound to the artifact installed: ids are the NIP-01 address (root and `d="root"` never share), storage and NAP-CONFIG are keyed by address + artifact hash with hashed file names and no fallback, updates/uninstall/window close reclaim data, the registry picks the NIP-01 latest event (id and signature checked) and shows an invalid latest as unavailable, blob downloads are public-only (user-configured servers excepted), trials verify every file, and shortcut files on Linux/macOS/Windows carry only launch tokens — Phase 5
 
 ### Active
 
@@ -129,4 +130,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-05 after Phase 4*
+*Last updated: 2026-10-06 after Phase 5*

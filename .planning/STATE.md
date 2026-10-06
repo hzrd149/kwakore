@@ -23,7 +23,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
-**Current focus:** Phase 05 — Napplet Artifact Identity and Storage Keying
+**Current focus:** Phase 06 — Relay, Outbox, Intent and INC Conformance
 
 ## Current Position
 
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-10-06 — Phase 05 complete, transitioned to Phase 6
 
-Progress: [█████░░░░░] 50% (4/8 phases)
+Progress: [██████░░░░] 63% (5/8 phases)
 
 ## Performance Metrics
 
@@ -233,6 +233,8 @@ None yet.
 - [Phase 3 residue]: First real Windows CI run not yet observed (124+ commits unpushed); Phase 3 info items IN-01..IN-11 open in 03-REVIEW.md; corrupt-state copies may keep plaintext secrets (AR-11); a downgrade on a migrated data dir must re-pair the bunker (release notes)
 - [Phase 3 UI]: 03-UI-REVIEW 20/24 follow-ups: draw the keyring-waiting Log in button disabled (login.go:89), cap/scroll the notice stack at high display scale (layout.go:273, login.go:220), click feedback for Try again / Log in again / Dismiss (retries already join in-flight loads)
 - [Phase 4 residue]: 04-UAT items 5–8 deferred to the milestone audit: WebView2 and WKWebView fixture runs (record in CONFORMANCE 5D-NG-webview2 / 5D-NG-wkwebview), Android `just apk`, first green CI xvfb smoke; SEED-002 (self-made `javascript:`/unclosed `document.open()` documents keep the session); one unexplained local smoke failure in 7 runs (04 deferred-items.md)
+- [Phase 5 residue]: 05-UAT items 19–21 (Windows .lnk/PowerShell-as-data, long titles, NTFS/APFS name folding, rename retries; macOS bundles/Spotlight; Android) deferred to the milestone audit; Android uninstall pending-close (AR-05) left open for backlog 999.8; Info IN-01 (update dialog promises a reset even when the hash is unchanged), IN-02 (InstallAddress dead code), IN-05 (napp storage still keyed by pk16~d), IN-10 (superseded window can't boot after swap) open
+- [Project]: No deployments exist — skip data migrations and old-build compatibility (user, 2026-10-06); backlog 999.7 per-OS data folders, 999.8 remove Android, 999.9 rename to kwakore
 - [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
 
 ### Quick Tasks Completed
