@@ -150,7 +150,13 @@ func processRequest(frame []byte, dispatch Dispatch) []byte {
 		return nil
 	}
 	if rpcErr != nil {
-		rpcErr = FixedError(rpcErr.Code)
+		fixed := FixedError(rpcErr.Code)
+		if fixed.Code == PartialCleanup && rpcErr.Code == PartialCleanup {
+			if data, ok := rpcErr.Data.(PartialCleanupData); ok && data.Address != "" && data.RecordRemoved && !data.CleanupComplete {
+				fixed.Data = data
+			}
+		}
+		rpcErr = fixed
 	}
 	response := Response{JSONRPC: "2.0", Error: rpcErr, ID: request.ID}
 	if rpcErr == nil {

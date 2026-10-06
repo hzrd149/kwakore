@@ -177,11 +177,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		result, uninstallErr := serviceUninstall(workCtx, address)
 		if errors.Is(uninstallErr, backend.ErrServicePartialCleanup) {
 			rpcErr := controlprotocol.FixedError(controlprotocol.PartialCleanup)
-			rpcErr.Data = struct {
-				Address         string `json:"address"`
-				RecordRemoved   bool   `json:"record_removed"`
-				CleanupComplete bool   `json:"cleanup_complete"`
-			}{result.Address, result.RecordRemoved, result.CleanupComplete}
+			rpcErr.Data = controlprotocol.PartialCleanupData{Address: result.Address, RecordRemoved: result.RecordRemoved, CleanupComplete: result.CleanupComplete}
 			return nil, rpcErr
 		}
 		if uninstallErr != nil {
