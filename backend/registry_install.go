@@ -281,11 +281,11 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 
 	// what the user allowed or denied it is about the copy they had; a
 	// reinstall starts from asking again
-	ForgetPermission(id, "")
+	cleanupErr = errors.Join(cleanupErr, ForgetPermission(id, ""))
 	// a napp that isn't installed can't be anyone's habitual handler, and
 	// whatever the next one installed under that id shouldn't inherit it
-	forgetActionUsage(id)
-	forgetDispatchTarget(id)
+	cleanupErr = errors.Join(cleanupErr, forgetActionUsage(id))
+	cleanupErr = errors.Join(cleanupErr, forgetDispatchTarget(id))
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")

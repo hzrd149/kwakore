@@ -349,7 +349,7 @@ func permissionRuleOf(key RuleKey, rule Rule) PermissionRule {
 // ForgetPermission takes back what was remembered: everything about a napp
 // with no permission named, or one permission of a napp. Whatever that napp
 // asks next is a prompt again.
-func ForgetPermission(napp string, perm Permission) {
+func ForgetPermission(napp string, perm Permission) error {
 	// a rule is filed under the napp and the permission (and the subject, for
 	// the permissions that take one), so a whole napp is everything filed
 	// under its name, and one of its permissions is everything filed under
@@ -375,8 +375,9 @@ func ForgetPermission(napp string, perm Permission) {
 		delete(state.Rules, id)
 		saved = true
 	}
+	var saveErr error
 	if saved {
-		saveState()
+		saveErr = saveState()
 	}
 	stateMu.Unlock()
 
@@ -387,12 +388,13 @@ func ForgetPermission(napp string, perm Permission) {
 			backgroundSyncs.Go(broadcastIntentChanges)
 		}
 	}
+	return saveErr
 }
 
 // forgetDispatchTarget removes defaults that point at an app which is no
 // longer installed. Leaving one behind would turn a missing handler into a
 // stale-rule failure instead of allowing discovery or another user choice.
-func forgetDispatchTarget(target string) {
+func forgetDispatchTarget(target string) error {
 	for id, rule := range sessionRules.Range {
 		if rule.Target == target {
 			sessionRules.Delete(id)
@@ -407,10 +409,12 @@ func forgetDispatchTarget(target string) {
 			changed = true
 		}
 	}
+	var saveErr error
 	if changed {
-		saveState()
+		saveErr = saveState()
 	}
 	stateMu.Unlock()
+	return saveErr
 }
 
 // ─── the installed configuration ──────────────────────────────────

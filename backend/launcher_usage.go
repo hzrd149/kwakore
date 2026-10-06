@@ -192,7 +192,7 @@ func sortHandlerOptions(options []PromptOption, caller, action string) {
 // that isn't installed can't be the answer to anything, and reinstalling it
 // later shouldn't inherit a history the user never formed with the copy they
 // have now.
-func forgetActionUsage(napp string) {
+func forgetActionUsage(napp string) error {
 	for id := range sessionUsage.Range {
 		k := usageKeyFromID(id)
 		if k.Napp == napp || k.Target == napp {
@@ -209,8 +209,10 @@ func forgetActionUsage(napp string) {
 			changed = true
 		}
 	}
+	var saveErr error
 	if changed {
-		saveState()
+		saveErr = saveState()
 	}
 	stateMu.Unlock()
+	return saveErr
 }
