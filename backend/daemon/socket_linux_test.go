@@ -37,6 +37,14 @@ func TestSocketPeerDisconnectCancelsWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go watchSocketPeer(server, ctx, cancel)
+	if err := client.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal("write half-close canceled a live response reader")
+	case <-time.After(250 * time.Millisecond):
+	}
 	client.Close()
 	select {
 	case <-ctx.Done():

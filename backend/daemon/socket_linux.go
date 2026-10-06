@@ -208,14 +208,14 @@ func watchSocketPeer(conn *net.UnixConn, ctx context.Context, cancel context.Can
 	for ctx.Err() == nil {
 		var revents int16
 		err = raw.Control(func(fd uintptr) {
-			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLRDHUP | unix.POLLHUP | unix.POLLERR}}
+			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLHUP | unix.POLLERR}}
 			if _, pollErr := unix.Poll(poll, 200); pollErr != nil {
 				err = pollErr
 				return
 			}
 			revents = poll[0].Revents
 		})
-		if err != nil || revents&(unix.POLLRDHUP|unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
+		if err != nil || revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
 			cancel()
 			return
 		}
