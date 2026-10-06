@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -22,11 +22,15 @@ import (
 const socketName = "daemon.sock"
 
 type Listener struct {
-	server *net.UnixListener
-	path   string
-	inode  os.FileInfo
-	closed chan struct{}
-	once   sync.Once
+	server      *net.UnixListener
+	path        string
+	inode       os.FileInfo
+	closed      chan struct{}
+	once        sync.Once
+	connections chan struct{}
+	clients     map[*net.UnixConn]struct{}
+	mu          sync.Mutex
+	work        sync.WaitGroup
 }
 
 func SocketPath() (string, error) {
@@ -58,7 +62,7 @@ func (s *Service) Listen() (*Listener, error) {
 		server.Close()
 		return nil, err
 	}
-	l := &Listener{server: server, path: path, inode: inode, closed: make(chan struct{})}
+	l := &Listener{server: server, path: path, inode: inode, closed: make(chan struct{}), connections: make(chan struct{}, 64), clients: make(map[*net.UnixConn]struct{})}
 	go l.serve(s)
 	return l, nil
 }
@@ -68,6 +72,12 @@ func (l *Listener) Close() error {
 	l.once.Do(func() {
 		err = l.server.Close()
 		<-l.closed
+		l.mu.Lock()
+		for conn := range l.clients {
+			_ = conn.Close()
+		}
+		l.mu.Unlock()
+		l.work.Wait()
 		if info, e := os.Lstat(l.path); e == nil && os.SameFile(info, l.inode) {
 			_ = os.Remove(l.path)
 		}
@@ -82,18 +92,37 @@ func (l *Listener) serve(s *Service) {
 		if err != nil {
 			return
 		}
-		go handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
-			if method != "service.status" {
-				return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
-			}
-			if len(params) > 0 && !bytes.Equal(params, []byte("{}")) {
-				return nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
-			}
-			return struct {
-				ProtocolVersion int    `json:"protocol_version"`
-				Health          Health `json:"health"`
-			}{controlprotocol.Version, s.Health()}, nil
-		})
+		select {
+		case l.connections <- struct{}{}:
+		default:
+			_ = conn.Close()
+			continue
+		}
+		l.mu.Lock()
+		l.clients[conn] = struct{}{}
+		l.work.Add(1)
+		l.mu.Unlock()
+		go func() {
+			defer func() {
+				l.mu.Lock()
+				delete(l.clients, conn)
+				l.mu.Unlock()
+				<-l.connections
+				l.work.Done()
+			}()
+			handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
+				if method != "service.status" {
+					return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
+				}
+				if rpcErr := controlprotocol.ValidateNamedParams(params); rpcErr != nil {
+					return nil, rpcErr
+				}
+				return struct {
+					ProtocolVersion int    `json:"protocol_version"`
+					Health          Health `json:"health"`
+				}{controlprotocol.Version, s.Health()}, nil
+			})
+		}()
 	}
 }
 
@@ -109,19 +138,50 @@ func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch) {
 	reader := bufio.NewReader(conn)
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-		line, err := reader.ReadBytes('\n')
+		line, err := readFrame(reader)
+		if errors.Is(err, errFrameTooLarge) {
+			writeResponse(conn, controlprotocol.ProcessFrame(bytes.Repeat([]byte{' '}, controlprotocol.MaxRequestLine+1), dispatch))
+			return
+		}
 		if err != nil {
 			return
 		}
-		response := controlprotocol.ProcessFrame(bytes.TrimSuffix(line, []byte{'\n'}), dispatch)
+		response := controlprotocol.ProcessFrame(line, dispatch)
 		if response == nil {
 			continue
 		}
-		_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-		if _, err := conn.Write(append(response, '\n')); err != nil {
+		if err := writeResponse(conn, response); err != nil {
 			return
 		}
 	}
+}
+
+var errFrameTooLarge = errors.New("request frame too large")
+
+func readFrame(reader *bufio.Reader) ([]byte, error) {
+	var frame []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(frame)+len(part) > controlprotocol.MaxRequestLine+1 {
+			return nil, errFrameTooLarge
+		}
+		frame = append(frame, part...)
+		if err == nil {
+			return bytes.TrimSuffix(frame, []byte{'\n'}), nil
+		}
+		if err != bufio.ErrBufferFull {
+			return nil, err
+		}
+	}
+}
+
+func writeResponse(conn *net.UnixConn, response []byte) error {
+	if response == nil {
+		return nil
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err := io.Copy(conn, bytes.NewReader(append(response, '\n')))
+	return err
 }
 
 func peerUID(conn *net.UnixConn) (uint32, error) {
@@ -139,5 +199,3 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 	}
 	return cred.Uid, nil
 }
-
-var _ = syscall.Stat_t{}

@@ -4,9 +4,14 @@ package controlprotocol
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"strings"
 )
 
 const Version = 1
+const MaxRequestLine = 1 << 20
+const MaxResponseLine = 8 << 20
+const MaxBatch = 64
 
 const (
 	ParseError           = -32700
@@ -31,21 +36,18 @@ type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
-
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	ID      json.RawMessage `json:"id,omitempty"`
 }
-
 type Response struct {
 	JSONRPC string          `json:"jsonrpc"`
-	Result  any             `json:"result,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *Error          `json:"error,omitempty"`
 	ID      json.RawMessage `json:"id"`
 }
-
 type Dispatch func(method string, params json.RawMessage) (any, *Error)
 
 func FixedError(code int) *Error {
@@ -60,26 +62,152 @@ func FixedError(code int) *Error {
 }
 
 func ProcessFrame(frame []byte, dispatch Dispatch) []byte {
-	var request Request
+	if len(frame) > MaxRequestLine {
+		return encodeError(InvalidRequest, nil)
+	}
 	if !json.Valid(frame) {
 		return encodeError(ParseError, nil)
 	}
-	if err := json.Unmarshal(frame, &request); err != nil || request.JSONRPC != "2.0" || request.Method == "" {
+	frame = bytes.TrimSpace(frame)
+	if frame[0] == '[' {
+		var members []json.RawMessage
+		if json.Unmarshal(frame, &members) != nil {
+			return encodeError(ParseError, nil)
+		}
+		if len(members) == 0 || len(members) > MaxBatch {
+			return encodeError(InvalidRequest, nil)
+		}
+		responses := make([]json.RawMessage, 0, len(members))
+		for _, member := range members {
+			if response := processRequest(member, dispatch); response != nil {
+				responses = append(responses, response)
+			}
+		}
+		if len(responses) == 0 {
+			return nil
+		}
+		out, _ := json.Marshal(responses)
+		if len(out) > MaxResponseLine {
+			return encodeError(InternalError, nil)
+		}
+		return out
+	}
+	return processRequest(frame, dispatch)
+}
+
+func processRequest(frame []byte, dispatch Dispatch) []byte {
+	if len(frame) == 0 || frame[0] != '{' {
 		return encodeError(InvalidRequest, nil)
 	}
-	if len(request.ID) == 0 {
-		return nil
-	}
-	if !validID(request.ID) {
+	fields, err := objectFields(frame)
+	if err != nil {
 		return encodeError(InvalidRequest, nil)
+	}
+	var request Request
+	if json.Unmarshal(frame, &request) != nil || request.JSONRPC != "2.0" || request.Method == "" {
+		return encodeError(InvalidRequest, nil)
+	}
+	if _, ok := fields["id"]; ok && !validID(request.ID) {
+		return encodeError(InvalidRequest, nil)
+	}
+	for key := range fields {
+		if key != "jsonrpc" && key != "method" && key != "params" && key != "id" {
+			return encodeError(InvalidRequest, nil)
+		}
+	}
+	if strings.HasPrefix(request.Method, "rpc.") {
+		if _, ok := fields["id"]; !ok {
+			return nil
+		}
+		return encodeError(MethodNotFound, request.ID)
+	}
+	if len(request.Params) > 0 && request.Params[0] != '{' {
+		if _, ok := fields["id"]; !ok {
+			return nil
+		}
+		return encodeError(InvalidParams, request.ID)
 	}
 	result, rpcErr := dispatch(request.Method, request.Params)
-	response := Response{JSONRPC: "2.0", Result: result, Error: rpcErr, ID: request.ID}
+	if _, ok := fields["id"]; !ok {
+		return nil
+	}
+	response := Response{JSONRPC: "2.0", Error: rpcErr, ID: request.ID}
+	if rpcErr == nil {
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return encodeError(InternalError, request.ID)
+		}
+		response.Result = encoded
+	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return encodeError(InternalError, request.ID)
 	}
+	if len(encoded) > MaxResponseLine {
+		return encodeError(InternalError, request.ID)
+	}
 	return encoded
+}
+
+// ValidateNamedParams rejects positional, unknown, and duplicate named values.
+func ValidateNamedParams(raw json.RawMessage, allowed ...string) *Error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] != '{' {
+		return FixedError(InvalidParams)
+	}
+	fields, err := objectFields(raw)
+	if err != nil {
+		return FixedError(InvalidParams)
+	}
+	for key := range fields {
+		found := false
+		for _, name := range allowed {
+			if key == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return FixedError(InvalidParams)
+		}
+	}
+	return nil
+}
+
+func objectFields(raw []byte) (map[string]json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, io.ErrUnexpectedEOF
+	}
+	fields := make(map[string]json.RawMessage)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, io.ErrUnexpectedEOF
+		}
+		if _, exists := fields[key]; exists {
+			return nil, io.ErrUnexpectedEOF
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields[key] = value
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return fields, nil
 }
 
 func validID(id json.RawMessage) bool {
@@ -90,11 +218,11 @@ func validID(id json.RawMessage) bool {
 	if json.Unmarshal(id, &s) == nil {
 		return true
 	}
-	var n json.Number
-	if json.Unmarshal(id, &n) == nil {
-		return true
+	if bytes.ContainsAny(id, ".eE") {
+		return false
 	}
-	return false
+	var n json.Number
+	return json.Unmarshal(id, &n) == nil
 }
 
 func encodeError(code int, id json.RawMessage) []byte {

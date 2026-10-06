@@ -59,7 +59,22 @@ func TestJSONRPCBatchAndNotifications(t *testing.T) {
 	if got := ProcessFrame([]byte(`[]`), dispatch); !bytes.Contains(got, []byte(`"code":-32600`)) {
 		t.Fatalf("empty batch: %s", got)
 	}
-	if got := ProcessFrame([]byte(strings.Repeat(`{"jsonrpc":"2.0","method":"tick"},`, 65)), dispatch); got == nil {
-		t.Fatal("oversized batch accepted")
+	members := make([]string, 65)
+	for i := range members {
+		members[i] = `{"jsonrpc":"2.0","method":"tick"}`
+	}
+	if got := ProcessFrame([]byte("["+strings.Join(members, ",")+"]"), dispatch); !bytes.Contains(got, []byte(`"code":-32600`)) || calls != 5 {
+		t.Fatalf("oversized batch: %s, calls=%d", got, calls)
+	}
+}
+
+func TestJSONRPCNamedParams(t *testing.T) {
+	for _, input := range []string{`{"extra":1}`, `{"name":1,"name":2}`, `[]`, `null`} {
+		if err := ValidateNamedParams(json.RawMessage(input), "name"); err == nil || err.Code != InvalidParams {
+			t.Fatalf("accepted %s: %+v", input, err)
+		}
+	}
+	if err := ValidateNamedParams(json.RawMessage(`{"name":"ok"}`), "name"); err != nil {
+		t.Fatal(err)
 	}
 }
