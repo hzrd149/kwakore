@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 06
 current_phase_name: Daemon Core and Configuration
-current_plan: 2 of 4
+current_plan: 3 of 4
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-10-06T20:07:00.264Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-10-06T20:13:32.153Z"
 last_activity: 2026-10-06
 last_activity_desc: v0.2 roadmap drafted
-state_head: 6bbdf9a3361c6bd5a0d891f38a1c49afad511988
+state_head: bb67b2d7d107127c1e8c335be40c00f3f6f8d2d6
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 06 (Daemon Core and Configuration) — EXECUTING
-Current Plan: 2 of 4
+Current Plan: 3 of 4
 Status: Plan 06-01 complete
 **Progress:** 1/4 plans ([░░░░░░░░░░] 0%)
 Last activity: 2026-10-06 — foreground daemon and config validated
@@ -105,6 +105,7 @@ Last activity: 2026-10-06 — foreground daemon and config validated
 | Phase 05 P10 | 13min | 3 tasks | 8 files |
 | Phase 05 P11 | 6min | 2 tasks | 4 files |
 | Phase 06 P01 | 6min | 2 tasks | 6 files |
+| Phase 06 P02 | 5min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 
 - [Phase 06]: Reject explicit JSON null for optional service settings; omit a key to use its default.
 - [Phase 06]: Discard legacy file-mode login fields when service mode loads or saves state.json.
+- [Phase 06]: Clearing an absent service setting override is a no-op and does not create an override file.
+- [Phase 06]: Unreconciled override persistence is unhealthy and blocks further mutations until repair and restart.
 
 ### Pending Todos
 
@@ -164,8 +167,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T20:06:41.468Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-10-06T20:13:32.135Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
