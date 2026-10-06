@@ -898,6 +898,16 @@ func trustedBlobDial(ctx context.Context, network, address string) (net.Conn, er
 // among them: the user never named those, and they are public hosts that
 // gain nothing from skipping the check (D-20).
 func userBlobServers() map[string]bool {
+	if serviceConfig != nil {
+		configured := serviceConfig.ConfiguredBlossomServers()
+		trusted := make(map[string]bool, len(configured))
+		for _, raw := range configured {
+			if u, err := nostr.NormalizeHTTPURL(raw); err == nil && u != "" {
+				trusted[u] = true
+			}
+		}
+		return trusted
+	}
 	stateMu.Lock()
 	configured := append([]string(nil), state.BlossomServers...)
 	stateMu.Unlock()

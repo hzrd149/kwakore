@@ -22,6 +22,9 @@ var defaultBlossomServers = []string{
 
 // BlossomServers are the launcher's own Blossom servers, in order.
 func BlossomServers() []string {
+	if serviceConfig != nil {
+		return serviceConfig.Effective().BlossomServers
+	}
 	stateMu.Lock()
 	defer stateMu.Unlock()
 	if state.BlossomServers == nil {
@@ -65,6 +68,9 @@ func SetBlossomServers(servers []string) {
 // DiscoverOnUserRelays says whether discovery also asks the user's own
 // NIP-65 write relays (see nostr_user_relays.go). On unless turned off.
 func DiscoverOnUserRelays() bool {
+	if serviceConfig != nil {
+		return serviceConfig.Effective().DiscoverOnUserRelays
+	}
 	stateMu.Lock()
 	defer stateMu.Unlock()
 	return state.DiscoverOnUserRelays == nil || *state.DiscoverOnUserRelays

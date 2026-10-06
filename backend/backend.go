@@ -26,13 +26,15 @@ import (
 	"verdana/backend/bunker"
 	"verdana/backend/fileutil"
 	"verdana/backend/napconfig"
+	"verdana/backend/serviceconfig"
 )
 
 var (
-	sys     *sdk.System
-	log     zerolog.Logger
-	host    Host
-	dataDir string
+	sys           *sdk.System
+	log           zerolog.Logger
+	host          Host
+	dataDir       string
+	serviceConfig *serviceconfig.Manager
 )
 
 // Options is what a GUI has to hand over to get a working backend.
@@ -52,6 +54,9 @@ type Options struct {
 	// file mode (Android, tests), and then the keyring-fallback notice is
 	// never shown.
 	Secrets SecretStore
+
+	// ServiceConfig enables headless service startup and live non-secret settings.
+	ServiceConfig *serviceconfig.Manager
 }
 
 // Start brings the backend up: stores open, state loaded, profile index
@@ -71,6 +76,7 @@ func Start(opts Options) (func(), error) {
 		opts.Host = noopHost{}
 	}
 	host = opts.Host
+	serviceConfig = opts.ServiceConfig
 
 	dataDir = opts.DataDir
 	if err := ensureDataDir(); err != nil {
@@ -94,6 +100,14 @@ func Start(opts Options) (func(), error) {
 	// instance file is live and nothing writes while the sweep deletes
 	// (D-08)
 	sweepNappletData()
+	if serviceConfig != nil {
+		ls.mu.Lock()
+		ls.installed = installedNapps()
+		ls.sortDiscovery()
+		ls.mu.Unlock()
+		buildUserIndex()
+		return closeStores, nil
+	}
 	refreshInstalled()
 	go buildUserIndex()
 

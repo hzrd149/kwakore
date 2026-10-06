@@ -360,6 +360,9 @@ func saveState() error {
 
 // Relays are the relays napps are discovered on.
 func Relays() []string {
+	if serviceConfig != nil {
+		return serviceConfig.Effective().Relays
+	}
 	return append([]string(nil), state.Relays...)
 }
 
