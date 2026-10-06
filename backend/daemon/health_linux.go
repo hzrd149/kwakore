@@ -3,6 +3,8 @@
 package daemon
 
 import (
+	"errors"
+	"os"
 	"time"
 
 	"verdana/backend"
@@ -32,6 +34,55 @@ type Diagnostics struct {
 	Settings     serviceconfig.Effective `json:"settings"`
 	Warning      string                  `json:"warning,omitempty"`
 	RecentErrors []DiagnosticError       `json:"recent_errors"`
+}
+
+// FileReport is a read-only observation of configuration files. Nil live
+// fields encode as JSON null, including when a daemon.lock file is present.
+// A separate process cannot establish readiness or read its error history.
+type FileReport struct {
+	ObservedFrom   string                  `json:"observed_from"`
+	Ready          *bool                   `json:"ready"`
+	UptimeSeconds  *float64                `json:"uptime_seconds"`
+	ActiveWindows  *int                    `json:"active_windows"`
+	ConfigStatus   string                  `json:"config_status"`
+	OverrideStatus string                  `json:"override_status"`
+	StorageStatus  string                  `json:"storage_status"`
+	Settings       serviceconfig.Effective `json:"settings"`
+	Warning        *string                 `json:"warning"`
+	RecentErrors   *[]DiagnosticError      `json:"recent_errors"`
+}
+
+// InspectFiles validates with the startup loader and observes only files. It
+// does not acquire the service lock, initialize stores, or create directories.
+func InspectFiles(paths serviceconfig.Paths) (FileReport, error) {
+	m, err := serviceconfig.Load(paths)
+	if err != nil {
+		return FileReport{}, err
+	}
+	config, err := filePresence(paths.ConfigFile, "valid")
+	if err != nil {
+		return FileReport{}, err
+	}
+	override, err := filePresence(paths.OverrideFile, "valid")
+	if err != nil {
+		return FileReport{}, err
+	}
+	storage, err := filePresence(paths.DataDir, "private")
+	if err != nil {
+		return FileReport{}, err
+	}
+	return FileReport{ObservedFrom: "files", ConfigStatus: config, OverrideStatus: override, StorageStatus: storage, Settings: m.Effective()}, nil
+}
+
+func filePresence(path, present string) (string, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return present, nil
 }
 
 func (s *Service) Health() Health {

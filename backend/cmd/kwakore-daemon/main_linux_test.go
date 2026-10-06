@@ -237,12 +237,17 @@ func TestOfflineReportsOnlyFileObservations(t *testing.T) {
 			ConfigStatus   string   `json:"config_status"`
 			OverrideStatus string   `json:"override_status"`
 			StorageStatus  string   `json:"storage_status"`
+			Warning        *string  `json:"warning"`
+			RecentErrors   *[]any   `json:"recent_errors"`
 		}
 		if err := json.Unmarshal(out, &report); err != nil {
 			t.Fatalf("%s output %q: %v", command, out, err)
 		}
-		if report.ObservedFrom != "files" || report.Ready != nil || report.UptimeSeconds != nil || report.ActiveWindows != nil {
+		if report.ObservedFrom != "files" || report.Ready != nil || report.UptimeSeconds != nil || report.ActiveWindows != nil || report.Warning != nil || report.RecentErrors != nil {
 			t.Fatalf("%s claimed live state: %s", command, out)
+		}
+		if bytes.Contains(out, []byte(configRoot)) || bytes.Contains(out, []byte(dataRoot)) {
+			t.Fatalf("%s leaked private path: %s", command, out)
 		}
 		if report.ConfigStatus != configStatus || report.OverrideStatus != overrideStatus || report.StorageStatus != storageStatus {
 			t.Fatalf("%s file status: %s", command, out)
@@ -265,6 +270,30 @@ func TestOfflineReportsOnlyFileObservations(t *testing.T) {
 	}
 	check("status", "missing", "missing", "private")
 	check("diagnostics", "missing", "missing", "private")
+	configPath := filepath.Join(configRoot, "kwakore", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relays":["wss://file.example"],"discover_on_user_relays":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "settings-overrides.json"), []byte(`{"relays":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("status", "valid", "valid", "private")
+	out, err := captureRunOutput([]string{"diagnostics"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effective struct {
+		Settings serviceconfig.Effective `json:"settings"`
+	}
+	if err := json.Unmarshal(out, &effective); err != nil {
+		t.Fatal(err)
+	}
+	if len(effective.Settings.Relays) != 0 || effective.Settings.DiscoverOnUserRelays || len(effective.Settings.BlossomServers) != len(serviceconfig.Defaults().BlossomServers) {
+		t.Fatalf("wrong effective settings: %s", out)
+	}
 }
 
 func TestValidateUsesStrictConfigAndOverrideLoader(t *testing.T) {

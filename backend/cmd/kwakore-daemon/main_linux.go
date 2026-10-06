@@ -22,27 +22,25 @@ func run(args []string) error {
 		return err
 	}
 	if len(args) > 0 {
+		if len(args) != 1 {
+			return fmt.Errorf("expected one command: version, validate, status, or diagnostics")
+		}
 		switch args[0] {
 		case "version":
 			fmt.Fprintln(os.Stdout, version)
 			return nil
 		case "validate", "status", "diagnostics":
-			manager, err := serviceconfig.Load(paths)
-			if err != nil {
-				return err
-			}
 			if args[0] == "validate" {
+				if _, err := serviceconfig.Load(paths); err != nil {
+					return err
+				}
 				fmt.Fprintln(os.Stdout, "valid")
 				return nil
 			}
-			result := struct {
-				ObservedFrom  string                  `json:"observed_from"`
-				Ready         *bool                   `json:"ready"`
-				UptimeSeconds *float64                `json:"uptime_seconds"`
-				ActiveWindows *int                    `json:"active_windows"`
-				ConfigStatus  string                  `json:"config_status"`
-				Settings      serviceconfig.Effective `json:"settings"`
-			}{ObservedFrom: "files", ConfigStatus: "valid", Settings: manager.Effective()}
+			result, err := daemon.InspectFiles(paths)
+			if err != nil {
+				return err
+			}
 			return json.NewEncoder(os.Stdout).Encode(result)
 		default:
 			return fmt.Errorf("unknown command %q", args[0])

@@ -19,6 +19,11 @@ installed.
 
 Verdana runs on **Linux, macOS, Windows and Android**.
 
+The new Linux foreground `kwakore-daemon` and its configuration are described
+in the [service guide](docs/service.md). Its file-only status and diagnostics
+commands are available now; the control socket and packaging arrive in later
+phases.
+
 ## Install
 
 ### Desktop
