@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -36,12 +37,15 @@ func run(args []string) error {
 	}
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	request := []byte(`{"jsonrpc":"2.0","method":"service.status","id":1}` + "\n")
-	if _, err := conn.Write(request); err != nil {
+	if n, err := conn.Write(request); err != nil || n != len(request) {
 		return errors.New("daemon unavailable")
 	}
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	line, err := bufio.NewReader(io.LimitReader(conn, controlprotocol.MaxResponseLine+1)).ReadBytes('\n')
 	if err != nil {
 		return errors.New("daemon unavailable")
+	}
+	if len(line) > controlprotocol.MaxResponseLine {
+		return errors.New("invalid daemon response")
 	}
 	var response struct {
 		JSONRPC string                 `json:"jsonrpc"`
@@ -53,7 +57,7 @@ func run(args []string) error {
 		return errors.New("invalid daemon response")
 	}
 	if response.Error != nil {
-		return fmt.Errorf("daemon error %d: %s", response.Error.Code, response.Error.Message)
+		return fmt.Errorf("daemon error %d: %s", response.Error.Code, controlprotocol.FixedError(response.Error.Code).Message)
 	}
 	if len(response.Result) == 0 {
 		return errors.New("invalid daemon response")
