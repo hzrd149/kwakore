@@ -341,3 +341,13 @@ Plans:
 Plans:
 
 - [ ] TBD (promote with $gsd-review-backlog when ready)
+
+### Phase 999.7: Move Verdana data and napplet storage to the correct per-OS folders (BACKLOG)
+
+**Goal:** Verdana's data directory (today Gio `app.DataDir()` + `Verdana`, i.e. `~/.config/Verdana` on Linux, including `state.json`, `napplet-storage/`, `storage/`, `config/`, `napps/`) follows each platform's conventions: XDG on Linux (data and napplet storage under `$XDG_DATA_HOME`, settings under `$XDG_CONFIG_HOME`, caches under `$XDG_CACHE_HOME`), `~/Library/Application Support` (and `Caches`) on macOS, and `%LocalAppData%`/`%AppData%` on Windows, with a one-time move of existing data from the old location.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with $gsd-review-backlog when ready)
