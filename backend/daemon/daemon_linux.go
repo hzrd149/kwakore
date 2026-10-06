@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,12 +34,18 @@ type Service struct {
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
+	if err := checkNoSymlinkComponents(paths.DataDir); err != nil {
+		return nil, err
+	}
 	m, err := serviceconfig.Load(paths)
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
 		return nil, fmt.Errorf("%s: %w", paths.DataDir, err)
+	}
+	if err := checkNoSymlinkComponents(paths.DataDir); err != nil {
+		return nil, err
 	}
 	if err := checkPrivateDir(paths.DataDir); err != nil {
 		return nil, err
@@ -49,15 +56,24 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	} else if e != nil && !errors.Is(e, os.ErrNotExist) {
 		return nil, e
 	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: open private lock: %w", lockPath, err)
 	}
+	lock := os.NewFile(uintptr(fd), lockPath)
 	defer func() {
 		if err != nil {
 			lock.Close()
 		}
 	}()
+	info, err := lock.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%s: inspect lock: %w", lockPath, err)
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || !ok || owner.Uid != uint32(os.Geteuid()) {
+		return nil, fmt.Errorf("%s: lock must be a regular 0600 file owned by current user", lockPath)
+	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return nil, fmt.Errorf("daemon already running for this user; inspect status or stop the existing instance: %w", err)
 	}
@@ -68,12 +84,37 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	return &Service{ready: true, start: time.Now(), version: version, manager: m, closeBackend: closeBackend, lock: lock}, nil
 }
 
+func checkNoSymlinkComponents(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%s: data directory must be absolute", path)
+	}
+	current := string(filepath.Separator)
+	for _, part := range splitPath(path) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s: symlinked data path is unsafe; use a real directory", current)
+		}
+	}
+	return nil
+}
+
+func splitPath(path string) []string {
+	return strings.FieldsFunc(filepath.Clean(path), func(r rune) bool { return r == filepath.Separator })
+}
+
 func checkPrivateDir(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode().Perm() != 0700 {
+	if !info.IsDir() || info.Mode().Perm() != 0700 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 		return fmt.Errorf("%s: data directory must be a private 0700 directory", path)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)

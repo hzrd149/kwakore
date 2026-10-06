@@ -86,11 +86,14 @@ func validate(c Config) error {
 		seen := map[string]bool{}
 		for _, raw := range *field.values {
 			u, err := url.Parse(raw)
-			if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (field.scheme == "wss" && u.Scheme != "wss") || (field.scheme == "https" && u.Scheme != "https" && u.Scheme != "http") {
-				return fmt.Errorf("%s: invalid URL %q", field.name, raw)
+			if err != nil || u.Hostname() == "" || u.Hostname() != strings.ToLower(u.Hostname()) || u.User != nil || u.Fragment != "" || u.RawQuery != "" || u.ForceQuery || u.Opaque != "" || u.String() != raw || (field.scheme == "wss" && (u.Scheme != "wss" || strings.HasSuffix(u.Path, "/"))) || (field.scheme == "https" && u.Scheme != "https" && u.Scheme != "http") {
+				if field.name == "relays" {
+					return fmt.Errorf("%s: invalid URL %q; use a canonical wss:// URL with a host", field.name, raw)
+				}
+				return fmt.Errorf("%s: invalid URL %q; use an http:// or https:// server URL with a host", field.name, raw)
 			}
 			if seen[raw] {
-				return fmt.Errorf("%s: duplicate URL %q", field.name, raw)
+				return fmt.Errorf("%s: duplicate URL %q; remove the duplicate", field.name, raw)
 			}
 			seen[raw] = true
 		}
@@ -120,7 +123,10 @@ func read(path string) (Config, error) {
 	}
 	for key := range raw {
 		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" {
-			return Config{}, fmt.Errorf("%s: unknown setting %q", path, key)
+			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, or discover_on_user_relays", path, key)
+		}
+		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
+			return Config{}, fmt.Errorf("%s: %s must be an array or boolean, not null; omit the setting to use its default", path, key)
 		}
 	}
 	if err := checkDuplicateKeys(b); err != nil {

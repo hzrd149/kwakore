@@ -158,6 +158,13 @@ func loadState() {
 		// nothing they change this run is saved
 		addStateCorruptNotice(time.Now().Unix(), statePath)
 	}
+	if serviceConfig != nil {
+		// Service startup does not use file-mode signers. Discard any legacy
+		// credentials before the normal startup save can write state.json.
+		state.ClientKey = nil
+		state.Login = nil
+		state.SecretsLocation = ""
+	}
 	// no client key is generated here: loadState also runs after a corrupt
 	// or missing state.json, where the real key may still be in the
 	// keyring. clientKey() makes one only when the user starts a login.
@@ -344,7 +351,15 @@ func saveState() error {
 		log.Warn().Str("path", statePath).Msg("not saving state: the existing state file could not be read")
 		return errStateSaveBlocked
 	}
-	data, err := json.MarshalIndent(&state, "", "  ")
+	persisted := state
+	if serviceConfig != nil {
+		// Keep the service's broad app-state writes from ever storing login
+		// material, including callers that mutate state after startup.
+		persisted.ClientKey = nil
+		persisted.Login = nil
+		persisted.SecretsLocation = ""
+	}
+	data, err := json.MarshalIndent(&persisted, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal state")
 		return err

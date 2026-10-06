@@ -56,11 +56,17 @@ func TestForegroundStartReadyAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := make(chan string, 1)
+	allLines := make(chan []string, 1)
 	go func() {
 		scan := bufio.NewScanner(stdout)
-		if scan.Scan() {
-			line <- scan.Text()
+		var lines []string
+		for scan.Scan() {
+			lines = append(lines, scan.Text())
+			if len(lines) == 1 {
+				line <- lines[0]
+			}
 		}
+		allLines <- lines
 	}()
 	select {
 	case got := <-line:
@@ -85,6 +91,9 @@ func TestForegroundStartReadyAndStop(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("shutdown: %v; stderr: %s", err, stderr.String())
 	}
+	if lines := <-allLines; len(lines) != 1 {
+		t.Fatalf("expected exactly one ready line, got %q", lines)
+	}
 	s, err = daemon.Open(paths, "test")
 	if err != nil {
 		t.Fatalf("lock retained after signal: %v", err)
@@ -99,6 +108,7 @@ func TestForegroundHelper(t *testing.T) {
 	if err := run(nil); err != nil {
 		t.Fatal(err)
 	}
+	os.Exit(0)
 }
 
 func TestValidateMissingAndInvalidConfig(t *testing.T) {

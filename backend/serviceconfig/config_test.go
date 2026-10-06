@@ -65,6 +65,26 @@ func TestConfigRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestConfigRejectsOversizedFileAndRelativeRoots(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(strings.Repeat(" ", maxConfigBytes+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "1 MiB") {
+		t.Fatalf("oversized config: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "relative-config")
+	t.Setenv("XDG_DATA_HOME", filepath.Dir(p.DataDir))
+	if _, err := ResolvePaths(); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative config root: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Dir(p.ConfigFile))
+	t.Setenv("XDG_DATA_HOME", "relative-data")
+	if _, err := ResolvePaths(); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative data root: %v", err)
+	}
+}
+
 func TestOverridePrecedenceAndClear(t *testing.T) {
 	p := testPaths(t)
 	if err := os.WriteFile(p.ConfigFile, []byte(`{"discover_on_user_relays":false}`), 0600); err != nil {

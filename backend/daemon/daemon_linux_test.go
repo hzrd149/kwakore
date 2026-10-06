@@ -3,10 +3,16 @@
 package daemon
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -44,6 +50,29 @@ func TestDaemonStartLockAndStop(t *testing.T) {
 		t.Fatalf("lock not released: %v", err)
 	}
 	s2.Close()
+}
+
+func TestDaemonDoesNotPersistFileSecrets(t *testing.T) {
+	p := daemonPaths(t)
+	if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(p.DataDir, "state.json")
+	if err := os.WriteFile(statePath, []byte(`{"client_key":"legacy-secret","login":"legacy-login","secrets_location":"file"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "legacy-secret") || strings.Contains(string(data), "legacy-login") || strings.Contains(string(data), `"secrets_location": "file"`) {
+		t.Fatalf("service persisted file-mode secrets: %s", data)
+	}
 }
 
 func TestDaemonSettingsAndReload(t *testing.T) {
@@ -107,9 +136,17 @@ func TestForegroundReadyAndStop(t *testing.T) {
 func TestDaemonRejectsUnsafeLockAndDataPath(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		prepare func(*testing.T, serviceconfig.Paths)
+		prepare func(*testing.T, *serviceconfig.Paths)
 	}{
-		{"public lock", func(t *testing.T, p serviceconfig.Paths) {
+		{"public data directory", func(t *testing.T, p *serviceconfig.Paths) {
+			if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(p.DataDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"public lock", func(t *testing.T, p *serviceconfig.Paths) {
 			if err := os.MkdirAll(p.DataDir, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -117,19 +154,38 @@ func TestDaemonRejectsUnsafeLockAndDataPath(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{"symlinked parent", func(t *testing.T, p serviceconfig.Paths) {
-			actual := p.DataDir + "-actual"
+		{"symlinked lock", func(t *testing.T, p *serviceconfig.Paths) {
+			if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(filepath.Dir(p.DataDir), "target")
+			if err := os.WriteFile(target, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(p.DataDir, "daemon.lock")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"symlinked parent", func(t *testing.T, p *serviceconfig.Paths) {
+			root := filepath.Dir(p.DataDir)
+			actual := filepath.Join(root, "actual")
 			if err := os.Mkdir(actual, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(actual, p.DataDir); err != nil {
+			if err := os.Mkdir(filepath.Join(actual, "kwakore"), 0700); err != nil {
 				t.Fatal(err)
 			}
+			link := filepath.Join(root, "link")
+			if err := os.Symlink(actual, link); err != nil {
+				t.Fatal(err)
+			}
+			p.DataDir = filepath.Join(link, "kwakore")
+			p.OverrideFile = filepath.Join(p.DataDir, "settings-overrides.json")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := daemonPaths(t)
-			tc.prepare(t, p)
+			tc.prepare(t, &p)
 			s, err := Open(p, "test")
 			if err == nil {
 				s.Close()
@@ -139,8 +195,80 @@ func TestDaemonRejectsUnsafeLockAndDataPath(t *testing.T) {
 	}
 }
 
+func TestDaemonCorrectedRestartAfterInvalidConfig(t *testing.T) {
+	p := daemonPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["bad"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Open(p, "test"); err == nil {
+		s.Close()
+		t.Fatal("invalid config started")
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatalf("corrected restart failed: %v", err)
+	}
+	s.Close()
+}
+
 func TestDaemonCloseWaitBound(t *testing.T) {
 	p := daemonPaths(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonLeaseHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_DAEMON_LEASE_HELPER=1", "KWAKORE_DAEMON_TEST_DATA="+p.DataDir, "KWAKORE_DAEMON_TEST_CONFIG="+p.ConfigFile)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	ready := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			ready <- scanner.Text()
+		}
+	}()
+	select {
+	case line := <-ready:
+		if line != "ready with lease" {
+			t.Fatalf("helper ready: %q; stderr: %s", line, stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("helper ready timeout: %s", stderr.String())
+	}
+	start := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("signal shutdown: %v; stderr: %s", err, stderr.String())
+	}
+	if elapsed := time.Since(start); elapsed < 5*time.Second || elapsed > 6*time.Second {
+		t.Fatalf("shutdown grace was %s, want about five seconds", elapsed)
+	}
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatalf("lock not released after signal: %v", err)
+	}
+	s.Close()
+}
+
+func TestDaemonLeaseHelper(t *testing.T) {
+	if os.Getenv("KWAKORE_DAEMON_LEASE_HELPER") != "1" {
+		return
+	}
+	p := serviceconfig.Paths{
+		DataDir:    os.Getenv("KWAKORE_DAEMON_TEST_DATA"),
+		ConfigFile: os.Getenv("KWAKORE_DAEMON_TEST_CONFIG"),
+	}
+	p.OverrideFile = filepath.Join(p.DataDir, "settings-overrides.json")
 	s, err := Open(p, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -149,24 +277,14 @@ func TestDaemonCloseWaitBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := make(chan struct{})
-	start := time.Now()
-	go func() { s.Close(); close(closed) }()
-	select {
-	case <-closed:
-		if time.Since(start) < 5*time.Second {
-			t.Fatal("closed before accepted work drained or grace elapsed")
-		}
-	case <-time.After(6 * time.Second):
-		t.Fatal("close exceeded grace period")
-	}
-	done()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintln(os.Stdout, "ready with lease")
+	<-ctx.Done()
+	s.Close()
 	if _, err := s.Begin(); err != ErrClosing {
 		t.Fatalf("new work accepted: %v", err)
 	}
-	s2, err := Open(p, "test")
-	if err != nil {
-		t.Fatalf("lock not released: %v", err)
-	}
-	s2.Close()
+	done()
+	os.Exit(0)
 }
