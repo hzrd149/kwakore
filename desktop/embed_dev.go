@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 )
 
-// A dev launcher has no embedded child: it runs the one `just run` built on
-// disk. The bytes are read and hashed fresh on every spawn (the developer
-// rebuilds the child while the launcher runs) and still go through the same
+// A dev launcher has no embedded window programs: it runs those built by
+// `just run` on disk. The bytes are read and hashed fresh on every spawn (the developer
+// rebuilds a program while the launcher runs) and still go through the same
 // verified per-user directory as in prod, so there is one spawn path.
 
 // failClosed is false: a dev build without a built child is a developer
@@ -21,16 +21,24 @@ const failClosed = false
 
 // childCandidates are where a dev child may be, in order.
 func childCandidates() []string {
+	return windowCandidates("napplet")
+}
+
+func windowCandidates(kind string) []string {
 	var out []string
 	if exe, err := os.Executable(); err == nil {
-		out = append(out, filepath.Join(filepath.Dir(exe), "child", "child"))
+		out = append(out, filepath.Join(filepath.Dir(exe), "child", kind))
 	}
-	return append(out, "./child/child", "child/child")
+	return append(out, "./child/"+kind, "child/"+kind)
 }
 
 // childSource reads the first dev child that exists.
 func childSource() (data []byte, sum [32]byte, err error) {
-	for _, path := range childCandidates() {
+	return windowSource("napplet")
+}
+
+func windowSource(kind string) (data []byte, sum [32]byte, err error) {
+	for _, path := range windowCandidates(kind) {
 		fi, err := os.Stat(path)
 		if err != nil || !fi.Mode().IsRegular() {
 			continue
@@ -44,5 +52,5 @@ func childSource() (data []byte, sum [32]byte, err error) {
 		}
 		return data, sha256.Sum256(data), nil
 	}
-	return nil, sum, errors.New("no child program found; build it with go build -o child/child ./child")
+	return nil, sum, errors.New("no " + kind + " program found; build it with go build -o child/" + kind + " ./child")
 }

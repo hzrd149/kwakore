@@ -102,15 +102,18 @@ buildGoModule {
     chmod u+wx "$webviewlib"
     patchelf --set-rpath "${webviewLibPath}" "$webviewlib"
 
-    go build -ldflags "-s -w" -o child/child ./child
-    patchelf \
-      --set-interpreter "$(cat "$NIX_CC/nix-support/dynamic-linker")" \
-      --set-rpath "${webviewLibPath}" \
-      child/child
+    go build -ldflags "-s -w" -o child/napplet ./child
+    go build -tags napp -ldflags "-s -w" -o child/napp ./child
+    for program in child/napplet child/napp; do
+      patchelf \
+        --set-interpreter "$(cat "$NIX_CC/nix-support/dynamic-linker")" \
+        --set-rpath "${webviewLibPath}" \
+        "$program"
+    done
 
     # ldd on the child lists only libc, so the positive check that the
     # RUNPATH reaches WebKit is made on the library
-    for elf in "$webviewlib" child/child; do
+    for elf in "$webviewlib" child/napplet child/napp; do
       ${ldd} "$elf" > ldd.log
       if grep -F "not found" ldd.log; then
         cat ldd.log >&2
@@ -120,22 +123,28 @@ buildGoModule {
     done
     ${ldd} "$webviewlib" | grep -q "libwebkit2gtk-4.1.so.0 => /nix/store/"
     rm ldd.log
-    case "$(patchelf --print-interpreter child/child)" in
-      /nix/store/*) ;;
-      *)
-        echo "child/child does not use a /nix/store interpreter" >&2
-        exit 1
-        ;;
-    esac
+    for program in child/napplet child/napp; do
+      case "$(patchelf --print-interpreter "$program")" in
+        /nix/store/*) ;;
+        *)
+          echo "$program does not use a /nix/store interpreter" >&2
+          exit 1
+          ;;
+      esac
+    done
     # the child refuses to start without WEBVIEW_PATH (child/libcheck.go);
     # reaching that refusal proves the patched interpreter runs it
-    status=0
-    env -u WEBVIEW_PATH ./child/child </dev/null >/dev/null 2>child-check.log || status=$?
-    if [ "$status" -ne 1 ] || ! grep -qF "WEBVIEW_PATH is not set" child-check.log; then
-      cat child-check.log >&2
-      echo "child/child did not run under the patched interpreter (status $status)" >&2
-      exit 1
-    fi
+    for program in child/napplet child/napp; do
+      status=0
+      format=""
+      if [ "$program" = child/napplet ]; then format=napplet; fi
+      env -u WEBVIEW_PATH VERDANA_NAPP_FORMAT="$format" "$program" </dev/null >/dev/null 2>child-check.log || status=$?
+      if [ "$status" -ne 1 ] || ! grep -qF "WEBVIEW_PATH is not set" child-check.log; then
+        cat child-check.log >&2
+        echo "$program did not run under the patched interpreter (status $status)" >&2
+        exit 1
+      fi
+    done
     rm child-check.log
   '';
 

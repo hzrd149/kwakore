@@ -48,10 +48,10 @@ func TestEngineSetupOrder(t *testing.T) {
 	check := firstCall(mainFn, "", "checkWebviewLibrary")
 	prepare := firstCall(mainFn, "", "prepareEngine")
 	newView := firstCall(mainFn, "webview", "New")
-	kind := firstString(mainFn, "VERDANA_WINDOW_KIND")
+	kind := firstCall(mainFn, "", "runSettings")
 	for what, pos := range map[string]token.Pos{
 		"checkWebviewLibrary()": check, "prepareEngine()": prepare,
-		"webview.New": newView, `"VERDANA_WINDOW_KIND"`: kind,
+		"webview.New": newView, "runSettings": kind,
 	} {
 		if !pos.IsValid() {
 			t.Fatalf("main has no %s", what)

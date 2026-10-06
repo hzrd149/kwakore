@@ -292,7 +292,8 @@ Without `just`, build the desktop app by hand:
 
 ```sh
 cd desktop
-go build -o child/child ./child   # the webview host, embedded in the binary
+go build -o child/napplet ./child             # napplet window program
+go build -tags napp -o child/napp ./child    # legacy napp and settings program
 go build -o verdana -tags novulkan .
 ```
 
@@ -311,15 +312,16 @@ Or, without `just`:
 
 ```sh
 cd verdana/desktop
-go build -o child/child ./child
+go build -o child/napplet ./child
+go build -tags napp -o child/napp ./child
 go install -tags novulkan .
 ```
 
 This installs `verdana` in `GOBIN`, or in `$(go env GOPATH)/bin` when `GOBIN`
 is unset. Make sure that directory is on your `PATH`.
 
-The preliminary child build is required because the production launcher
-embeds its webview host into the installed executable. For that reason,
+The preliminary window builds are required because the production launcher
+embeds both webview programs into the installed executable. For that reason,
 a remote `go install` with an `@latest` version is not currently supported;
 use the release archive for the simplest install.
 
@@ -327,7 +329,7 @@ To run the tests:
 
 ```sh
 (cd backend && go test ./...)
-(cd desktop && go build -o child/child ./child && go test -tags novulkan ./...)
+(cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go test -tags novulkan ./...)
 ```
 
 ## Making apps for Verdana

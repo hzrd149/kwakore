@@ -23,8 +23,8 @@ import (
 	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
 
-// On the desktop a napp window is its own process: a small webview shell
-// (./child) that we talk to over its stdin/stdout with one JSON wire message
+// On the desktop each app window is its own process: a dedicated napp or
+// napplet webview program that we talk to over stdin/stdout with one JSON wire message
 // per line. This file is that pipe — the backend never learns about it.
 
 type childTransport struct {
@@ -47,7 +47,14 @@ var (
 // process is up: the napp's own readiness is observed later, when it registers
 // its actions.
 func startChild(spec backend.WindowSpec) (backend.Transport, error) {
-	exe, dir, err := prepareChild()
+	kind := spec.Format
+	if kind == "" {
+		kind = "napp"
+	}
+	if kind != "napp" && kind != "napplet" {
+		return nil, fmt.Errorf("unsupported window format %q", kind)
+	}
+	exe, dir, err := prepareWindowProgram(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -78,10 +85,10 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 	return ct, nil
 }
 
-// startSettingsChild spawns the webview process for a napp's settings window:
-// the same child, in its settings mode, serving the launcher's settings page.
+// startSettingsChild spawns the napp program in settings mode to serve the
+// launcher's settings page.
 func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
-	exe, dir, err := prepareChild()
+	exe, dir, err := prepareWindowProgram("napp")
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +245,11 @@ var childCacheDir = childbin.CacheDir
 // childFiles is the one list of files the child needs next to it in the
 // cache dir. The child program comes first.
 func childFiles(data []byte, sum [32]byte) []childbin.File {
-	name := "child-" + hex.EncodeToString(sum[:])
+	return windowFiles("napplet", data, sum)
+}
+
+func windowFiles(kind string, data []byte, sum [32]byte) []childbin.File {
+	name := kind + "-" + hex.EncodeToString(sum[:])
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -260,6 +271,10 @@ func childFiles(data []byte, sum [32]byte) []childbin.File {
 // backend.ErrWindowProgramUnavailable: the window then fails to open and
 // nothing else is executed in its place.
 func prepareChild() (exe, dir string, err error) {
+	return prepareWindowProgram("napplet")
+}
+
+func prepareWindowProgram(kind string) (exe, dir string, err error) {
 	defer func() {
 		if err == nil {
 			return
@@ -275,7 +290,7 @@ func prepareChild() (exe, dir string, err error) {
 		}
 	}()
 
-	data, sum, err := childSource()
+	data, sum, err := windowSource(kind)
 	if err != nil {
 		return "", "", err
 	}
@@ -283,7 +298,7 @@ func prepareChild() (exe, dir string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	files := childFiles(data, sum)
+	files := windowFiles(kind, data, sum)
 	dir = filepath.Join(base, childbin.Version(files))
 	exe = filepath.Join(dir, files[0].Name)
 	if _, err := childbin.EnsureVersion(base, files); err != nil {

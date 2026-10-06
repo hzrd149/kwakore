@@ -16,7 +16,7 @@ Run commands from the repository root unless noted:
 - `just run` builds the child host and launches a development desktop build with webview debugging enabled.
 - `just prod` builds the production desktop binary at `desktop/verdana`.
 - `cd backend && go test ./...` runs backend tests.
-- `cd desktop && go build -o child/child ./child && go test -tags novulkan ./...` reproduces desktop CI; the child binary must exist before package compilation.
+- `cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go test -tags novulkan ./...` reproduces desktop CI; both window binaries must exist before package compilation.
 - `just apk` builds the backend AAR and Android debug APK. It requires the Android SDK at `/opt/android-sdk` and installed `gomobile` tooling.
 - `just fonts` regenerates embedded WOFF2 files after changing `desktop/assets/*.ttf`.
 

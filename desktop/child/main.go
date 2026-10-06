@@ -76,6 +76,18 @@ func main() {
 		Theme:       os.Getenv("VERDANA_THEME"),
 		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
 	}
+	if programKind == "napp" && os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
+		log.Error().Msg("napplet cannot run in the napp program")
+		os.Exit(1)
+	}
+	if programKind == "napplet" && os.Getenv("VERDANA_NAPP_FORMAT") != "napplet" {
+		log.Error().Msg("napp cannot run in the napplet program")
+		os.Exit(1)
+	}
+	if programKind == "napplet" && os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
+		log.Error().Msg("settings cannot run in the napplet program")
+		os.Exit(1)
+	}
 	if req := strings.TrimSpace(os.Getenv("VERDANA_NAPP_REQUIRES")); req != "" {
 		meta.Requires = strings.Split(req, ",")
 	}
@@ -86,7 +98,7 @@ func main() {
 		meta.Instance = meta.ID
 	}
 
-	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Msg("napp process started")
+	log.Info().Str("kind", programKind).Str("napp", meta.ID).Str("instance", meta.Instance).Msg("window program started")
 	outEnc = json.NewEncoder(os.Stdout)
 
 	// before the library is loaded (lazily, by the first webview.New)
@@ -105,14 +117,14 @@ func main() {
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 
-	if os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
+	if programKind == "napp" && os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
 		w.SetTitle(meta.Name + " \u2014 Settings")
 		runSettings(w)
 		return
 	}
 	w.SetTitle(windowTitle(meta.Name))
 
-	if os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
+	if programKind == "napplet" {
 		runNapplet(w)
 		return
 	}

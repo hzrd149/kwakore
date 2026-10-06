@@ -30,7 +30,7 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 ## Runtime
 
 - Native Go binaries. Desktop builds use cgo on Linux, macOS and Windows amd64. Windows arm64 builds without cgo.
-- Desktop runs as two processes: the Gio launcher (`desktop/`) and a webview host child (`desktop/child/`). The child binary is built to `desktop/child/child` and embedded into the launcher, so it must be built first.
+- Desktop uses a Gio launcher (`desktop/`) and separate webview window processes. Build `desktop/child/napplet` for napplets and `desktop/child/napp` for legacy napps and settings; both are embedded into the launcher.
 - Android: minSdk 26, compile/targetSdk 35, Java/JVM target 11 (`android/app/build.gradle.kts`). The Go backend ships as an AAR built with `gomobile bind` from `backend/mobile/`.
 - Go modules. `go.sum` lockfiles live in `backend/` and `desktop/`. `desktop/go.mod` uses `replace verdana/backend => ../backend`.
 - Gradle with the Kotlin DSL and wrapper (`android/gradlew`).
@@ -214,7 +214,7 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 - **Threading:** RPCs handled in goroutines per message; NAP envelopes serialized per session. Gio clipboard writes only from a frame, so they are parked in `ui.clipboard` (`desktop/main.go`).
 - **Global state:** `backend/backend.go` (`sys`, `host`, `log`, `dataDir`); `desktop/main.go` (`ui`, `bundleChecks`); `desktop/childproc.go` (`children`); `desktop/child/main.go` (`meta`, `pending`).
 - **Build tags:** `dev` (dev panel, child on disk) vs default; `novulkan` required for desktop builds; `darwin` split for tray.
-- **Child binary must be built first:** `desktop/child/child` is embedded at compile time.
+- **Window binaries must be built first:** `desktop/child/napplet` and `desktop/child/napp` are embedded at compile time.
 - **Circular imports:** None; backend never imports desktop.
 
 ## Anti-Patterns

@@ -216,8 +216,8 @@ func TestPrepareChildPassesWebviewPath(t *testing.T) {
 
 	base := filepath.Join(t.TempDir(), "Verdana", "child")
 	useChildCacheDir(t, base)
-	data, sum, _ := childSource()
-	dir := filepath.Join(base, childbin.Version(childFiles(data, sum)))
+	data, sum, _ := windowSource("napp")
+	dir := filepath.Join(base, childbin.Version(windowFiles("napp", data, sum)))
 	// an inherited value, as go-webview's old embedded init used to set
 	t.Setenv("WEBVIEW_PATH", filepath.Join(os.TempDir(), "webview-0.12.0"))
 
@@ -257,11 +257,35 @@ func TestPrepareChildPassesWebviewPath(t *testing.T) {
 	if err := os.WriteFile(lib, []byte("not a library"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := prepareChild(); err != nil {
+	if _, _, err := prepareWindowProgram("napp"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(lib); sha256.Sum256(got) != want {
 		t.Fatal("planted library survived prepareChild")
+	}
+}
+
+func TestWindowFormatSelectsDedicatedProgram(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "Verdana", "child")
+	useChildCacheDir(t, base)
+	old := cmdStart
+	t.Cleanup(func() { cmdStart = old })
+	var paths []string
+	cmdStart = func(c *exec.Cmd) error {
+		paths = append(paths, c.Path)
+		return errors.New("not started in tests")
+	}
+	startChild(backend.WindowSpec{NappID: "legacy", Instance: "a"})
+	startChild(backend.WindowSpec{NappID: "modern", Instance: "b", Format: "napplet"})
+	startSettingsChild(backend.SettingsSpec{NappID: "legacy", Window: "c"})
+	if len(paths) != 3 {
+		t.Fatalf("got %d launch attempts", len(paths))
+	}
+	if !strings.HasPrefix(filepath.Base(paths[0]), "napp-") || !strings.HasPrefix(filepath.Base(paths[1]), "napplet-") || !strings.HasPrefix(filepath.Base(paths[2]), "napp-") {
+		t.Fatalf("wrong window program selection: %v", paths)
+	}
+	if _, err := startChild(backend.WindowSpec{NappID: "unknown", Instance: "d", Format: "other"}); err == nil {
+		t.Fatal("unknown format selected a window program")
 	}
 }
 
