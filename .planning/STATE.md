@@ -13,10 +13,10 @@ last_activity_desc: Phase 7 implementation complete; live UAT deferred
 state_head: 0829d6eba56a32e318b7e314ae22a6999242c58d
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 11
   completed_plans: 11
-  percent: 25
+  percent: 0
 ---
 
 # Project State
@@ -130,6 +130,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 None yet.
 
 ### Blockers/Concerns
+
+- [Phase 6 regression, 2026-10-06]: Phase 7 made shutdown wait for active registry leases without a deadline so stores remain safe, but Phase 6 Plan 01 requires a five-second maximum drain. `06-VERIFICATION.md` is now `gaps_found` (19/20). Resolve the shutdown contract before marking Phase 6 complete again.
 
 - [Backlog 999.11]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Backlog 999.10]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
