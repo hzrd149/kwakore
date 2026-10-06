@@ -89,3 +89,13 @@ func SetDiscoverOnUserRelays(on bool) {
 		rediscover()
 	}
 }
+
+// ServiceSettingsChanged publishes a committed service setting change. The
+// daemon calls this after the manager has released its lock, while its own
+// operation gate still orders notifications with subsequent changes.
+func ServiceSettingsChanged(discoveryChanged bool) {
+	notifyState()
+	if discoveryChanged && LoggedIn() {
+		rediscover()
+	}
+}

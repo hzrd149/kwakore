@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,7 @@ var ErrClosing = errors.New("service is shutting down")
 
 type Service struct {
 	mu           sync.Mutex
+	operationMu  sync.Mutex
 	work         sync.WaitGroup
 	closing      bool
 	ready        bool
@@ -140,7 +142,14 @@ func (s *Service) SetSetting(field string, value any) error {
 		return err
 	}
 	defer done()
-	return s.manager.SetOverride(field, value)
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	before := s.manager.Effective()
+	if err := s.manager.SetOverride(field, value); err != nil {
+		return err
+	}
+	s.notifySettingsChange(before)
+	return nil
 }
 
 func (s *Service) ClearSetting(field string) error {
@@ -149,7 +158,23 @@ func (s *Service) ClearSetting(field string) error {
 		return err
 	}
 	defer done()
-	return s.manager.ClearOverride(field)
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	before := s.manager.Effective()
+	if err := s.manager.ClearOverride(field); err != nil {
+		return err
+	}
+	s.notifySettingsChange(before)
+	return nil
+}
+
+func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
+	after := s.manager.Effective()
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays {
+		return
+	}
+	discoveryChanged := !slices.Equal(before.Relays, after.Relays) || before.DiscoverOnUserRelays != after.DiscoverOnUserRelays
+	backend.ServiceSettingsChanged(discoveryChanged)
 }
 
 func (s *Service) Reload() error {
