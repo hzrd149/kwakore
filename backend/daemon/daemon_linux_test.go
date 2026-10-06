@@ -103,3 +103,70 @@ func TestForegroundReadyAndStop(t *testing.T) {
 		t.Fatal("stop timeout")
 	}
 }
+
+func TestDaemonRejectsUnsafeLockAndDataPath(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(*testing.T, serviceconfig.Paths)
+	}{
+		{"public lock", func(t *testing.T, p serviceconfig.Paths) {
+			if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(p.DataDir, "daemon.lock"), nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"symlinked parent", func(t *testing.T, p serviceconfig.Paths) {
+			actual := p.DataDir + "-actual"
+			if err := os.Mkdir(actual, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(actual, p.DataDir); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := daemonPaths(t)
+			tc.prepare(t, p)
+			s, err := Open(p, "test")
+			if err == nil {
+				s.Close()
+				t.Fatal("unsafe path accepted")
+			}
+		})
+	}
+}
+
+func TestDaemonCloseWaitBound(t *testing.T) {
+	p := daemonPaths(t)
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := s.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan struct{})
+	start := time.Now()
+	go func() { s.Close(); close(closed) }()
+	select {
+	case <-closed:
+		if time.Since(start) < 5*time.Second {
+			t.Fatal("closed before accepted work drained or grace elapsed")
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("close exceeded grace period")
+	}
+	done()
+	if _, err := s.Begin(); err != ErrClosing {
+		t.Fatalf("new work accepted: %v", err)
+	}
+	s2, err := Open(p, "test")
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+	s2.Close()
+}

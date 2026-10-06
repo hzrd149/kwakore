@@ -47,6 +47,10 @@ func TestConfigRejectsMalformed(t *testing.T) {
 		{"duplicate", `{"relays":[],"relays":[]}`, "duplicate"},
 		{"trailing", `{} {}`, "trailing"},
 		{"bad URL", `{"relays":["https://relay.example"]}`, "relays"},
+		{"null list", `{"relays":null}`, "relays"},
+		{"null boolean", `{"discover_on_user_relays":null}`, "discover_on_user_relays"},
+		{"noncanonical relay", `{"relays":["wss://relay.example/"]}`, "relays"},
+		{"blossom query", `{"blossom_servers":["https://blossom.example/?token=x"]}`, "blossom_servers"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := testPaths(t)
