@@ -12,10 +12,10 @@ provides:
   - fixed mutation errors, long-operation CLI commands, and socket disconnect cancellation
 affects: [phase-07-protocol-documentation, phase-08-service-control]
 actuals:
-  tokens: 9276
+  tokens: 9469
   tasks: 2
-  commits: 5
-commits: 5
+  commits: 6
+commits: 6
 plan_head_before: 30df9382b08cf081a52ac3639c556239184d1e5c
 tech-stack:
   added: []
@@ -106,6 +106,7 @@ status: complete
 3. **Task 1 and Task 2 GREEN:** `19202b8` — shared registry mutation core, strict address adapter, RPC methods, CLI commands, and fixed errors.
 4. **Task 2 cancellation:** `878a813` — pass a connection context through RPC and cancel it on peer disconnect.
 5. **Task 2 socket regression:** `fef1878` — preserve responses to clients that only close their write half.
+6. **Task 1 cancellation regression:** `5f3e567` — ensure a canceled install leaves its committed predecessor intact.
 
 ## Verification
 
@@ -113,6 +114,7 @@ status: complete
 - `cd backend && go test -race . ./daemon -run 'Test(ServiceInstall|ServiceUpdate|RPCInstall|RPCUpdate|SocketPeerDisconnectCancelsWork)' -count=1` — passed.
 - `cd backend && go test ./...` — passed after the final commit.
 - `cd backend && GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...` — passed.
+- `cd backend && go test . -run 'TestServiceInstall(CanceledKeepsCommittedVersion|CommittedOutcomeAndRollback)' -count=1` — passed after the cancellation regression commit.
 
 ## Decisions Made
 
@@ -165,4 +167,4 @@ Uninstall can reuse the canonical address and fixed error adapter. Plan 07-06 ow
 
 ## Self-Check: PASSED
 
-All named source files and this summary exist. All five measured plan commits are present. No source changes remain unstaged.
+All named source files and this summary exist. All six implementation and test commits are present. No source changes remain unstaged.
