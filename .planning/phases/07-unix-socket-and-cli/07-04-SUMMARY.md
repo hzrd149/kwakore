@@ -14,8 +14,8 @@ affects: [phase-07-protocol-documentation, phase-08-service-control]
 actuals:
   tokens: 9469
   tasks: 2
-  commits: 6
-commits: 6
+  commits: 8
+commits: 8
 plan_head_before: 30df9382b08cf081a52ac3639c556239184d1e5c
 tech-stack:
   added: []
@@ -107,6 +107,8 @@ status: complete
 4. **Task 2 cancellation:** `878a813` — pass a connection context through RPC and cancel it on peer disconnect.
 5. **Task 2 socket regression:** `fef1878` — preserve responses to clients that only close their write half.
 6. **Task 1 cancellation regression:** `5f3e567` — ensure a canceled install leaves its committed predecessor intact.
+
+The measured plan count also includes the two prior summary commits (`ab963fe`, `ffebe29`) made before this final metadata update.
 
 ## Verification
 
