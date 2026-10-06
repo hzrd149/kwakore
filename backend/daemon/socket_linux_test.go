@@ -5,6 +5,7 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -16,6 +17,33 @@ import (
 
 	"verdana/backend/controlprotocol"
 )
+
+func TestSocketPeerDisconnectCancelsWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cancel.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	client, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := listener.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go watchSocketPeer(server, ctx, cancel)
+	client.Close()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("peer close did not cancel request context")
+	}
+}
 
 func TestSocketFrames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rpc.sock")

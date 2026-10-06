@@ -5,6 +5,8 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -185,8 +187,38 @@ func (l *Listener) serve(s *Service) {
 				<-l.connections
 				l.work.Done()
 			}()
-			handleSocketConn(conn, s.dispatchRPC)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go watchSocketPeer(conn, ctx, cancel)
+			handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
+				return s.dispatchRPCContext(ctx, method, params)
+			})
 		}()
+	}
+}
+
+// watchSocketPeer cancels in-flight network and staging work when a client
+// disconnects. Polling the socket does not consume pipelined request bytes.
+func watchSocketPeer(conn *net.UnixConn, ctx context.Context, cancel context.CancelFunc) {
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		cancel()
+		return
+	}
+	for ctx.Err() == nil {
+		var revents int16
+		err = raw.Control(func(fd uintptr) {
+			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLRDHUP | unix.POLLHUP | unix.POLLERR}}
+			if _, pollErr := unix.Poll(poll, 200); pollErr != nil {
+				err = pollErr
+				return
+			}
+			revents = poll[0].Revents
+		})
+		if err != nil || revents&(unix.POLLRDHUP|unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
+			cancel()
+			return
+		}
 	}
 }
 
