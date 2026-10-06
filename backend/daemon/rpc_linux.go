@@ -13,6 +13,10 @@ import (
 	"verdana/backend/serviceconfig"
 )
 
+// serviceUninstall is replaceable by package tests to force a cleanup failure
+// after record removal through the real socket path.
+var serviceUninstall = backend.ServiceUninstall
+
 // dispatchRPC is the allow-listed service boundary. Configuration persistence
 // and change notifications remain owned by Service and serviceconfig.Manager.
 func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *controlprotocol.Error) {
@@ -170,7 +174,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		defer done()
 		workCtx, cancel := s.registryContext(ctx)
 		defer cancel()
-		result, uninstallErr := backend.ServiceUninstall(workCtx, address)
+		result, uninstallErr := serviceUninstall(workCtx, address)
 		if errors.Is(uninstallErr, backend.ErrServicePartialCleanup) {
 			rpcErr := controlprotocol.FixedError(controlprotocol.PartialCleanup)
 			rpcErr.Data = struct {

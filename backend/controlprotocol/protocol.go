@@ -47,6 +47,13 @@ type Error struct {
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 }
+
+// PartialCleanupData is the only error metadata allowed on the wire.
+type PartialCleanupData struct {
+	Address         string `json:"address"`
+	RecordRemoved   bool   `json:"record_removed"`
+	CleanupComplete bool   `json:"cleanup_complete"`
+}
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`

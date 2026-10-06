@@ -4,7 +4,9 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -330,5 +332,40 @@ func TestRPCUninstallRequiresConfirmation(t *testing.T) {
 	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.uninstall", `{"address":"`+address+`","confirm":true}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
 		t.Fatalf("confirmed missing: %+v", rpcErr)
+	}
+}
+
+func TestRPCUninstallPartialCleanupWire(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	old := serviceUninstall
+	serviceUninstall = func(_ context.Context, got string) (backend.ServiceUninstallResult, error) {
+		if got != address {
+			t.Errorf("address = %q", got)
+		}
+		return backend.ServiceUninstallResult{Address: got, RecordRemoved: true, CleanupComplete: false}, errors.Join(backend.ErrServicePartialCleanup, errors.New("private cleanup path /home/user/secret"))
+	}
+	t.Cleanup(func() { serviceUninstall = old })
+	_, reader, conn, _ := rpcService(t)
+	result, rpcErr, raw := rpcCall(t, reader, conn, "napplet.uninstall", `{"address":"`+address+`","confirm":true}`)
+	if len(result) != 0 {
+		t.Fatalf("error has result: %s", result)
+	}
+	if rpcErr == nil || rpcErr.Code != controlprotocol.PartialCleanup || rpcErr.Message != controlprotocol.FixedError(controlprotocol.PartialCleanup).Message {
+		t.Fatalf("error: %s", raw)
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatal(err)
+	}
+	var errorFields map[string]json.RawMessage
+	if err := json.Unmarshal(response["error"], &errorFields); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"address":"` + address + `","record_removed":true,"cleanup_complete":false}`
+	if string(errorFields["data"]) != want || len(errorFields) != 3 || len(response) != 3 {
+		t.Fatalf("unsafe or incomplete wire response: %s", raw)
+	}
+	if strings.Contains(raw, "private") || strings.Contains(raw, "/home/user/secret") {
+		t.Fatalf("internal text leaked: %s", raw)
 	}
 }

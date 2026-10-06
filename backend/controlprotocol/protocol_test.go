@@ -109,3 +109,56 @@ func TestJSONRPCNamedParams(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProcessFramePartialCleanupData(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	request := `{"jsonrpc":"2.0","method":"napplet.uninstall","id":1}`
+	for _, tc := range []struct {
+		name     string
+		code     int
+		data     any
+		wantData bool
+	}{
+		{"valid", PartialCleanup, PartialCleanupData{address, true, false}, true},
+		{"wrong code", Unavailable, PartialCleanupData{address, true, false}, false},
+		{"wrong type", PartialCleanup, map[string]any{"address": address, "record_removed": true, "cleanup_complete": false, "private": "secret"}, false},
+		{"empty address", PartialCleanup, PartialCleanupData{"", true, false}, false},
+		{"record retained", PartialCleanup, PartialCleanupData{address, false, false}, false},
+		{"cleanup complete", PartialCleanup, PartialCleanupData{address, true, true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dispatch := func(string, json.RawMessage) (any, *Error) {
+				return nil, &Error{Code: tc.code, Message: "private failure text", Data: tc.data}
+			}
+			for _, frame := range []string{request, "[" + request + "]"} {
+				out := ProcessFrame([]byte(frame), dispatch)
+				if strings.HasPrefix(frame, "[") {
+					out = bytes.TrimSuffix(bytes.TrimPrefix(out, []byte("[")), []byte("]"))
+				}
+				var got map[string]json.RawMessage
+				if err := json.Unmarshal(out, &got); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := got["result"]; ok {
+					t.Fatalf("error has result: %s", out)
+				}
+				var rpcErr map[string]json.RawMessage
+				if err := json.Unmarshal(got["error"], &rpcErr); err != nil {
+					t.Fatal(err)
+				}
+				if string(rpcErr["message"]) != `"`+FixedError(tc.code).Message+`"` {
+					t.Fatalf("unsafe message: %s", out)
+				}
+				if _, ok := rpcErr["data"]; ok != tc.wantData {
+					t.Fatalf("data presence: %s", out)
+				}
+				if tc.wantData && string(rpcErr["data"]) != `{"address":"`+address+`","record_removed":true,"cleanup_complete":false}` {
+					t.Fatalf("data: %s", out)
+				}
+				if bytes.Contains(out, []byte("private")) || bytes.Contains(out, []byte("secret")) {
+					t.Fatalf("leak: %s", out)
+				}
+			}
+		})
+	}
+}
