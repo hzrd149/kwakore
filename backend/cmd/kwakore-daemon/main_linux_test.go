@@ -111,6 +111,92 @@ func TestForegroundHelper(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestForegroundSIGHUPReloadsAndSanitizesWarning(t *testing.T) {
+	root := t.TempDir()
+	configRoot := filepath.Join(root, "config")
+	dataRoot := filepath.Join(root, "data")
+	configPath := filepath.Join(configRoot, "kwakore", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_CONFIG_HOME="+configRoot, "XDG_DATA_HOME="+dataRoot)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	ready := make(chan string, 1)
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- scan.Text()
+		}
+	}()
+	lines := make(chan string, 32)
+	go func() {
+		scan := bufio.NewScanner(stderr)
+		for scan.Scan() {
+			lines <- scan.Text()
+		}
+	}()
+	select {
+	case line := <-ready:
+		if !strings.Contains(line, "ready") {
+			t.Fatalf("startup line: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relays":["wss://private-token.example/secret?token=hidden"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	waitLog := func(needle string) string {
+		t.Helper()
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case line := <-lines:
+				if strings.Contains(line, needle) {
+					return line
+				}
+			case <-deadline:
+				t.Fatalf("timeout waiting for %q", needle)
+			}
+		}
+	}
+	warning := waitLog("configuration reload rejected")
+	if !strings.Contains(warning, "config.json") || !strings.Contains(warning, "relays") || strings.Contains(warning, "secret") || strings.Contains(warning, "hidden") {
+		t.Fatalf("unsafe SIGHUP warning: %q", warning)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"relays":["wss://valid.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	waitLog("configuration reloaded")
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateMissingAndInvalidConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))

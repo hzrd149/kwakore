@@ -66,8 +66,8 @@ func run(args []string) error {
 		case <-ctx.Done():
 			return nil
 		case <-hup:
-			if err := service.Reload(); err != nil {
-				fmt.Fprintf(os.Stderr, "configuration reload rejected: %v\n", err)
+			if err := service.Reload(); err == nil {
+				fmt.Fprintln(os.Stderr, "configuration reloaded")
 			}
 		}
 	}

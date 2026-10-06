@@ -183,15 +183,38 @@ func (s *Service) Reload() error {
 		return err
 	}
 	defer done()
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	before := s.manager.Effective()
 	err = s.manager.Reload()
 	s.mu.Lock()
 	if err == nil {
 		s.warning = ""
 	} else {
-		s.warning = "configuration reload rejected"
+		s.warning = reloadWarning(s.manager.Paths().ConfigFile, err)
 	}
+	warning := s.warning
 	s.mu.Unlock()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, warning)
+		return err
+	}
+	s.notifySettingsChange(before)
 	return err
+}
+
+// reloadWarning contains only a fixed reason, the config basename and a
+// supported field name. Validation errors can contain operator-supplied URLs
+// and must never be copied into live diagnostics or stderr.
+func reloadWarning(path string, err error) string {
+	field := "file"
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays"} {
+		if strings.Contains(err.Error(), name) {
+			field = name
+			break
+		}
+	}
+	return fmt.Sprintf("configuration reload rejected: %s: invalid %s", filepath.Base(path), field)
 }
 
 func (s *Service) Close() {

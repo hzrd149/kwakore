@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -238,6 +239,44 @@ func TestDaemonReloadWarnsSafelyAndClears(t *testing.T) {
 	}
 	if got := s.Diagnostics().Warning; got != "" {
 		t.Fatalf("successful reload retained warning: %q", got)
+	}
+}
+
+func TestDaemonReloadAndMutationKeepOverridePrecedence(t *testing.T) {
+	p := daemonPaths(t)
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		results <- s.SetSetting("relays", []string{"wss://override.example"})
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		results <- s.Reload()
+	}()
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := s.Manager().Effective()
+	if !reflect.DeepEqual(got.Relays, []string{"wss://override.example"}) || !reflect.DeepEqual(got.BlossomServers, []string{"https://file.example"}) {
+		t.Fatalf("mutation/reload lost precedence: %+v", got)
 	}
 }
 
