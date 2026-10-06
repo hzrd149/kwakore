@@ -1,7 +1,10 @@
 package backend
 
 import (
+	"context"
+	"errors"
 	"sort"
+	"time"
 	"unicode"
 )
 
@@ -25,6 +28,22 @@ type ServicePage struct {
 	Items      []ServiceDescriptor `json:"items"`
 	Total      int                 `json:"total"`
 	NextOffset *int                `json:"next_offset"`
+}
+
+var (
+	ErrDiscoveryUnavailable = errors.New("discovery unavailable")
+	ErrDiscoveryTimeout     = errors.New("discovery timeout")
+	ErrDiscoveryConflict    = errors.New("discovery superseded")
+)
+
+type ServiceDiscoveryPage struct {
+	ServicePage
+	FetchedAt *time.Time `json:"fetched_at"`
+	Complete  bool       `json:"complete"`
+}
+
+func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, limit int) (ServiceDiscoveryPage, error) {
+	return ServiceDiscoveryPage{ServicePage: ServicePage{Items: []ServiceDescriptor{}}}, nil
 }
 
 func ServiceInstalled(offset, limit int) ServicePage {

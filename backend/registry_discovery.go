@@ -18,6 +18,16 @@ var (
 	cancelDiscover context.CancelFunc
 )
 
+var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
+	if sys == nil {
+		return nil, nil, ErrDiscoveryUnavailable
+	}
+	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
+		nostr.Filter{Kinds: napKinds},
+		nostr.SubscriptionOptions{Label: "verdana-discovery", MaxWaitForEOSE: 20 * time.Second})
+	return events, eose, nil
+}
+
 // discoveryFlushInterval is how often napps arriving from the relays are
 // pushed to the launcher while discovery runs. The list fills in as each
 // relay answers instead of waiting for the slowest one, and a relay that

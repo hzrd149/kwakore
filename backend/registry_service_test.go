@@ -1,12 +1,41 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 )
+
+func TestServiceDiscoveryCompletesAndFilters(t *testing.T) {
+	resetLauncherState(t)
+	old := subscribeDiscovery
+	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
+		events := make(chan nostr.RelayEvent)
+		eose := make(chan struct{})
+		go func() {
+			events <- testNappEvent(nostr.Generate(), "notes", "Notes", 1)
+			close(eose)
+			<-ctx.Done()
+			close(events)
+		}()
+		return events, eose, nil
+	}
+	t.Cleanup(func() { subscribeDiscovery = old })
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	page, err := ServiceDiscover(ctx, "notes", true, 0, 100)
+	if err != nil || !page.Complete || page.FetchedAt == nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].Name != "Notes" {
+		t.Fatalf("refresh: %+v %v", page, err)
+	}
+	filtered, err := ServiceDiscover(ctx, "no match", false, 0, 100)
+	if err != nil || !filtered.Complete || filtered.FetchedAt == nil || filtered.Total != 0 {
+		t.Fatalf("cached filter: %+v %v", filtered, err)
+	}
+}
 
 func TestServiceInstalledCanonicalSafePages(t *testing.T) {
 	pk := nostr.Generate().Public()
