@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Gated NAP Dispatcher** - One route table with declared permission gates, guaranteed spec-shaped replies, Go-side bounds, rate limits and panic recovery (completed 2026-10-03)
 - [x] **Phase 3: Desktop Process and Secrets Hardening** - Verified per-user binary extraction, user-only instance IPC, OpenLink validation, keyring secrets, atomic state (completed 2026-10-04)
 - [x] **Phase 4: Frame Sandbox Lifecycle** - Frame reload/navigation resets the session, enforced host CSP, adversarial fixture, side channels closed where engines allow (completed 2026-10-05)
-- [ ] **Phase 5: Napplet Artifact Identity and Storage Keying** - Storage/config keyed by address + artifact hash, root-napplet isolation, reclamation, NIP-01 manifest selection and blob verification
+- [x] **Phase 5: Napplet Artifact Identity and Storage Keying** - Storage/config keyed by address + artifact hash, root-napplet isolation, reclamation, NIP-01 manifest selection and blob verification (completed 2026-10-06)
 - [ ] **Phase 6: Relay, Outbox, Intent and INC Conformance** - No ciphertext signing, guarded relay dialing, relay hints and termination, authorized intent handlers, INC teardown
 - [ ] **Phase 7: Resource, Upload and Media Policy** - NAP-RESOURCE PR #80 conformance with Blossom consent and quotas, upload MIME allowlist, proxied and verified media playback
 - [ ] **Phase 8: Trusted Prompts, Remaining Domains and Audit Close-out** - Trusted identity in every prompt, notify/config/identity/common conformance, completed checklist and accurate `NAPPLETS.md`
@@ -275,7 +275,7 @@ Parallel opportunities: Phase 3 needs only Phase 1, so it can run alongside Phas
 | 2. Gated NAP Dispatcher | 7/7 | Complete    | 2026-10-03 |
 | 3. Desktop Process and Secrets Hardening | 10/10 | Complete    | 2026-10-04 |
 | 4. Frame Sandbox Lifecycle | 6/6 | Complete    | 2026-10-05 |
-| 5. Napplet Artifact Identity and Storage Keying | 12/12 | In Progress|  |
+| 5. Napplet Artifact Identity and Storage Keying | 12/12 | Complete    | 2026-10-06 |
 | 6. Relay, Outbox, Intent and INC Conformance | 0/TBD | Not started | - |
 | 7. Resource, Upload and Media Policy | 0/TBD | Not started | - |
 | 8. Trusted Prompts, Remaining Domains and Audit Close-out | 0/TBD | Not started | - |

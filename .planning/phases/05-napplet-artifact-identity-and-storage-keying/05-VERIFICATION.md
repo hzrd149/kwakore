@@ -1,7 +1,7 @@
 ---
 phase: 05-napplet-artifact-identity-and-storage-keying
 verified: 2026-10-05T19:36:20Z
-status: human_needed
+status: passed
 score: 101/105 must-have truths verified (5/5 roadmap success criteria; 96/96 plan truths after gap closure cdc78ef; 4 backstop truths need human evidence)
 behavior_unverified: 0
 overrides_applied: 0
@@ -259,3 +259,7 @@ _Verifier: Claude (gsd-verifier)_
 - D-08 sweep gap closed in cdc78ef (napplet-*/napplet~* files removed from storage/, napp files kept, CR-02 holds respected).
 - Warning "raw detail in FetchErr lines" fixed in 984ca49; warning "updates skip user Blossom servers" fixed in 4aea1f4.
 - Gates re-run green by the fixer at 4aea1f4 (backend vet/tests/-race, Android build, desktop -race).
+
+## Human Validation
+
+User ran Linux checks 1–18 in 05-UAT.md, one by one, all passed (2026-10-06). Windows/macOS/Android checks 19–21 are deferred to the milestone audit; backstop truths depending on them remain unverified. Migration-only checks dropped: there are no deployments.

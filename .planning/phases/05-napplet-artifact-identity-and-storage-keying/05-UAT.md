@@ -1,16 +1,14 @@
 ---
-status: testing
+status: partial
 phase: 05-napplet-artifact-identity-and-storage-keying
 source: [05-VERIFICATION.md]
 started: 2026-10-05T19:54:53Z
-updated: 2026-10-05T19:54:53Z
+updated: 2026-10-06T17:10:03Z
 ---
 
 ## Current Test
 
-number: 14
-name: Default servers
-awaiting: user response
+[Linux checks 1–18 complete — all passed; 19–21 deferred]
 
 ## Tests
 
@@ -68,45 +66,45 @@ result: pass
 
 ### 14. Default servers
 expected: Install, update, Try and icons work with the default servers
-result: [pending]
+result: pass
 
 ### 15. Bad NIP-5D source
 expected: A nostr: or relative source shows unavailable with the source reason
-result: [pending]
+result: pass
 
 ### 16. Linux shortcuts
 expected: Expose installed apps: .desktop Exec and X-Verdana-Napp-ID hold tokens under the same names; menu launches work; new bundles open (old-build bundles not tested: no deployments); no zombie update-desktop-database processes
-result: [pending]
+result: pass
 
 ### 17. Dialogs
 expected: Logout (red button), update and uninstall dialogs look right in light and dark (screenshots)
-result: [pending]
+result: pass
 
 ### 18. Staged install
 expected: Killing the launcher mid-install or mid-update leaves the old copy launchable; leftover staging/.old dirs are cleared next install
-result: [pending]
+result: pass
 
 ### 19. Windows
 expected: Start-menu Apps/Discover links carry tokens and launch; a d ending in \ launches; curly quotes, $(calc) or ; in titles/descriptions produce correct links and run nothing; a 300-char title and huge description are bounded and other entries still written; Signal/Sıgnal/ſignal get distinct links; an update succeeds while the install dir is held open
-result: [pending]
+result: deferred — needs Windows/macOS/Android; carried to milestone audit
 
 ### 20. macOS
 expected: Apps .app bundles carry tokens and launch; a Spotlight Discover result opens a trial; NFC/NFD Café titles are distinct bundles; a long title is cut and other entries still written
-result: [pending]
+result: deferred — needs Windows/macOS/Android; carried to milestone audit
 
 ### 21. Android (optional)
 expected: just apk builds, trial prompt unchanged, uninstall removes data; WR-01 pending-close is a known open issue
-result: [pending]
+result: deferred — needs Windows/macOS/Android; carried to milestone audit
 
 ## Summary
 
 total: 21
-passed: 0
+passed: 18
 issues: 0
-pending: 21
-skipped: 0
+pending: 0
+skipped: 3
 blocked: 0
 
 ## Gaps
 
-[none yet]
+- Items 19–21 (Windows, macOS, Android) not yet run; carried to the milestone audit. Migration-only checks dropped (no deployments).
