@@ -98,6 +98,9 @@ func (m *Manager) change(field string, value any, clear bool) error {
 	if filepath.Dir(m.paths.OverrideFile) != m.paths.DataDir {
 		return errors.New("override path must be in data directory")
 	}
+	if err := os.Mkdir(m.paths.DataDir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s: create data directory: %w", m.paths.DataDir, err)
+	}
 	if err := privateDataDir(m.paths.DataDir); err != nil {
 		return err
 	}
