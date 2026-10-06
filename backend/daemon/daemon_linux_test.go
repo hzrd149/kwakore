@@ -432,6 +432,35 @@ func TestDaemonCloseWaitBound(t *testing.T) {
 	s.Close()
 }
 
+func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
+	s, err := Open(daemonPaths(t), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseDone, err := s.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan struct{})
+	closeBackend := s.closeBackend
+	s.closeBackend = func() { close(closed); closeBackend() }
+	finished := make(chan struct{})
+	go func() { s.Close(); close(finished) }()
+	time.Sleep(5200 * time.Millisecond)
+	select {
+	case <-closed:
+		t.Fatal("stores closed while RPC lease active")
+	default:
+	}
+	leaseDone()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("close did not drain")
+	}
+	s.Close()
+}
+
 func TestDaemonLeaseHelper(t *testing.T) {
 	if os.Getenv("KWAKORE_DAEMON_LEASE_HELPER") != "1" {
 		return
