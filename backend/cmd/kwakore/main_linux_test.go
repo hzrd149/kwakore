@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -12,6 +13,90 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCLISettingsCommands(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	child := filepath.Join(runtimeDir, "kwakore")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(child, "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	for _, tc := range []struct {
+		args           []string
+		method, params string
+	}{
+		{[]string{"settings", "reload"}, "settings.reload", ""},
+		{[]string{"settings", "set", "relays", `[]`}, "settings.set", `{"field":"relays","value":[]}`},
+		{[]string{"settings", "set", "blossom_servers", `[]`}, "settings.set", `{"field":"blossom_servers","value":[]}`},
+		{[]string{"settings", "set", "discover_on_user_relays", `false`}, "settings.set", `{"field":"discover_on_user_relays","value":false}`},
+		{[]string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
+	} {
+		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
+			seen := make(chan string, 1)
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					seen <- err.Error()
+					return
+				}
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					seen <- err.Error()
+					return
+				}
+				var request struct {
+					Method string          `json:"method"`
+					Params json.RawMessage `json:"params"`
+				}
+				_ = json.Unmarshal(line, &request)
+				seen <- request.Method + " " + string(request.Params)
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":false}}}` + "\n"))
+			}()
+			old := os.Stdout
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			os.Stdout = w
+			callErr := run(tc.args)
+			_ = w.Close()
+			os.Stdout = old
+			out, _ := io.ReadAll(r)
+			_ = r.Close()
+			if callErr != nil || !strings.Contains(string(out), `"settings":`) {
+				t.Fatalf("run: %s %v", out, callErr)
+			}
+			want := tc.method + " " + tc.params
+			if got := <-seen; got != want {
+				t.Fatalf("request %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCLISettingsStructuredErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"settings", "set", "relays", `null`},
+		{"settings", "set", "discover_on_user_relays", `[]`},
+		{"settings", "set", "blossom_servers", `[true]`},
+	} {
+		err := run(args)
+		if err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+		var out bytes.Buffer
+		writeCLIError(&out, err)
+		if !strings.Contains(out.String(), `"code":-32602`) {
+			t.Fatalf("error %v: %s", args, out.String())
+		}
+	}
+}
 
 func TestCLIReadMethods(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")

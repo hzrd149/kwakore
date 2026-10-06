@@ -13,9 +13,137 @@ import (
 	"testing"
 	"time"
 
+	"verdana/backend"
 	"verdana/backend/controlprotocol"
 	"verdana/backend/serviceconfig"
 )
+
+func TestRPCSettingsMutateReload(t *testing.T) {
+	s, reader, conn, paths := rpcService(t)
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, rpcErr, _ := rpcCall(t, reader, conn, "settings.reload", "{}"); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	for _, tc := range []struct{ field, value string }{
+		{"relays", `[]`}, {"blossom_servers", `[]`}, {"discover_on_user_relays", `false`},
+	} {
+		result, rpcErr, _ := rpcCall(t, reader, conn, "settings.set", `{"field":"`+tc.field+`","value":`+tc.value+`}`)
+		if rpcErr != nil || !strings.Contains(string(result), `"settings":`) {
+			t.Fatalf("set %s: %s %+v", tc.field, result, rpcErr)
+		}
+	}
+	if got := s.Manager().Effective(); len(got.Relays) != 0 || len(got.BlossomServers) != 0 || got.DiscoverOnUserRelays {
+		t.Fatalf("empty and false overrides lost: %+v", got)
+	}
+	data, err := os.ReadFile(paths.OverrideFile)
+	var persisted struct {
+		Relays   []string `json:"relays"`
+		Discover bool     `json:"discover_on_user_relays"`
+	}
+	if err != nil || json.Unmarshal(data, &persisted) != nil || persisted.Relays == nil || len(persisted.Relays) != 0 || persisted.Discover {
+		t.Fatalf("override not persisted atomically: %s %v", data, err)
+	}
+	for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays"} {
+		if _, rpcErr, _ := rpcCall(t, reader, conn, "settings.clear", `{"field":"`+field+`"}`); rpcErr != nil {
+			t.Fatalf("clear %s: %+v", field, rpcErr)
+		}
+		if _, rpcErr, _ := rpcCall(t, reader, conn, "settings.clear", `{"field":"`+field+`"}`); rpcErr != nil {
+			t.Fatalf("no-op clear %s: %+v", field, rpcErr)
+		}
+	}
+	if got := s.Manager().Effective(); !reflect.DeepEqual(got.Relays, []string{"wss://file.example"}) || !reflect.DeepEqual(got.BlossomServers, []string{"https://file.example"}) || !got.DiscoverOnUserRelays {
+		t.Fatalf("file precedence lost: %+v", got)
+	}
+	secret := "secret-path.invalid"
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{"relays":["wss://`+secret+`/?token=hidden"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, rpcErr, raw := rpcCall(t, reader, conn, "settings.reload", "{}")
+	if rpcErr == nil || rpcErr.Code != controlprotocol.ConfigInvalid || strings.Contains(raw, secret) || strings.Contains(raw, paths.ConfigFile) {
+		t.Fatalf("unsafe reload error: %s", raw)
+	}
+	if got := s.Manager().Effective(); !reflect.DeepEqual(got.Relays, []string{"wss://file.example"}) {
+		t.Fatalf("failed reload changed settings: %+v", got)
+	}
+}
+
+func TestRPCSettingsRejectsInvalidParams(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	for _, params := range []string{
+		`{"field":"login","value":"secret"}`, `{"field":"relays","value":null}`,
+		`{"field":"relays","value":false}`, `{"field":"relays","value":[12]}`,
+		`{"field":"discover_on_user_relays","value":[]}`,
+		`{"field":"relays","value":[],"extra":1}`,
+		`{"field":"relays","field":"blossom_servers","value":[]}`,
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "settings.set", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted %s: %+v", params, rpcErr)
+		}
+	}
+	for _, params := range []string{`{"field":"login"}`, `{"field":null}`, `{"field":"relays","extra":1}`, `{"field":"relays","field":"relays"}`} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "settings.clear", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted clear %s: %+v", params, rpcErr)
+		}
+	}
+	if _, rpcErr, raw := rpcCall(t, reader, conn, "settings.set", `{"field":"relays","value":["wss://secret.invalid/"]}`); rpcErr == nil || rpcErr.Code != controlprotocol.ConfigInvalid || strings.Contains(raw, "secret.invalid") {
+		t.Fatalf("unsafe validation error: %s", raw)
+	}
+}
+
+func TestRPCSettingsNotificationChangesBackend(t *testing.T) {
+	paths := daemonPaths(t)
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := serviceconfig.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &settingsChangeHost{}
+	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: manager, Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBackend()
+	service := &Service{manager: manager}
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := service.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+	frame := []byte(`{"jsonrpc":"2.0","method":"settings.set","params":{"field":"relays","value":["wss://changed.example"]}}` + "\n")
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	if _, rpcErr, raw := rpcCall(t, reader, conn, "settings.get", "{}"); rpcErr != nil || !strings.Contains(raw, "wss://changed.example") {
+		t.Fatalf("notification did not change settings: %s %+v", raw, rpcErr)
+	}
+	if host.changes != 1 {
+		t.Fatalf("notification produced %d backend changes", host.changes)
+	}
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	if _, rpcErr, raw := rpcCall(t, reader, conn, "settings.get", "{}"); rpcErr != nil || !strings.Contains(raw, "wss://changed.example") || host.changes != 1 {
+		t.Fatalf("no-op notification responded or notified: %s %d", raw, host.changes)
+	}
+}
 
 func rpcService(t *testing.T) (*Service, *bufio.Reader, *net.UnixConn, serviceconfig.Paths) {
 	t.Helper()
