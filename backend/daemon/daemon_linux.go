@@ -209,10 +209,14 @@ func (s *Service) Reload() error {
 	return err
 }
 
-// reloadWarning contains only a fixed reason, the config basename and a
-// supported field name. Validation errors can contain operator-supplied URLs
-// and must never be copied into live diagnostics or stderr.
+// reloadWarning contains only a fixed reason, the known config basename (or
+// a redaction marker), and a supported field name. Validation errors can
+// contain operator-supplied URLs and must never reach diagnostics or stderr.
 func reloadWarning(path string, err error) string {
+	name := filepath.Base(path)
+	if name != "config.json" {
+		name = "[redacted]"
+	}
 	field := "file"
 	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays"} {
 		if strings.Contains(err.Error(), name) {
@@ -220,7 +224,7 @@ func reloadWarning(path string, err error) string {
 			break
 		}
 	}
-	return fmt.Sprintf("configuration reload rejected: %s: invalid %s", filepath.Base(path), field)
+	return fmt.Sprintf("configuration reload rejected: %s: invalid %s", name, field)
 }
 
 func (s *Service) Close() {

@@ -5,6 +5,7 @@ package daemon
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +91,29 @@ func TestDiagnosticsBoundsAndSanitizesReloadErrors(t *testing.T) {
 	}
 	if got := s.Diagnostics().Warning; got != "" {
 		t.Fatalf("warning persisted after successful reload: %q", got)
+	}
+}
+
+func TestDiagnosticsRedactsSensitiveConfigBasename(t *testing.T) {
+	p := daemonPaths(t)
+	secret := "private-client-key-sentinel"
+	p.ConfigFile = filepath.Join(filepath.Dir(p.ConfigFile), secret+".json")
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["invalid"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err == nil {
+		t.Fatal("invalid reload accepted")
+	}
+	b, err := json.Marshal(s.Diagnostics())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), secret) || strings.Contains(string(b), p.ConfigFile) {
+		t.Fatalf("diagnostics exposed private config name: %s", b)
 	}
 }
