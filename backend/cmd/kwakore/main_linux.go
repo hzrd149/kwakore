@@ -78,11 +78,15 @@ type rpcFailure struct{ RPC controlprotocol.Error }
 
 func (e rpcFailure) Error() string { return e.RPC.Message }
 
+type inputFailure string
+
+func (e inputFailure) Error() string { return string(e) }
+
 func command(args []string) (string, json.RawMessage, string, error) {
 	socketPath := ""
 	if len(args) >= 2 && args[0] == "--socket" {
 		if !filepath.IsAbs(args[1]) {
-			return "", nil, "", errors.New("--socket requires an absolute path")
+			return "", nil, "", inputFailure("--socket requires an absolute path")
 		}
 		socketPath, args = args[1], args[2:]
 	}
@@ -115,7 +119,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			if len(args) == 4 && settingField(args[2]) {
 				value := json.RawMessage(args[3])
 				if !validSettingValue(args[2], value) {
-					return "", nil, "", errors.New("invalid JSON setting value")
+					return "", nil, "", inputFailure("invalid JSON setting value")
 				}
 				params, _ := json.Marshal(struct {
 					Field string          `json:"field"`
@@ -125,7 +129,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", errors.New("usage: kwakore [--socket PATH] status|diagnostics|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {
@@ -165,14 +169,21 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
-		var remote rpcFailure
-		if errors.As(err, &remote) {
-			rpcErr = controlprotocol.FixedError(remote.RPC.Code)
-		}
-		_ = json.NewEncoder(os.Stderr).Encode(struct {
-			Error *controlprotocol.Error `json:"error"`
-		}{rpcErr})
+		writeCLIError(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func writeCLIError(w io.Writer, err error) {
+	rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+	var remote rpcFailure
+	var input inputFailure
+	if errors.As(err, &remote) {
+		rpcErr = controlprotocol.FixedError(remote.RPC.Code)
+	} else if errors.As(err, &input) {
+		rpcErr = controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	_ = json.NewEncoder(w).Encode(struct {
+		Error *controlprotocol.Error `json:"error"`
+	}{rpcErr})
 }
