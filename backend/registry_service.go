@@ -69,22 +69,30 @@ func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, li
 func ServiceInstalled(offset, limit int) ServicePage {
 	stateMu.Lock()
 	type storedDescriptor struct {
-		key        string
-		descriptor ServiceDescriptor
+		key  string
+		napp Napp
 	}
 	stored := make([]storedDescriptor, 0, len(state.InstalledNapps))
 	for key, n := range state.InstalledNapps {
-		stored = append(stored, storedDescriptor{key: key, descriptor: serviceDescriptor(n)})
+		stored = append(stored, storedDescriptor{key: key, napp: n})
 	}
 	stateMu.Unlock()
-	sort.Slice(stored, func(i, j int) bool {
-		if stored[i].descriptor.Address == stored[j].descriptor.Address {
-			return stored[i].key < stored[j].key
-		}
-		return stored[i].descriptor.Address < stored[j].descriptor.Address
-	})
-	items := make([]ServiceDescriptor, len(stored))
+	type sortedDescriptor struct {
+		key        string
+		descriptor ServiceDescriptor
+	}
+	sorted := make([]sortedDescriptor, len(stored))
 	for i, row := range stored {
+		sorted[i] = sortedDescriptor{key: row.key, descriptor: serviceDescriptor(row.napp)}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].descriptor.Address == sorted[j].descriptor.Address {
+			return sorted[i].key < sorted[j].key
+		}
+		return sorted[i].descriptor.Address < sorted[j].descriptor.Address
+	})
+	items := make([]ServiceDescriptor, len(sorted))
+	for i, row := range sorted {
 		items[i] = row.descriptor
 	}
 	return servicePage(items, offset, limit)
