@@ -51,7 +51,7 @@ type ServiceUninstallResult struct {
 	Address         string         `json:"address"`
 	Outcome         string         `json:"outcome,omitempty"`
 	PreviousVersion ServiceVersion `json:"previous_version,omitempty"`
-	RecordRemoved   bool           `json:"record_removed"`
+	RecordRemoved   bool           `json:"-"`
 	CleanupComplete bool           `json:"cleanup_complete"`
 }
 

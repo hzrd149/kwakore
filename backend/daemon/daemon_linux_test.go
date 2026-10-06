@@ -3,18 +3,12 @@
 package daemon
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -282,6 +276,11 @@ func TestDaemonReloadAndMutationKeepOverridePrecedence(t *testing.T) {
 
 func TestForegroundReadyAndStop(t *testing.T) {
 	p := daemonPaths(t)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan string, 1)
 	done := make(chan error, 1)
@@ -386,52 +385,6 @@ func TestDaemonCorrectedRestartAfterInvalidConfig(t *testing.T) {
 	s.Close()
 }
 
-func TestDaemonCloseWaitBound(t *testing.T) {
-	p := daemonPaths(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonLeaseHelper$")
-	cmd.Env = append(os.Environ(), "KWAKORE_DAEMON_LEASE_HELPER=1", "KWAKORE_DAEMON_TEST_DATA="+p.DataDir, "KWAKORE_DAEMON_TEST_CONFIG="+p.ConfigFile)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	ready := make(chan string, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		if scanner.Scan() {
-			ready <- scanner.Text()
-		}
-	}()
-	select {
-	case line := <-ready:
-		if line != "ready with lease" {
-			t.Fatalf("helper ready: %q; stderr: %s", line, stderr.String())
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("helper ready timeout: %s", stderr.String())
-	}
-	start := time.Now()
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("signal shutdown: %v; stderr: %s", err, stderr.String())
-	}
-	if elapsed := time.Since(start); elapsed < 5*time.Second || elapsed > 6*time.Second {
-		t.Fatalf("shutdown grace was %s, want about five seconds", elapsed)
-	}
-	s, err := Open(p, "test")
-	if err != nil {
-		t.Fatalf("lock not released after signal: %v", err)
-	}
-	s.Close()
-}
-
 func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
 	s, err := Open(daemonPaths(t), "test")
 	if err != nil {
@@ -461,16 +414,8 @@ func TestShutdownDuringRPCDrainsLeaseBeforeClosingStores(t *testing.T) {
 	s.Close()
 }
 
-func TestDaemonLeaseHelper(t *testing.T) {
-	if os.Getenv("KWAKORE_DAEMON_LEASE_HELPER") != "1" {
-		return
-	}
-	p := serviceconfig.Paths{
-		DataDir:    os.Getenv("KWAKORE_DAEMON_TEST_DATA"),
-		ConfigFile: os.Getenv("KWAKORE_DAEMON_TEST_CONFIG"),
-	}
-	p.OverrideFile = filepath.Join(p.DataDir, "settings-overrides.json")
-	s, err := Open(p, "test")
+func TestShutdownDuringRPCCancelsWork(t *testing.T) {
+	s, err := Open(daemonPaths(t), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,14 +423,30 @@ func TestDaemonLeaseHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer stop()
-	fmt.Fprintln(os.Stdout, "ready with lease")
-	<-ctx.Done()
-	s.Close()
+	workCtx, cancel := s.registryContext(t.Context())
+	defer cancel()
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	select {
+	case <-workCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("work not canceled")
+	}
 	if _, err := s.Begin(); err != ErrClosing {
-		t.Fatalf("new work accepted: %v", err)
+		t.Fatalf("late lease: %v", err)
+	}
+	if _, rpcErr := s.dispatchRPC("service.status", nil); rpcErr == nil || rpcErr.Code != 1007 {
+		t.Fatalf("late RPC: %+v", rpcErr)
+	}
+	select {
+	case <-closed:
+		t.Fatal("closed before RPC returned")
+	default:
 	}
 	done()
-	os.Exit(0)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish")
+	}
 }

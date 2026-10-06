@@ -25,6 +25,9 @@ type Service struct {
 	mu           sync.Mutex
 	operationMu  sync.Mutex
 	work         sync.WaitGroup
+	workContext  context.Context
+	cancelWork   context.CancelFunc
+	closeDone    chan struct{}
 	closing      bool
 	ready        bool
 	start        time.Time
@@ -86,7 +89,8 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{ready: true, start: time.Now(), version: version, manager: m, closeBackend: closeBackend, lock: lock}, nil
+	workContext, cancelWork := context.WithCancel(context.Background())
+	return &Service{ready: true, start: time.Now(), version: version, manager: m, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}, nil
 }
 
 func checkNoSymlinkComponents(path string) error {
@@ -230,21 +234,43 @@ func reloadWarning(path string, err error) string {
 func (s *Service) Close() {
 	s.mu.Lock()
 	if s.closing {
+		done := s.closeDone
 		s.mu.Unlock()
+		if done != nil {
+			<-done
+		}
 		return
 	}
 	s.closing = true
 	s.ready = false
-	s.mu.Unlock()
-	done := make(chan struct{})
-	go func() { s.work.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
+	if s.closeDone == nil {
+		s.closeDone = make(chan struct{})
 	}
-	s.closeBackend()
-	syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
-	s.lock.Close()
+	done := s.closeDone
+	s.mu.Unlock()
+	if s.cancelWork != nil {
+		s.cancelWork()
+	}
+	s.work.Wait()
+	if s.closeBackend != nil {
+		s.closeBackend()
+	}
+	if s.lock != nil {
+		_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+		_ = s.lock.Close()
+	}
+	close(done)
+}
+
+// registryContext ties network and staging work to both the client and the
+// service. A lease remains held after cancellation until the operation returns.
+func (s *Service) registryContext(client context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(client)
+	if s.workContext == nil {
+		return ctx, cancel
+	}
+	stop := context.AfterFunc(s.workContext, cancel)
+	return ctx, func() { stop(); cancel() }
 }
 
 func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready func(string)) error {
@@ -253,6 +279,11 @@ func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready f
 		return err
 	}
 	defer s.Close()
+	listener, err := s.Listen()
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
 	ready(fmt.Sprintf("kwakore-daemon %s ready (config: %s)", version, paths.ConfigFile))
 	<-ctx.Done()
 	return nil

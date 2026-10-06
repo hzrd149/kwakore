@@ -199,7 +199,7 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 // deleted, so nothing is removed under a window still running.
 func Uninstall(id string) {
 	_, err := uninstallNapp(id)
-	if err != nil {
+	if err != nil && !errors.Is(err, errNotInstalled) {
 		SetFetchErr("uninstall failed: " + err.Error())
 	}
 }
@@ -268,11 +268,15 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 			log.Warn().Err(err).Str("napp", id).Msg("napp directory not removed")
 			cleanupErr = err
 		}
-		removeStaleStaging(base)
+		cleanupErr = errors.Join(cleanupErr, removeStaleStaging(base))
 	}
 
 	if napplet {
-		reclaimNapplet(record, instancesForNapp(id))
+		complete, err := reclaimNapplet(record, instancesForNapp(id))
+		cleanupErr = errors.Join(cleanupErr, err)
+		if !complete {
+			cleanupErr = errors.Join(cleanupErr, ErrServicePartialCleanup)
+		}
 	}
 
 	// what the user allowed or denied it is about the copy they had; a
@@ -771,12 +775,16 @@ func swapInstallDir(staging, base string) (func(), error) {
 // base's napp that an interrupted install or update left behind. Only
 // directories named after base are touched; the napp's busy claim keeps
 // any other install of it from running meanwhile.
-func removeStaleStaging(base string) {
+func removeStaleStaging(base string) error {
 	parent, name := filepath.Dir(base), filepath.Base(base)
 	entries, err := os.ReadDir(parent)
 	if err != nil {
-		return
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
+	var cleanupErr error
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -784,9 +792,11 @@ func removeStaleStaging(base string) {
 		if strings.HasPrefix(e.Name(), name+stagingInfix) || strings.HasPrefix(e.Name(), name+oldInfix) {
 			if err := os.RemoveAll(filepath.Join(parent, e.Name())); err != nil {
 				log.Warn().Err(err).Str("dir", e.Name()).Msg("could not remove a stale install directory")
+				cleanupErr = errors.Join(cleanupErr, err)
 			}
 		}
 	}
+	return cleanupErr
 }
 
 // maxParallelAssets caps how many of a napp's files are in flight at once, so

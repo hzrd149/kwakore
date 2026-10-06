@@ -242,6 +242,36 @@ func TestSocketClosePreservesUnexpectedInode(t *testing.T) {
 	}
 }
 
+func TestSocketCloseReleasesIdleClientAndOwnedPath(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := (&Service{}).Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: listener.path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() { done <- listener.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("idle client delayed close")
+	}
+	if _, err := os.Lstat(listener.path); !os.IsNotExist(err) {
+		t.Fatalf("owned socket remains: %v", err)
+	}
+}
+
 func TestSocketAccessReplacesOwnedStaleSocket(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	child := filepath.Join(runtimeDir, "kwakore")

@@ -20,11 +20,22 @@ func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *cont
 }
 
 func (s *Service) dispatchRPCContext(ctx context.Context, method string, params json.RawMessage) (any, *controlprotocol.Error) {
+	s.mu.Lock()
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		return nil, controlprotocol.FixedError(controlprotocol.Closing)
+	}
 	switch method {
 	case "service.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
 		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
 		return struct {
 			ProtocolVersion int    `json:"protocol_version"`
 			Health          Health `json:"health"`
@@ -33,11 +44,21 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
 		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
 		return s.Diagnostics(), nil
 	case "settings.get":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
 		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
 		return s.Manager().Effective(), nil
 	case "settings.reload":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
@@ -86,7 +107,9 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, controlprotocol.FixedError(controlprotocol.Closing)
 		}
 		defer done()
-		result, discoverErr := backend.ServiceDiscover(ctx, query, refresh, offset, limit)
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, discoverErr := backend.ServiceDiscover(workCtx, query, refresh, offset, limit)
 		if discoverErr != nil {
 			switch {
 			case errors.Is(discoverErr, backend.ErrDiscoveryUnavailable):
@@ -108,7 +131,9 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, controlprotocol.FixedError(controlprotocol.Closing)
 		}
 		defer done()
-		result, installErr := backend.ServiceInstall(ctx, address)
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, installErr := backend.ServiceInstall(workCtx, address)
 		if installErr != nil {
 			return nil, mutationError(installErr)
 		}
@@ -123,7 +148,9 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, controlprotocol.FixedError(controlprotocol.Closing)
 		}
 		defer done()
-		result, updateErr := backend.ServiceUpdate(ctx, address)
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, updateErr := backend.ServiceUpdate(workCtx, address)
 		if updateErr != nil {
 			return nil, mutationError(updateErr)
 		}
@@ -141,7 +168,9 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, controlprotocol.FixedError(controlprotocol.Closing)
 		}
 		defer done()
-		result, uninstallErr := backend.ServiceUninstall(ctx, address)
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, uninstallErr := backend.ServiceUninstall(workCtx, address)
 		if errors.Is(uninstallErr, backend.ErrServicePartialCleanup) {
 			rpcErr := controlprotocol.FixedError(controlprotocol.PartialCleanup)
 			rpcErr.Data = struct {
