@@ -317,3 +317,16 @@ func TestRPCUpdateValidationAndNotFound(t *testing.T) {
 		t.Fatalf("missing: %+v", rpcErr)
 	}
 }
+
+func TestRPCUninstallRequiresConfirmation(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	for _, params := range []string{`{"address":"` + address + `"}`, `{"address":"` + address + `","confirm":false}`, `{"address":"` + address + `","confirm":"true"}`} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.uninstall", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.ConfirmationRequired {
+			t.Fatalf("unconfirmed %s: %+v", params, rpcErr)
+		}
+	}
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.uninstall", `{"address":"`+address+`","confirm":true}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound { t.Fatalf("confirmed missing: %+v", rpcErr) }
+}
