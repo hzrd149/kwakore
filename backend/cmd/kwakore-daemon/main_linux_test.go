@@ -26,6 +26,11 @@ func TestForegroundStartReadyAndStop(t *testing.T) {
 	dataRoot := filepath.Join(root, "data")
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("XDG_DATA_HOME", dataRoot)
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	configPath := filepath.Join(configRoot, "kwakore", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
 		t.Fatal(err)
@@ -196,6 +201,10 @@ func TestForegroundSIGHUPReloadsAndSanitizesWarning(t *testing.T) {
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
 	dataRoot := filepath.Join(root, "data")
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	configPath := filepath.Join(configRoot, "kwakore", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
 		t.Fatal(err)
@@ -204,7 +213,7 @@ func TestForegroundSIGHUPReloadsAndSanitizesWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
-	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_CONFIG_HOME="+configRoot, "XDG_DATA_HOME="+dataRoot)
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_CONFIG_HOME="+configRoot, "XDG_DATA_HOME="+dataRoot, "XDG_RUNTIME_DIR="+runtimeDir)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

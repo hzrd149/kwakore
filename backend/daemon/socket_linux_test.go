@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,6 +114,12 @@ func TestSocketAccessRuntimeValidation(t *testing.T) {
 	if err := os.Chmod(runtimeDir, 0700); err != nil {
 		t.Fatal(err)
 	}
+	previousUID := runtimeUID
+	runtimeUID = func() uint32 { return previousUID() + 1 }
+	if _, err := (&Service{}).Listen(); err == nil {
+		t.Fatal("wrong-owner runtime directory accepted")
+	}
+	runtimeUID = previousUID
 	if err := os.Symlink(runtimeDir, filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +136,41 @@ func TestSocketAccessRuntimeValidation(t *testing.T) {
 	}
 }
 
+func TestSocketAccessRejectsForeignPeerBeforeDispatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rpc.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	previous := socketPeerUID
+	socketPeerUID = func(*net.UnixConn) (uint32, error) { return runtimeUID() + 1, nil }
+	defer func() { socketPeerUID = previous }()
+	var called atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.AcceptUnix()
+		if err == nil {
+			handleSocketConn(conn, func(string, json.RawMessage) (any, *controlprotocol.Error) { called.Add(1); return nil, nil })
+		}
+	}()
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil || !bytes.Contains(line, []byte(`"code":1001`)) || !bytes.Contains(line, []byte(`"id":null`)) {
+		t.Fatalf("foreign peer: %s, %v", line, err)
+	}
+	<-done
+	if called.Load() != 0 {
+		t.Fatal("foreign peer reached dispatcher")
+	}
+}
+
 func TestSocketClosePreservesUnexpectedInode(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	if err := os.Mkdir(runtimeDir, 0700); err != nil {
@@ -141,6 +183,12 @@ func TestSocketClosePreservesUnexpectedInode(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	if info, err := os.Lstat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("socket must be 0600: %v, %v", info, err)
+	}
+	if info, err := os.Lstat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("runtime child must be 0700: %v, %v", info, err)
+	}
 	if _, err := s.Listen(); err == nil {
 		t.Fatal("second listener replaced active socket")
 	}

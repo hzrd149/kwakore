@@ -131,6 +131,9 @@ func processRequest(frame []byte, dispatch Dispatch) []byte {
 	if _, ok := fields["id"]; !ok {
 		return nil
 	}
+	if rpcErr != nil {
+		rpcErr = FixedError(rpcErr.Code)
+	}
 	response := Response{JSONRPC: "2.0", Error: rpcErr, ID: request.ID}
 	if rpcErr == nil {
 		encoded, err := json.Marshal(result)
@@ -232,3 +235,6 @@ func encodeError(code int, id json.RawMessage) []byte {
 	b, _ := json.Marshal(Response{JSONRPC: "2.0", Error: FixedError(code), ID: id})
 	return b
 }
+
+// ErrorResponse emits only catalogued messages and never includes internal data.
+func ErrorResponse(code int, id json.RawMessage) []byte { return encodeError(code, id) }
