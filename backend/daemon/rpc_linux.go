@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"verdana/backend"
 	"verdana/backend/controlprotocol"
 	"verdana/backend/serviceconfig"
 )
@@ -59,9 +60,45 @@ func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *cont
 			return nil, settingsError(s, e)
 		}
 		return settingsResult{Settings: s.Manager().Effective()}, nil
+	case "napplet.installed":
+		offset, limit, err := decodePageParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		return backend.ServiceInstalled(offset, limit), nil
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
 	}
+}
+
+func decodePageParams(params json.RawMessage) (int, int, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "offset", "limit"); err != nil {
+		return 0, 0, err
+	}
+	offset, limit := 0, 100
+	if len(params) == 0 {
+		return offset, limit, nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	if raw, ok := fields["offset"]; ok {
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &offset) != nil || offset < 0 {
+			return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+	}
+	if raw, ok := fields["limit"]; ok {
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 500 {
+			return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+	}
+	return offset, limit, nil
 }
 
 type settingsResult struct {

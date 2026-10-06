@@ -80,6 +80,18 @@ func TestCLISettingsCommands(t *testing.T) {
 	}
 }
 
+func TestCLIInstalledCommand(t *testing.T) {
+	method, params, _, err := command([]string{"installed", "--offset", "2", "--limit", "50"})
+	if err != nil || method != "napplet.installed" || string(params) != `{"offset":2,"limit":50}` {
+		t.Fatalf("installed command: %s %s %v", method, params, err)
+	}
+	for _, args := range [][]string{{"installed", "--offset", "-1"}, {"installed", "--limit", "501"}, {"installed", "--limit", "1.5"}, {"installed", "extra"}} {
+		if _, _, _, err := command(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
 func TestCLISettingsStructuredErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"settings", "set", "relays", `null`},

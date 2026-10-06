@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"net"
 	"os"
@@ -98,6 +99,20 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			return "service.diagnostics", nil, socketPath, nil
 		}
 	}
+	if len(args) >= 1 && args[0] == "installed" {
+		flags := flag.NewFlagSet("installed", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		offset := flags.Int("offset", 0, "page offset")
+		limit := flags.Int("limit", 100, "page size")
+		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 0 || *offset < 0 || *limit < 1 || *limit > 500 {
+			return "", nil, "", inputFailure("invalid installed page")
+		}
+		params, _ := json.Marshal(struct {
+			Offset int `json:"offset"`
+			Limit  int `json:"limit"`
+		}{*offset, *limit})
+		return "napplet.installed", params, socketPath, nil
+	}
 	if len(args) >= 2 && args[0] == "settings" {
 		switch args[1] {
 		case "get":
@@ -129,7 +144,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] status|diagnostics|installed [--offset N --limit N]|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {

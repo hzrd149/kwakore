@@ -1,5 +1,10 @@
 package backend
 
+import (
+	"sort"
+	"unicode"
+)
+
 // ServiceVersion is the public installed manifest version.
 type ServiceVersion struct {
 	EventID      string `json:"event_id"`
@@ -23,5 +28,56 @@ type ServicePage struct {
 }
 
 func ServiceInstalled(offset, limit int) ServicePage {
-	return ServicePage{Items: []ServiceDescriptor{}}
+	stateMu.Lock()
+	items := make([]ServiceDescriptor, 0, len(state.InstalledNapps))
+	for _, n := range state.InstalledNapps {
+		items = append(items, serviceDescriptor(n))
+	}
+	stateMu.Unlock()
+	sort.Slice(items, func(i, j int) bool { return items[i].Address < items[j].Address })
+	return servicePage(items, offset, limit)
+}
+
+func serviceDescriptor(n Napp) ServiceDescriptor {
+	format := n.Format
+	if format == "" {
+		format = "napp"
+	}
+	name := make([]rune, 0, 256)
+	for _, r := range n.Name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		name = append(name, r)
+		if len(name) == 256 {
+			break
+		}
+	}
+	return ServiceDescriptor{
+		Address: n.Address(), Name: string(name), Format: format,
+		Available: n.Unavailable == "",
+		Version:   ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash},
+	}
+}
+
+func servicePage(items []ServiceDescriptor, offset, limit int) ServicePage {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	result := ServicePage{Items: []ServiceDescriptor{}, Total: len(items)}
+	if offset >= len(items) {
+		return result
+	}
+	end := offset + limit
+	if end < offset || end > len(items) {
+		end = len(items)
+	}
+	result.Items = items[offset:end]
+	if end < len(items) {
+		result.NextOffset = &end
+	}
+	return result
 }

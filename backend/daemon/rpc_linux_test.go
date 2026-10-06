@@ -246,3 +246,21 @@ func TestRPCReadRejectsParams(t *testing.T) {
 		}
 	}
 }
+
+func TestRPCInstalledPageAndValidation(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	result, rpcErr, raw := rpcCall(t, reader, conn, "napplet.installed", `{}`)
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	var page backend.ServicePage
+	if err := json.Unmarshal(result, &page); err != nil || page.Items == nil || page.Total != 0 || page.NextOffset != nil {
+		t.Fatalf("empty installed page: %s %v", raw, err)
+	}
+	for _, params := range []string{`{"offset":-1}`, `{"offset":1.5}`, `{"offset":"1"}`, `{"limit":0}`, `{"limit":501}`, `{"limit":null}`, `{"offset":1,"offset":2}`, `{"extra":1}`} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.installed", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted params %s: %+v", params, rpcErr)
+		}
+	}
+}

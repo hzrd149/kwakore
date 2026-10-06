@@ -14,7 +14,7 @@ func TestServiceInstalledCanonicalSafePages(t *testing.T) {
 	stateMu.Lock()
 	state.InstalledNapps = map[string]Napp{
 		"legacy-short": {ID: pk.Hex()[:16] + "~z", D: "z", Author: pk, Name: "Z\x00\u200b" + strings.Repeat("x", 300), CreatedAt: 7, EventID: "event-z", Paths: []NappPath{{Path: "private/path"}}, Servers: []string{"private.server"}},
-		"root": {ID: "root", Author: pk, Format: FormatNapplet, Kind: KindRootNapplet, Name: "Root", ArtifactHash: "hash-root", EventID: "event-root"},
+		"root":         {ID: "root", Author: pk, Format: FormatNapplet, Kind: KindRootNapplet, Name: "Root", ArtifactHash: "hash-root", EventID: "event-root"},
 	}
 	stateMu.Unlock()
 	t.Cleanup(func() { stateMu.Lock(); state.InstalledNapps = old; stateMu.Unlock() })
