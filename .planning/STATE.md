@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 Phase: 5 (Napplet Artifact Identity and Storage Keying) — VERIFYING
 Plan: 12 of 12 (all complete: 05-01 through 05-12; end-of-phase human smoke list in 05-11-SUMMARY.md)
 Status: Phase complete — ready for verification
-Last activity: 2026-10-05 — Completed 05-11-PLAN.md (CONFORMANCE: CF-2 and conflicts A4, A7, A11 fixed (Phase 5); rows S-1..S-3, CF-1, 5D-4..5D-6, W-3..W-5; DEC-7 per-schema source rules, DEC-8 Blossom trust; TestConformanceChecklistSkeleton pins them. NAPPLETS.md describes the address-plus-hash runtime with the launch-check privacy note. KEY-01..07 and REG-01..04 complete)
+Last activity: 2026-10-06 - Completed quick task 261006-ebp: nix flake packaging for verdana desktop and NixOS module for kwak-os
 
 Progress: [█████░░░░░] 50% (4/8 phases)
 
@@ -233,6 +233,12 @@ None yet.
 - [Phase 3 UI]: 03-UI-REVIEW 20/24 follow-ups: draw the keyring-waiting Log in button disabled (login.go:89), cap/scroll the notice stack at high display scale (layout.go:273, login.go:220), click feedback for Try again / Log in again / Dismiss (retries already join in-flight loads)
 - [Phase 4 residue]: 04-UAT items 5–8 deferred to the milestone audit: WebView2 and WKWebView fixture runs (record in CONFORMANCE 5D-NG-webview2 / 5D-NG-wkwebview), Android `just apk`, first green CI xvfb smoke; SEED-002 (self-made `javascript:`/unclosed `document.open()` documents keep the session); one unexplained local smoke failure in 7 runs (04 deferred-items.md)
 - [Phase 8]: DEC-4 — a bridge napp can click/script its own in-page prompt overlay; CONFORMANCE P1 wording overstates late-click behaviour (IN-05)
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261006-ebp | nix flake packaging for verdana desktop and NixOS module for kwak-os | 2026-10-06 | 7e865bc | [261006-ebp-nix-flake-packaging-for-verdana-desktop-](./quick/261006-ebp-nix-flake-packaging-for-verdana-desktop-/) |
 
 ## Deferred Items
 
