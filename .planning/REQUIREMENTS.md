@@ -11,7 +11,7 @@
 - [x] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
 - [ ] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
 - [ ] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
-- [ ] **SRVC-05**: A client can inspect daemon health, version, active windows, and actionable diagnostic information.
+- [x] **SRVC-05**: A client can inspect daemon health, version, active windows, and actionable diagnostic information.
 
 ### Local Control
 

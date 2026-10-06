@@ -6,16 +6,16 @@ current_phase: 06
 current_phase_name: Daemon Core and Configuration
 current_plan: 4 of 4
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-10-06T20:19:21.190Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-10-06T20:29:47.872Z"
 last_activity: 2026-10-06
 last_activity_desc: v0.2 roadmap drafted
-state_head: 41719553159522ca1e302fd5042da76c82ffb440
+state_head: f70259ff99267124263227f797a194103f1e18c9
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -107,6 +107,7 @@ Last activity: 2026-10-06 — foreground daemon and config validated
 | Phase 06 P01 | 6min | 2 tasks | 6 files |
 | Phase 06 P02 | 5min | 2 tasks | 4 files |
 | Phase 06 P03 | 4min | 2 tasks | 7 files |
+| Phase 06 P04 | 8min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 06]: Unreconciled override persistence is unhealthy and blocks further mutations until repair and restart.
 - [Phase 06]: Only effective service setting changes notify the backend; discovery source changes trigger rediscovery for a logged-in user.
 - [Phase 06]: Reload diagnostics and stderr contain only a config basename, supported field name, and fixed validation reason.
+- [Phase 06]: Offline status and diagnostics use null for unavailable live facts; a lock file is not live evidence.
+- [Phase 06]: Recent service errors retain at most 32 fixed sanitized summaries; unexpected config basenames are redacted.
 
 ### Pending Todos
 
@@ -170,8 +173,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T20:19:21.171Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-10-06T20:29:47.852Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
