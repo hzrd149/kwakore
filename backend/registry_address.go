@@ -90,6 +90,8 @@ func (n Napp) Naddr() string {
 // resolveTimeout bounds one address lookup across every relay asked.
 const resolveTimeout = 15 * time.Second
 
+var ErrNappAddressNotFound = errors.New("no napp or napplet found at that address")
+
 // ResolveNappAddress finds the current manifest at an address, its NIP-01
 // latest event (registry_select.go), in the local store, on the address's
 // relay hints, the author's write relays and the launcher's relays. When
@@ -109,7 +111,7 @@ func ResolveNappAddress(ctx context.Context, input string) (Napp, error) {
 	}
 	best, found := pickAddress(ptr, events)
 	if !found {
-		return Napp{}, errors.New("no napp or napplet found at that address")
+		return Napp{}, ErrNappAddressNotFound
 	}
 	if best.AuthorName == "" {
 		best.AuthorName = best.AuthorShortName()

@@ -289,3 +289,31 @@ func TestRPCDiscoveryCachedAndValidation(t *testing.T) {
 		t.Fatalf("no relay refresh: %+v", rpcErr)
 	}
 }
+
+func TestRPCInstallValidationAndFixedErrors(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	for _, params := range []string{`{}`, `{"address":null}`, `{"address":"bad"}`, `{"address":"bad","extra":1}`, `{"address":"a","address":"b"}`} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.install", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted %s: %+v", params, rpcErr)
+		}
+	}
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	_, rpcErr, raw := rpcCall(t, reader, conn, "napplet.install", `{"address":"`+address+`"}`)
+	if rpcErr == nil || (rpcErr.Code != controlprotocol.NotFound && rpcErr.Code != controlprotocol.Unavailable) || strings.Contains(raw, "relay") {
+		t.Fatalf("unsafe missing install: %s %+v", raw, rpcErr)
+	}
+}
+
+func TestRPCUpdateValidationAndNotFound(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.update", `{"address":"bad"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("invalid: %+v", rpcErr)
+	}
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	_, rpcErr, _ = rpcCall(t, reader, conn, "napplet.update", `{"address":"`+address+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
+		t.Fatalf("missing: %+v", rpcErr)
+	}
+}

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"sync"
@@ -281,28 +282,56 @@ func launchUpdateCheck(n Napp) {
 // relay lookup this triggers when there is none. Only the NIP-01 latest
 // version is ever installed, and only when it is valid.
 func Update(id string) {
+	_, err := updateNappContext(context.Background(), id, "", false)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, ErrServiceNoUpdate) || errors.Is(err, ErrServiceUnavailable) {
+		if n, ok := InstalledNapp(id); ok {
+			SetFetchErr("no update found for " + fetchErrName(n))
+			return
+		}
+	}
+	SetFetchErr(failureLine("update failed: ", installFallback, id, err))
+}
+
+// UpdateNappContext resolves and commits an update for an installed storage ID.
+func UpdateNappContext(ctx context.Context, id string) (ServiceUpdateResult, error) {
+	return updateNappContext(ctx, id, "", true)
+}
+
+func updateNappContext(ctx context.Context, id, expectedAddress string, serviceLookup bool) (ServiceUpdateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ServiceUpdateResult{}, err
+	}
 	// claimed before the record is read, so no install, update or
 	// uninstall of the same id runs between the read and the write
 	if !trySetBusy(id) {
 		log.Warn().Str("napp", id).Msg("napp is busy, not updating")
-		SetFetchErr("update failed: " + errBusy.Error())
-		return
+		return ServiceUpdateResult{}, errBusy
 	}
 	defer setBusy(id, false)
 
 	n, ok := InstalledNapp(id)
-	if !ok {
-		SetFetchErr(failureLine("update failed: ", installFallback, id, errNotInstalled))
-		return
+	if !ok || (expectedAddress != "" && n.Address() != expectedAddress) {
+		return ServiceUpdateResult{}, errNotInstalled
 	}
 
-	latest := newerVersion(n)
+	var latest *Napp
+	var lookupErr error
+	if serviceLookup {
+		latest, lookupErr = newerVersionService(ctx, n)
+	} else {
+		latest = newerVersion(n)
+	}
+	if lookupErr != nil {
+		return ServiceUpdateResult{}, lookupErr
+	}
 	if latest == nil {
-		SetFetchErr("no update found for " + fetchErrName(n))
-		return
+		return ServiceUpdateResult{}, ErrServiceNoUpdate
 	}
 
-	applyUpdate(n, *latest)
+	return applyUpdateContext(ctx, n, *latest)
 }
 
 // applyUpdate does the shared re-download: fetch every path of newer next to
@@ -311,13 +340,22 @@ func Update(id string) {
 // the napp's busy claim held (trySetBusy). newer needs the full event shape; Paths and Servers are the
 // parts that matter for the download itself.
 func applyUpdate(current, newer Napp) {
+	_, err := applyUpdateContext(context.Background(), current, newer)
+	if err != nil {
+		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
+	}
+}
+
+func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ServiceUpdateResult{}, err
+	}
 	if newer.Unavailable != "" {
 		// newerVersion never returns one; this keeps any other caller from
 		// downloading an invalid manifest's files
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).
 			Msg("refusing to update to an invalid latest version")
-		SetFetchErr("update failed: " + errUnavailable.Error())
-		return
+		return ServiceUpdateResult{}, errUnavailable
 	}
 	// never a downgrade: checked before the download, which it would
 	// waste, and again when the record is written
@@ -326,15 +364,13 @@ func applyUpdate(current, newer Napp) {
 	stateMu.Unlock()
 	if had && nappNewer(installed, newer) {
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
-		SetFetchErr("update failed: " + errOlderVersion.Error())
-		return
+		return ServiceUpdateResult{}, errOlderVersion
 	}
 	base, err := nappBaseDir(current.ID)
 	if err != nil {
-		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
-		return
+		return ServiceUpdateResult{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	// the same servers an install asks, in the same order: the user's
@@ -347,8 +383,7 @@ func applyUpdate(current, newer Napp) {
 	// version running as it was (D-10)
 	staging, err := stageNappFiles(ctx, newer, base, servers)
 	if err != nil {
-		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
-		return
+		return ServiceUpdateResult{}, err
 	}
 
 	// adopt the new event wholesale (new paths, new metadata), keeping the
@@ -357,30 +392,36 @@ func applyUpdate(current, newer Napp) {
 	newer.ID = current.ID
 	newer.UpdateAvailable = nil
 	stateMu.Lock()
+	if err := ctx.Err(); err != nil {
+		stateMu.Unlock()
+		os.RemoveAll(staging)
+		return ServiceUpdateResult{}, err
+	}
 	previous, had := state.InstalledNapps[current.ID]
+	if !had || previous.Address() != current.Address() {
+		stateMu.Unlock()
+		os.RemoveAll(staging)
+		return ServiceUpdateResult{}, errNotInstalled
+	}
 	if had && nappNewer(previous, newer) {
 		stateMu.Unlock()
 		os.RemoveAll(staging)
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
-		SetFetchErr("update failed: " + errOlderVersion.Error())
-		return
+		return ServiceUpdateResult{}, errOlderVersion
 	}
 	// files and record change together, under stateMu
 	removeOld, err := swapInstallDir(staging, base)
 	if err != nil {
 		stateMu.Unlock()
 		os.RemoveAll(staging)
-		SetFetchErr(failureLine("update failed: ", installFallback, current.ID, err))
-		return
+		return ServiceUpdateResult{}, err
 	}
 	state.InstalledNapps[current.ID] = newer
+	result := ServiceUpdateResult{Address: newer.Address(), Outcome: "updated", PreviousVersion: serviceVersion(previous), InstalledVersion: serviceVersion(state.InstalledNapps[current.ID])}
 	delete(state.LastLaunched, current.ID)
 	saveState()
 	stateMu.Unlock()
 	removeOld()
-	if !had {
-		previous = current
-	}
 
 	// the previously available update is now the installed version
 	mergeUpdateState(current.ID, nil)
@@ -396,6 +437,7 @@ func applyUpdate(current, newer Napp) {
 
 	refreshInstalled()
 	log.Info().Str("napp", current.ID).Msg("update complete")
+	return result, nil
 }
 
 // newerVersion returns the version Update installs: the NIP-01 latest
@@ -425,6 +467,96 @@ func newerVersion(n Napp) *Napp {
 		return nil
 	}
 	return entry
+}
+
+// fetchServiceManifestEvents reports whether a relay completed its history
+// response. An empty result is authoritative only after at least one EOSE.
+var fetchServiceManifestEvents = func(ctx context.Context, n Napp) ([]nostr.Event, bool) {
+	if sys == nil {
+		return nil, false
+	}
+	urls := append([]string(nil), Relays()...)
+	for _, url := range sys.FetchWriteRelays(ctx, n.Author) {
+		urls = nostr.AppendUnique(urls, url)
+	}
+	if len(urls) == 0 {
+		return nil, false
+	}
+	var mu sync.Mutex
+	var events []nostr.Event
+	completed := false
+	var wg sync.WaitGroup
+	for _, url := range urls {
+		wg.Go(func() {
+			relay, err := nostr.RelayConnect(ctx, url, sys.Pool.RelayOptions)
+			if err != nil {
+				return
+			}
+			defer relay.Close()
+			sub, err := relay.Subscribe(ctx, manifestFilter(n), nostr.SubscriptionOptions{Label: "verdana-service-update"})
+			if err != nil {
+				return
+			}
+			defer sub.Unsub()
+			for {
+				select {
+				case evt, ok := <-sub.Events:
+					if !ok {
+						return
+					}
+					mu.Lock()
+					events = append(events, evt)
+					mu.Unlock()
+				case <-sub.EndOfStoredEvents:
+					mu.Lock()
+					completed = true
+					mu.Unlock()
+					return
+				case <-sub.ClosedReason:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return events, completed
+}
+
+func newerVersionService(ctx context.Context, n Napp) (*Napp, error) {
+	if cached, ok := updateSet.Load().Load(n.ID); ok {
+		if cached.Unavailable == "" && nappNewer(cached, n) {
+			return &cached, nil
+		}
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	events, completed := fetchServiceManifestEvents(lookupCtx, n)
+	if err := lookupCtx.Err(); err != nil {
+		return nil, err
+	}
+	if !completed {
+		return nil, ErrServiceUnavailable
+	}
+	winners := latestByAddress{}
+	for _, evt := range events {
+		winners.add(evt)
+	}
+	evt, ok := winners[n.Address()]
+	if !ok {
+		mergeUpdateState(n.ID, nil)
+		return nil, ErrServiceNoUpdate
+	}
+	entry := updateState(n, nappFromLatest(evt))
+	mergeUpdateState(n.ID, entry)
+	if entry == nil {
+		return nil, ErrServiceNoUpdate
+	}
+	if entry.Unavailable != "" {
+		return nil, errUnavailable
+	}
+	return entry, nil
 }
 
 // latestManifest is the NIP-01 latest version of n's address among what the

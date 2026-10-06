@@ -16,6 +16,10 @@ import (
 // dispatchRPC is the allow-listed service boundary. Configuration persistence
 // and change notifications remain owned by Service and serviceconfig.Manager.
 func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *controlprotocol.Error) {
+	return s.dispatchRPCContext(context.Background(), method, params)
+}
+
+func (s *Service) dispatchRPCContext(ctx context.Context, method string, params json.RawMessage) (any, *controlprotocol.Error) {
 	switch method {
 	case "service.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
@@ -82,7 +86,7 @@ func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *cont
 			return nil, controlprotocol.FixedError(controlprotocol.Closing)
 		}
 		defer done()
-		result, discoverErr := backend.ServiceDiscover(context.Background(), query, refresh, offset, limit)
+		result, discoverErr := backend.ServiceDiscover(ctx, query, refresh, offset, limit)
 		if discoverErr != nil {
 			switch {
 			case errors.Is(discoverErr, backend.ErrDiscoveryUnavailable):
@@ -94,8 +98,75 @@ func (s *Service) dispatchRPC(method string, params json.RawMessage) (any, *cont
 			}
 		}
 		return result, nil
+	case "napplet.install":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		result, installErr := backend.ServiceInstall(ctx, address)
+		if installErr != nil {
+			return nil, mutationError(installErr)
+		}
+		return result, nil
+	case "napplet.update":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		result, updateErr := backend.ServiceUpdate(ctx, address)
+		if updateErr != nil {
+			return nil, mutationError(updateErr)
+		}
+		return result, nil
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
+	}
+}
+
+func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address"); err != nil {
+		return "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	var address string
+	if raw, ok := fields["address"]; !ok || bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &address) != nil {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	if _, err := backend.ParseCanonicalServiceAddress(address); err != nil {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	return address, nil
+}
+
+func mutationError(err error) *controlprotocol.Error {
+	switch {
+	case errors.Is(err, backend.ErrServiceInvalidAddress):
+		return controlprotocol.FixedError(controlprotocol.InvalidParams)
+	case errors.Is(err, backend.ErrServiceNotFound):
+		return controlprotocol.FixedError(controlprotocol.NotFound)
+	case errors.Is(err, backend.ErrServiceBusy):
+		return controlprotocol.FixedError(controlprotocol.Busy)
+	case errors.Is(err, backend.ErrServiceNoUpdate):
+		return controlprotocol.FixedError(controlprotocol.NoUpdate)
+	case errors.Is(err, backend.ErrServiceTimeout):
+		return controlprotocol.FixedError(controlprotocol.Timeout)
+	case errors.Is(err, backend.ErrServiceConflict):
+		return controlprotocol.FixedError(controlprotocol.Conflict)
+	default:
+		return controlprotocol.FixedError(controlprotocol.Unavailable)
 	}
 }
 

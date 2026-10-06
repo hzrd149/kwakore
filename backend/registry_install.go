@@ -85,15 +85,24 @@ func Install(n Napp) {
 // record keeps its EventID and never carries UpdateAvailable or
 // Unavailable: those are Snapshot's to stamp.
 func InstallNapp(n Napp) error {
+	_, err := InstallNappContext(context.Background(), n)
+	return err
+}
+
+// InstallNappContext installs a resolved manifest and returns the committed record.
+func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ServiceInstallResult{}, err
+	}
 	if n.Unavailable != "" {
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Str("reason", n.Unavailable).
 			Msg("refusing to install an invalid latest version")
-		return errUnavailable
+		return ServiceInstallResult{}, errUnavailable
 	}
 	n.UpdateAvailable = nil
 	if !trySetBusy(n.ID) {
 		log.Warn().Str("napp", n.ID).Msg("napp is busy, not installing")
-		return errBusy
+		return ServiceInstallResult{}, errBusy
 	}
 	defer setBusy(n.ID, false)
 	// checked before the download, which it would waste, and again when
@@ -103,16 +112,16 @@ func InstallNapp(n Napp) error {
 	stateMu.Unlock()
 	if older {
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
-		return errOlderVersion
+		return ServiceInstallResult{}, errOlderVersion
 	}
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 
 	base, err := nappBaseDir(n.ID)
 	if err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
-		return err
+		return ServiceInstallResult{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	// the files land next to the install dir first: a failed download
@@ -121,10 +130,15 @@ func InstallNapp(n Napp) error {
 	staging, err := stageNappFiles(ctx, n, base, servers)
 	if err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
-		return err
+		return ServiceInstallResult{}, err
 	}
 
 	stateMu.Lock()
+	if err := ctx.Err(); err != nil {
+		stateMu.Unlock()
+		os.RemoveAll(staging)
+		return ServiceInstallResult{}, err
+	}
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
@@ -132,7 +146,7 @@ func InstallNapp(n Napp) error {
 		stateMu.Unlock()
 		os.RemoveAll(staging)
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
-		return errOlderVersion
+		return ServiceInstallResult{}, errOlderVersion
 	}
 	// files and record change together, under stateMu
 	removeOld, err := swapInstallDir(staging, base)
@@ -140,10 +154,18 @@ func InstallNapp(n Napp) error {
 		stateMu.Unlock()
 		os.RemoveAll(staging)
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
-		return err
+		return ServiceInstallResult{}, err
 	}
 	previous, overwrote := state.InstalledNapps[n.ID]
 	state.InstalledNapps[n.ID] = n
+	outcome := "installed"
+	if overwrote {
+		outcome = "updated"
+		if previous.EventID == n.EventID {
+			outcome = "reinstalled"
+		}
+	}
+	result := ServiceInstallResult{Address: n.Address(), Outcome: outcome, InstalledVersion: serviceVersion(state.InstalledNapps[n.ID])}
 	saveState()
 	stateMu.Unlock()
 	removeOld()
@@ -163,7 +185,7 @@ func InstallNapp(n Napp) error {
 
 	refreshInstalled()
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
-	return nil
+	return result, nil
 }
 
 // Uninstall removes a napp's files and forgets it. Installed-only by

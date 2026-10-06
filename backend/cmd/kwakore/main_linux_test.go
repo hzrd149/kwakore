@@ -92,6 +92,28 @@ func TestCLIInstalledCommand(t *testing.T) {
 	}
 }
 
+func TestCLIInstallCommand(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	method, params, _, err := command([]string{"install", address})
+	if err != nil || method != "napplet.install" || string(params) != `{"address":"`+address+`"}` {
+		t.Fatalf("install: %s %s %v", method, params, err)
+	}
+	if _, _, _, err := command([]string{"install"}); err == nil {
+		t.Fatal("missing address accepted")
+	}
+}
+
+func TestCLIUpdateCommand(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	method, params, _, err := command([]string{"update", address})
+	if err != nil || method != "napplet.update" || string(params) != `{"address":"`+address+`"}` {
+		t.Fatalf("update: %s %s %v", method, params, err)
+	}
+	if _, _, _, err := command([]string{"update"}); err == nil {
+		t.Fatal("missing address accepted")
+	}
+}
+
 func TestCLIDiscoveryCommand(t *testing.T) {
 	method, params, _, err := command([]string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "50"})
 	if err != nil || method != "napplet.discover" || string(params) != `{"query":"hello","refresh":true,"offset":2,"limit":50}` {

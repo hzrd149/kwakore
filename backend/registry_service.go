@@ -3,11 +3,118 @@ package backend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	"fiatjaf.com/nostr"
 )
+
+func ParseCanonicalServiceAddress(input string) (nostr.EntityPointer, error) {
+	if len(input) == 0 || len(input) > 4096 {
+		return nostr.EntityPointer{}, ErrServiceInvalidAddress
+	}
+	ptr, err := ParseNappAddress(input)
+	if err != nil || fmt.Sprintf("%d:%s:%s", ptr.Kind, ptr.PublicKey.Hex(), ptr.Identifier) != input || (!addressable(ptr.Kind) && ptr.Identifier != "") {
+		return nostr.EntityPointer{}, ErrServiceInvalidAddress
+	}
+	return ptr, nil
+}
+
+var (
+	ErrServiceInvalidAddress = errors.New("invalid service address")
+	ErrServiceNotFound       = errors.New("service address not found")
+	ErrServiceBusy           = errors.New("service mutation busy")
+	ErrServiceUnavailable    = errors.New("service mutation unavailable")
+	ErrServiceNoUpdate       = errors.New("no update")
+	ErrServiceTimeout        = errors.New("service mutation timeout")
+	ErrServiceConflict       = errors.New("service mutation conflict")
+)
+
+type ServiceInstallResult struct {
+	Address          string         `json:"address"`
+	Outcome          string         `json:"outcome"`
+	InstalledVersion ServiceVersion `json:"installed_version"`
+}
+
+type ServiceUpdateResult struct {
+	Address          string         `json:"address"`
+	Outcome          string         `json:"outcome"`
+	PreviousVersion  ServiceVersion `json:"previous_version"`
+	InstalledVersion ServiceVersion `json:"installed_version"`
+}
+
+func serviceVersion(n Napp) ServiceVersion {
+	return ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash}
+}
+
+func serviceMutationError(ctx context.Context, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return ErrServiceTimeout
+	case errors.Is(err, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
+		return ErrServiceTimeout
+	case errors.Is(err, errBusy):
+		return ErrServiceBusy
+	case errors.Is(err, errOlderVersion):
+		return ErrServiceConflict
+	case errors.Is(err, errUnavailable):
+		return ErrServiceUnavailable
+	default:
+		return ErrServiceUnavailable
+	}
+}
+
+func ServiceInstall(ctx context.Context, address string) (ServiceInstallResult, error) {
+	if _, err := ParseCanonicalServiceAddress(address); err != nil {
+		return ServiceInstallResult{}, err
+	}
+	n, err := ResolveNappAddress(ctx, address)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ServiceInstallResult{}, ErrServiceTimeout
+		}
+		if errors.Is(err, ErrNappAddressNotFound) {
+			return ServiceInstallResult{}, ErrServiceNotFound
+		}
+		return ServiceInstallResult{}, ErrServiceUnavailable
+	}
+	if n.Unavailable != "" {
+		return ServiceInstallResult{}, ErrServiceUnavailable
+	}
+	result, err := InstallNappContext(ctx, n)
+	return result, serviceMutationError(ctx, err)
+}
+
+func ServiceUpdate(ctx context.Context, address string) (ServiceUpdateResult, error) {
+	if _, err := ParseCanonicalServiceAddress(address); err != nil {
+		return ServiceUpdateResult{}, err
+	}
+	stateMu.Lock()
+	var id string
+	for key, n := range state.InstalledNapps {
+		if n.Address() == address {
+			id = key
+			break
+		}
+	}
+	stateMu.Unlock()
+	if id == "" {
+		return ServiceUpdateResult{}, ErrServiceNotFound
+	}
+	result, err := updateNappContext(ctx, id, address, true)
+	if errors.Is(err, errNotInstalled) {
+		return ServiceUpdateResult{}, ErrServiceNotFound
+	}
+	if errors.Is(err, ErrServiceNoUpdate) {
+		return ServiceUpdateResult{}, ErrServiceNoUpdate
+	}
+	return result, serviceMutationError(ctx, err)
+}
 
 // ServiceVersion is the public installed manifest version.
 type ServiceVersion struct {
