@@ -55,6 +55,11 @@ func run(args []string) error {
 		return err
 	}
 	defer service.Close()
+	listener, err := service.Listen()
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)

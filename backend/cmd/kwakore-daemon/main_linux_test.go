@@ -116,44 +116,80 @@ func TestForegroundHelper(t *testing.T) {
 func TestSocketStatusCLIEndToEnd(t *testing.T) {
 	root := t.TempDir()
 	runtimeDir := filepath.Join(root, "runtime")
-	if err := os.Mkdir(runtimeDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	configRoot := filepath.Join(root, "config")
 	dataRoot := filepath.Join(root, "data")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
 	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+configRoot, "XDG_DATA_HOME="+dataRoot)
 	stdout, err := cmd.StdoutPipe()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil { t.Fatal(err) }
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	ready := make(chan string, 1)
-	go func() { scan := bufio.NewScanner(stdout); if scan.Scan() { ready <- scan.Text() } }()
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- scan.Text()
+		}
+	}()
 	select {
 	case line := <-ready:
-		if !strings.Contains(line, "ready") { t.Fatalf("unexpected readiness: %q", line) }
-	case <-time.After(10 * time.Second): t.Fatal("ready timeout")
+		if !strings.Contains(line, "ready") {
+			t.Fatalf("unexpected readiness: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
 	}
 	conn, err := net.Dial("unix", filepath.Join(runtimeDir, "kwakore", "daemon.sock"))
-	if err != nil { t.Fatalf("socket not available after ready: %v", err) }
+	if err != nil {
+		t.Fatalf("socket not available after ready: %v", err)
+	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3*time.Second))
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 	for i := 0; i < 2; i++ {
-		if _, err := conn.Write([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"service.status\",\"id\":7}\n")); err != nil { t.Fatal(err) }
+		if _, err := conn.Write([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"service.status\",\"id\":7}\n")); err != nil {
+			t.Fatal(err)
+		}
 		line, err := bufio.NewReader(conn).ReadBytes('\n')
-		if err != nil { t.Fatal(err) }
-		var response struct { ID int `json:"id"`; Result json.RawMessage `json:"result"` }
-		if err := json.Unmarshal(line, &response); err != nil || response.ID != 7 || len(response.Result) == 0 { t.Fatalf("response: %s, %v", line, err) }
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			ID     int             `json:"id"`
+			Result json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(line, &response); err != nil || response.ID != 7 || len(response.Result) == 0 {
+			t.Fatalf("response: %s, %v", line, err)
+		}
 	}
 	cli := filepath.Join(root, "kwakore")
 	build := exec.Command("go", "build", "-o", cli, "../kwakore")
-	if out, err := build.CombinedOutput(); err != nil { t.Fatalf("build CLI: %v: %s", err, out) }
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
 	status := exec.Command(cli, "status")
 	status.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
 	out, err := status.CombinedOutput()
-	if err != nil { t.Fatalf("CLI status: %v: %s", err, out) }
-	var result struct { ProtocolVersion int `json:"protocol_version"`; Health struct { Ready bool `json:"ready"` } `json:"health"` }
-	if err := json.Unmarshal(out, &result); err != nil || result.ProtocolVersion != 1 || !result.Health.Ready { t.Fatalf("status: %s, %v", out, err) }
+	if err != nil {
+		t.Fatalf("CLI status: %v: %s", err, out)
+	}
+	var result struct {
+		ProtocolVersion int `json:"protocol_version"`
+		Health          struct {
+			Ready bool `json:"ready"`
+		} `json:"health"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil || result.ProtocolVersion != 1 || !result.Health.Ready {
+		t.Fatalf("status: %s, %v", out, err)
+	}
 }
 
 func TestForegroundSIGHUPReloadsAndSanitizesWarning(t *testing.T) {
