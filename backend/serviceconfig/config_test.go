@@ -3,6 +3,7 @@ package serviceconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -147,5 +148,41 @@ func TestConfigReloadKeepsFieldOverridesAndRejectsInvalidFile(t *testing.T) {
 	}
 	if got := m.Effective(); got.Relays[0] != "wss://override.example" || got.BlossomServers[0] != "https://second.example" {
 		t.Fatalf("invalid reload changed snapshot: %+v", got)
+	}
+}
+
+func TestReloadRejectsWholeCandidateThenRestoresDefaultsWithOverride(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://first.example"],"blossom_servers":["https://first.example"],"discover_on_user_relays":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOverride("relays", []string{"wss://override.example"}); err != nil {
+		t.Fatal(err)
+	}
+	before := m.Effective()
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://new.example"],"blossom_servers":["ftp://invalid.example"],"discover_on_user_relays":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Effective(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("file edit changed live settings without reload: %+v", got)
+	}
+	if err := m.Reload(); err == nil || !strings.Contains(err.Error(), "blossom_servers") {
+		t.Fatalf("invalid candidate: %v", err)
+	}
+	if got := m.Effective(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("invalid candidate partially applied: %+v", got)
+	}
+	if err := os.Remove(p.ConfigFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Effective(); !reflect.DeepEqual(got.Relays, []string{"wss://override.example"}) || !reflect.DeepEqual(got.BlossomServers, Defaults().BlossomServers) || !got.DiscoverOnUserRelays {
+		t.Fatalf("missing file did not reveal defaults under override: %+v", got)
 	}
 }

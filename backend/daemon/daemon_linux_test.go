@@ -209,6 +209,38 @@ func TestDaemonSettingNotifiesOnlyForEffectiveChange(t *testing.T) {
 	}
 }
 
+func TestDaemonReloadWarnsSafelyAndClears(t *testing.T) {
+	p := daemonPaths(t)
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	secret := "https://private-token.example.invalid/path"
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"blossom_servers":["`+secret+`?token=hidden"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err == nil {
+		t.Fatal("invalid reload accepted")
+	}
+	warning := s.Diagnostics().Warning
+	if !strings.Contains(warning, "config.json") || !strings.Contains(warning, "blossom_servers") || strings.Contains(warning, secret) || strings.Contains(warning, "hidden") {
+		t.Fatalf("unsafe or incomplete warning: %q", warning)
+	}
+	if !s.Health().Ready {
+		t.Fatal("rejected reload marked service unready")
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"blossom_servers":["https://safe.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Diagnostics().Warning; got != "" {
+		t.Fatalf("successful reload retained warning: %q", got)
+	}
+}
+
 func TestForegroundReadyAndStop(t *testing.T) {
 	p := daemonPaths(t)
 	ctx, cancel := context.WithCancel(context.Background())
