@@ -1,11 +1,15 @@
 package serviceconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+
+	"verdana/backend/fileutil"
 )
 
 func TestOverridePrecedenceAndRestart(t *testing.T) {
@@ -122,5 +126,170 @@ func TestOverrideCreatesPrivateDataDirOnMutation(t *testing.T) {
 		if info.Mode().Perm() != want {
 			t.Fatalf("%s mode = %o, want %o", path, info.Mode().Perm(), want)
 		}
+	}
+}
+
+func TestOverrideWriteFailureBeforeRename(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOverride("relays", []string{"wss://old.example"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(p.OverrideFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWrite := writeAtomic
+	writeAtomic = func(string, []byte, os.FileMode) error { return errors.New("before rename") }
+	t.Cleanup(func() { writeAtomic = oldWrite })
+	if err := m.SetOverride("relays", []string{"wss://new.example"}); err == nil {
+		t.Fatal("write failure accepted")
+	}
+	after, err := os.ReadFile(p.OverrideFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) || !reflect.DeepEqual(m.Effective().Relays, []string{"wss://old.example"}) {
+		t.Fatalf("failed write changed state: disk %q, effective %+v", after, m.Effective())
+	}
+}
+
+func TestOverrideWriteFailureAfterRename(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWrite := writeAtomic
+	writeAtomic = func(path string, data []byte, perm os.FileMode) error {
+		if err := fileutil.WriteFileAtomic(path, data, perm); err != nil {
+			return err
+		}
+		return errors.New("after rename")
+	}
+	t.Cleanup(func() { writeAtomic = oldWrite })
+	if err := m.SetOverride("relays", []string{"wss://new.example"}); err == nil {
+		t.Fatal("directory sync failure accepted")
+	}
+	if !reflect.DeepEqual(m.Effective().Relays, []string{"wss://new.example"}) {
+		t.Fatalf("effective state did not reconcile: %+v", m.Effective())
+	}
+	restarted, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restarted.Effective(), m.Effective()) {
+		t.Fatalf("disk and memory disagree: %+v vs %+v", restarted.Effective(), m.Effective())
+	}
+}
+
+func TestOverrideUnreconciledWriteFailureBlocksChanges(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWrite := writeAtomic
+	writeAtomic = func(path string, _ []byte, _ os.FileMode) error {
+		if err := os.WriteFile(path, []byte(`{"relays":null}`), 0600); err != nil {
+			return err
+		}
+		return errors.New("disk state unknown")
+	}
+	defer func() { writeAtomic = oldWrite }()
+	if err := m.SetOverride("relays", []string{"wss://new.example"}); err == nil {
+		t.Fatal("write failure accepted")
+	}
+	writeAtomic = fileutil.WriteFileAtomic
+	if err := m.SetOverride("blossom_servers", []string{"https://new.example"}); err == nil || !strings.Contains(err.Error(), "unhealthy") {
+		t.Fatalf("unreconciled manager accepted another mutation: %v", err)
+	}
+}
+
+func TestOverrideMalformedStartup(t *testing.T) {
+	for _, body := range []string{
+		`{"relays":null}`,
+		`{"relays":[],"relays":[]}`,
+		`{"login":"secret"}`,
+		`{"blossom_servers":123}`,
+		`{} {}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			p := testPaths(t)
+			if err := os.WriteFile(p.OverrideFile, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(p); err == nil {
+				t.Fatal("malformed override accepted")
+			}
+		})
+	}
+}
+
+func TestOverrideRejectsUnsafePaths(t *testing.T) {
+	t.Run("symlink target", func(t *testing.T) {
+		p := testPaths(t)
+		outside := filepath.Join(t.TempDir(), "outside.json")
+		if err := os.WriteFile(outside, []byte(`{}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, p.OverrideFile); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Fatal("symlinked override accepted")
+		}
+	})
+	t.Run("world readable target", func(t *testing.T) {
+		p := testPaths(t)
+		if err := os.WriteFile(p.OverrideFile, []byte(`{}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Fatal("public override accepted")
+		}
+	})
+	t.Run("outside data directory", func(t *testing.T) {
+		p := testPaths(t)
+		p.OverrideFile = filepath.Join(t.TempDir(), "outside.json")
+		if err := os.WriteFile(p.OverrideFile, []byte(`{}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Fatal("override outside data directory accepted")
+		}
+	})
+}
+
+func TestOverrideConcurrentIndependentFields(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for _, set := range []struct {
+		field string
+		value any
+	}{{"relays", []string{"wss://one.example"}}, {"blossom_servers", []string{"https://two.example"}}, {"discover_on_user_relays", false}} {
+		wg.Add(1)
+		go func(field string, value any) {
+			defer wg.Done()
+			if err := m.SetOverride(field, value); err != nil {
+				t.Errorf("set %s: %v", field, err)
+			}
+		}(set.field, set.value)
+	}
+	wg.Wait()
+	m, err = Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.Effective()
+	if !reflect.DeepEqual(got.Relays, []string{"wss://one.example"}) || !reflect.DeepEqual(got.BlossomServers, []string{"https://two.example"}) || got.DiscoverOnUserRelays {
+		t.Fatalf("concurrent writes lost a field: %+v", got)
 	}
 }
