@@ -117,3 +117,35 @@ func TestOverridePrecedenceAndClear(t *testing.T) {
 		t.Fatal("unsupported setting accepted")
 	}
 }
+
+func TestConfigReloadKeepsFieldOverridesAndRejectsInvalidFile(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://first.example"],"blossom_servers":["https://first.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOverride("relays", []string{"wss://override.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://second.example"],"blossom_servers":["https://second.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Effective(); got.Relays[0] != "wss://override.example" || got.BlossomServers[0] != "https://second.example" {
+		t.Fatalf("reload lost precedence: %+v", got)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"blossom_servers":["ftp://invalid.example"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err == nil {
+		t.Fatal("invalid reload accepted")
+	}
+	if got := m.Effective(); got.Relays[0] != "wss://override.example" || got.BlossomServers[0] != "https://second.example" {
+		t.Fatalf("invalid reload changed snapshot: %+v", got)
+	}
+}

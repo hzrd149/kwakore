@@ -14,6 +14,13 @@ import (
 
 func TestOverridePrecedenceAndRestart(t *testing.T) {
 	p := testPaths(t)
+	defaults, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := defaults.ConfiguredBlossomServers(); len(got) != 0 {
+		t.Fatalf("built-in servers exposed as configured: %v", got)
+	}
 	original := []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`)
 	if err := os.WriteFile(p.ConfigFile, original, 0600); err != nil {
 		t.Fatal(err)
@@ -98,6 +105,43 @@ func TestOverrideUnsupportedField(t *testing.T) {
 	}
 	if _, err := os.Stat(p.OverrideFile); !os.IsNotExist(err) {
 		t.Fatalf("unsupported mutation wrote file: %v", err)
+	}
+}
+
+func TestOverrideInvalidValueLeavesDiskAndSnapshot(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := m.Effective()
+	for _, tc := range []struct {
+		field string
+		value any
+	}{{"relays", []string{"https://wrong.example"}}, {"relays", "wss://wrong.example"}, {"blossom_servers", []string{"https://host.example/?token=secret"}}, {"discover_on_user_relays", "false"}} {
+		if err := m.SetOverride(tc.field, tc.value); err == nil || !strings.Contains(err.Error(), tc.field) {
+			t.Fatalf("invalid %s accepted or error lacked field: %v", tc.field, err)
+		}
+	}
+	if got := m.Effective(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("invalid value changed snapshot: %+v", got)
+	}
+	if _, err := os.Stat(p.OverrideFile); !os.IsNotExist(err) {
+		t.Fatalf("invalid value wrote file: %v", err)
+	}
+}
+
+func TestOverrideClearAbsentDoesNotCreateFile(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ClearOverride("relays"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.OverrideFile); !os.IsNotExist(err) {
+		t.Fatalf("clearing an absent override wrote a file: %v", err)
 	}
 }
 
@@ -204,6 +248,9 @@ func TestOverrideUnreconciledWriteFailureBlocksChanges(t *testing.T) {
 		t.Fatal("write failure accepted")
 	}
 	writeAtomic = fileutil.WriteFileAtomic
+	if m.PersistenceError() == nil {
+		t.Fatal("unreconciled persistence was not marked unhealthy")
+	}
 	if err := m.SetOverride("blossom_servers", []string{"https://new.example"}); err == nil || !strings.Contains(err.Error(), "unhealthy") {
 		t.Fatalf("unreconciled manager accepted another mutation: %v", err)
 	}
@@ -260,6 +307,22 @@ func TestOverrideRejectsUnsafePaths(t *testing.T) {
 		}
 		if _, err := Load(p); err == nil {
 			t.Fatal("override outside data directory accepted")
+		}
+	})
+	t.Run("symlinked data ancestor", func(t *testing.T) {
+		root := t.TempDir()
+		real := filepath.Join(root, "real")
+		if err := os.Mkdir(real, 0700); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(root, "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		data := filepath.Join(link, "data")
+		p := Paths{ConfigFile: filepath.Join(root, "config.json"), DataDir: data, OverrideFile: filepath.Join(data, "settings-overrides.json")}
+		if _, err := Load(p); err == nil {
+			t.Fatal("symlinked data ancestor accepted")
 		}
 	})
 }

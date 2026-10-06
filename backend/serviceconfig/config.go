@@ -74,6 +74,11 @@ func merge(file, override Config) Effective {
 	return v
 }
 
+func validateMerged(file, override Config) error {
+	v := merge(file, override)
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays})
+}
+
 func validate(c Config) error {
 	for _, field := range []struct {
 		name   string
@@ -180,14 +185,21 @@ func checkDuplicateKeys(b []byte) error {
 }
 
 type Manager struct {
-	mu        sync.RWMutex
-	paths     Paths
-	file      Config
-	override  Config
-	effective Effective
+	mu             sync.RWMutex
+	paths          Paths
+	file           Config
+	override       Config
+	effective      Effective
+	persistenceErr error
 }
 
 func Load(paths Paths) (*Manager, error) {
+	if filepath.Dir(paths.OverrideFile) != paths.DataDir || filepath.Base(paths.OverrideFile) != "settings-overrides.json" {
+		return nil, errors.New("override path must be settings-overrides.json in data directory")
+	}
+	if err := safeDataPath(paths.DataDir); err != nil {
+		return nil, err
+	}
 	file, err := read(paths.ConfigFile)
 	if err != nil {
 		return nil, err
@@ -208,6 +220,9 @@ func Load(paths Paths) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateMerged(file, override); err != nil {
+		return nil, fmt.Errorf("%s: %w", paths.OverrideFile, err)
+	}
 	return &Manager{paths: paths, file: file, override: override, effective: merge(file, override)}, nil
 }
 
@@ -227,9 +242,23 @@ func (m *Manager) Reload() error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.persistenceErr != nil {
+		return fmt.Errorf("override persistence unhealthy: %w", m.persistenceErr)
+	}
+	if err := validateMerged(file, m.override); err != nil {
+		return err
+	}
 	m.file = file
 	m.effective = merge(file, m.override)
 	return nil
+}
+
+// PersistenceError reports when the override file could not be reconciled after
+// a failed write. Restarting after repairing the file restores normal writes.
+func (m *Manager) PersistenceError() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.persistenceErr
 }
 
 func (m *Manager) ConfiguredBlossomServers() []string {
