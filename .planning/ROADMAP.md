@@ -34,6 +34,16 @@ First extract a daemon-owned core and configuration from the Gio launcher. Next 
 **Goal:** Local clients can perform all basic service and napplet management through a stable, user-only interface.
 **Depends on:** Phase 6.
 **Requirements:** SOCK-01, SOCK-02, SOCK-03, SOCK-04, SOCK-05.
+**Plans:** 6 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Private JSON-RPC socket and live CLI status
+- [ ] 07-02-PLAN.md — Live diagnostics and settings control
+- [ ] 07-03-PLAN.md — Installed list and completed discovery
+- [ ] 07-04-PLAN.md — Synchronous install and update outcomes
+- [ ] 07-05-PLAN.md — Confirmed uninstall and safe shutdown
+- [ ] 07-06-PLAN.md — CLI parity and public protocol reference
+
 **Success criteria:**
 
 1. A local client connects through a versioned Unix socket protocol in the user's runtime directory; access checks reject other users and malformed requests receive stable error codes.
