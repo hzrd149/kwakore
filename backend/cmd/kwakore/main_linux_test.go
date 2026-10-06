@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,30 @@ func TestCLIContractPeerUIDOverride(t *testing.T) {
 		t.Fatalf("foreign peer accepted: %v", err)
 	}
 	<-done
+}
+
+func TestCLIContractCatalog(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	commands := [][]string{
+		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
+		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
+		{"discover"}, {"installed"}, {"install", address}, {"update", address},
+		{"uninstall", "--yes", address},
+	}
+	methods := make([]string, 0, len(commands))
+	for _, args := range commands {
+		method, _, _, err := command(args)
+		if err != nil {
+			t.Fatalf("command %v: %v", args, err)
+		}
+		methods = append(methods, method)
+	}
+	catalog := controlprotocol.MethodNames()
+	slices.Sort(methods)
+	slices.Sort(catalog)
+	if !slices.Equal(methods, catalog) {
+		t.Fatalf("CLI methods %v differ from protocol catalog %v", methods, catalog)
+	}
 }
 
 func TestCLIInstalledCommand(t *testing.T) {

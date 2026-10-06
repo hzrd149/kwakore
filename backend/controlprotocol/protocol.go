@@ -13,6 +13,16 @@ const MaxRequestLine = 1 << 20
 const MaxResponseLine = 8 << 20
 const MaxBatch = 64
 
+// MethodNames is the version 1 public method catalog. A new entry requires
+// matching daemon routing, CLI coverage, and control-protocol documentation.
+func MethodNames() []string {
+	return []string{
+		"service.status", "service.diagnostics",
+		"settings.get", "settings.reload", "settings.set", "settings.clear",
+		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall",
+	}
+}
+
 const (
 	ParseError           = -32700
 	InvalidRequest       = -32600

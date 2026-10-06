@@ -3,6 +3,10 @@ package controlprotocol
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,6 +37,33 @@ func TestJSONRPCEnvelopeErrors(t *testing.T) {
 				t.Fatalf("response %s: %s, %v", tc.name, out, err)
 			}
 		})
+	}
+}
+
+func TestProtocolDocsMethods(t *testing.T) {
+	docs, err := os.ReadFile(filepath.Join("..", "..", "docs", "control-protocol.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := os.ReadFile(filepath.Join("..", "daemon", "rpc_linux.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := regexp.MustCompile(`case "((?:service|settings|napplet)\.[a-z]+)":`).FindAllSubmatch(router, -1)
+	var routed []string
+	for _, match := range cases {
+		routed = append(routed, string(match[1]))
+	}
+	catalog := MethodNames()
+	slices.Sort(catalog)
+	slices.Sort(routed)
+	if !slices.Equal(catalog, routed) {
+		t.Fatalf("catalog %v differs from routed %v", catalog, routed)
+	}
+	for _, method := range catalog {
+		if !bytes.Contains(docs, []byte("`"+method+"`")) {
+			t.Errorf("documentation missing %s", method)
+		}
 	}
 }
 
