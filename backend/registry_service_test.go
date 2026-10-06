@@ -239,6 +239,27 @@ func TestServiceInstallCommittedOutcomeAndRollback(t *testing.T) {
 	assertInstalledIntact(t, installedFrom(t, v2Event), "v2")
 }
 
+func TestServiceInstallCanceledKeepsCommittedVersion(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1Event := blobs.servedNapplet(t, sk, "app", "v1", 10)
+	v2Event := blobs.servedNapplet(t, sk, "app", "v2", 20)
+	v1 := installedFrom(t, v1Event)
+	if err := InstallNapp(v1); err != nil {
+		t.Fatal(err)
+	}
+	old := addressEvents
+	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{v2Event}, nil }
+	t.Cleanup(func() { addressEvents = old })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := ServiceInstall(ctx, v1.Address()); !errors.Is(err, ErrServiceTimeout) {
+		t.Fatalf("canceled install: %v", err)
+	}
+	assertInstalledIntact(t, v1, "v1")
+}
+
 func TestServiceUpdateLegacyIDAndFinalVersion(t *testing.T) {
 	newReclaimRig(t)
 	resetUpdateSet()
