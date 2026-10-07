@@ -69,6 +69,16 @@ Plans:
 **Goal:** The daemon controls napplet windows, permissions, and signer options while retaining v0.1 security boundaries.
 **Depends on:** Phase 7.
 **Requirements:** SRVC-03, SRVC-04, SOCK-06, SIGN-01, SIGN-02, SIGN-03.
+**Plans:** 5 plans
+
+Plans:
+
+- [ ] 08-01-PLAN.md — Daemon-owned Linux child launch, confirmed stop, and headless error
+- [ ] 08-02-PLAN.md — Canonical-address permission inspection and one-rule edits
+- [ ] 08-03-PLAN.md — Protected local signer, credentials, and non-secret configuration
+- [ ] 08-04-PLAN.md — NIP-46 bunker and nostrconnect pairing
+- [ ] 08-05-PLAN.md — Concurrent identity safety and independent child smoke
+
 **Success criteria:**
 
 1. A client launches and stops an installed napplet through the daemon; the sandbox, NAP permission gates, and existing host operations still work.
