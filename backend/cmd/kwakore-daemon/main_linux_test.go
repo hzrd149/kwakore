@@ -5,7 +5,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -112,6 +115,20 @@ func TestForegroundHelper(t *testing.T) {
 	if os.Getenv("KWAKORE_FOREGROUND_HELPER") != "1" {
 		return
 	}
+	if mode := os.Getenv("KWAKORE_TEST_LEASE"); mode != "" {
+		foregroundServiceHook = func(s *daemon.Service) {
+			done, err := s.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(os.Getenv("KWAKORE_TEST_MARKER"), []byte("leased"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "cooperative" {
+				time.AfterFunc(time.Second, done)
+			}
+		}
+	}
 	if err := run(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +138,160 @@ func TestForegroundHelper(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+func TestForegroundSignalDeadline(t *testing.T) {
+	testForegroundSignalLease(t, "held", 124)
+}
+
+func TestForegroundGracefulShutdown(t *testing.T) {
+	testForegroundSignalLease(t, "cooperative", 0)
+}
+
+func TestForcedExitRestartRecovery(t *testing.T) {
+	root := testForegroundSignalLease(t, "held", 124)
+	dataDir := filepath.Join(root, "data", "kwakore")
+	id := "interrupted-install"
+	sum := sha256.Sum256([]byte(id))
+	name := hex.EncodeToString(sum[:])
+	base := filepath.Join(dataDir, "napps", name)
+	intentDir := filepath.Join(dataDir, "mutations")
+	if err := os.MkdirAll(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(intentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := json.Marshal(map[string]any{"version": 1, "id": id, "operation": "install", "token": "1234567890abcdef1234567890abcdef", "new_event": "interrupted-event", "base": name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intentPath := filepath.Join(intentDir, name+".json")
+	if err := os.WriteFile(intentPath, intent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeDir := filepath.Join(root, "runtime")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan string, 1)
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- scan.Text()
+		}
+	}()
+	select {
+	case line := <-ready:
+		if !strings.Contains(line, " ready ") {
+			t.Fatalf("restart readiness: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("restart did not become ready")
+	}
+	if _, err := os.Stat(intentPath); !os.IsNotExist(err) {
+		t.Fatalf("ready before intent recovery: %v", err)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
+		t.Fatalf("ready before uncommitted install rollback: %v", err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("restart shutdown: %v: %s", err, stderr.String())
+	}
+}
+
+func testForegroundSignalLease(t *testing.T, mode string, wantExit int) string {
+	t.Helper()
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "leased")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "KWAKORE_TEST_LEASE="+mode, "KWAKORE_TEST_MARKER="+marker, "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan string, 1)
+	go func() {
+		scan := bufio.NewScanner(stdout)
+		if scan.Scan() {
+			ready <- scan.Text()
+		}
+	}()
+	select {
+	case line := <-ready:
+		if !strings.Contains(line, " ready ") {
+			t.Fatalf("readiness: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("lease marker: %v", err)
+	}
+	dataDir := filepath.Join(root, "data", "kwakore")
+	paths := serviceconfig.Paths{ConfigFile: filepath.Join(root, "config", "kwakore", "config.json"), DataDir: dataDir, OverrideFile: filepath.Join(dataDir, "settings-overrides.json")}
+	if second, err := daemon.Open(paths, "test"); err == nil {
+		second.Close()
+		t.Fatal("lock released before child exit")
+	}
+	start := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- cmd.Wait() }()
+	select {
+	case err := <-finished:
+		elapsed := time.Since(start)
+		if wantExit == 0 && err != nil {
+			t.Fatalf("graceful exit: %v: %s", err, stderr.String())
+		}
+		if wantExit != 0 {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != wantExit {
+				t.Fatalf("exit = %v, want %d: %s", err, wantExit, stderr.String())
+			}
+			if !strings.HasSuffix(strings.TrimSpace(stderr.String()), "shutdown deadline exceeded") {
+				t.Fatalf("deadline stderr: %q", stderr.String())
+			}
+			if elapsed < 5*time.Second || elapsed > 6*time.Second {
+				t.Fatalf("deadline elapsed %v", elapsed)
+			}
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("child missed shutdown deadline")
+	}
+	second, err := daemon.Open(paths, "test")
+	if err != nil {
+		t.Fatalf("post-exit lock/recovery: %v", err)
+	}
+	second.Close()
+	return root
 }
 
 func TestForegroundClientParity(t *testing.T) {

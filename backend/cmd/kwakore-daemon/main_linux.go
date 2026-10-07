@@ -9,12 +9,19 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"verdana/backend/daemon"
 	"verdana/backend/serviceconfig"
 )
 
 var version = "development"
+
+const shutdownGrace = 5 * time.Second
+const shutdownDeadlineExitCode = 124
+
+// foregroundServiceHook is set only by the test helper process.
+var foregroundServiceHook func(*daemon.Service)
 
 func run(args []string) error {
 	paths, err := serviceconfig.ResolvePaths()
@@ -54,12 +61,14 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer service.Close()
 	listener, err := service.Listen()
 	if err != nil {
+		service.Close()
 		return err
 	}
-	defer listener.Close()
+	if foregroundServiceHook != nil {
+		foregroundServiceHook(service)
+	}
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
@@ -67,6 +76,14 @@ func run(args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
+			deadline := time.AfterFunc(shutdownGrace, func() {
+				fmt.Fprintln(os.Stderr, "shutdown deadline exceeded")
+				os.Exit(shutdownDeadlineExitCode)
+			})
+			service.BeginShutdown()
+			_ = listener.Close()
+			service.Close()
+			deadline.Stop()
 			return nil
 		case <-hup:
 			if err := service.Reload(); err == nil {

@@ -28,6 +28,7 @@ type Service struct {
 	workContext  context.Context
 	cancelWork   context.CancelFunc
 	closeDone    chan struct{}
+	closeOnce    sync.Once
 	closing      bool
 	ready        bool
 	start        time.Time
@@ -231,14 +232,12 @@ func reloadWarning(path string, err error) string {
 	return fmt.Sprintf("configuration reload rejected: %s: invalid %s", name, field)
 }
 
-func (s *Service) Close() {
+// BeginShutdown rejects new leases and cancels accepted network work. It is
+// safe to call more than once and never waits for a worker.
+func (s *Service) BeginShutdown() {
 	s.mu.Lock()
 	if s.closing {
-		done := s.closeDone
 		s.mu.Unlock()
-		if done != nil {
-			<-done
-		}
 		return
 	}
 	s.closing = true
@@ -246,20 +245,29 @@ func (s *Service) Close() {
 	if s.closeDone == nil {
 		s.closeDone = make(chan struct{})
 	}
-	done := s.closeDone
 	s.mu.Unlock()
 	if s.cancelWork != nil {
 		s.cancelWork()
 	}
-	s.work.Wait()
-	if s.closeBackend != nil {
-		s.closeBackend()
-	}
-	if s.lock != nil {
-		_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
-		_ = s.lock.Close()
-	}
-	close(done)
+}
+
+func (s *Service) Close() {
+	s.BeginShutdown()
+	s.mu.Lock()
+	done := s.closeDone
+	s.mu.Unlock()
+	s.closeOnce.Do(func() {
+		s.work.Wait()
+		if s.closeBackend != nil {
+			s.closeBackend()
+		}
+		if s.lock != nil {
+			_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+			_ = s.lock.Close()
+		}
+		close(done)
+	})
+	<-done
 }
 
 // registryContext ties network and staging work to both the client and the
@@ -278,14 +286,16 @@ func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready f
 	if err != nil {
 		return err
 	}
-	defer s.Close()
 	listener, err := s.Listen()
 	if err != nil {
+		s.Close()
 		return err
 	}
-	defer listener.Close()
 	ready(fmt.Sprintf("kwakore-daemon %s ready (config: %s)", version, paths.ConfigFile))
 	<-ctx.Done()
+	s.BeginShutdown()
+	_ = listener.Close()
+	s.Close()
 	return nil
 }
 
