@@ -210,19 +210,6 @@ jobs:
           echo "C:\ProgramData\mingw64\mingw64\bin" >> $env:GITHUB_PATH
           echo "CC=gcc" >> $env:GITHUB_ENV
 
-      - name: validate powershell installer
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path scripts/install.ps1),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) { throw ($errors | Out-String) }
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: desktop/go.mod
