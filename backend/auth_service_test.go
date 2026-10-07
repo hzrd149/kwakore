@@ -53,6 +53,52 @@ func TestServiceSignerIdentityRace(t *testing.T) {
 	}
 }
 
+type blockingSignKeyer struct {
+	nostr.Keyer
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (k *blockingSignKeyer) SignEvent(ctx context.Context, evt *nostr.Event) error {
+	close(k.entered)
+	<-k.release
+	return k.Keyer.SignEvent(ctx, evt)
+}
+
+func TestServiceSignerBlockedNAPSink(t *testing.T) {
+	secret := nostr.Generate()
+	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(secret), &keyer.SignerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := &blockingSignKeyer{Keyer: inner, entered: make(chan struct{}), release: make(chan struct{})}
+	s := &ServiceSigner{keyer: &revocableKeyer{active: true, inner: blocked}}
+	publishIdentity(s.keyer, secret.Public(), nil)
+	t.Cleanup(s.Close)
+	c := &napCall{}
+	c.approved.Store(true)
+	signDone := make(chan error, 1)
+	go func() { signDone <- c.sign(context.Background(), &nostr.Event{Kind: 1, CreatedAt: nostr.Now()}) }()
+	<-blocked.entered
+	switchDone := make(chan error, 1)
+	go func() { _, err := s.Switch(context.Background(), "none", "", nil); switchDone <- err }()
+	select {
+	case err := <-switchDone:
+		t.Fatalf("switch finished before in-flight NAP sign: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(blocked.release)
+	if err := <-signDone; err != nil {
+		t.Fatalf("in-flight NAP sign failed: %v", err)
+	}
+	if err := <-switchDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := c.sign(context.Background(), &nostr.Event{Kind: 1}); err == nil || (!errors.Is(err, errServiceSignerUnavailable) && err.Error() != "not-signed-in") {
+		t.Fatalf("old signer remained usable: %v", err)
+	}
+}
+
 func TestServiceSignerStaleResult(t *testing.T) {
 	client, remote, user := nostr.Generate(), nostr.Generate(), nostr.Generate()
 	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(user), &keyer.SignerOptions{})

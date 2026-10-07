@@ -97,8 +97,10 @@ func loginAmber(input string) {
 
 	// no handshake to wait on: the signer app is the session, and it holds
 	// the key whether we are online or not
-	clearIdentity()
-	publishIdentity(AmberSigner{PubKey: pk, Package: pkg}, pk, nil)
+	gen := clearIdentity()
+	if !publishIdentityIfCurrent(gen, AmberSigner{PubKey: pk, Package: pkg}, pk, nil) {
+		return
+	}
 	go pushIdentityChanged()
 
 	if err := setStoredLogin(input); err != nil {
