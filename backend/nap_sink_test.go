@@ -270,6 +270,41 @@ func TestNapGateRefusesUndeclaredPermission(t *testing.T) {
 	}
 }
 
+func TestNAPRouteGateAfterSavedAllow(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "saved-allow-gate")
+	oldPath := statePath
+	statePath = filepath.Join(dataDir, "state.json")
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[ci.napp.ID] = ci.napp
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		delete(state.InstalledNapps, ci.napp.ID)
+		delete(state.Rules, RuleKey{Napp: ci.napp.ID, Permission: PermPublish}.ruleID())
+		stateMu.Unlock()
+		statePath = oldPath
+	})
+	if _, err := ServicePermissionSet(context.Background(), ci.napp.Address(), PermPublish, "", DecisionAllow); err != nil {
+		t.Fatal(err)
+	}
+	withTestRoute(t, "test.savedallow", napRoute{
+		h:    func(c *napCall) { c.approve(PermPublish, "forged", "", "") },
+		gate: perCallGate(PermOpenLink), fail: failShape(failLink),
+	})
+	ready(t, ci, rec, 1)
+	post(t, ci, map[string]any{"type": "test.savedallow", "id": "forged"})
+	if got := rec.wait(t, "test.savedallow.result", 1); got["status"] != "denied" || got["error"] != napErrDenied {
+		t.Fatalf("saved allow bypassed declared route: %v", got)
+	}
+	if p := CurrentPrompt(); p != nil {
+		t.Fatalf("forged route prompted: %+v", p)
+	}
+}
+
 // TestNapStorageRepliesUseTheVocabulary: storage failures answer codes,
 // never prose or Go error text (D-07); over quota keeps NAP-STORAGE's own.
 func TestNapStorageRepliesUseTheVocabulary(t *testing.T) {

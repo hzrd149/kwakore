@@ -215,6 +215,22 @@ func TestRPCPermissionsGetInstalledSavedRules(t *testing.T) {
 		!reflect.DeepEqual(got.SavedRules, []backend.ServiceSavedRule{{Permission: backend.PermSign, Decision: backend.DecisionDeny}}) {
 		t.Fatalf("scoped permission view: %+v", got)
 	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.set", `{"address":"`+napp.Address()+`","permission":"dispatch","subject":"view","decision":"deny"}`)
+	if rpcErr != nil {
+		t.Fatalf("set: %+v", rpcErr)
+	}
+	result, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.get", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil || json.Unmarshal(result, &got) != nil || len(got.SavedRules) != 2 {
+		t.Fatalf("set view: %s %+v", result, rpcErr)
+	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.clear", `{"address":"`+napp.Address()+`","permission":"dispatch","subject":"view"}`)
+	if rpcErr != nil {
+		t.Fatalf("clear: %+v", rpcErr)
+	}
+	result, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.get", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil || json.Unmarshal(result, &got) != nil || len(got.SavedRules) != 1 {
+		t.Fatalf("clear view: %s %+v", result, rpcErr)
+	}
 	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.get", `{"address":"`+nostr.Generate().Public().Hex()+`"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
 		t.Fatalf("bad address: %+v", rpcErr)
@@ -227,6 +243,18 @@ func TestRPCPermissionsSetRejectsInvalidPermission(t *testing.T) {
 	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.permissions.set", `{"address":"`+address+`","permission":"invented","decision":"allow"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
 		t.Fatalf("invalid permission accepted: %+v", rpcErr)
+	}
+	for _, params := range []string{
+		`{"address":"` + address + `","permission":"dispatch","decision":"deny"}`,
+		`{"address":"` + address + `","permission":"sign","decision":"ask"}`,
+		`{"address":"` + address + `","permission":"sign","decision":"allow","subject":null}`,
+		`{"address":"` + address + `","permission":"sign","decision":"allow","extra":1}`,
+		`{"address":"` + address + `","permission":"sign","permission":"fetch","decision":"allow"}`,
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.permissions.set", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted %s: %+v", params, rpcErr)
+		}
 	}
 }
 

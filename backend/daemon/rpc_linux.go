@@ -120,6 +120,29 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(getErr)
 		}
 		return result, nil
+	case "napplet.permissions.set", "napplet.permissions.clear":
+		address, perm, subject, decision, err := decodePermissionParams(params, method == "napplet.permissions.set")
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		var result backend.ServicePermissionResult
+		var mutationErr error
+		if method == "napplet.permissions.set" {
+			result, mutationErr = backend.ServicePermissionSet(workCtx, address, perm, subject, decision)
+		} else {
+			result, mutationErr = backend.ServicePermissionClear(workCtx, address, perm, subject)
+		}
+		if mutationErr != nil {
+			return nil, mutationError(mutationErr)
+		}
+		return result, nil
 	case "napplet.launch":
 		address, err := decodeAddressParams(params)
 		if err != nil {
@@ -279,6 +302,43 @@ func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error
 	return address, nil
 }
 
+func decodePermissionParams(params json.RawMessage, set bool) (string, backend.Permission, string, backend.Decision, *controlprotocol.Error) {
+	allowed := []string{"address", "permission", "subject"}
+	if set {
+		allowed = append(allowed, "decision")
+	}
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	if err := controlprotocol.ValidateNamedParams(params, allowed...); err != nil {
+		return "", "", "", "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", "", "", "", invalid
+	}
+	address, err := decodeAddressParams(json.RawMessage(`{"address":` + string(fields["address"]) + `}`))
+	if err != nil {
+		return "", "", "", "", err
+	}
+	var permission string
+	if raw, ok := fields["permission"]; !ok || bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &permission) != nil {
+		return "", "", "", "", invalid
+	}
+	var subject string
+	if raw, ok := fields["subject"]; ok && (bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &subject) != nil) {
+		return "", "", "", "", invalid
+	}
+	var decision string
+	if set {
+		if raw, ok := fields["decision"]; !ok || bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &decision) != nil || (decision != "allow" && decision != "deny") {
+			return "", "", "", "", invalid
+		}
+	}
+	if !backend.ValidServicePermission(backend.Permission(permission), subject) {
+		return "", "", "", "", invalid
+	}
+	return address, backend.Permission(permission), subject, backend.Decision(decision), nil
+}
+
 func decodeWindowIDParams(params json.RawMessage) (string, *controlprotocol.Error) {
 	if err := controlprotocol.ValidateNamedParams(params, "window_id"); err != nil {
 		return "", err
@@ -305,6 +365,8 @@ func mutationError(err error) *controlprotocol.Error {
 		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: "session_unavailable"}
 		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
+		return controlprotocol.FixedError(controlprotocol.InvalidParams)
+	case errors.Is(err, backend.ErrServiceInvalidPermission):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceNotFound):
 		return controlprotocol.FixedError(controlprotocol.NotFound)
