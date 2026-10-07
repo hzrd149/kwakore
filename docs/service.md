@@ -548,7 +548,7 @@ If a switch times out, run `kwakore signer status` before trying again.
 
 ## Status, errors and logs
 
-Run `kwakore` or `kwakore help` for the command menu; help works even when the service is stopped.
+Run `kwakore` or `kwakore help` for the command menu. Use `kwakore COMMAND --help` for command-specific options, for example `kwakore installed --help` or `kwakore settings set --help`. Help works even when the service is stopped.
 
 **Public status.** CLI output is labeled text by default; `--json` before the command returns JSON. Neither format contains secrets, signer
 URLs or private paths.

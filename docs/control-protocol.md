@@ -97,7 +97,7 @@ The unauthorized response is sent before dispatch and followed by close. `confir
 
 ## Bundled CLI
 
-Run `kwakore` or `kwakore help` to see the full command menu without connecting to the daemon. `-h` and `--help` do the same.
+Run `kwakore` or `kwakore help` to see the full command menu without connecting to the daemon. `-h` and `--help` do the same. For command-specific usage, run `kwakore COMMAND --help`, such as `kwakore discover --help` or `kwakore signer pair start --help`; `kwakore help COMMAND` also works. Bare `settings`, `signer`, and `permissions` show their subcommand menus. Help never contacts the daemon.
 
 Installations put it on `PATH` as `kwakore` (the helper links `~/.local/bin/kwakore`); from source, build it with `cd backend && go build -o /tmp/kwakore ./cmd/kwakore`. Syntax: `kwakore [--socket ABSOLUTE_PATH] [--timeout POSITIVE_GO_DURATION] [--json] COMMAND`. Global options precede the command and may appear in either order. `--socket` selects another Unix socket and still enforces server UID. Without it, the CLI requires a valid private `XDG_RUNTIME_DIR` and uses the standard path; it never falls back to a shared directory. `--timeout` accepts a positive Go duration such as `45s` or `3m`. By default, the CLI prints labeled text. Put `--json` before the command to print the original JSON result and structured JSON errors for scripts.
 

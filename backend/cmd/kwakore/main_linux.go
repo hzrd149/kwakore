@@ -35,6 +35,13 @@ func run(args []string) error {
 		_, err := io.WriteString(os.Stdout, cliHelp)
 		return err
 	}
+	if topic, requested := helpTopic(args); requested {
+		if topic == "" {
+			return inputFailure("unknown help topic; run 'kwakore help' for commands")
+		}
+		_, err := io.WriteString(os.Stdout, topic)
+		return err
+	}
 	method, params, _, err := command(args)
 	if err != nil {
 		return err

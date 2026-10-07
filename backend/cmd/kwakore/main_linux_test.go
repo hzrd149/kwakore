@@ -1248,3 +1248,42 @@ func TestCLIHelpWithoutDaemon(t *testing.T) {
 		t.Fatalf("invalid command: stdout=%q stderr=%q err=%v", stdout.String(), stderr.String(), err)
 	}
 }
+
+func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
+	cli := filepath.Join(t.TempDir(), "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"installed", "--help"}, "--limit N"},
+		{[]string{"discover", "-h"}, "--refresh"},
+		{[]string{"uninstall", "--help"}, "--yes"},
+		{[]string{"permissions"}, "permissions set ADDRESS"},
+		{[]string{"permissions", "set", "--help"}, "--subject NAME"},
+		{[]string{"settings"}, "settings set FIELD"},
+		{[]string{"settings", "set", "--help"}, "JSON_VALUE"},
+		{[]string{"settings", "help"}, "settings set FIELD"},
+		{[]string{"signer"}, "signer pair start"},
+		{[]string{"signer", "pair", "help"}, "signer pair cancel"},
+		{[]string{"signer", "switch", "nsec", "--help"}, "--secret-file PATH"},
+		{[]string{"signer", "pair", "start", "--help"}, "private pairing URI"},
+		{[]string{"help", "signer", "pair", "wait"}, "signer pair wait"},
+		{[]string{"--json", "--socket", "/tmp/unused.sock", "install", "--help"}, "install ADDRESS"},
+	} {
+		cmd := exec.Command(cli, tc.args...)
+		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil || stderr.Len() != 0 || !strings.Contains(stdout.String(), tc.want) {
+			t.Fatalf("%v: stdout=%q stderr=%q err=%v", tc.args, stdout.String(), stderr.String(), err)
+		}
+	}
+	for topic, help := range commandHelp {
+		if !strings.Contains(help, "Usage:") || !strings.Contains(help, "kwakore "+topic) {
+			t.Errorf("incomplete help for %q", topic)
+		}
+	}
+}
