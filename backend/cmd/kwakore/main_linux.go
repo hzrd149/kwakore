@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"verdana/backend/controlprotocol"
+	"verdana/backend/desktopentry"
 )
 
 func run(args []string) error {
@@ -31,6 +32,11 @@ func run(args []string) error {
 	method, params, _, err := command(args)
 	if err != nil {
 		return err
+	}
+	// A desktop entry always reaches the standard user socket, the one
+	// kwakore.socket owns, so systemd can start the daemon on demand.
+	if len(args) > 0 && args[0] == "launch-token" && socketOverride != "" {
+		return inputFailure("launch-token uses the standard user socket")
 	}
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if socketOverride == "" && (runtimeDir == "" || !filepath.IsAbs(runtimeDir)) {
@@ -395,6 +401,19 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{args[1]})
 		return "napplet.launch", params, socketPath, nil
 	}
+	if len(args) == 2 && args[0] == "launch-token" {
+		// The token comes from a generated desktop entry's Exec line. It is
+		// decoded and checked here, before any dial, and then becomes the
+		// same napplet.launch request as `launch ADDRESS`.
+		address, err := desktopentry.DecodeToken(args[1])
+		if err != nil {
+			return "", nil, "", inputFailure("invalid launch token")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{address})
+		return "napplet.launch", params, socketPath, nil
+	}
 	if len(args) == 2 && args[0] == "stop" {
 		decoded, err := hex.DecodeString(args[1])
 		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != args[1] {
@@ -500,7 +519,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed|discover|install|update|uninstall|launch|stop|permissions|settings|signer")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed|discover|install|update|uninstall|launch|launch-token|stop|permissions|settings|signer")
 }
 
 func readSignerSecret(r io.Reader, limit int) (string, error) {

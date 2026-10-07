@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/puzpuzpuz/xsync/v3 v3.5.1
@@ -26,7 +27,6 @@ require (
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.13 // indirect

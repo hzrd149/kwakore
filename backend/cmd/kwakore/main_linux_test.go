@@ -5,7 +5,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,10 +16,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"verdana/backend/controlprotocol"
+	"verdana/backend/desktopentry"
 )
 
 func TestCLISettingsCommands(t *testing.T) {
@@ -754,4 +758,154 @@ func TestStatusRejectsMismatchedResponseID(t *testing.T) {
 		t.Fatalf("mismatched ID: %v", err)
 	}
 	<-done
+}
+
+// ─── desktop entry launch tokens ───────────────────────────────────
+
+func TestCLILaunchToken(t *testing.T) {
+	root, err := os.MkdirTemp("", "kwl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	runtimeDir := filepath.Join(root, "run")
+	if err := os.MkdirAll(filepath.Join(runtimeDir, "kwakore"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var accepted atomic.Int32
+	requests := make(chan string, 4)
+	responses := make(chan string, 4)
+	go func() {
+		for {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			go func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				requests <- string(line)
+				select {
+				case response := <-responses:
+					_, _ = conn.Write([]byte(response + "\n"))
+				case <-time.After(5 * time.Second):
+				}
+			}()
+		}
+	}()
+	runCLI := func(args ...string) (string, string, error) {
+		cmd := exec.Command(cli, args...)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		return stdout.String(), stderr.String(), err
+	}
+
+	// The d tag carries everything a desktop entry must never see raw.
+	pubkey := "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+	address := "35129:" + pubkey + ":notes\n%f $(id) \"q\" ✓"
+	token, err := desktopentry.EncodeToken(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRequest, _ := json.Marshal(controlprotocol.Request{
+		JSONRPC: "2.0", Method: "napplet.launch",
+		Params: json.RawMessage(mustJSON(t, map[string]string{"address": address})), ID: json.RawMessage("1"),
+	})
+
+	t.Run("dispatches one canonical napplet.launch", func(t *testing.T) {
+		before := accepted.Load()
+		result := `{"address":` + mustJSON(t, address) + `,"window_id":"` + strings.Repeat("ab", 16) + `","outcome":"opened"}`
+		responses <- `{"jsonrpc":"2.0","id":1,"result":` + result + `}`
+		stdout, stderr, err := runCLI("launch-token", token)
+		if err != nil || stderr != "" || stdout != result+"\n" {
+			t.Fatalf("launch-token: stdout=%q stderr=%q err=%v", stdout, stderr, err)
+		}
+		if got := <-requests; got != string(wantRequest)+"\n" {
+			t.Fatalf("request %q, want %q", got, wantRequest)
+		}
+		if n := accepted.Load() - before; n != 1 {
+			t.Fatalf("dialed %d times, want 1", n)
+		}
+	})
+
+	t.Run("headless error is fixed JSON on stderr", func(t *testing.T) {
+		responses <- `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"no DISPLAY at /run/user/1000","data":{"reason":"session_unavailable"}}}`
+		stdout, stderr, err := runCLI("launch-token", token)
+		want := `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` + "\n"
+		if err == nil || stdout != "" || stderr != want {
+			t.Fatalf("headless: stdout=%q stderr=%q err=%v", stdout, stderr, err)
+		}
+		if got := <-requests; got != string(wantRequest)+"\n" {
+			t.Fatalf("request %q, want %q", got, wantRequest)
+		}
+	})
+
+	t.Run("invalid tokens never dial", func(t *testing.T) {
+		before := accepted.Load()
+		invalid := map[string][]string{
+			"raw address":  {"launch-token", address},
+			"padded":       {"launch-token", token + "=="},
+			"std alphabet": {"launch-token", strings.NewReplacer("-", "+", "_", "/").Replace(token) + "+/"},
+			"truncated":    {"launch-token", token[:len(token)-1]},
+			"oversized":    {"launch-token", strings.Repeat("A", desktopentry.MaxTokenLen+4)},
+			"noncanonical": {"launch-token", base64.RawURLEncoding.EncodeToString([]byte("nostr:" + address))},
+			"upper hex":    {"launch-token", base64.RawURLEncoding.EncodeToString([]byte(strings.ToUpper(address)))},
+			"bad kind":     {"launch-token", base64.RawURLEncoding.EncodeToString([]byte("1:" + pubkey + ":notes"))},
+			"empty":        {"launch-token", ""},
+			"missing":      {"launch-token"},
+			"extra":        {"launch-token", token, token},
+			"socket":       {"--socket", listener.Addr().String(), "launch-token", token},
+		}
+		wantErr := `{"error":{"code":-32602,"message":"Invalid params"}}` + "\n"
+		for name, args := range invalid {
+			stdout, stderr, err := runCLI(args...)
+			if err == nil || stdout != "" || stderr != wantErr {
+				t.Fatalf("%s: stdout=%q stderr=%q err=%v", name, stdout, stderr, err)
+			}
+		}
+		if n := accepted.Load() - before; n != 0 {
+			t.Fatalf("invalid tokens dialed %d times", n)
+		}
+	})
+
+	t.Run("server uid still checked", func(t *testing.T) {
+		old := serverPeerUID
+		serverPeerUID = func(*net.UnixConn) (uint32, error) { return uint32(os.Geteuid() + 1), nil }
+		defer func() { serverPeerUID = old }()
+		if err := run([]string{"launch-token", token}); err == nil || err.Error() != "unauthorized server" {
+			t.Fatalf("foreign server accepted: %v", err)
+		}
+		var stderr bytes.Buffer
+		writeCLIError(&stderr, errors.New("unauthorized server"))
+		if stderr.String() != `{"error":{"code":1004,"message":"Unavailable"}}`+"\n" {
+			t.Fatalf("unauthorized stderr %q", stderr.String())
+		}
+	})
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

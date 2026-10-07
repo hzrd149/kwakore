@@ -116,6 +116,7 @@ Build with `cd backend && go build -o /tmp/kwakore ./cmd/kwakore`. Syntax: `kwak
 | `update ADDRESS` | `napplet.update` |
 | `uninstall --yes ADDRESS` | `napplet.uninstall` |
 | `launch ADDRESS` | `napplet.launch` |
+| `launch-token TOKEN` | `napplet.launch` (TOKEN is the unpadded base64url of a full canonical address, as written by generated desktop entries; it is decoded and checked before dialing, and `--socket` is refused) |
 | `stop WINDOW_ID` | `napplet.stop` |
 | `permissions get ADDRESS` | `napplet.permissions.get` |
 | `permissions set ADDRESS PERMISSION allow\|deny [--subject NAME]` | `napplet.permissions.set` |
