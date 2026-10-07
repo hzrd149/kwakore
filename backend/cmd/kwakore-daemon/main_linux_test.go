@@ -144,6 +144,94 @@ func TestForegroundSignalDeadline(t *testing.T) {
 	testForegroundSignalLease(t, "held", 124)
 }
 
+func TestForegroundSignalDeadlineDuringReload(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	configRoot := filepath.Join(root, "config")
+	configPath := filepath.Join(configRoot, "kwakore", "config.json")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+configRoot, "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan struct{}, 1)
+	go func() {
+		if bufio.NewScanner(stdout).Scan() {
+			ready <- struct{}{}
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ready timeout")
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(configPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	// A nonblocking writer opens only after Reload has opened the FIFO for
+	// reading. Keep it open without writing so Reload stays inside ReadAll.
+	var writer int
+	opened := false
+	for until := time.Now().Add(3 * time.Second); time.Now().Before(until); {
+		writer, err = syscall.Open(configPath, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			opened = true
+			break
+		}
+		if err != syscall.ENXIO {
+			t.Fatalf("open FIFO writer: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !opened {
+		t.Fatal("reload did not open config FIFO")
+	}
+	defer syscall.Close(writer)
+	start := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- cmd.Wait() }()
+	select {
+	case err := <-finished:
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != shutdownDeadlineExitCode {
+			t.Fatalf("exit = %v, want %d: %s", err, shutdownDeadlineExitCode, stderr.String())
+		}
+		if elapsed := time.Since(start); elapsed < shutdownGrace || elapsed > shutdownGrace+time.Second {
+			t.Fatalf("deadline elapsed %v", elapsed)
+		}
+		if !strings.Contains(stderr.String(), "shutdown deadline exceeded") {
+			t.Fatalf("deadline stderr: %q", stderr.String())
+		}
+	case <-time.After(shutdownGrace + 2*time.Second):
+		t.Fatal("blocked reload prevented shutdown deadline")
+	}
+}
+
 func TestForegroundGracefulShutdown(t *testing.T) {
 	testForegroundSignalLease(t, "cooperative", 0)
 }

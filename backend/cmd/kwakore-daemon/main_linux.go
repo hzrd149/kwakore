@@ -72,18 +72,23 @@ func run(args []string) error {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
+	shutdownDone := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		deadline := time.AfterFunc(shutdownGrace, func() {
+			fmt.Fprintln(os.Stderr, "shutdown deadline exceeded")
+			os.Exit(shutdownDeadlineExitCode)
+		})
+		service.BeginShutdown()
+		_ = listener.Close()
+		service.Close()
+		deadline.Stop()
+		close(shutdownDone)
+	}()
 	fmt.Fprintf(os.Stdout, "kwakore-daemon %s ready (config: %s)\n", version, paths.ConfigFile)
 	for {
 		select {
-		case <-ctx.Done():
-			deadline := time.AfterFunc(shutdownGrace, func() {
-				fmt.Fprintln(os.Stderr, "shutdown deadline exceeded")
-				os.Exit(shutdownDeadlineExitCode)
-			})
-			service.BeginShutdown()
-			_ = listener.Close()
-			service.Close()
-			deadline.Stop()
+		case <-shutdownDone:
 			return nil
 		case <-hup:
 			if err := service.Reload(); err == nil {
