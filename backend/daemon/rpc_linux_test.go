@@ -152,6 +152,14 @@ func TestRPCWindowStop(t *testing.T) {
 	}
 }
 
+func TestRPCPermissionsGetRejectsNoncanonicalAddress(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.permissions.get", `{"address":"short-id"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("noncanonical permission address: %+v", rpcErr)
+	}
+}
+
 func TestRPCSettingsMutateReload(t *testing.T) {
 	s, reader, conn, paths := rpcService(t)
 	if err := os.WriteFile(paths.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`), 0600); err != nil {
