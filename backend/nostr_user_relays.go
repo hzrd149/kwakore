@@ -183,7 +183,7 @@ func listenUserRelays(ctx context.Context, s *sdk.System, url string, filter nos
 		relay, err := s.Pool.EnsureRelay(url)
 		if err == nil {
 			var sub *nostr.Subscription
-			sub, err = relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{Label: "verdana-user-relays"})
+			sub, err = relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{Label: "kwakore-user-relays"})
 			if err == nil {
 				backoff = time.Second
 				readUserRelays(ctx, s, sub)

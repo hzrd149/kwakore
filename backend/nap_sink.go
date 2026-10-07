@@ -404,7 +404,7 @@ func (c *napCall) blossomHas(ctx context.Context, target string) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", "verdana-napplet-resource")
+	req.Header.Set("User-Agent", "kwakore-napplet-resource")
 	resp, err := resourceClient.Do(req)
 	if err != nil {
 		return false
@@ -422,7 +422,7 @@ func httpsResource(ctx context.Context, target string) (resourceResult, error) {
 	if err != nil {
 		return resourceResult{}, rerr("invalid-request", err.Error())
 	}
-	req.Header.Set("User-Agent", "verdana-napplet-resource")
+	req.Header.Set("User-Agent", "kwakore-napplet-resource")
 	resp, err := resourceClient.Do(req)
 	if err != nil {
 		if errors.Is(err, netguard.ErrPrivateAddress) || strings.Contains(err.Error(), netguard.ErrPrivateAddress.Error()) {

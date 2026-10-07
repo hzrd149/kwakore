@@ -76,7 +76,7 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 	for evt := range sys.Store.QueryEvents(filter, 200) {
 		events = append(events, evt)
 	}
-	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
+	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "kwakore-author-napps"}) {
 		events = append(events, re.Event)
 	}
 

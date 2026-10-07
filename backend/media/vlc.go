@@ -39,7 +39,7 @@ type vlcPlayer struct {
 }
 
 func startVLC(path string, req backend.MediaRequest, onState func(backend.MediaState)) (sharedPlayer, backend.MediaPlayer, error) {
-	dir, err := os.MkdirTemp("", "verdana-vlc-")
+	dir, err := os.MkdirTemp("", "kwakore-vlc-")
 	if err != nil {
 		return nil, nil, err
 	}

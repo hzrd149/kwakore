@@ -7,7 +7,7 @@ import (
 
 var systemSearchSyncMu sync.Mutex
 
-// GNOMESearchSupported reports whether this host can register Verdana as a
+// GNOMESearchSupported reports whether this host can register Kwakore as a
 // GNOME Shell search provider.
 func GNOMESearchSupported() bool { return host.GNOMESearchSupported() }
 

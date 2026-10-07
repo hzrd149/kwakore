@@ -111,7 +111,7 @@ func fetchProfileFromHints(ctx context.Context, pk nostr.PubKey, hints []string)
 	}
 	var best *nostr.Event
 	filter := nostr.Filter{Kinds: []nostr.Kind{0}, Authors: []nostr.PubKey{pk}, Limit: 1}
-	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-nap-profile-hint"}) {
+	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "kwakore-nap-profile-hint"}) {
 		if re.Event.PubKey == pk && (best == nil || re.Event.CreatedAt > best.CreatedAt) {
 			e := re.Event
 			best = &e

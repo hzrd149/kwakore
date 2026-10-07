@@ -147,7 +147,7 @@ var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.
 		urls = nostr.AppendUnique(urls, r)
 	}
 	if len(urls) > 0 {
-		for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-address"}) {
+		for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "kwakore-address"}) {
 			events = append(events, re.Event)
 		}
 	}
@@ -377,7 +377,7 @@ func askInstall(n Napp) bool {
 	if n.Description != "" {
 		detail = n.Description + "\n\n" + detail
 	}
-	p := newPrompt("Verdana", "Install and open the "+what+" "+n.Label()+"?", detail, n.Naddr(), nil)
+	p := newPrompt("Kwakore", "Install and open the "+what+" "+n.Label()+"?", detail, n.Naddr(), nil)
 	log.Info().Str("napp", n.ID).Msg("asking to install a napp opened by address")
 	enqueuePrompt(p)
 	return p.wait().OK

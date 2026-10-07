@@ -207,7 +207,7 @@ func identityZaps(ctx context.Context, pk nostr.PubKey) (any, error) {
 		add(evt)
 	}
 	relays := sys.FetchInboxRelays(ctx, pk, 4)
-	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "verdana-nap-zaps"}) {
+	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "kwakore-nap-zaps"}) {
 		add(re.Event)
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].at > found[j].at })
@@ -415,7 +415,7 @@ func identityBadges(ctx context.Context, pk nostr.PubKey) (any, error) {
 		consider(evt)
 	}
 	relays := nostr.AppendUnique(sys.FetchInboxRelays(ctx, pk, 4), Relays()...)
-	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "verdana-nap-badges"}) {
+	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "kwakore-nap-badges"}) {
 		consider(re.Event)
 	}
 	if len(awards) == 0 {
@@ -604,7 +604,7 @@ func fetchLatest(ctx context.Context, author nostr.PubKey, filter nostr.Filter) 
 		urls = Relays()
 	}
 	filter.Limit = 1
-	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "verdana-nap-latest"}) {
+	for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "kwakore-nap-latest"}) {
 		consider(re.Event)
 	}
 	return best

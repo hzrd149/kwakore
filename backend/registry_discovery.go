@@ -27,7 +27,7 @@ var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.
 	}
 	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
 		nostr.Filter{Kinds: napKinds},
-		nostr.SubscriptionOptions{Label: "verdana-discovery", MaxWaitForEOSE: 20 * time.Second})
+		nostr.SubscriptionOptions{Label: "kwakore-discovery", MaxWaitForEOSE: 20 * time.Second})
 	return events, eose, nil
 }
 

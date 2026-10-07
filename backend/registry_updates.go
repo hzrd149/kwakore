@@ -94,7 +94,7 @@ var fetchManifestEvents = func(ctx context.Context, napps []Napp) []nostr.Event 
 			return
 		}
 		for re := range sys.Pool.FetchMany(ctx, urls, f, nostr.SubscriptionOptions{
-			Label: "verdana-napp-update",
+			Label: "kwakore-napp-update",
 		}) {
 			mu.Lock()
 			out = append(out, re.Event)
@@ -488,7 +488,7 @@ var fetchServiceManifestEvents = func(ctx context.Context, n Napp) ([]nostr.Even
 				return
 			}
 			defer relay.Close()
-			sub, err := relay.Subscribe(ctx, manifestFilter(n), nostr.SubscriptionOptions{Label: "verdana-service-update"})
+			sub, err := relay.Subscribe(ctx, manifestFilter(n), nostr.SubscriptionOptions{Label: "kwakore-service-update"})
 			if err != nil {
 				return
 			}

@@ -10,8 +10,8 @@ import (
 // -ldflags "-X kwakore/backend.Version=v1.2.3". Empty for development builds.
 var Version = ""
 
-// SourceURL is where Verdana's source, releases and issues live.
-const SourceURL = "https://github.com/hzrd149/verdana"
+// SourceURL is where Kwakore's source, releases and issues live.
+const SourceURL = "https://github.com/hzrd149/kwakore"
 
 // aboutInfo is what the settings window's About page shows.
 type aboutInfo struct {
