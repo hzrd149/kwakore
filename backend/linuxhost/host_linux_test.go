@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,81 @@ func TestLinuxHostSession(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Fatal("stale display exceeded deadline")
+	}
+}
+
+func TestLinuxHostSaveFileDoesNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DOWNLOAD_DIR", dir)
+	host := New("")
+	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	name, err := host.SaveFile("report.txt", []byte("new"))
+	if err != nil || name != "report-1.txt" {
+		t.Fatalf("save = %q, %v", name, err)
+	}
+	for file, want := range map[string]string{"report.txt": "old", "report-1.txt": "new"} {
+		got, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q, %v", file, got, err)
+		}
+	}
+	if got := host.SaveFileTarget(); got != dir {
+		t.Fatalf("target = %q", got)
+	}
+	for _, bad := range []string{"", "../escape", "sub/file", ".", ".."} {
+		if _, err := host.SaveFile(bad, nil); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+func TestLinuxHostCommands(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	for _, name := range []string{"wl-copy", "xdg-open", "notify-send"} {
+		path := filepath.Join(dir, name)
+		script := "#!/bin/sh\nprintf '%s\\n' '" + name + "' \"$@\" >> '" + log + "'\n/bin/cat >> '" + log + "'\n"
+		if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	host := New("")
+	if err := host.CopyText("clipboard payload\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.OpenLink("https://example.com/path"); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.OpenLink("file:///etc/passwd"); err == nil {
+		t.Fatal("accepted local link")
+	}
+	if _, err := host.SendNotification(backend.NotificationRequest{NappName: "App", Title: "News", Body: "Hello"}); err != nil {
+		t.Fatal(err)
+	}
+	// xdg-open is asynchronous, so wait briefly for its child to write the call.
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, _ := os.ReadFile(log)
+		if strings.Contains(string(data), "https://example.com/path") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("opener was not called: %q", data)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"clipboard payload", "https://example.com/path", "App: News", "Hello"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("missing %q in %q", want, data)
+		}
 	}
 }
 

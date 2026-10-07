@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,9 @@ import (
 	"time"
 
 	"verdana/backend"
+	"verdana/backend/fileutil"
+	"verdana/backend/media"
+	"verdana/backend/netguard"
 )
 
 const readyTimeout = 10 * time.Second
@@ -228,13 +232,79 @@ func checkProgram(program string) error {
 	return nil
 }
 
-func (*Host) OpenDiscovery(string)                    {}
-func (*Host) StateChanged()                           {}
-func (*Host) PromptsChanged()                         {}
-func (*Host) CopyText(string) error                   { return backend.ErrServiceUnavailable }
-func (*Host) SaveFile(string, []byte) (string, error) { return "", backend.ErrServiceUnavailable }
-func (*Host) SaveFileTarget() string                  { return "" }
-func (*Host) OpenLink(string) error                   { return backend.ErrServiceUnavailable }
+func (*Host) OpenDiscovery(string) {}
+func (*Host) StateChanged()        {}
+func (*Host) PromptsChanged()      {}
+func (*Host) CopyText(value string) error {
+	program := "xclip"
+	args := []string{"-selection", "clipboard"}
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		program, args = "wl-copy", nil
+	}
+	cmd := exec.Command(program, args...)
+	cmd.Stdin = strings.NewReader(value)
+	return cmd.Run()
+}
+
+func downloadsDir() string {
+	if dir := strings.TrimSpace(os.Getenv("XDG_DOWNLOAD_DIR")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return backend.DataDir()
+	}
+	if candidate := filepath.Join(home, "Downloads"); isDirectory(candidate) {
+		return candidate
+	}
+	return home
+}
+
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func (*Host) SaveFileTarget() string { return downloadsDir() }
+
+func (*Host) SaveFile(name string, data []byte) (string, error) {
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return "", errors.New("invalid download filename")
+	}
+	dir := downloadsDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 0; i <= 999; i++ {
+		candidate := name
+		if i > 0 {
+			candidate = stem + "-" + strconv.Itoa(i) + ext
+		}
+		err := fileutil.WriteFileNew(filepath.Join(dir, candidate), data, 0644)
+		if err == nil {
+			return candidate, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
+	}
+	return "", errors.New("could not find a free filename")
+}
+
+func (*Host) OpenLink(raw string) error {
+	url, err := netguard.ExternalLink(raw)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("xdg-open", url)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
 func (*Host) CreateShortcutFile(string, string) (string, error) {
 	return "", backend.ErrServiceUnavailable
 }
@@ -249,13 +319,21 @@ func (*Host) SyncSearchNapplets([]backend.AppShortcut) error                   {
 func (*Host) GNOMESearchSupported() bool                                       { return false }
 func (*Host) SetGNOMESearchIntegration(bool) error                             { return backend.ErrServiceUnavailable }
 func (*Host) AmberRequest(string, string, string, string, string, string) bool { return false }
-func (*Host) NotificationControls() []string                                   { return nil }
-func (*Host) RequestNotificationPermission() bool                              { return false }
-func (*Host) SendNotification(backend.NotificationRequest) (backend.NotificationHandle, error) {
-	return nil, backend.ErrServiceUnavailable
+func (*Host) NotificationControls() []string                                   { return []string{"system"} }
+func (*Host) RequestNotificationPermission() bool                              { return true }
+func (*Host) SendNotification(req backend.NotificationRequest) (backend.NotificationHandle, error) {
+	cmd := exec.Command("notify-send", req.NappName+": "+req.Title, req.Body)
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	return linuxNotification{}, nil
 }
-func (*Host) MediaPlay(backend.MediaRequest, func(backend.MediaState)) (backend.MediaPlayer, error) {
-	return nil, backend.ErrServiceUnavailable
+
+type linuxNotification struct{}
+
+func (linuxNotification) Dismiss() error { return nil }
+func (*Host) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+	return media.Play(req, onState)
 }
 func (*Host) OpenSettings(backend.SettingsSpec) (backend.Transport, error) {
 	return nil, backend.ErrServiceUnavailable
