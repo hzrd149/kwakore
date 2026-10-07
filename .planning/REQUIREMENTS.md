@@ -7,7 +7,7 @@
 
 ### Service and Runtime
 
-- [ ] **SRVC-01**: A Linux user can start, stop, restart, and inspect the Kwakore daemon through their per-user systemd manager.
+- [x] **SRVC-01**: A Linux user can start, stop, restart, and inspect the Kwakore daemon through their per-user systemd manager.
 - [x] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
 - [x] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
 - [x] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
@@ -33,12 +33,12 @@
 
 ### Linux Delivery and Cleanup
 
-- [ ] **LNXS-01**: A user on a common systemd Linux distribution can install user service and socket units and run the daemon without the Gio manager/store.
-- [ ] **LNXS-02**: A NixOS user can install and configure Kwakore declaratively through a module that creates the same per-user service and socket behavior.
+- [x] **LNXS-01**: A user on a common systemd Linux distribution can install user service and socket units and run the daemon without the Gio manager/store.
+- [x] **LNXS-02**: A NixOS user can install and configure Kwakore declaratively through a module that creates the same per-user service and socket behavior.
 - [ ] **LNXS-03**: A user can launch installed napplets through native desktop entries backed by the daemon's stable control interface.
-- [ ] **CLNP-01**: The Gio manager/store UI, Android application and bindings, and obsolete build paths are removed without breaking backend tests or the Linux napplet runtime.
-- [ ] **CLNP-02**: Installation, configuration, socket API, CLI, signer handling, and graphical-session behavior are documented for users and third-party client authors.
-- [ ] **NAME-01**: Linux users and developers see `kwakore` consistently in binaries, Go module paths, systemd units, socket/config/data locations, desktop entries, keyring identifiers, CI, and documentation, with obsolete Verdana identifiers removed from supported paths.
+- [x] **CLNP-01**: The Gio manager/store UI, Android application and bindings, and obsolete build paths are removed without breaking backend tests or the Linux napplet runtime.
+- [x] **CLNP-02**: Installation, configuration, socket API, CLI, signer handling, and graphical-session behavior are documented for users and third-party client authors.
+- [x] **NAME-01**: Linux users and developers see `kwakore` consistently in binaries, Go module paths, systemd units, socket/config/data locations, desktop entries, keyring identifiers, CI, and documentation, with obsolete Verdana identifiers removed from supported paths.
 
 ## Future Requirements
 
@@ -59,7 +59,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRVC-01 | 9 | Pending |
+| SRVC-01 | 9 | Complete |
 | SRVC-02 | 6 | Complete |
 | SRVC-03 | 8 | Complete |
 | SRVC-04 | 8 | Complete |
@@ -76,12 +76,12 @@
 | SIGN-01 | 8 | Complete |
 | SIGN-02 | 8 | Complete |
 | SIGN-03 | 8 | Complete |
-| LNXS-01 | 9 | Pending |
-| LNXS-02 | 9 | Pending |
+| LNXS-01 | 9 | Complete |
+| LNXS-02 | 9 | Complete |
 | LNXS-03 | 9 | Pending |
-| CLNP-01 | 9 | Pending |
-| CLNP-02 | 9 | Pending |
-| NAME-01 | 9 | Pending |
+| CLNP-01 | 9 | Complete |
+| CLNP-02 | 9 | Complete |
+| NAME-01 | 9 | Complete |
 
 **Coverage:** 23 v0.2 requirements; 23 mapped to exactly one phase; 0 unmapped.
 

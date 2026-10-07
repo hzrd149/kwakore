@@ -5,17 +5,17 @@ milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
 current_plan: 24
-status: executing
-stopped_at: Completed 09-10-PLAN.md
-last_updated: "2026-10-07T08:41:40.868Z"
+status: verifying
+stopped_at: Completed 09-11-PLAN.md
+last_updated: "2026-10-07T09:01:46.321Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 6d48c5ecc16f5022bffe76d430706dad7e8e610b
+state_head: 4009a9ae67fa3ac5799b531f42add93fb03b4b1a
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 41
+  completed_plans: 42
   percent: 75
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
 Current Plan: 24
 Total Plans in Phase: 24
-Status: Ready to execute
+Status: Phase complete — ready for verification
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
@@ -140,6 +140,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P08 | 85min | 2 tasks | 7 files |
 | Phase 09 P09 | 10min | 2 tasks | 6 files |
 | Phase 09 P10 | 24min | 2 tasks | 12 files |
+| Phase 09 P11 | 15min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-10: docs/service.md is the single user guide (generic install first, then NixOS); README stays short; docs/control-protocol.md stays the v1 client reference
 - [Phase 09]: 09-10: full identity scan passes (37 reviewed); remaining doc mentions of the old name are exact-pattern historical (audit shim build, P7 marker, no-migration sentences) or font (env.d.ts) entries
 - [Phase 09]: 09-10: 5D-NG-android row and its test requirement removed; DEC-3 kept as a retirement record; 5D-5 stays fixed (Phase 5) but says the requires warning is not shown since Phase 9 (surfacing it is new protocol surface, Rule 4)
+- [Phase 09]: 09-11: smoke --full proves the installed release archive end to end (activation, control, entry, signer, graphical, headless, uninstall); CI runs it on the uploaded amd64 artifact in the installed job
+- [Phase 09]: 09-11: session variables change via import/unset-environment only on the throwaway CI manager; on a real session manager a kwakore.service runtime drop-in is used so the desktop keeps DISPLAY
+- [Phase 09]: 09-11: LNXS-03 left open until the end-of-phase human check (Terminal=true visibility from a real desktop menu) passes
 
 ### Pending Todos
 
@@ -259,8 +263,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T08:41:40.777Z
-Stopped at: Completed 09-10-PLAN.md
+Last session: 2026-10-07T09:01:46.219Z
+Stopped at: Completed 09-11-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
