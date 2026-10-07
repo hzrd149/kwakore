@@ -6,6 +6,10 @@
 #   scripts/smoke-linux-service.sh --install-only
 #   scripts/smoke-linux-service.sh --full [--archive FILE [--sha256sums FILE]]
 #
+# These stages are developer tools that run locally against your own user
+# manager. CI runs none of them, except --bundle-only inside the tagged
+# release build (.github/workflows/linux.yml).
+#
 # --activation-only builds kwakore-daemon and kwakore from the tracked backend
 # sources into a temporary staging directory, renders
 # packaging/systemd/user/*.{socket,service} against those binaries, and
@@ -73,10 +77,10 @@
 # with scripts/install.sh exactly as --install-only does (private prefix below
 # XDG_RUNTIME_DIR, --runtime-units, staged offline XDG config and data), so
 # every native entry lands in the staged data directory, never in the real
-# ~/.local/share/applications. Without --archive it bundles this tree; CI
-# passes the kwakore-linux-amd64.tar.gz its bundle job uploaded for the
-# release, with that job's checksum line as --sha256sums. It needs DISPLAY
-# (CI runs it under xvfb-run) and go, and checks:
+# ~/.local/share/applications. Without --archive it bundles this tree. With
+# --archive FILE --sha256sums FILE it installs a downloaded release archive,
+# such as a published kwakore-linux-amd64.tar.gz. It needs DISPLAY and go,
+# and checks:
 #
 #   release     the checksummed archive installs, its daemon reports the
 #               archive's version, and only kwakore.socket is enabled
@@ -98,11 +102,8 @@
 #   uninstall   kwakore uninstall removes the entry, a restart does not
 #               recreate it, and the real applications directory is unchanged
 #
-# On the throwaway manager of scripts/ci-user-manager.sh the session variables
-# are changed with systemctl --user import-environment/unset-environment, as
-# the docs tell users to. On a real session's manager they are set for
-# kwakore.service alone through a runtime drop-in, so the session keeps its
-# DISPLAY. The trap restores the manager environment, removes both drop-ins
+# The session variables are set for kwakore.service alone through a runtime
+# drop-in, so the session keeps its DISPLAY. The trap removes both drop-ins
 # and everything --install-only removes.
 
 set -euo pipefail
@@ -339,39 +340,6 @@ stop_service() {
 	wait_state kwakore.service inactive
 }
 
-# The graphical session the daemon sees comes from the user manager. On the
-# throwaway CI manager (scripts/ci-user-manager.sh) the smoke changes it the
-# documented way, with import-environment and unset-environment. On a real
-# session's manager that would briefly take DISPLAY away from every unit the
-# user starts, so there the same variables are set or unset for
-# kwakore.service alone through a runtime drop-in. Either way the daemon is
-# restarted and its own environment is checked through /proc.
-isolated_manager() {
-	[ -n "${KWAKORE_CI_MANAGER_HOME:-}" ] && [[ "$XDG_RUNTIME_DIR" =~ ^/run/kwakore-ci\.[A-Za-z0-9]{6}/runtime$ ]]
-}
-
-session_vars=(DISPLAY WAYLAND_DISPLAY XAUTHORITY NO_AT_BRIDGE)
-manager_saved=0
-
-save_manager_session() {
-	systemctl --user show-environment >"$stage/manager-env.before" || fail "could not read the user manager environment"
-	manager_saved=1
-}
-
-restore_manager_session() {
-	local name line
-	[ "${manager_saved:-0}" = 1 ] || return 0
-	for name in "${session_vars[@]}"; do
-		line=$(grep -m1 "^$name=" "$stage/manager-env.before" || true)
-		if [ -n "$line" ]; then
-			systemctl --user set-environment "$line" >/dev/null 2>&1 || true
-		else
-			systemctl --user unset-environment "$name" >/dev/null 2>&1 || true
-		fi
-	done
-	manager_saved=0
-}
-
 # ─── activation and control ─────────────────────────────────────────────────
 
 # check_activation_control runs the activation and control checks against
@@ -515,7 +483,6 @@ install_cleanup() {
 	# The preconditions refused to run if any of these existed beforehand.
 	rm -f "$runtime_units/kwakore.socket" "$runtime_units/kwakore.service" "$runtime_units/kwakore.service.d/50-smoke.conf" \
 		"$runtime_units/kwakore.service.d/60-session.conf"
-	restore_manager_session
 	rmdir "$runtime_units/kwakore.service.d" 2>/dev/null || true
 	if [ "$wants_created" = 1 ]; then rmdir "$runtime_units/sockets.target.wants" 2>/dev/null || true; fi
 	if [ "$units_dir_created" = 1 ]; then rmdir "$runtime_units" 2>/dev/null || true; fi
@@ -749,34 +716,27 @@ drop_in_value() {
 }
 
 # set_session graphical|headless gives the daemon the caller's X display, or
-# no display at all, and restarts it.
+# no display at all, and restarts it. The graphical or headless session is
+# set for kwakore.service alone through a runtime drop-in, so the user's
+# session keeps its DISPLAY, and the daemon's own environment is checked
+# through /proc.
 set_session() {
 	local want=$1 dropin="$runtime_units/kwakore.service.d/60-session.conf"
-	if isolated_manager; then
-		[ "$manager_saved" = 1 ] || save_manager_session
-		if [ "$want" = graphical ]; then
-			systemctl --user import-environment DISPLAY ${XAUTHORITY:+XAUTHORITY} ${NO_AT_BRIDGE:+NO_AT_BRIDGE}
-			systemctl --user unset-environment WAYLAND_DISPLAY
-		else
-			systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY
-		fi
+	if [ "$want" = graphical ]; then
+		drop_in_value "$DISPLAY" DISPLAY
+		{
+			echo '[Service]'
+			echo "Environment=\"DISPLAY=$DISPLAY\""
+			if [ -n "${XAUTHORITY:-}" ]; then
+				drop_in_value "$XAUTHORITY" XAUTHORITY
+				echo "Environment=\"XAUTHORITY=$XAUTHORITY\""
+			fi
+			echo 'UnsetEnvironment=WAYLAND_DISPLAY'
+		} >"$dropin"
 	else
-		if [ "$want" = graphical ]; then
-			drop_in_value "$DISPLAY" DISPLAY
-			{
-				echo '[Service]'
-				echo "Environment=\"DISPLAY=$DISPLAY\""
-				if [ -n "${XAUTHORITY:-}" ]; then
-					drop_in_value "$XAUTHORITY" XAUTHORITY
-					echo "Environment=\"XAUTHORITY=$XAUTHORITY\""
-				fi
-				echo 'UnsetEnvironment=WAYLAND_DISPLAY'
-			} >"$dropin"
-		else
-			printf '%s\n' '[Service]' 'UnsetEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY' >"$dropin"
-		fi
-		systemctl --user daemon-reload
+		printf '%s\n' '[Service]' 'UnsetEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY' >"$dropin"
 	fi
+	systemctl --user daemon-reload
 	systemctl --user restart kwakore.service
 	wait_state kwakore.service active
 	cli_status
@@ -837,7 +797,7 @@ run_full() {
 	for tool in tar gzip sha256sum flock od realpath base64 awk; do
 		command -v "$tool" >/dev/null || fail "$tool not found"
 	done
-	[ -n "${DISPLAY:-}" ] || fail "--full opens a real napplet window and needs DISPLAY (CI runs it under xvfb-run)"
+	[ -n "${DISPLAY:-}" ] || fail "--full opens a real napplet window and needs DISPLAY"
 	[ ! -e "$runtime_units/kwakore.service.d" ] || fail "$runtime_units/kwakore.service.d already exists"
 	arch=$(host_arch)
 	units_dir_created=0
@@ -856,7 +816,7 @@ run_full() {
 	apps_dir="$stage/data/applications"
 	real_entries >"$stage/real-entries.before"
 
-	# The archive: the one CI uploaded for the release (--archive), or a fresh
+	# The archive: a downloaded release archive (--archive), or a fresh
 	# bundle of this tree. Either way the helper installs it only after its
 	# checksum line verifies.
 	if [ -n "$full_archive" ]; then

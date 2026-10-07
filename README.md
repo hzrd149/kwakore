@@ -138,7 +138,7 @@ With [just](https://github.com/casey/just):
 | Command | What it does |
 |---|---|
 | `just bundle` | Builds `kwakore-daemon`, `kwakore`, the `napplet` window program and `libwebview.so` into `dist/VERSION/kwakore-VERSION-linux-ARCH/`, plus `kwakore-linux-ARCH.tar.gz` and `SHA256SUMS`. |
-| `just bundle-check` | Builds the bundle twice and checks it as CI does: identical bytes, exactly the four files, matching checksums, and a window program that starts. |
+| `just bundle-check` | Builds the bundle twice and checks it as the tagged release build does: identical bytes, exactly the four files, matching checksums, and a window program that starts. |
 | `just webview-libs` | Generates the pinned `libwebview.so` copies the window program and its tests need (`just bundle` does this itself). |
 
 Install a local bundle the same way as a release:
@@ -155,6 +155,14 @@ To run the tests:
 (cd desktop && go generate ./internal/webviewlib && go build -o child/napplet ./child && go vet ./... && go test ./...)
 ```
 
+A plain `go test` skips the display-backed WebKit tests and the real daemon
+child test, and CI does not run them either. Run them locally with a display
+(or under `xvfb-run -a`) before changing the window program, the host page or
+the engine hardening: `KWAKORE_WEBKIT_SMOKE=1 go test ./child -run '^TestWebKit' -count=1 -v`
+in `desktop/`, and `KWAKORE_REQUIRE_GRAPHICS=1` with `TestRPCRealChildGraphical`
+in `backend/`. [AGENTS.md](AGENTS.md) ("Local-only real-engine tests") has the
+full commands.
+
 `scripts/smoke-linux-service.sh` has four stages. `--activation-only` and
 `--install-only` run against your user manager with temporary runtime units,
 private data directories and an offline configuration, and refuse to run when
@@ -164,9 +172,10 @@ release archive (a fresh bundle, or `--archive FILE --sha256sums FILE`) the
 same isolated way, then checks socket activation, `systemctl --user` control,
 the native desktop entry of an offline-seeded napplet opening a real window
 (it needs `DISPLAY`, and a window opens briefly), the headless
-`session_unavailable` error and uninstall. CI runs all of these in
-[`.github/workflows/linux.yml`](.github/workflows/linux.yml), `--full` on the
-amd64 archive the release publishes.
+`session_unavailable` error and uninstall. These stages run locally, not in
+CI: the tagged release build in
+[`.github/workflows/linux.yml`](.github/workflows/linux.yml) runs only
+`--bundle-only`.
 
 ## Making napplets
 
