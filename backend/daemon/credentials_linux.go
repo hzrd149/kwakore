@@ -21,7 +21,8 @@ import (
 const maxCredentialBytes = 4096
 
 // A transition keeps both the private credential and the prior public signer
-// config. The latter may occupy nearly the service config's 1 MiB file limit.
+// config. With HTML escaping disabled below, the latter is bounded by the
+// service config's 1 MiB file limit; 512 bytes covers journal field overhead.
 const maxSignerTransitionBytes = maxCredentialBytes + (1 << 20) + 512
 
 type credentialRecord struct {
@@ -138,6 +139,18 @@ func (s *credentialStore) writeRecord(rec credentialRecord) error {
 
 func (s *credentialStore) transitionPath() string { return s.path + ".transition" }
 
+func encodeSignerTransition(transition signerTransition) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	// A canonical relay may contain many '&' characters. HTML escaping would
+	// expand each one to six bytes, beyond the accepted config size bound.
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(transition); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func (s *credentialStore) readTransition() (*signerTransition, error) {
 	path := s.transitionPath()
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
@@ -174,7 +187,7 @@ func (s *credentialStore) beginTransition(previous credentialRecord, signer serv
 	if pending, err := s.readTransition(); err != nil || pending != nil {
 		return errCredential
 	}
-	data, err := json.Marshal(signerTransition{Version: 1, Previous: previous, Signer: signer})
+	data, err := encodeSignerTransition(signerTransition{Version: 1, Previous: previous, Signer: signer})
 	if err != nil || len(data) > maxSignerTransitionBytes {
 		return errCredential
 	}
@@ -193,7 +206,7 @@ func (s *credentialStore) commitTransition() error {
 		return errCredential
 	}
 	pending.Committed = true
-	data, err := json.Marshal(pending)
+	data, err := encodeSignerTransition(*pending)
 	if err != nil || len(data) > maxSignerTransitionBytes {
 		return errCredential
 	}

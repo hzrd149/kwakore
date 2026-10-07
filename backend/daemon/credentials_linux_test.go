@@ -333,6 +333,46 @@ func TestDaemonLongBunkerRelayCanSwitchToNone(t *testing.T) {
 	}
 }
 
+func TestDaemonAmpersandHeavyConfiguredRelayCanSwitchToNone(t *testing.T) {
+	p := daemonPaths(t)
+	relay := "wss://example.com/" + strings.Repeat("&", 180000)
+	config := []byte(`{"signer":{"mode":"bunker","relay":"` + relay + `"}}`)
+	if len(config) >= 1<<20 {
+		t.Fatalf("test config exceeds accepted size: %d", len(config))
+	}
+	if err := os.WriteFile(p.ConfigFile, config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	transition := signerTransition{Version: 1, Previous: credentialRecord{Version: 1, Mode: "none"}, Signer: serviceconfig.Signer{Mode: "bunker", Relay: relay}}
+	htmlJournal, err := json.Marshal(transition)
+	if err != nil || len(htmlJournal) <= maxSignerTransitionBytes {
+		t.Fatalf("test does not reproduce HTML expansion: size=%d err=%v", len(htmlJournal), err)
+	}
+	journal, err := encodeSignerTransition(transition)
+	if err != nil || len(journal) > maxSignerTransitionBytes || bytes.Contains(journal, []byte(`\u0026`)) {
+		t.Fatalf("journal encoding exceeds bound or HTML-escapes relay: size=%d err=%v", len(journal), err)
+	}
+	first, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := first.manager.Effective().Signer; got.Mode != "bunker" || got.Relay != relay {
+		t.Fatalf("declarative relay not loaded: mode=%q relay_length=%d", got.Mode, len(got.Relay))
+	}
+	if status, err := first.SwitchSigner(context.Background(), "none", ""); err != nil || status.Mode != "none" {
+		t.Fatalf("clear ampersand-heavy configured relay: %+v %v", status, err)
+	}
+	first.Close()
+	restarted, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if rec, err := restarted.credentials.read(); err != nil || rec.Mode != "none" || restarted.manager.Effective().Signer.Mode != "none" {
+		t.Fatalf("cleared signer did not persist: credential=%q config=%q err=%v", rec.Mode, restarted.manager.Effective().Signer.Mode, err)
+	}
+}
+
 func TestReloadSignerReconcilesAndKeepsValidConfig(t *testing.T) {
 	p := daemonPaths(t)
 	secret := nip19.EncodeNsec(nostr.Generate())
