@@ -205,10 +205,12 @@ func (s *Service) StartSignerPair(secret string) (backend.ServicePairStart, erro
 		if s.signer.Generation() != expected || ctx.Err() != nil {
 			return backend.SignerStatus{}, errCredential
 		}
-		if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: "bunker", Relay: relay}); err != nil {
-			return backend.SignerStatus{}, errCredential
-		}
-		return s.signer.SwitchBunkerPair(ctx, url, key, expected, s.credentials.writeBunker)
+		return s.signer.SwitchBunkerPair(ctx, url, key, expected, func(url, clientKey string) error {
+			if err := s.credentials.writeBunker(url, clientKey); err != nil {
+				return err
+			}
+			return s.manager.SetSignerOverride(serviceconfig.Signer{Mode: "bunker", Relay: relay})
+		})
 	}, done)
 	if err != nil {
 		done()

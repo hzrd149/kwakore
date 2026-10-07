@@ -230,6 +230,38 @@ func TestServiceNostrConnectPairTimeout(t *testing.T) {
 	}
 }
 
+func TestServiceNostrConnectPairCancelAfterCommit(t *testing.T) {
+	s := &ServiceSigner{}
+	client, remote, user := nostr.Generate(), nostr.Generate(), nostr.Generate()
+	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(user), &keyer.SignerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWait, oldConnect := servicePairWait, serviceBunkerConnect
+	servicePairWait = func(context.Context, nostr.SecretKey, string, string) (nostr.PubKey, error) {
+		return remote.Public(), nil
+	}
+	serviceBunkerConnect = func(context.Context, context.Context, nostr.SecretKey, string, bool) (nostr.Keyer, error) {
+		return inner, nil
+	}
+	t.Cleanup(func() { servicePairWait, serviceBunkerConnect = oldWait, oldConnect; s.Close() })
+	committing, release := make(chan struct{}), make(chan struct{})
+	_, err = s.StartPair(context.Background(), strings.Repeat("d", 32), client, "wss://example.com", func(ctx context.Context, url string, key nostr.SecretKey, gen uint64) (SignerStatus, error) {
+		return s.SwitchBunkerPair(ctx, url, key, gen, func(string, string) error { close(committing); <-release; return nil })
+	}, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-committing
+	cancelled := make(chan bool, 1)
+	go func() { cancelled <- s.CancelPair() }()
+	close(release)
+	status, err := s.WaitPair(context.Background())
+	if err != nil || status.ConnectionState != "connected" || <-cancelled {
+		t.Fatalf("committed pair canceled: %+v %v", status, err)
+	}
+}
+
 func TestServiceSignerNsecTransition(t *testing.T) {
 	signer := &ServiceSigner{}
 	first := nostr.Generate()

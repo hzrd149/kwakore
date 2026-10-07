@@ -253,6 +253,10 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 	userPubkey = pk
 	s.status = SignerStatus{Mode: "bunker", PublicKey: pk.Hex(), ConnectionState: "connected"}
 	pushIdentityChanged()
+	if expected != 0 && s.pair != nil && s.pair.generation == expected && !s.pair.finished {
+		s.pair.status, s.pair.err, s.pair.finished, s.pair.secret = s.status, nil, true, ""
+		close(s.pair.done)
+	}
 	return s.status, nil
 }
 
