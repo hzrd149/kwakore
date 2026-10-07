@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 1
-status: ready_to_execute
-stopped_at: Phase 8 complete, Phase 9 planned (24 plans)
-last_updated: "2026-10-07T05:03:00.151Z"
+current_plan: 2
+status: executing
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-10-07T05:20:32.165Z"
 last_activity: 2026-10-07
-last_activity_desc: Phase 8 complete, transitioned to Phase 09
-state_head: a86d0cd7821ea6c18ffdb3967895f6129bbcb8f6
+last_activity_desc: Phase 09 execution started
+state_head: f621e0874c6bbae3057e6f8f07fa4da700f63f8e
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 42
-  completed_plans: 18
-  percent: 43
+  total_plans: 43
+  completed_plans: 19
+  percent: 44
 ---
 
 # Project State
@@ -26,16 +26,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** Phase 9 — Linux Packaging, Rename and Cleanup
+**Current focus:** Phase 09 — Linux Packaging, Rename and Cleanup
 
 ## Current Position
 
-Phase: 09 — Linux Packaging, Rename and Cleanup
-Current Plan: 1
+Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████░░░░░░] 43%)
-Last activity: 2026-10-07 — Phase 8 complete, transitioned to Phase 09
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████░░░░░░] 44%)
+Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ Last activity: 2026-10-07 — Phase 8 complete, transitioned to Phase 09
 | Phase 08 P03 | 20min | 3 tasks | 15 files |
 | Phase 08 P04 | 11min | 3 tasks | 16 files |
 | Phase 08 P05 | 15min | 3 tasks | 14 files |
+| Phase 09 P01 | 9min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 8]: Signer keyer and public key are copied under one short lock; signer and network work run after release.
 - [Phase 8]: The daemon binds a checked child transport before waiting for nap.start so nap.boot can complete.
 - [Phase 8]: The Linux host accepts the host page exact null nap.start params; graphical CI requires a named PASS under xvfb.
+- [Phase 09]: 09-01: D-08 acknowledged by user 2026-10-07; units use kwakore only, no aliases or migration
+- [Phase 09]: 09-01: any LISTEN_* present selects activation; malformed PID/count/descriptor is an error with no direct-bind fallback; LISTEN_* always unset so napplet children never inherit it
+- [Phase 09]: 09-01: kwakore.socket uses RemoveOnStop=yes and the daemon never unlinks an inherited socket; kwakore.service pins StartLimitIntervalSec=10s/StartLimitBurst=5 so a sixth rapid start fails both units deterministically until reset-failed
 
 ### Pending Todos
 
@@ -196,9 +200,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T05:05:00Z
-Stopped at: Phase 8 complete, Phase 9 planned (24 plans), ready to execute
-Resume file: .planning/phases/09-linux-packaging-rename-and-cleanup/09-CONTEXT.md
+Last session: 2026-10-07T05:20:32.064Z
+Stopped at: Completed 09-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
