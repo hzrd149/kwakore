@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 21
+current_plan: 22
 status: executing
-stopped_at: Completed 09-24-PLAN.md
-last_updated: "2026-10-07T07:36:43.981Z"
+stopped_at: Completed 09-08-PLAN.md
+last_updated: "2026-10-07T08:01:50.644Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 1d5d2244ea20e05e32b02b50d51646712eb28bfe
+state_head: feed3f4b3d99d2ac9cc1b3eb7cbbbaee684dba3a
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 38
+  completed_plans: 39
   percent: 75
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 21
+Current Plan: 22
 Total Plans in Phase: 24
 Status: Ready to execute
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
@@ -137,6 +137,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P23 | 6min | 1 tasks | 11 files |
 | Phase 09 P18 | 8min | 1 tasks | 3 files |
 | Phase 09 P24 | 11min | 2 tasks | 9 files |
+| Phase 09 P08 | 85min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -195,6 +196,10 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-18: dev~verdana-probe/adversarial assertions kept; ids come from testdata fixtures that 09-24 allowlists or renames together with the assertions
 - [Phase 09]: 09-24: test gates are KWAKORE_REQUIRE_NODE and KWAKORE_WEBKIT_SMOKE; 09-09 must set them in the new workflow (desktop.yml still sets the old names, so its webkit step skips until then)
 - [Phase 09]: 09-24: scripts/check-product-identity.sh --runtime-only gates backend/desktop/scripts/packaging/justfile with file-specific font/fixture/historical entries and fails on stale entries; 09-10 extends full mode
+- [Phase 09]: 09-08: Nix package is four real files in one bin dir; daemon wrapped only for GSETTINGS_SCHEMA_DIR (no TLS modules: napplet CSP has connect-src none)
+- [Phase 09]: 09-08: NixOS module renders packaging/systemd/user units at eval time with only @BINDIR@ and kill->coreutils kill substitutions; ConditionUser=| per configured user; enableDefaultPath off
+- [Phase 09]: 09-08: declared NixOS settings become a store-backed XDG_CONFIG_HOME validated by kwakore-daemon validate; secret-like and unknown keys fail assertions
+- [Phase 09]: 09-08: linuxhost checkProgram accepts sticky shared directories (/nix/store is 1775)
 
 ### Pending Todos
 
@@ -247,8 +252,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T07:36:43.877Z
-Stopped at: Completed 09-24-PLAN.md
+Last session: 2026-10-07T08:01:50.540Z
+Stopped at: Completed 09-08-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
