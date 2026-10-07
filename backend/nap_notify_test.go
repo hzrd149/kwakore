@@ -163,7 +163,7 @@ func TestNotifyChannelMustBeRegistered(t *testing.T) {
 	}
 }
 
-func TestNotifyPermissionCombinesVerdanaAndPlatformApproval(t *testing.T) {
+func TestNotifyPermissionCombinesKwakoreAndPlatformApproval(t *testing.T) {
 	setupNapTest(t)
 	nh := &notifyTestHost{permission: true}
 	host = nh

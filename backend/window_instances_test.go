@@ -279,8 +279,8 @@ func TestWindowFailedClosesQuietly(t *testing.T) {
 }
 
 // TestWindowFailedOnlyFromNapplets: windowFailed is a napplet window's line
-// to send. A napp (35130) window's page writes its own wire JSON on Android
-// (NappWebView.kt __verdanaHost), so from a non-napplet window the message
+// to send. A napp (35130) window's page can write its own wire JSON (the
+// bridge.js __kwakoreHost port), so from a non-napplet window the message
 // raises no notice and logs nothing past a sampled Debug line (WR-06).
 func TestWindowFailedOnlyFromNapplets(t *testing.T) {
 	setupNapTest(t)

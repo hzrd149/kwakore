@@ -65,7 +65,7 @@ type conformanceFixture struct {
 	} `json:"envelopes"`
 }
 
-// naDomains are the NAP domains the shim knows that Verdana does not offer.
+// naDomains are the NAP domains the shim knows that Kwakore does not offer.
 // The shim only installs window.napplet.<domain> for the domains the launcher
 // passes it (napDomains), so a napplet never reaches these types.
 var naDomains = func() map[string]string {

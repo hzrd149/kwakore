@@ -22,18 +22,18 @@ import (
 // GTK must run on the process's main thread, which a test function never is
 // (go-webview locks it in init), so nothing here calls webview.New: the real
 // child binary runs as a subprocess against the installed WebKitGTK. These
-// tests open real windows, so they only run with VERDANA_WEBKIT_SMOKE=1 and a
+// tests open real windows, so they only run with KWAKORE_WEBKIT_SMOKE=1 and a
 // display (a live one locally, xvfb in CI).
 
 // needWebKit skips unless the real-engine tests were asked for, and fails
 // when they were asked for without a display to open windows on.
 func needWebKit(t *testing.T) {
 	t.Helper()
-	if os.Getenv("VERDANA_WEBKIT_SMOKE") != "1" {
-		t.Skip("set VERDANA_WEBKIT_SMOKE=1 to run the child against the installed WebKitGTK")
+	if os.Getenv("KWAKORE_WEBKIT_SMOKE") != "1" {
+		t.Skip("set KWAKORE_WEBKIT_SMOKE=1 to run the child against the installed WebKitGTK")
 	}
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		t.Fatal("VERDANA_WEBKIT_SMOKE=1 needs a display: set DISPLAY (xvfb-run) or WAYLAND_DISPLAY")
+		t.Fatal("KWAKORE_WEBKIT_SMOKE=1 needs a display: set DISPLAY (xvfb-run) or WAYLAND_DISPLAY")
 	}
 }
 
@@ -99,8 +99,8 @@ func runChild(t *testing.T, bin string, extra ...string) (string, error) {
 // every symbol hardenEngine requires. It needs no display.
 func TestWebKitHardeningSymbolsResolve(t *testing.T) {
 	if _, err := purego.Dlopen(libWebKit, purego.RTLD_NOW|purego.RTLD_GLOBAL); err != nil {
-		if os.Getenv("VERDANA_WEBKIT_SMOKE") == "1" {
-			t.Fatalf("VERDANA_WEBKIT_SMOKE=1 but %s cannot be opened: %v", libWebKit, err)
+		if os.Getenv("KWAKORE_WEBKIT_SMOKE") == "1" {
+			t.Fatalf("KWAKORE_WEBKIT_SMOKE=1 but %s cannot be opened: %v", libWebKit, err)
 		}
 		t.Skipf("%s not installed: %v", libWebKit, err)
 	}

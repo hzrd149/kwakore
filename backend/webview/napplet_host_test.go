@@ -18,14 +18,14 @@ import (
 // D-07) are only as good as this script, and no Go test reaches it otherwise.
 
 // needNode returns node's path, or skips the test when there is none. CI sets
-// VERDANA_REQUIRE_NODE=1, which turns a missing node into a failure: these
+// KWAKORE_REQUIRE_NODE=1, which turns a missing node into a failure: these
 // tests guard the napplet sandbox and must never skip silently there.
 func needNode(t *testing.T) string {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
-		if os.Getenv("VERDANA_REQUIRE_NODE") == "1" {
-			t.Fatal("node is required (VERDANA_REQUIRE_NODE=1) but not on PATH")
+		if os.Getenv("KWAKORE_REQUIRE_NODE") == "1" {
+			t.Fatal("node is required (KWAKORE_REQUIRE_NODE=1) but not on PATH")
 		}
 		t.Skip("node not on PATH")
 	}

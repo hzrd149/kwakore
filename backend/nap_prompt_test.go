@@ -243,7 +243,7 @@ func TestLauncherPromptsAreExempt(t *testing.T) {
 		}
 	}
 
-	p := newPrompt("Verdana", "Install and open the napp?", "", "", nil)
+	p := newPrompt("Kwakore", "Install and open the napp?", "", "", nil)
 	answered := make(chan bool, 1)
 	go func() {
 		enqueuePrompt(p)
@@ -257,7 +257,7 @@ func TestLauncherPromptsAreExempt(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	// an empty Instance goes through enqueueNappPrompt unbounded too
-	q := newPrompt("Verdana", "Another launcher question", "", "", nil)
+	q := newPrompt("Kwakore", "Another launcher question", "", "", nil)
 	if !enqueueNappPrompt(q) {
 		t.Fatal("a launcher prompt was refused by the napplet bounds")
 	}
@@ -283,7 +283,7 @@ func TestPromptsStayFIFOWhenRefused(t *testing.T) {
 	ready(t, ci, rec, 1)
 
 	// a launcher prompt and another window's prompt between this window's
-	launcher := newPrompt("Verdana", "launcher question", "", "", nil)
+	launcher := newPrompt("Kwakore", "launcher question", "", "", nil)
 	enqueuePrompt(launcher)
 	post(t, ci, map[string]any{"type": "test.ask", "id": "f1"})
 	waitPromptsFor(t, ci.instance, 1)
