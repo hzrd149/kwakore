@@ -111,7 +111,7 @@ build() {
 	fail "could not build kwakore-daemon"
 (cd "$repo_root/backend" && build -ldflags "$ldflags" -o "$bundle/kwakore" ./cmd/kwakore) ||
 	fail "could not build kwakore"
-# D-10: the default (non-"napp") child program is the napplet window host.
+# D-10: the child program is the napplet window host, the only window kind.
 (cd "$repo_root/desktop" && build -ldflags "-s -w -buildid=" -o "$bundle/napplet" ./child) ||
 	fail "could not build the napplet child"
 cp -- "$lib" "$bundle/libwebview.so"

@@ -1,6 +1,5 @@
-desktop/child/child
+# napplet child program (desktop/child/.gitignore covers a default `go build`)
 desktop/child/napplet
-desktop/child/napp
 # libwebview copies from the go-webview module (just webview-libs)
 desktop/internal/webviewlib/lib/
 
