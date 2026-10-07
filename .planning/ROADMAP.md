@@ -69,7 +69,7 @@ Plans:
 **Goal:** The daemon controls napplet windows, permissions, and signer options while retaining v0.1 security boundaries.
 **Depends on:** Phase 7.
 **Requirements:** SRVC-03, SRVC-04, SOCK-06, SIGN-01, SIGN-02, SIGN-03.
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -86,7 +86,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 08-04-PLAN.md — NIP-46 bunker and nostrconnect pairing
+- [x] 08-04-PLAN.md — NIP-46 bunker and nostrconnect pairing
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
