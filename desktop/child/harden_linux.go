@@ -288,11 +288,9 @@ func prepareEngine() {}
 
 // hardenEngine turns off WebRTC, media capture and link preconnect in this
 // window's WebKitSettings and logs the values read back. It runs on the UI
-// thread, after webview.New and before Navigate, for napplet and settings
-// windows only (napp windows are not CSP-confined; their policy is
-// deferred). It never panics. A non-nil error means a switch every
-// supported WebKitGTK has could not be turned off, and the caller decides
-// whether the window may still open (a napplet window may not).
+// thread, after webview.New and before Navigate, from runNapplet. It never
+// panics. A non-nil error means a switch every supported WebKitGTK has could
+// not be turned off, and runNapplet then refuses to open the window.
 func hardenEngine(w webview.WebView) error {
 	h, err := hardenWindow(resolveWebKit, uintptr(w.Window()))
 	if h.reached {

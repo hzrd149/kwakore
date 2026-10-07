@@ -6,11 +6,10 @@ import (
 	nappbridge "verdana/backend/webview"
 )
 
-// Every page the child serves on loopback (the napplet host page, a napp's
-// files, the settings page) goes through loopbackHeaders, so each response,
-// a 404 or an SPA fallback included, carries its page's policy and turns off
-// DNS prefetching (D-06, D-11). The policies themselves live in
-// backend/webview, where Android reads them too (D-07).
+// The one page the child serves on loopback, the napplet host page, goes
+// through loopbackHeaders, so each response, a 404 included, carries its
+// policy and turns off DNS prefetching (D-06, D-11). The policy itself lives
+// in backend/webview.
 
 // loopbackHeaders sets the Content-Security-Policy and X-DNS-Prefetch-Control
 // headers on every response before next writes anything.

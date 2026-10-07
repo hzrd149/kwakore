@@ -3,27 +3,19 @@ package main
 import (
 	"bufio"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net"
-	"net/http"
 	"os"
-	"path"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/abemedia/go-webview"
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
-
-	nappbridge "verdana/backend/webview"
 
 	"fiatjaf.com/verdana/desktop/internal/wireline"
 )
@@ -39,16 +31,15 @@ type wireMsg struct {
 	Idx    *int            `json:"idx,omitempty"`
 }
 
+// nappMeta is what the launcher tells a napplet window about its napplet.
+// The window never loads napplet files from disk or a url: the bytes arrive
+// over nap.boot, after the backend verified them.
 type nappMeta struct {
-	ID          string
-	Name        string
-	Description string
-	Dir         string
-	URL         string
-	Instance    string
-	Requires    []string
-	Theme       string
-	ThemeVars   string
+	ID        string
+	Name      string
+	Instance  string
+	Theme     string
+	ThemeVars string
 }
 
 var (
@@ -67,29 +58,22 @@ func main() {
 		Logger()
 
 	meta = nappMeta{
-		ID:          os.Getenv("VERDANA_NAPP_ID"),
-		Dir:         os.Getenv("VERDANA_NAPP_DIR"),
-		URL:         strings.TrimSpace(os.Getenv("VERDANA_NAPP_URL")),
-		Name:        os.Getenv("VERDANA_NAPP_NAME"),
-		Description: os.Getenv("VERDANA_NAPP_DESC"),
-		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
-		Theme:       os.Getenv("VERDANA_THEME"),
-		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
+		ID:        os.Getenv("VERDANA_NAPP_ID"),
+		Name:      os.Getenv("VERDANA_NAPP_NAME"),
+		Instance:  os.Getenv("VERDANA_INSTANCE_ID"),
+		Theme:     os.Getenv("VERDANA_THEME"),
+		ThemeVars: os.Getenv("VERDANA_THEME_VARS"),
 	}
-	if programKind == "napp" && os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
-		log.Error().Msg("napplet cannot run in the napp program")
-		os.Exit(1)
-	}
-	if programKind == "napplet" && os.Getenv("VERDANA_NAPP_FORMAT") != "napplet" {
+	// this program only hosts napplets (D-10): the napp (35130) window and
+	// the bundled settings page were retired with the Gio launcher, so any
+	// other kind of window is refused before a webview exists
+	if os.Getenv("VERDANA_NAPP_FORMAT") != "napplet" {
 		log.Error().Msg("napp cannot run in the napplet program")
 		os.Exit(1)
 	}
-	if programKind == "napplet" && os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
+	if os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
 		log.Error().Msg("settings cannot run in the napplet program")
 		os.Exit(1)
-	}
-	if req := strings.TrimSpace(os.Getenv("VERDANA_NAPP_REQUIRES")); req != "" {
-		meta.Requires = strings.Split(req, ",")
 	}
 	if meta.Name == "" {
 		meta.Name = meta.ID
@@ -98,7 +82,7 @@ func main() {
 		meta.Instance = meta.ID
 	}
 
-	log.Info().Str("kind", programKind).Str("napp", meta.ID).Str("instance", meta.Instance).Msg("window program started")
+	log.Info().Str("kind", "napplet").Str("napp", meta.ID).Str("instance", meta.Instance).Msg("window program started")
 	outEnc = json.NewEncoder(os.Stdout)
 
 	// before the library is loaded (lazily, by the first webview.New)
@@ -108,70 +92,16 @@ func main() {
 	}
 
 	// engine-wide setup (WebView2's browser arguments) happens before the
-	// first view exists and before the window-kind branch: every kind of a
-	// build must start the engine the same way
+	// first view exists
 	prepareEngine()
 
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
-
-	if programKind == "napp" && os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
-		w.SetTitle(meta.Name + " \u2014 Settings")
-		runSettings(w)
-		return
-	}
 	w.SetTitle(windowTitle(meta.Name))
 
-	if programKind == "napplet" {
-		runNapplet(w)
-		return
-	}
-
-	_ = w.Bind("__bridge_rpc", rpcBound)
-	// the prompt overlay answers through a binding that demands this
-	// window's secret, which only the overlay code eval'd by the reader
-	// carries: a bridge napp's own scripts get no untokened answer function
-	// (CR-01). Go also refuses an answer for a prompt this window does not
-	// own; a napp clicking its own in-page overlay is Phase 8's to fix.
-	bridgeAnswerToken = newWindowToken()
-	_ = w.Bind("__verdana_bridge_answer", bridgeAnswer)
-	overlayAnswer = "function(id, ok, index, scope){ return window.__verdana_bridge_answer(" +
-		jsString(bridgeAnswerToken) + ", id, ok, index, scope) }"
-
-	// window.name is where bridge.js picks up window.napp.instance, and it
-	// survives same-origin navigations — so a reload keeps the instance id.
-	// window.__nappTheme is where bridge.js picks the launcher's theme up on
-	// every (re)load, so a napp that reloads itself stays in sync.
-	// window.__nappStorage seeds the localStorage shim: the file is the
-	// per-nappId JSON store the backend persists (native localStorage would
-	// be a fresh empty origin on every launch, random port each time).
-	w.Init("window.name = " + jsString(meta.Instance) + ";" +
-		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
-		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
-		themeInitScript(meta.Theme, meta.ThemeVars))
-	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
-	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
-		w.Init(kit)
-	}
-	// the very same bridge.js the Android app injects
-	w.Init(nappbridge.JS())
-
-	// a dev napp navigates straight to its page (its dev-server url, or the
-	// launcher's throwaway server): the bridge bindings below don't depend
-	// on the page's origin, so nothing else changes.
-	url := meta.URL
-	if url == "" {
-		url = startNappServer(meta.Dir)
-	}
-	w.Navigate(url)
-
-	go reader(w)
-
-	w.Run()
-	w.Destroy()
-	os.Exit(0)
+	runNapplet(w)
 }
 
 func jsString(s string) string {
@@ -217,21 +147,6 @@ func windowTitle(name string) string {
 	return name
 }
 
-// storageInitScript seeds window.__nappStorage, which the bridge's
-// localStorage shim runs synchronously from. The file is the backend's
-// per-nappId JSON store; missing/corrupt means start empty.
-func storageInitScript(path string) string {
-	raw, err := os.ReadFile(path)
-	if err != nil || len(strings.TrimSpace(string(raw))) == 0 {
-		return "window.__nappStorage = {};"
-	}
-	var probe map[string]string
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return "window.__nappStorage = {};"
-	}
-	return "window.__nappStorage = " + string(raw) + ";"
-}
-
 // themeInitScript sets window.__nappTheme, which bridge.js applies as soon as
 // it runs. varsJSON comes from the launcher, so it is already valid JSON.
 func themeInitScript(name, varsJSON string) string {
@@ -242,49 +157,6 @@ func themeInitScript(name, varsJSON string) string {
 		varsJSON = "{}"
 	}
 	return "window.__nappTheme = {name:" + jsString(name) + ",vars:" + varsJSON + "};"
-}
-
-func jsStringSlice(items []string) string {
-	b, err := json.Marshal(items)
-	if err != nil {
-		return "[]"
-	}
-	return string(b)
-}
-
-func startNappServer(root string) string {
-	if root == "" {
-		return ""
-	}
-	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil {
-		log.Debug().Str("root", root).Msg("no index.html found for napp")
-		return ""
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		log.Error().Err(err).Str("root", root).Msg("failed to listen for napp server")
-		return ""
-	}
-	go http.Serve(ln, nappHandler(root))
-	return "http://" + ln.Addr().String() + "/"
-}
-
-// nappHandler serves a napp's files from root. A path with no file behind it
-// and no extension (a client-side route) falls back to index.html. Every
-// response, the fallback and a 404 included, carries NappPageCSP (D-08) and
-// the other loopback headers.
-func nappHandler(root string) http.Handler {
-	fs := http.FileServer(http.Dir(root))
-	return loopbackHeaders(nappbridge.NappPageCSP(), http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
-		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
-		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
-			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {
-				http.ServeFile(wr, r, filepath.Join(root, "index.html"))
-				return
-			}
-		}
-		fs.ServeHTTP(wr, r)
-	}))
 }
 
 func rpcBound(method string, params string) string {
@@ -427,22 +299,17 @@ type promptOptionView struct {
 // launcher; if the launcher has another prompt queued for this window it will
 // send it right back. scope is how long the answer holds: "once", "session" or
 // "always" (see backend.Scope) — the launcher files the wider ones away and
-// stops asking. It is never bound as it is: each window kind reaches it
-// through a binding that checks the window's token (bridgeAnswer,
-// nappletAnswer).
+// stops asking. It is never bound as it is: the window reaches it through
+// nappletAnswer, a binding that checks the window's token.
 func promptAnswer(id int, ok bool, index int, scope string) {
 	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
-// bridgeAnswerToken is a bridge napp window's prompt-answer secret: it only
-// appears inside the overlay code the reader evals, never in a global the
-// napp's scripts start with.
-var bridgeAnswerToken string
-
 // overlayAnswer is the JavaScript function expression the prompt overlay's
-// buttons call with (id, ok, index, scope). Each window kind sets it to a
-// call that carries its token; the default answers nothing.
+// buttons call with (id, ok, index, scope). runNapplet sets it to the host
+// page's top-frame wrapper, which carries the window token; the default
+// answers nothing.
 var overlayAnswer = "function(){}"
 
 // newWindowToken is a random per-window secret.
@@ -452,19 +319,6 @@ func newWindowToken() string {
 		log.Fatal().Err(err).Msg("no randomness for a window token")
 	}
 	return hex.EncodeToString(raw[:])
-}
-
-// bridgeAnswer is the overlay's binding in a bridge napp window.
-func bridgeAnswer(token string, id int, ok bool, index int, scope string) {
-	if bridgeAnswerToken == "" ||
-		subtle.ConstantTimeCompare([]byte(token), []byte(bridgeAnswerToken)) != 1 {
-		if logIt, n := tokenMisses.note(time.Now()); logIt {
-			log.Warn().Int("prompt", id).Int("suppressed", n).
-				Msg("napp window: prompt answer without the window token, ignored")
-		}
-		return
-	}
-	promptAnswer(id, ok, index, scope)
 }
 
 // promptOverlayCode draws the overlay for one prompt. The runtime is

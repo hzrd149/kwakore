@@ -7,10 +7,9 @@ import (
 
 // webview2BrowserArgs are the browser arguments every WebView2 window of
 // this build starts with (D-19). libwebview keeps WebView2's user data in
-// %APPDATA%\<exe name>, and the child is child-<sha256>.exe, so napp,
-// napplet and settings windows of one build share one browser process; a
-// window asking for different arguments than the running process has fails
-// to open (ERROR_INVALID_STATE). So there is one value, for every kind.
+// %APPDATA%\<exe name>, so every napplet window of one build shares one
+// browser process; a window asking for different arguments than the running
+// process has fails to open (ERROR_INVALID_STATE). So there is one value.
 //
 // It stops WebRTC from using non-proxied UDP, which would otherwise reach
 // the network around the napplet's connect-src. It is best effort:

@@ -22,12 +22,13 @@ func TestWebView2Args(t *testing.T) {
 }
 
 // TestEngineSetupOrder pins where the engine is set up: prepareEngine runs
-// for every window kind before the first webview exists, and hardenEngine
-// runs on the napplet and settings windows before their page loads.
+// before the first webview exists, and hardenEngine runs in runNapplet
+// before the host page loads. The child is napplet-only (D-10), so main
+// hands every window it opens to runNapplet.
 func TestEngineSetupOrder(t *testing.T) {
 	fset := token.NewFileSet()
 	funcs := map[string]*ast.FuncDecl{}
-	for _, name := range []string{"main.go", "napplet.go", "settings.go"} {
+	for _, name := range []string{"main.go", "napplet.go"} {
 		f, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -38,7 +39,7 @@ func TestEngineSetupOrder(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"main", "runNapplet", "runSettings"} {
+	for _, name := range []string{"main", "runNapplet"} {
 		if funcs[name] == nil {
 			t.Fatalf("func %s not found", name)
 		}
@@ -48,10 +49,10 @@ func TestEngineSetupOrder(t *testing.T) {
 	check := firstCall(mainFn, "", "checkWebviewLibrary")
 	prepare := firstCall(mainFn, "", "prepareEngine")
 	newView := firstCall(mainFn, "webview", "New")
-	kind := firstCall(mainFn, "", "runSettings")
+	run := firstCall(mainFn, "", "runNapplet")
 	for what, pos := range map[string]token.Pos{
 		"checkWebviewLibrary()": check, "prepareEngine()": prepare,
-		"webview.New": newView, "runSettings": kind,
+		"webview.New": newView, "runNapplet": run,
 	} {
 		if !pos.IsValid() {
 			t.Fatalf("main has no %s", what)
@@ -63,11 +64,11 @@ func TestEngineSetupOrder(t *testing.T) {
 	if !(prepare < newView) {
 		t.Errorf("prepareEngine() must come before webview.New in main: WebView2 reads its arguments when the first view is created")
 	}
-	if !(newView < kind) {
-		t.Errorf("webview.New must come before the window-kind branch in main, so every kind gets the same engine setup")
+	if !(newView < run) {
+		t.Errorf("webview.New must come before runNapplet in main")
 	}
 	if firstCall(mainFn, "", "hardenEngine").IsValid() {
-		t.Errorf("main calls hardenEngine: napp windows keep engine defaults (DEC-6); only runNapplet and runSettings harden")
+		t.Errorf("main calls hardenEngine: it belongs in runNapplet, whose failure branch reports and exits (WR-02)")
 	}
 
 	// WR-02: a napplet window fails closed, so runNapplet must leave when
@@ -84,17 +85,13 @@ func TestEngineSetupOrder(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"runNapplet", "runSettings"} {
-		fn := funcs[name]
-		harden := firstCall(fn, "", "hardenEngine")
-		navigate := firstCall(fn, "w", "Navigate")
-		if !harden.IsValid() || !navigate.IsValid() {
-			t.Errorf("%s: hardenEngine(w) or w.Navigate missing", name)
-			continue
-		}
-		if !(harden < navigate) {
-			t.Errorf("%s: hardenEngine(w) must come before w.Navigate", name)
-		}
+	fn := funcs["runNapplet"]
+	harden := firstCall(fn, "", "hardenEngine")
+	navigate := firstCall(fn, "w", "Navigate")
+	if !harden.IsValid() || !navigate.IsValid() {
+		t.Errorf("runNapplet: hardenEngine(w) or w.Navigate missing")
+	} else if !(harden < navigate) {
+		t.Errorf("runNapplet: hardenEngine(w) must come before w.Navigate")
 	}
 }
 

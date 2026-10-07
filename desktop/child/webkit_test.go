@@ -42,19 +42,10 @@ func needWebKit(t *testing.T) {
 // must not import internal/webviewlib (that would embed the library), so
 // the file is copied by path.
 func buildChild(t *testing.T) string {
-	return buildWindowProgram(t, "napplet")
-}
-
-func buildWindowProgram(t *testing.T, kind string) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, kind)
-	args := []string{"build"}
-	if kind == "napp" {
-		args = append(args, "-tags", "napp")
-	}
-	args = append(args, "-o", bin, ".")
-	cmd := exec.Command("go", args...)
+	bin := filepath.Join(dir, "napplet")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("building the child: %v\n%s", err, out)
 	}
@@ -122,56 +113,25 @@ func TestWebKitHardeningSymbolsResolve(t *testing.T) {
 	}
 }
 
-// TestWebKitEngineHardening runs the real child for each window kind and
-// reads its log: napplet and settings windows turn WebRTC, media capture and
-// link preconnect off and say so; a napp window keeps the engine's defaults.
+// TestWebKitEngineHardening runs the real child for a napplet window and
+// reads its log: WebRTC, media capture and link preconnect are turned off
+// and it says so. The child is napplet-only (D-10), so there is no other
+// window kind to compare against.
 func TestWebKitEngineHardening(t *testing.T) {
 	needWebKit(t)
 	bin := buildChild(t)
-	nappBin := buildWindowProgram(t, "napp")
 
 	hardened := []string{"webkit hardening applied", "webrtc=false", "media_stream=false", "link_preconnect=false"}
-	for _, tc := range []struct {
-		name  string
-		bin   string
-		extra []string
-	}{
-		{"napplet", bin, []string{"VERDANA_WINDOW_KIND=", "VERDANA_NAPP_FORMAT=napplet"}},
-		{"settings", nappBin, []string{"VERDANA_NAPP_FORMAT=", "VERDANA_WINDOW_KIND=settings"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			log, err := runChild(t, tc.bin, tc.extra...)
-			if err != nil {
-				t.Fatalf("child failed: %v\n%s", err, log)
-			}
-			for _, want := range hardened {
-				if !strings.Contains(log, want) {
-					t.Errorf("child log lacks %q\n%s", want, log)
-				}
-			}
-			if strings.Contains(log, "webkit hardening incomplete") {
-				t.Errorf("a switch stayed on\n%s", log)
-			}
-		})
+	log, err := runChild(t, bin, "VERDANA_WINDOW_KIND=", "VERDANA_NAPP_FORMAT=napplet")
+	if err != nil {
+		t.Fatalf("child failed: %v\n%s", err, log)
 	}
-
-	t.Run("napp", func(t *testing.T) {
-		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<!doctype html><title>napp</title>"), 0o644); err != nil {
-			t.Fatal(err)
+	for _, want := range hardened {
+		if !strings.Contains(log, want) {
+			t.Errorf("child log lacks %q\n%s", want, log)
 		}
-		log, err := runChild(t, nappBin,
-			"VERDANA_WINDOW_KIND=", "VERDANA_NAPP_FORMAT=", "VERDANA_NAPP_URL=", "VERDANA_NAPP_DIR="+root)
-		// exit status 0 is only reached after the napp window ran its main
-		// loop and returned, so this cannot pass by the child failing early
-		if err != nil {
-			t.Fatalf("napp window did not run to a clean exit: %v\n%s", err, log)
-		}
-		if !strings.Contains(log, "window program started") {
-			t.Fatalf("child log lacks its start line\n%s", log)
-		}
-		if strings.Contains(log, "webkit hardening") {
-			t.Errorf("a napp window was hardened; napps keep engine defaults (DEC-6)\n%s", log)
-		}
-	})
+	}
+	if strings.Contains(log, "webkit hardening incomplete") {
+		t.Errorf("a switch stayed on\n%s", log)
+	}
 }
