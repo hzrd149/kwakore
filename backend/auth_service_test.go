@@ -67,6 +67,10 @@ func (k *blockingSignKeyer) SignEvent(ctx context.Context, evt *nostr.Event) err
 
 func TestServiceSignerBlockedNAPSink(t *testing.T) {
 	secret := nostr.Generate()
+	var captured bytes.Buffer
+	previous := log
+	log = zerolog.New(&captured)
+	t.Cleanup(func() { log = previous })
 	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(secret), &keyer.SignerOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +100,11 @@ func TestServiceSignerBlockedNAPSink(t *testing.T) {
 	}
 	if err := c.sign(context.Background(), &nostr.Event{Kind: 1}); err == nil || (!errors.Is(err, errServiceSignerUnavailable) && err.Error() != "not-signed-in") {
 		t.Fatalf("old signer remained usable: %v", err)
+	}
+	for _, private := range []string{secret.Hex(), nip19.EncodeNsec(secret)} {
+		if strings.Contains(captured.String(), private) {
+			t.Fatalf("logout or retired NAP signer leaked private key in logs: %q", captured.String())
+		}
 	}
 }
 

@@ -203,7 +203,20 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	copyGraphicalFile(t, library, filepath.Join(programDir, "libwebview.so"), 0600)
 	paths := daemonPaths(t)
 	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
-	content := []byte("<!doctype html><html><body><p>real child</p></body></html>")
+	// This code runs in the sandboxed frame of the actual WebKit child. A
+	// forged top-frame binding must not open settings or answer the prompt.
+	content := []byte(`<!doctype html><html><body><script>
+	const ready = setInterval(() => {
+	  if (!window.napplet || !window.napplet.storage) return;
+	  clearInterval(ready);
+	  const binding = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.__webview__;
+	  if (binding) {
+	    binding.postMessage(JSON.stringify({id:"forged-rpc",method:"__verdana_napplet_rpc",params:["forged-token","nap.openSettings","null"]}));
+	    binding.postMessage(JSON.stringify({id:"forged-answer",method:"__verdana_napplet_answer",params:["forged-token",1,true,0,"always"]}));
+	  }
+	  parent.postMessage({type:"link.open",id:"real-child-gated-link",url:"https://example.com/"},"*");
+	}, 10);
+	</script></body></html>`)
 	artifact := sha256.Sum256(content)
 	napp := backend.Napp{D: "real-child", Name: "Real child", Format: backend.FormatNapplet,
 		Kind: backend.KindNapplet, Author: key.Public(), ArtifactHash: hex.EncodeToString(artifact[:]),
@@ -260,6 +273,27 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	if err := json.Unmarshal(result, &opened); err != nil || opened.WindowID == "" {
 		t.Fatalf("real child launch result: %s %v", result, err)
 	}
+	deadline := time.Now().Add(8 * time.Second)
+	var prompt *backend.Prompt
+	for time.Now().Before(deadline) {
+		prompt = backend.CurrentPrompt()
+		if prompt != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if prompt == nil || prompt.Instance != opened.WindowID || !strings.Contains(prompt.Code, "https://example.com/") {
+		t.Fatalf("real child link route did not raise an owned permission prompt: %+v", prompt)
+	}
+	time.Sleep(100 * time.Millisecond)
+	// The frame used both child bindings with a counterfeit token; neither
+	// may create another window or grant this permission.
+	if windows := backend.OpenWindows(); len(windows) != 1 {
+		t.Fatalf("forged child binding opened a window: %+v", windows)
+	}
+	if current := backend.CurrentPrompt(); current == nil || current.ID != prompt.ID {
+		t.Fatalf("forged prompt answer changed the gated prompt: %+v", current)
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -268,6 +302,9 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	stopped, rpcErr, raw := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"`+opened.WindowID+`"}`)
 	if rpcErr != nil || !strings.Contains(string(stopped), `"closed":true`) || len(backend.OpenWindows()) != 0 {
 		t.Fatalf("real child did not close before stop returned: %s %+v", raw, rpcErr)
+	}
+	if remaining := backend.CurrentPrompt(); remaining != nil && remaining.ID == prompt.ID {
+		t.Fatalf("stopped child retained its permission prompt: %+v", remaining)
 	}
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
