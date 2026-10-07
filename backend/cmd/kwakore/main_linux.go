@@ -5,12 +5,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +60,7 @@ func run(args []string) error {
 		return errors.New("unauthorized server")
 	}
 	deadline := 30 * time.Second
-	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" {
+	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "signer.pair.wait" {
 		deadline = 180 * time.Second
 	}
 	if timeoutOverride > 0 {
@@ -103,6 +105,12 @@ func run(args []string) error {
 		return errors.New("invalid daemon response")
 	}
 	if hasError {
+		if strings.HasPrefix(method, "signer.") {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rpcError, &fields) != nil || len(fields) != 2 || fields["code"] == nil || fields["message"] == nil {
+				return errors.New("invalid daemon response")
+			}
+		}
 		var remote controlprotocol.Error
 		if json.Unmarshal(rpcError, &remote) != nil || remote.Code == 0 || remote.Message == "" {
 			return errors.New("invalid daemon response")
@@ -140,7 +148,30 @@ func run(args []string) error {
 	if strings.HasPrefix(method, "napplet.permissions.") && !validPermissionResponse(method, params, result) {
 		return errors.New("invalid daemon response")
 	}
-	if strings.HasPrefix(method, "signer.") && !validSignerResponse(result) {
+	if method == "signer.pair.start" {
+		start, ok := validPairStartResult(result)
+		if !ok {
+			return errors.New("invalid daemon response")
+		}
+		var offered struct {
+			Secret string `json:"secret"`
+		}
+		if json.Unmarshal(params, &offered) != nil || len(offered.Secret) != 32 {
+			return errors.New("invalid command parameters")
+		}
+		uri := localPairURI(start.ClientPublicKey, start.Relay, offered.Secret)
+		out, _ := json.Marshal(struct {
+			PairingURI string `json:"pairing_uri"`
+			Notice     string `json:"notice"`
+		}{uri, "Private pairing token: share only with your signer"})
+		_, err = os.Stdout.Write(append(out, '\n'))
+		return err
+	}
+	if method == "signer.pair.cancel" {
+		if !validPairCancelResult(result) {
+			return errors.New("invalid daemon response")
+		}
+	} else if strings.HasPrefix(method, "signer.") && !validSignerResponse(result) {
 		return errors.New("invalid daemon response")
 	}
 	_, err = os.Stdout.Write(append(result, '\n'))
@@ -255,14 +286,35 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		if len(args) == 3 && args[1] == "switch" && args[2] == "none" {
 			return "signer.switch", json.RawMessage(`{"mode":"none"}`), socketPath, nil
 		}
-		if len(args) == 5 && args[1] == "switch" && args[2] == "nsec" {
+		if len(args) == 3 && args[1] == "pair" && args[2] == "start" {
+			var raw [16]byte
+			if _, err := rand.Read(raw[:]); err != nil {
+				return "", nil, "", inputFailure("could not create pairing token")
+			}
+			params, _ := json.Marshal(struct {
+				Secret string `json:"secret"`
+			}{hex.EncodeToString(raw[:])})
+			return "signer.pair.start", params, socketPath, nil
+		}
+		if len(args) == 3 && args[1] == "pair" && args[2] == "wait" {
+			return "signer.pair.wait", nil, socketPath, nil
+		}
+		if len(args) == 3 && args[1] == "pair" && args[2] == "cancel" {
+			return "signer.pair.cancel", nil, socketPath, nil
+		}
+		if len(args) == 5 && args[1] == "switch" && (args[2] == "nsec" || args[2] == "bunker") {
+			mode := args[2]
+			limit := 256
+			if mode == "bunker" {
+				limit = 2048
+			}
 			var secret string
 			var err error
 			switch args[3] {
 			case "--secret-stdin":
 				return "", nil, "", inputFailure("invalid signer secret source")
 			case "--secret-file":
-				secret, err = readSignerSecretFile(args[4])
+				secret, err = readSignerSecretFile(args[4], limit)
 			default:
 				return "", nil, "", inputFailure("invalid signer secret source")
 			}
@@ -272,18 +324,23 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			params, _ := json.Marshal(struct {
 				Mode   string `json:"mode"`
 				Secret string `json:"secret"`
-			}{"nsec", secret})
+			}{mode, secret})
 			return "signer.switch", params, socketPath, nil
 		}
-		if len(args) == 4 && args[1] == "switch" && args[2] == "nsec" && args[3] == "--secret-stdin" {
-			secret, err := readSignerSecret(os.Stdin)
+		if len(args) == 4 && args[1] == "switch" && (args[2] == "nsec" || args[2] == "bunker") && args[3] == "--secret-stdin" {
+			mode := args[2]
+			limit := 256
+			if mode == "bunker" {
+				limit = 2048
+			}
+			secret, err := readSignerSecret(os.Stdin, limit)
 			if err != nil {
 				return "", nil, "", inputFailure("invalid signer secret source")
 			}
 			params, _ := json.Marshal(struct {
 				Mode   string `json:"mode"`
 				Secret string `json:"secret"`
-			}{"nsec", secret})
+			}{mode, secret})
 			return "signer.switch", params, socketPath, nil
 		}
 		return "", nil, "", inputFailure("invalid signer command")
@@ -446,19 +503,22 @@ func command(args []string) (string, json.RawMessage, string, error) {
 	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed|discover|install|update|uninstall|launch|stop|permissions|settings|signer")
 }
 
-func readSignerSecret(r io.Reader) (string, error) {
-	b, err := io.ReadAll(io.LimitReader(r, 257))
-	if err != nil || len(b) > 256 {
+func readSignerSecret(r io.Reader, limit int) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(r, int64(limit+2)))
+	if err != nil || len(b) > limit+1 {
 		return "", errors.New("invalid signer secret")
 	}
 	secret := strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r")
 	if secret == "" || strings.ContainsAny(secret, "\r\n\x00") {
 		return "", errors.New("invalid signer secret")
 	}
+	if len(secret) > limit {
+		return "", errors.New("invalid signer secret")
+	}
 	return secret, nil
 }
 
-func readSignerSecretFile(path string) (string, error) {
+func readSignerSecretFile(path string, limit int) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", errors.New("invalid signer secret file")
 	}
@@ -484,14 +544,59 @@ func readSignerSecretFile(path string) (string, error) {
 	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 || info.Size() > 256 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 || info.Size() > int64(limit+1) {
 		return "", errors.New("invalid signer secret file")
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || owner.Uid != uint32(os.Geteuid()) {
 		return "", errors.New("invalid signer secret file")
 	}
-	return readSignerSecret(f)
+	return readSignerSecret(f, limit)
+}
+
+type pairStartResult struct {
+	ClientPublicKey string `json:"client_public_key"`
+	Relay           string `json:"relay"`
+}
+
+func validPairStartResult(result json.RawMessage) (pairStartResult, bool) {
+	var out pairStartResult
+	if len(result) == 0 || result[0] != '{' || controlprotocol.ValidateNamedParams(result, "client_public_key", "relay") != nil {
+		return out, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil || len(fields) != 2 || json.Unmarshal(fields["client_public_key"], &out.ClientPublicKey) != nil || json.Unmarshal(fields["relay"], &out.Relay) != nil {
+		return out, false
+	}
+	b, err := hex.DecodeString(out.ClientPublicKey)
+	if err != nil || len(b) != 32 || hex.EncodeToString(b) != out.ClientPublicKey {
+		return out, false
+	}
+	u, err := url.Parse(out.Relay)
+	if err != nil || u.Scheme != "wss" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Host != strings.ToLower(u.Host) || u.String() != out.Relay {
+		return out, false
+	}
+	return out, true
+}
+
+func validPairCancelResult(result json.RawMessage) bool {
+	if len(result) == 0 || result[0] != '{' || controlprotocol.ValidateNamedParams(result, "cancelled") != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil || len(fields) != 1 {
+		return false
+	}
+	return bytes.Equal(fields["cancelled"], []byte("true")) || bytes.Equal(fields["cancelled"], []byte("false"))
+}
+
+func localPairURI(clientPublicKey, relay, secret string) string {
+	q := url.Values{}
+	q.Set("relay", relay)
+	q.Set("secret", secret)
+	q.Set("perms", "get_public_key,sign_event,nip44_encrypt,nip44_decrypt,nip04_encrypt,nip04_decrypt")
+	q.Set("name", "Verdana")
+	return "nostrconnect://" + clientPublicKey + "?" + q.Encode()
 }
 
 func validSignerResponse(result json.RawMessage) bool {

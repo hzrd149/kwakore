@@ -98,6 +98,17 @@ func TestCLISecretInputFileAndArgvBoundary(t *testing.T) {
 	if _, _, _, err := command([]string{"signer", "switch", "nsec", "nsec-private-sentinel"}); err == nil || strings.Contains(err.Error(), "nsec-private-sentinel") {
 		t.Fatalf("argv accepted/leaked: %v", err)
 	}
+	bunker := "bunker://" + strings.Repeat("a", 64) + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
+	if err := os.WriteFile(path, []byte(bunker+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	method, params, _, err = command([]string{"signer", "switch", "bunker", "--secret-file", path})
+	if err != nil || method != "signer.switch" || !strings.Contains(string(params), "private-sentinel") {
+		t.Fatalf("bunker file input: %s %s %v", method, params, err)
+	}
+	if _, _, _, err := command([]string{"signer", "switch", "bunker", bunker}); err == nil || strings.Contains(err.Error(), "private-sentinel") {
+		t.Fatalf("bunker argv accepted/leaked: %v", err)
+	}
 	if err := os.Chmod(path, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +139,70 @@ func TestSignerLeakMalformedPeerResult(t *testing.T) {
 	}
 }
 
+func TestCLIContractPairStartLocalToken(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "pair.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	pub := strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		name, result string
+		valid        bool
+	}{
+		{"valid", `{"client_public_key":"` + pub + `","relay":"wss://example.com"}`, true},
+		{"extra secret", `{"client_public_key":"` + pub + `","relay":"wss://example.com","secret":"private-sentinel"}`, false},
+		{"query relay", `{"client_public_key":"` + pub + `","relay":"wss://example.com/?secret=private-sentinel"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan string, 1)
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					seen <- ""
+					return
+				}
+				defer conn.Close()
+				line, _ := bufio.NewReader(conn).ReadBytes('\n')
+				var req controlprotocol.Request
+				_ = json.Unmarshal(line, &req)
+				var p struct {
+					Secret string `json:"secret"`
+				}
+				_ = json.Unmarshal(req.Params, &p)
+				seen <- p.Secret
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + tc.result + `}` + "\n"))
+			}()
+			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "signer", "pair", "start")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			secret := <-seen
+			if len(secret) != 32 {
+				t.Fatalf("CLI did not generate a 16-byte secret: %q", secret)
+			}
+			if !tc.valid {
+				if err == nil || stdout.Len() != 0 || strings.Contains(stderr.String(), secret) || strings.Contains(stderr.String(), "private-sentinel") {
+					t.Fatalf("accepted/leaked invalid peer result: %q %q %v", stdout.String(), stderr.String(), err)
+				}
+				return
+			}
+			var output struct {
+				PairingURI string `json:"pairing_uri"`
+				Notice     string `json:"notice"`
+			}
+			if err != nil || stderr.Len() != 0 || json.Unmarshal(stdout.Bytes(), &output) != nil || !strings.Contains(output.PairingURI, secret) || !strings.Contains(output.PairingURI, pub) || !strings.Contains(output.Notice, "Private") {
+				t.Fatalf("local token: %q %q %v", stdout.String(), stderr.String(), err)
+			}
+		})
+	}
+}
+
 func TestCLIContract(t *testing.T) {
 	root := t.TempDir()
 	cli := filepath.Join(root, "kwakore")
@@ -153,6 +228,8 @@ func TestCLIContract(t *testing.T) {
 		{"reload", []string{"settings", "reload"}, "settings.reload", ""},
 		{"signer status", []string{"signer", "status"}, "signer.status", ""},
 		{"signer none", []string{"signer", "switch", "none"}, "signer.switch", `{"mode":"none"}`},
+		{"signer pair wait", []string{"signer", "pair", "wait"}, "signer.pair.wait", ""},
+		{"signer pair cancel", []string{"signer", "pair", "cancel"}, "signer.pair.cancel", ""},
 		{"set", []string{"settings", "set", "relays", `[]`}, "settings.set", `{"field":"relays","value":[]}`},
 		{"clear", []string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
 		{"discover", []string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "3"}, "napplet.discover", `{"query":"hello","refresh":true,"offset":2,"limit":3}`},
@@ -313,8 +390,10 @@ func TestCLIContract(t *testing.T) {
 
 func cliContractResult(method, address string) string {
 	switch method {
-	case "signer.status", "signer.switch":
+	case "signer.status", "signer.switch", "signer.pair.wait":
 		return `{"mode":"none","public_key":"","connection_state":"disconnected"}`
+	case "signer.pair.cancel":
+		return `{"cancelled":true}`
 	case "napplet.permissions.get":
 		return `{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[]}`
 	case "napplet.permissions.set":
@@ -354,7 +433,7 @@ func TestCLIContractCatalog(t *testing.T) {
 	windowID := strings.Repeat("b", 32)
 	commands := [][]string{
 		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
-		{"signer", "status"}, {"signer", "switch", "none"},
+		{"signer", "status"}, {"signer", "switch", "none"}, {"signer", "pair", "start"}, {"signer", "pair", "wait"}, {"signer", "pair", "cancel"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
 		{"discover"}, {"installed"}, {"install", address}, {"update", address},
 		{"uninstall", "--yes", address}, {"launch", address}, {"stop", windowID},
