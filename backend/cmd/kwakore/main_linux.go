@@ -426,7 +426,7 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 		return false
 	}
 	var address string
-	if json.Unmarshal(fields["address"], &address) != nil || address != requested.Address {
+	if bytes.Equal(fields["address"], []byte("null")) || json.Unmarshal(fields["address"], &address) != nil || address != requested.Address {
 		return false
 	}
 	if method == "napplet.permissions.get" {
@@ -453,7 +453,8 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 				return false
 			}
 			var permission, subject, decision string
-			if json.Unmarshal(fields["permission"], &permission) != nil ||
+			if bytes.Equal(fields["permission"], []byte("null")) || bytes.Equal(fields["subject"], []byte("null")) || bytes.Equal(fields["decision"], []byte("null")) ||
+				json.Unmarshal(fields["permission"], &permission) != nil ||
 				json.Unmarshal(fields["subject"], &subject) != nil ||
 				json.Unmarshal(fields["decision"], &decision) != nil ||
 				!permissionField(permission) || (decision != "allow" && decision != "deny") {
@@ -463,14 +464,15 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 		return true
 	}
 	var permission, subject string
-	if json.Unmarshal(fields["permission"], &permission) != nil || permission != requested.Permission ||
+	if bytes.Equal(fields["permission"], []byte("null")) || bytes.Equal(fields["subject"], []byte("null")) ||
+		json.Unmarshal(fields["permission"], &permission) != nil || permission != requested.Permission ||
 		json.Unmarshal(fields["subject"], &subject) != nil || subject != requested.Subject {
 		return false
 	}
 	if method == "napplet.permissions.set" {
 		var decision string
 		return len(fields) == 4 && controlprotocol.ValidateNamedParams(result, "address", "permission", "subject", "decision") == nil &&
-			json.Unmarshal(fields["decision"], &decision) == nil && decision == requested.Decision
+			!bytes.Equal(fields["decision"], []byte("null")) && json.Unmarshal(fields["decision"], &decision) == nil && decision == requested.Decision
 	}
 	var cleared bool
 	return len(fields) == 4 && controlprotocol.ValidateNamedParams(result, "address", "permission", "subject", "cleared") == nil &&

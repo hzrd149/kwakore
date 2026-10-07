@@ -211,6 +211,7 @@ func TestCLIContract(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"result":{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[]}}`,
 		`{"jsonrpc":"2.0","id":1,"result":{"address":"other","required_domains":[],"optional_domains":[],"saved_rules":[]}}`,
 		`{"jsonrpc":"2.0","id":1,"result":{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[{"permission":"sign","decision":"secret"}]}}`,
+		`{"jsonrpc":"2.0","id":1,"result":{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[{"permission":"sign","subject":null,"decision":"allow"}]}}`,
 	} {
 		go func() {
 			conn, err := listener.AcceptUnix()

@@ -49,6 +49,17 @@ func TestServicePermissionsMutateExactRuleAndPersist(t *testing.T) {
 	if persisted.Rules[key.ruleID()].Decision != DecisionAllow {
 		t.Fatalf("missing persisted allow: %+v", persisted.Rules)
 	}
+	// Rehydrate the state as a new process would before clearing the rule.
+	stateMu.Lock()
+	state = persisted
+	stateMu.Unlock()
+	if reloaded, err := ServicePermissionsGet(context.Background(), first.Address()); err != nil ||
+		!reflect.DeepEqual(reloaded.SavedRules, []ServiceSavedRule{
+			{Permission: PermDispatch, Subject: "view", Decision: DecisionDeny},
+			{Permission: PermSign, Subject: "saved", Decision: DecisionAllow},
+		}) {
+		t.Fatalf("reloaded saved rules: %+v %v", reloaded, err)
+	}
 	if _, err := ServicePermissionClear(context.Background(), first.Address(), PermSign, "saved"); err != nil {
 		t.Fatal(err)
 	}
