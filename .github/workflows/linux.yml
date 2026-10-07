@@ -1,9 +1,20 @@
 name: linux
 
 # Kwakore is a per-user Linux service: kwakore-daemon, the kwakore CLI, the
-# napplet child and libwebview.so, shipped side by side. Every lane here builds
-# and tests only those paths; there is no Windows, macOS, Android or Gio
-# launcher build any more (D-09, D-10).
+# napplet child and libwebview.so, shipped side by side. There is no Windows,
+# macOS, Android or Gio launcher build any more (D-09, D-10).
+#
+# backend and child run the Go suites on every push and pull request. bundle
+# (amd64, arm64) and release run only on v* tags, and nothing publishes unless
+# both Go lanes and both bundles passed.
+#
+# By user decision (quick task 261007-ej4), CI runs no real-engine, systemd or
+# Nix lane: the display-backed TestWebKit* tests (KWAKORE_WEBKIT_SMOKE=1), the
+# backend's TestRPCRealChildGraphical (KWAKORE_REQUIRE_GRAPHICS=1), the user
+# service and installed-artifact smokes and the Nix checks run locally; see
+# AGENTS.md for the commands. Comments may name those gates, because
+# TestCIWorkflowContract (backend/daemon) ignores comment lines and fails if
+# one of them comes back in a step.
 
 on:
   push:
@@ -32,6 +43,18 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      # the installer and smoke scripts parse, and every supported path (code,
+      # units, Nix, CI, docs) uses only the kwakore name outside the reviewed
+      # exceptions in scripts/check-product-identity.sh
+      - name: check shell scripts
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: product identity (full)
+        run: bash scripts/check-product-identity.sh
+
       # the napplet frame-scope and host-page tests run in node; the runner
       # image ships it, and this fails fast if it ever stops doing so
       - name: check node
@@ -47,24 +70,6 @@ jobs:
         env:
           KWAKORE_REQUIRE_NODE: "1"
         run: go test ./...
-
-  # the installer and smoke scripts parse, and every supported path (code,
-  # units, Nix, CI, docs) uses only the kwakore name outside the reviewed
-  # exceptions in scripts/check-product-identity.sh
-  identity:
-    name: identity and scripts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: check shell scripts
-        run: |
-          for script in scripts/*.sh; do
-            bash -n "$script"
-          done
-
-      - name: product identity (full)
-        run: bash scripts/check-product-identity.sh
 
   child:
     name: child
@@ -99,6 +104,18 @@ jobs:
         working-directory: desktop
         run: go test ./...
 
+      # CI has no display, so the display-backed TestWebKit* tests and the
+      # backend's TestRPCRealChildGraphical skip behind their env gates. This
+      # notice says so on every run, so a green child job is never read as
+      # graphical coverage. TestWebKitHardeningSymbolsResolve needs no display
+      # and runs in the step above.
+      - name: real-engine tests are local-only
+        working-directory: desktop
+        run: |
+          tests=$(go test ./child -list '^TestWebKit' | grep '^TestWebKit' | grep -vx 'TestWebKitHardeningSymbolsResolve' | tr '\n' ' ')
+          echo "not run in CI: $tests TestRPCRealChildGraphical"
+          echo "::notice title=real-engine tests not run::the display-backed TestWebKit tests ($tests) and the backend's TestRPCRealChildGraphical were skipped because CI has no display; run them locally per AGENTS.md \"Local-only real-engine tests\""
+
       # the retired Gio launcher, Android app, gomobile bindings, settings
       # window and non-Linux build paths (D-09, D-10) stay deleted: none of
       # them may come back, both modules stay tidy, and building and testing
@@ -127,205 +144,12 @@ jobs:
           dirty=$(git status --porcelain --untracked-files=all)
           [ -z "$dirty" ] || { echo "the build left unignored files:"; echo "$dirty"; exit 1; }
 
-  # the real napplet child on a real WebKitGTK under xvfb. Both steps fail on a
-  # missing prerequisite instead of skipping, and both require PASS lines, so
-  # a skipped graphical test can never let this job pass.
-  graphical:
-    name: graphical
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/linux-build-deps
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: desktop/go.mod
-          cache-dependency-path: |
-            desktop/go.sum
-            backend/go.sum
-
-      - name: generate libwebview copies
-        working-directory: desktop
-        run: go generate ./internal/webviewlib
-
-      - name: build napplet child
-        working-directory: desktop
-        env:
-          CGO_ENABLED: "1"
-        run: go build -o child/napplet ./child
-
-      - name: install graphical test display
-        run: sudo apt-get install -y --no-install-recommends xvfb
-
-      - name: test real daemon child
-        working-directory: backend
-        env:
-          KWAKORE_REQUIRE_GRAPHICS: "1"
-          KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet
-          KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so
-          NO_AT_BRIDGE: "1"
-        run: |
-          set -euo pipefail
-          xvfb-run -a go test -v ./daemon -run '^TestRPCRealChildGraphical$' -count=1 -timeout 60s | tee "$RUNNER_TEMP/kwakore-real-child.log"
-          grep -Fq -- '--- PASS: TestRPCRealChildGraphical' "$RUNNER_TEMP/kwakore-real-child.log"
-
-      # the child under WebKitGTK with a fake launcher on the wire protocol:
-      # the adversarial napplet's escapes, the rebuild order, the reload cap
-      # and the forged bindings. KWAKORE_WEBKIT_SMOKE=1 turns a missing display
-      # or engine into a failure; every TestWebKit* must also print PASS.
-      - name: webkit smoke
-        working-directory: desktop
-        env:
-          KWAKORE_WEBKIT_SMOKE: "1"
-          NO_AT_BRIDGE: "1"
-        run: |
-          set -euo pipefail
-          log="$RUNNER_TEMP/kwakore-webkit.log"
-          go test ./child -list '^TestWebKit' | grep '^TestWebKit' >"$RUNNER_TEMP/kwakore-webkit.tests"
-          [ -s "$RUNNER_TEMP/kwakore-webkit.tests" ] || { echo "no TestWebKit tests found"; exit 1; }
-          xvfb-run -a go test ./child -run '^TestWebKit' -count=1 -v -timeout 10m | tee "$log"
-          if grep -E -- '--- SKIP' "$log"; then
-            echo "a real-engine test skipped; KWAKORE_WEBKIT_SMOKE is not reaching it"
-            exit 1
-          fi
-          while read -r name; do
-            grep -Eq -- "^--- PASS: $name \\(" "$log" || { echo "missing PASS for $name"; exit 1; }
-          done <"$RUNNER_TEMP/kwakore-webkit.tests"
-
-  nix:
-    name: nix
-    runs-on: ubuntu-24.04
-    steps:
-      # full history: Nix refuses shallow git trees as flake sources
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: evaluate NixOS module
-        run: |
-          result=$(nix eval --impure --json --file nix/module-test.nix)
-          [ "$result" = true ] || { echo "nix/module-test.nix printed $result, not true"; exit 1; }
-
-      # the Go module vendor trees are fixed-output fetches from the module
-      # proxy, which occasionally fail on a resolver hiccup; retry those only
-      - name: build package
-        run: |
-          for attempt in 1 2 3; do
-            if nix build -L --no-link .#packages.x86_64-linux.kwakore; then
-              exit 0
-            fi
-            echo "nix build attempt $attempt failed"
-            sleep 15
-          done
-          exit 1
-
-      - name: flake check
-        run: |
-          nix flake check -L
-          nix flake check --all-systems --no-build
-
-  # an isolated per-user systemd manager (scripts/ci-user-manager.sh) runs the
-  # socket activation and installer smokes against real user units built from
-  # this tree; the installed job below runs the released archive itself
-  service:
-    name: user service
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/linux-build-deps
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: desktop/go.mod
-          cache-dependency-path: |
-            desktop/go.sum
-            backend/go.sum
-
-      - name: activation smoke
-        run: |
-          log="$RUNNER_TEMP/kwakore-activation.log"
-          bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --activation-only | tee "$log"
-          for marker in activation control; do
-            want=$(grep -c "pass \"$marker:" scripts/smoke-linux-service.sh)
-            got=$(grep -c "^PASS $marker:" "$log" || true)
-            [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS $marker lines, got $got"; exit 1; }
-          done
-
-      - name: install smoke
-        run: |
-          log="$RUNNER_TEMP/kwakore-install.log"
-          bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --install-only | tee "$log"
-          want=$(grep -c 'pass "install:' scripts/smoke-linux-service.sh)
-          got=$(grep -c '^PASS install:' "$log" || true)
-          [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS install lines, got $got"; exit 1; }
-
-  # D-12 release acceptance: the exact kwakore-linux-amd64.tar.gz the bundle
-  # job uploaded (and the release job publishes) is installed with
-  # scripts/install.sh under an isolated user manager, socket-activated,
-  # controlled with systemctl --user, given an offline napplet whose native
-  # entry opens a real child under xvfb, then made headless for the fixed
-  # session_unavailable error, and uninstalled. Every segment must print all
-  # of its PASS lines; the script prints no skips.
-  installed:
-    name: installed artifact
-    needs: [bundle]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      # runtime libraries for the bundled child and cgo for the seed helper
-      - uses: ./.github/actions/linux-build-deps
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: install graphical test display
-        run: sudo apt-get install -y --no-install-recommends xvfb
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: kwakore-linux-amd64
-          path: ${{ runner.temp }}/release
-
-      - name: installed artifact smoke
-        env:
-          NO_AT_BRIDGE: "1"
-        run: |
-          set -euo pipefail
-          release="$RUNNER_TEMP/release"
-          manifest=$(ls -A "$release" | LC_ALL=C sort | tr '\n' ' ')
-          [ "$manifest" = "kwakore-linux-amd64.sha256 kwakore-linux-amd64.tar.gz kwakore-linux-amd64.version " ] ||
-            { echo "unexpected amd64 artifact: $manifest"; exit 1; }
-          version=$(cat "$release/kwakore-linux-amd64.version")
-          log="$RUNNER_TEMP/kwakore-full.log"
-          xvfb-run -a bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --full \
-            --archive "$release/kwakore-linux-amd64.tar.gz" \
-            --sha256sums "$release/kwakore-linux-amd64.sha256" | tee "$log"
-          grep -Fq "PASS release: the helper installed kwakore $version from the checksummed kwakore-linux-amd64.tar.gz" "$log" ||
-            { echo "the smoke did not install the uploaded $version archive"; exit 1; }
-          for marker in release activation control entry signer graphical headless uninstall; do
-            want=$(grep -c "pass \"$marker:" scripts/smoke-linux-service.sh)
-            got=$(grep -c "^PASS $marker:" "$log" || true)
-            [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS $marker lines, got $got"; exit 1; }
-          done
-          if grep -Ei '^(SKIP|FAIL)' "$log"; then
-            echo "the installed artifact smoke skipped or failed a segment"
-            exit 1
-          fi
-
   # one native job per architecture; each writes only its own archive name,
-  # so the two never race on an output file
+  # so the two never race on an output file. It builds only for tagged
+  # releases.
   bundle:
     name: bundle (${{ matrix.arch }})
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -410,7 +234,7 @@ jobs:
 
   release:
     name: release
-    needs: [backend, identity, child, graphical, nix, service, installed, bundle]
+    needs: [backend, child, bundle]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

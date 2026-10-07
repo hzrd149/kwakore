@@ -23,7 +23,8 @@ import (
 // (go-webview locks it in init), so nothing here calls webview.New: the real
 // child binary runs as a subprocess against the installed WebKitGTK. These
 // tests open real windows, so they only run with KWAKORE_WEBKIT_SMOKE=1 and a
-// display (a live one locally, xvfb in CI).
+// display (a live one, or xvfb-run). CI does not run them; AGENTS.md has the
+// local command.
 
 // needWebKit skips unless the real-engine tests were asked for, and fails
 // when they were asked for without a display to open windows on.

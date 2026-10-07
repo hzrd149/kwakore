@@ -354,12 +354,14 @@ func TestRPCHermeticGateAndSecretSentinels(t *testing.T) {
 	}
 }
 
-// TestRPCRealChildGraphical is a separate required CI gate. The ordinary
-// backend suite remains headless; the CI flag turns every missing prerequisite
-// into a failure rather than a skip.
+// TestRPCRealChildGraphical is a local-only real-engine test: CI has no
+// display since quick task 261007-ej4, and the ordinary backend suite stays
+// headless. KWAKORE_REQUIRE_GRAPHICS=1 asks for it and turns every missing
+// prerequisite into a failure rather than a skip; AGENTS.md ("Local-only
+// real-engine tests") has the command.
 func TestRPCRealChildGraphical(t *testing.T) {
 	if os.Getenv("KWAKORE_REQUIRE_GRAPHICS") != "1" {
-		t.Skip("real child requires the explicit graphical CI gate")
+		t.Skip("local-only real child test: set KWAKORE_REQUIRE_GRAPHICS=1 with a display (see AGENTS.md)")
 	}
 	if os.Getenv("DISPLAY") == "" {
 		t.Fatal("required DISPLAY is absent")
