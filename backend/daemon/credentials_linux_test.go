@@ -5,7 +5,9 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,6 +287,49 @@ func TestDaemonFailedPairOverrideRestoresPreviousSigner(t *testing.T) {
 				t.Fatalf("failed pair changed restored signer: %+v", got)
 			}
 		})
+	}
+}
+
+func TestDaemonLongBunkerRelayCanSwitchToNone(t *testing.T) {
+	p := daemonPaths(t)
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := nostr.Generate()
+	relay := "wss://example.com/" + strings.Repeat("a", 1900)
+	bunkerURL := "bunker://" + remote.Public().Hex() + "?relay=" + url.QueryEscape(relay)
+	if len(bunkerURL) > 2048 {
+		t.Fatalf("test bunker URL exceeds credential limit: %d", len(bunkerURL))
+	}
+	s.signer.BunkerConnect = func(context.Context, context.Context, nostr.SecretKey, string, bool) (nostr.Keyer, error) {
+		return keyer.New(context.Background(), nil, nip19.EncodeNsec(remote), &keyer.SignerOptions{})
+	}
+	if status, err := s.SwitchSigner(context.Background(), "bunker", bunkerURL); err != nil || status.ConnectionState != "connected" {
+		t.Fatalf("install long bunker signer: %+v %v", status, err)
+	}
+	previous, err := s.credentials.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := json.Marshal(signerTransition{Version: 1, Previous: previous, Signer: s.manager.Effective().Signer})
+	if err != nil || len(journal) <= maxCredentialBytes {
+		t.Fatalf("test transition does not exceed old limit: %d bytes, %v", len(journal), err)
+	}
+	if status, err := s.SwitchSigner(context.Background(), "none", ""); err != nil || status.Mode != "none" || status.ConnectionState != "disconnected" {
+		t.Fatalf("clear long bunker signer: %+v %v", status, err)
+	}
+	if rec, err := s.credentials.read(); err != nil || rec.Mode != "none" || s.manager.Effective().Signer.Mode != "none" {
+		t.Fatalf("clear did not persist: credential=%q config=%q err=%v", rec.Mode, s.manager.Effective().Signer.Mode, err)
+	}
+	s.Close()
+	restarted, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if got := restarted.signer.Status(); got.Mode != "none" || got.ConnectionState != "disconnected" {
+		t.Fatalf("cleared signer restored unexpectedly: %+v", got)
 	}
 }
 

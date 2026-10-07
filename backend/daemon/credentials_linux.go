@@ -20,6 +20,10 @@ import (
 
 const maxCredentialBytes = 4096
 
+// A transition keeps both the private credential and the prior public signer
+// config. The latter may occupy nearly the service config's 1 MiB file limit.
+const maxSignerTransitionBytes = maxCredentialBytes + (1 << 20) + 512
+
 type credentialRecord struct {
 	Version   int    `json:"version"`
 	Mode      string `json:"mode"`
@@ -146,7 +150,7 @@ func (s *credentialStore) readTransition() (*signerTransition, error) {
 	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > maxCredentialBytes {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > maxSignerTransitionBytes {
 		return nil, errCredential
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
@@ -171,7 +175,7 @@ func (s *credentialStore) beginTransition(previous credentialRecord, signer serv
 		return errCredential
 	}
 	data, err := json.Marshal(signerTransition{Version: 1, Previous: previous, Signer: signer})
-	if err != nil || len(data) > maxCredentialBytes {
+	if err != nil || len(data) > maxSignerTransitionBytes {
 		return errCredential
 	}
 	if err := credentialWriteAtomic(s.transitionPath(), data, 0600); err != nil {
@@ -190,7 +194,7 @@ func (s *credentialStore) commitTransition() error {
 	}
 	pending.Committed = true
 	data, err := json.Marshal(pending)
-	if err != nil || len(data) > maxCredentialBytes {
+	if err != nil || len(data) > maxSignerTransitionBytes {
 		return errCredential
 	}
 	writeErr := credentialWriteAtomic(s.transitionPath(), data, 0600)
