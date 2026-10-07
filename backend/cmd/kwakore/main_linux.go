@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -26,7 +27,7 @@ import (
 )
 
 func run(args []string) error {
-	args, socketOverride, timeoutOverride, err := globalOptions(args)
+	args, socketOverride, timeoutOverride, jsonOutput, err := globalOptions(args)
 	if err != nil {
 		return err
 	}
@@ -171,8 +172,7 @@ func run(args []string) error {
 			PairingURI string `json:"pairing_uri"`
 			Notice     string `json:"notice"`
 		}{uri, "Private pairing token: share only with your signer"})
-		_, err = os.Stdout.Write(append(out, '\n'))
-		return err
+		return writeCLIResult(os.Stdout, method, out, jsonOutput)
 	}
 	if method == "signer.pair.cancel" {
 		if !validPairCancelResult(result) {
@@ -181,8 +181,7 @@ func run(args []string) error {
 	} else if strings.HasPrefix(method, "signer.") && !validSignerResponse(result) {
 		return errors.New("invalid daemon response")
 	}
-	_, err = os.Stdout.Write(append(result, '\n'))
-	return err
+	return writeCLIResult(os.Stdout, method, result, jsonOutput)
 }
 
 var serverPeerUID = peerUID
@@ -198,33 +197,40 @@ func (timeoutFailure) Error() string {
 	return "client timeout; operation outcome unknown; check service, signer, or installed state"
 }
 
-func globalOptions(args []string) ([]string, string, time.Duration, error) {
+func globalOptions(args []string) ([]string, string, time.Duration, bool, error) {
 	var socket string
 	var timeout time.Duration
+	var jsonOutput bool
 	for len(args) > 0 {
 		switch args[0] {
+		case "--json":
+			if jsonOutput {
+				return nil, "", 0, false, inputFailure("--json specified more than once")
+			}
+			jsonOutput = true
+			args = args[1:]
 		case "--socket", "--timeout":
 			if len(args) < 2 {
-				return nil, "", 0, inputFailure("missing global option value")
+				return nil, "", 0, jsonOutput, inputFailure("missing global option value")
 			}
 			if args[0] == "--socket" {
 				if socket != "" || !filepath.IsAbs(args[1]) {
-					return nil, "", 0, inputFailure("--socket requires an absolute path")
+					return nil, "", 0, jsonOutput, inputFailure("--socket requires an absolute path")
 				}
 				socket = args[1]
 			} else {
 				value, err := time.ParseDuration(args[1])
 				if err != nil || value <= 0 || timeout != 0 {
-					return nil, "", 0, inputFailure("--timeout requires a positive duration")
+					return nil, "", 0, jsonOutput, inputFailure("--timeout requires a positive duration")
 				}
 				timeout = value
 			}
 			args = args[2:]
 		default:
-			return args, socket, timeout, nil
+			return args, socket, timeout, jsonOutput, nil
 		}
 	}
-	return args, socket, timeout, nil
+	return args, socket, timeout, jsonOutput, nil
 }
 
 type rpcFailure struct{ RPC controlprotocol.Error }
@@ -813,8 +819,51 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		writeCLIError(os.Stderr, err)
+		if wantsJSON(os.Args[1:]) {
+			writeCLIError(os.Stderr, err)
+		} else {
+			writeHumanError(os.Stderr, err)
+		}
 		os.Exit(1)
+	}
+}
+
+func wantsJSON(args []string) bool {
+	for len(args) > 0 {
+		switch args[0] {
+		case "--json":
+			return true
+		case "--socket", "--timeout":
+			if len(args) < 2 {
+				return false
+			}
+			args = args[2:]
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func writeHumanError(w io.Writer, err error) {
+	var remote rpcFailure
+	var address addressFailure
+	var input inputFailure
+	switch {
+	case errors.As(err, &address):
+		fmt.Fprintf(w, "Error: %s. Use KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...\n", err)
+	case errors.As(err, &input):
+		fmt.Fprintf(w, "Error: %s\n", err)
+	case errors.As(err, &remote):
+		fmt.Fprintf(w, "Error: %s\n", err)
+		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == "session_unavailable" {
+			fmt.Fprintln(w, "A graphical session is required to launch a napplet.")
+		}
+		if data, ok := remote.RPC.Data.(controlprotocol.PartialCleanupData); ok {
+			fmt.Fprintf(w, "Record removed for %s, but cleanup is incomplete.\n", displayValue(data.Address))
+		}
+	default:
+		fmt.Fprintf(w, "Error: %s\n", err)
 	}
 }
 

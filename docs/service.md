@@ -369,8 +369,8 @@ keep working across upgrades. With the NixOS module it is
 
 Entries set `Terminal=true`. Your desktop opens a terminal for the launch; on
 success the CLI prints the opened window and exits, and on failure the fixed
-JSON error is printed in that terminal, such as the
-`session_unavailable` error above. Many terminals close as soon as the
+readable error is printed in that terminal, such as the
+`session_unavailable` error above (`Error: Unavailable` followed by a graphical-session hint). Many terminals close as soon as the
 command exits, so the message may only flash. To read it, run the same
 command from a terminal: copy the `Exec=` line from the entry, or use
 `kwakore launch ADDRESS` with the address from `kwakore installed`.
@@ -539,14 +539,19 @@ If a switch times out, run `kwakore signer status` before trying again.
 
 ## Status, errors and logs
 
-**Public status.** All output is JSON; none of it contains secrets, signer
+**Public status.** CLI output is labeled text by default; `--json` before the command returns JSON. Neither format contains secrets, signer
 URLs or private paths.
 
 ```console
 $ kwakore status
+Service status
+health:
+  active windows: 0
+  ready: true
+  version: v0.2.0
+protocol version: 1
+$ kwakore --json status
 {"protocol_version":1,"health":{"ready":true,"version":"v0.2.0","uptime_seconds":2.01,"config_status":"valid","storage_status":"open","active_windows":0}}
-$ kwakore diagnostics
-{"observed_from":"live","health":{…},"settings":{…},"recent_errors":[]}
 ```
 
 `ready` means valid configuration, open storage and acceptance of work; it
@@ -563,8 +568,7 @@ files with the same parser and ownership checks and report
 take no lock and create nothing. On a helper install the daemon binary is
 `~/.local/lib/kwakore/current/kwakore-daemon`.
 
-**CLI errors.** Every failure writes one JSON object to stderr, nothing to
-stdout, and exits 1. Codes and messages are fixed (the full table is in the
+**CLI errors.** By default, failures write a readable message to stderr. With `--json`, every failure writes one JSON object to stderr. Both modes write nothing to stdout and exit 1. Codes and messages are fixed (the full table is in the
 [protocol reference](control-protocol.md#errors)):
 
 | Output | Meaning |

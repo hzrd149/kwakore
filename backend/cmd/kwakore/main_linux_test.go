@@ -76,7 +76,7 @@ func TestCLISettingsCommands(t *testing.T) {
 				t.Fatal(err)
 			}
 			os.Stdout = w
-			callErr := run(tc.args)
+			callErr := run(append([]string{"--json"}, tc.args...))
 			_ = w.Close()
 			os.Stdout = old
 			out, _ := io.ReadAll(r)
@@ -185,7 +185,7 @@ func TestCLIContractPairStartLocalToken(t *testing.T) {
 				seen <- p.Secret
 				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + tc.result + `}` + "\n"))
 			}()
-			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "signer", "pair", "start")
+			cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "signer", "pair", "start")
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err := cmd.Run()
@@ -264,7 +264,7 @@ func TestCLIContract(t *testing.T) {
 				result := cliContractResult(tc.method, address)
 				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + result + `}` + "\n"))
 			}()
-			cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, tc.args...)...)
+			cmd := exec.Command(cli, append([]string{"--json", "--socket", listener.Addr().String()}, tc.args...)...)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			out, err := cmd.Output()
@@ -295,7 +295,7 @@ func TestCLIContract(t *testing.T) {
 				_, _ = bufio.NewReader(conn).ReadBytes('\n')
 				_, _ = conn.Write([]byte(tc.response + "\n"))
 			}()
-			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "status")
+			cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "status")
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			if err := cmd.Run(); err == nil || stdout.Len() != 0 {
@@ -327,7 +327,7 @@ func TestCLIContract(t *testing.T) {
 				_, _ = bufio.NewReader(conn).ReadBytes('\n')
 				_, _ = conn.Write([]byte(tc.response + "\n"))
 			}()
-			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "launch", address)
+			cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "launch", address)
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			if err := cmd.Run(); err == nil || stdout.Len() != 0 || bytes.Contains(stderr.Bytes(), []byte("secret")) || bytes.Contains(stderr.Bytes(), []byte("private")) || bytes.Contains(stderr.Bytes(), []byte(`"reason":"session_unavailable"`)) != tc.wantReason {
@@ -350,7 +350,7 @@ func TestCLIContract(t *testing.T) {
 			_, _ = bufio.NewReader(conn).ReadBytes('\n')
 			_, _ = conn.Write([]byte(response + "\n"))
 		}()
-		cmd := exec.Command(cli, "--socket", listener.Addr().String(), "permissions", "get", address)
+		cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "permissions", "get", address)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"code":1004`) || strings.Contains(stderr.String(), "secret") {
@@ -358,7 +358,7 @@ func TestCLIContract(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"--timeout", "0s", "status"}, {"--timeout", "garbage", "status"}, {"status"}} {
-		cmd := exec.Command(cli, args...)
+		cmd := exec.Command(cli, append([]string{"--json"}, args...)...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -381,7 +381,7 @@ func TestCLIContract(t *testing.T) {
 		_, _ = bufio.NewReader(conn).ReadBytes('\n')
 		time.Sleep(100 * time.Millisecond)
 	}()
-	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "--timeout", "10ms", "install", address)
+	cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "--timeout", "10ms", "install", address)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err == nil || stdout.Len() != 0 {
@@ -632,7 +632,7 @@ func TestCLIPartialCleanupErrorData(t *testing.T) {
 				seen <- line
 				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":` + fmt.Sprint(tc.code) + `,"message":"private cleanup path /home/user/secret","data":` + tc.data + `}}` + "\n"))
 			}()
-			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "uninstall", "--yes", address)
+			cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "uninstall", "--yes", address)
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			if err := cmd.Run(); err == nil || stdout.Len() != 0 {
@@ -720,7 +720,7 @@ func TestCLIReadMethods(t *testing.T) {
 				t.Fatal(err)
 			}
 			os.Stdout = w
-			callErr := run(tc.args)
+			callErr := run(append([]string{"--json"}, tc.args...))
 			_ = w.Close()
 			os.Stdout = old
 			out, _ := io.ReadAll(r)
@@ -813,7 +813,7 @@ func TestCLILaunchToken(t *testing.T) {
 		}
 	}()
 	runCLI := func(args ...string) (string, string, error) {
-		cmd := exec.Command(cli, args...)
+		cmd := exec.Command(cli, append([]string{"--json"}, args...)...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
@@ -1067,7 +1067,7 @@ func TestCLIAddressExec(t *testing.T) {
 		}
 	}()
 	runCLI := func(args ...string) (string, string, error) {
-		cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, args...)...)
+		cmd := exec.Command(cli, append([]string{"--json", "--socket", listener.Addr().String()}, args...)...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
@@ -1172,7 +1172,7 @@ func TestCLIInstallForwardsRelayHints(t *testing.T) {
 		seen <- string(line)
 		_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
 	}()
-	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "install", naddr)
+	cmd := exec.Command(cli, "--json", "--socket", listener.Addr().String(), "install", naddr)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -1185,5 +1185,38 @@ func TestCLIInstallForwardsRelayHints(t *testing.T) {
 	})
 	if got := <-seen; got != string(want)+"\n" {
 		t.Fatalf("request %q, want %q", got, want)
+	}
+}
+
+func TestCLIHumanOutputAndJSONOption(t *testing.T) {
+	raw := json.RawMessage(`{"items":[{"name":"Notes","address":"35129:abc:notes"}],"total":1,"next_offset":null}`)
+	var out bytes.Buffer
+	if err := writeCLIResult(&out, "napplet.installed", raw, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"Napplet installed\n", "name: Notes", "address: 35129:abc:notes", "total: 1", "next offset: none"} {
+		if !strings.Contains(out.String(), part) {
+			t.Fatalf("missing %q in %q", part, out.String())
+		}
+	}
+	out.Reset()
+	if err := writeCLIResult(&out, "napplet.installed", raw, true); err != nil || out.String() != string(raw)+"\n" {
+		t.Fatalf("json: %q %v", out.String(), err)
+	}
+	args, socket, timeout, jsonOutput, err := globalOptions([]string{"--timeout", "2s", "--json", "--socket", "/tmp/test.sock", "status"})
+	if err != nil || !jsonOutput || socket != "/tmp/test.sock" || timeout != 2*time.Second || !slices.Equal(args, []string{"status"}) {
+		t.Fatalf("options: %v %q %s %t %v", args, socket, timeout, jsonOutput, err)
+	}
+	if _, _, _, _, err := globalOptions([]string{"--json", "--json", "status"}); err == nil {
+		t.Fatal("duplicate --json accepted")
+	}
+	out.Reset()
+	writeHumanError(&out, addressFailure("invalid_address"))
+	if !strings.Contains(out.String(), "naddr1...") || strings.HasPrefix(out.String(), "{") {
+		t.Fatalf("human error: %q", out.String())
+	}
+	out.Reset()
+	if err := writeCLIResult(&out, "napplet.installed", json.RawMessage(`{"name":"bad\nname"}`), false); err != nil || strings.Contains(out.String(), "bad\nname") {
+		t.Fatalf("control output: %q %v", out.String(), err)
 	}
 }

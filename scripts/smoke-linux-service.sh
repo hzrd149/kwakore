@@ -317,7 +317,7 @@ wait_state() {
 
 cli_status() {
 	local out
-	out=$("$cli" status) || fail "kwakore status failed: $out"
+	out=$("$cli" --json status) || fail "kwakore status failed: $out"
 	echo "$out" | grep -Eq '"protocol_version": *1([^0-9]|$)' || fail "status lacks protocol_version 1: $out"
 	echo "$out" | grep -Eq '"ready": *true' || fail "status is not ready: $out"
 }
@@ -878,7 +878,7 @@ run_full() {
 	systemctl --user start kwakore.service
 	wait_state kwakore.service active
 	cli_status
-	"$cli" installed >"$stage/installed.json" || fail "kwakore installed failed"
+	"$cli" --json installed >"$stage/installed.json" || fail "kwakore installed failed"
 	grep -qF "\"$address\"" "$stage/installed.json" || fail "the seeded napplet is not installed: $(cat "$stage/installed.json")"
 	entry="$apps_dir/kwakore-napplet-$(printf '%s' "$address" | sha256sum | cut -c1-32).desktop"
 	[ "$(ls -A "$apps_dir" | tr '\n' ' ')" = "$(basename "$entry") " ] ||
@@ -907,10 +907,10 @@ run_full() {
 	# journal can read repeats it.
 	nsec=$(cat "$stage/seed/signer.nsec")
 	pub=$(cat "$stage/seed/signer.pub")
-	"$cli" signer switch nsec --secret-file "$stage/seed/signer.nsec" >"$stage/signer.out" 2>&1 ||
+	"$cli" --json signer switch nsec --secret-file "$stage/seed/signer.nsec" >"$stage/signer.out" 2>&1 ||
 		fail "signer switch failed: $(cat "$stage/signer.out")"
-	"$cli" signer status >>"$stage/signer.out" 2>&1 || fail "signer status failed"
-	"$cli" diagnostics >>"$stage/signer.out" 2>&1 || fail "diagnostics failed"
+	"$cli" --json signer status >>"$stage/signer.out" 2>&1 || fail "signer status failed"
+	"$cli" --json diagnostics >>"$stage/signer.out" 2>&1 || fail "diagnostics failed"
 	grep -Eq "\"public_key\": *\"$pub\"" "$stage/signer.out" || fail "signer status does not show the switched key: $(cat "$stage/signer.out")"
 	journalctl --user -u kwakore.service --since "@$start_epoch" -o cat --no-pager >"$stage/journal.log" 2>&1 || true
 	[ -s "$stage/journal.log" ] || fail "the user journal for kwakore.service is empty"
@@ -925,12 +925,12 @@ run_full() {
 	daemon_env WAYLAND_DISPLAY >/dev/null && fail "the daemon kept WAYLAND_DISPLAY in the graphical X stage"
 	[ "$(entry_snapshot)" = "$entry_state" ] || fail "a daemon restart rewrote the unchanged entry"
 	run_entry || fail "the entry launch failed: $(cat "$stage/entry.err")"
-	grep -Eq '"outcome": *"opened"' "$stage/entry.out" || fail "the entry launch did not open a window: $(cat "$stage/entry.out")"
-	window_id=$(sed -nE 's/.*"window_id": *"([0-9a-f]{32})".*/\1/p' "$stage/entry.out")
+	grep -q '^outcome: opened$' "$stage/entry.out" || fail "the entry launch did not open a window: $(cat "$stage/entry.out")"
+	window_id=$(sed -nE 's/^window id: ([0-9a-f]{32})$/\1/p' "$stage/entry.out")
 	[ -n "$window_id" ] || fail "no window id in the launch result: $(cat "$stage/entry.out")"
 	pid=$(window_children)
 	[ -n "$pid" ] && [ "$(echo "$pid" | wc -l)" = 1 ] || fail "expected one napplet child in kwakore.service, found: ${pid:-none}"
-	"$cli" stop "$window_id" >"$stage/stop.out" 2>&1 || fail "kwakore stop failed: $(cat "$stage/stop.out")"
+	"$cli" --json stop "$window_id" >"$stage/stop.out" 2>&1 || fail "kwakore stop failed: $(cat "$stage/stop.out")"
 	grep -Eq '"closed": *true' "$stage/stop.out" || fail "the window did not close: $(cat "$stage/stop.out")"
 	for _ in $(seq 1 50); do
 		[ -z "$(window_children)" ] && break
@@ -944,7 +944,7 @@ run_full() {
 	daemon_env DISPLAY >/dev/null && fail "the daemon still has DISPLAY"
 	daemon_env WAYLAND_DISPLAY >/dev/null && fail "the daemon still has WAYLAND_DISPLAY"
 	[ "$(entry_snapshot)" = "$entry_state" ] || fail "a daemon restart rewrote the unchanged entry"
-	want_error='{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}'
+	want_error='Error: Unavailable'
 	# Once with the caller's display still set (the daemon's environment
 	# decides), once without one, as a session-less menu would run it.
 	for stale in keep drop; do
@@ -952,7 +952,7 @@ run_full() {
 		if [ "$stale" = keep ]; then run_entry || status=$?; else run_entry env -u DISPLAY -u WAYLAND_DISPLAY || status=$?; fi
 		[ "$status" != 0 ] || fail "the headless entry launch exited 0"
 		[ ! -s "$stage/entry.out" ] || fail "the headless entry launch wrote to stdout: $(cat "$stage/entry.out")"
-		[ "$(cat "$stage/entry.err")" = "$want_error" ] || fail "the headless entry error is not the fixed JSON: $(cat "$stage/entry.err")"
+		grep -qF "$want_error" "$stage/entry.err" && grep -qF "A graphical session is required" "$stage/entry.err" || fail "the headless entry error is not readable: $(cat "$stage/entry.err")"
 	done
 	[ -z "$(window_children)" ] || fail "a headless launch started a napplet child"
 	# Terminal=true is how a desktop shows that stderr; the docs must say so
@@ -961,13 +961,13 @@ run_full() {
 	grep -qF 'Entries set `Terminal=true`' "$repo_root/docs/service.md" || fail "docs/service.md does not document Terminal=true"
 	grep -qF "$want_error" "$repo_root/docs/service.md" || fail "docs/service.md does not show the session_unavailable error"
 	grep -qF "$want_error" "$repo_root/docs/control-protocol.md" || fail "docs/control-protocol.md does not show the session_unavailable error"
-	pass "headless: with no DISPLAY or WAYLAND_DISPLAY the entry printed only the fixed session_unavailable JSON on stderr, exited non-zero, and Terminal=true is the documented surface"
+	pass "headless: with no DISPLAY or WAYLAND_DISPLAY the entry printed a readable session_unavailable error on stderr, exited non-zero, and Terminal=true is the documented surface"
 
 	# ─── uninstall ───
-	"$cli" uninstall --yes "$address" >"$stage/uninstall.out" 2>&1 || fail "kwakore uninstall failed: $(cat "$stage/uninstall.out")"
+	"$cli" --json uninstall --yes "$address" >"$stage/uninstall.out" 2>&1 || fail "kwakore uninstall failed: $(cat "$stage/uninstall.out")"
 	[ ! -e "$entry" ] || fail "uninstall left the entry behind"
 	[ -z "$(entry_snapshot)" ] || fail "uninstall left a managed entry: $(entry_snapshot)"
-	"$cli" installed >"$stage/installed.json" || fail "kwakore installed failed"
+	"$cli" --json installed >"$stage/installed.json" || fail "kwakore installed failed"
 	grep -qF "\"$address\"" "$stage/installed.json" && fail "the napplet is still installed"
 	systemctl --user restart kwakore.service
 	wait_state kwakore.service active

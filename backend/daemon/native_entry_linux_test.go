@@ -125,7 +125,7 @@ func TestServiceNativeEntryLaunch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	launch.Stdout, launch.Stderr = &stdout, &stderr
 	err = launch.Run()
-	const want = `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}`
+	const want = "Error: Unavailable\nA graphical session is required to launch a napplet."
 	if err == nil || stdout.Len() != 0 || strings.TrimSpace(stderr.String()) != want {
 		t.Fatalf("headless entry launch: err %v, stdout %q, stderr %q", err, stdout.String(), stderr.String())
 	}

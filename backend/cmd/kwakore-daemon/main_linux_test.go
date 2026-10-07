@@ -443,7 +443,7 @@ func TestForegroundClientParity(t *testing.T) {
 		{"installed", []string{"installed"}, "items"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			call := exec.Command(cli, tc.args...)
+			call := exec.Command(cli, append([]string{"--json"}, tc.args...)...)
 			call.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
 			var errout bytes.Buffer
 			call.Stderr = &errout
@@ -578,7 +578,7 @@ func TestSocketStatusCLIEndToEnd(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v: %s", err, out)
 	}
-	status := exec.Command(cli, "status")
+	status := exec.Command(cli, "--json", "status")
 	status.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
 	out, err := status.CombinedOutput()
 	if err != nil {
