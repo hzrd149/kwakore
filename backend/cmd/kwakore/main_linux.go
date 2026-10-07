@@ -107,7 +107,7 @@ func run(args []string) error {
 	if hasError {
 		if strings.HasPrefix(method, "signer.") {
 			var fields map[string]json.RawMessage
-			if json.Unmarshal(rpcError, &fields) != nil || len(fields) != 2 || fields["code"] == nil || fields["message"] == nil {
+			if controlprotocol.ValidateNamedParams(rpcError, "code", "message") != nil || json.Unmarshal(rpcError, &fields) != nil || len(fields) != 2 || fields["code"] == nil || fields["message"] == nil {
 				return errors.New("invalid daemon response")
 			}
 		}
@@ -569,7 +569,7 @@ func validPairStartResult(result json.RawMessage) (pairStartResult, bool) {
 		return out, false
 	}
 	b, err := hex.DecodeString(out.ClientPublicKey)
-	if err != nil || len(b) != 32 || hex.EncodeToString(b) != out.ClientPublicKey {
+	if err != nil || len(b) != 32 || bytes.Equal(b, make([]byte, 32)) || hex.EncodeToString(b) != out.ClientPublicKey {
 		return out, false
 	}
 	u, err := url.Parse(out.Relay)

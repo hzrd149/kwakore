@@ -158,6 +158,7 @@ func TestCLIContractPairStartLocalToken(t *testing.T) {
 		{"valid", `{"client_public_key":"` + pub + `","relay":"wss://example.com"}`, true},
 		{"extra secret", `{"client_public_key":"` + pub + `","relay":"wss://example.com","secret":"private-sentinel"}`, false},
 		{"query relay", `{"client_public_key":"` + pub + `","relay":"wss://example.com/?secret=private-sentinel"}`, false},
+		{"zero key", `{"client_public_key":"` + strings.Repeat("0", 64) + `","relay":"wss://example.com"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seen := make(chan string, 1)
