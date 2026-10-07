@@ -12,7 +12,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"verdana/backend/webview"
+	"kwakore/backend/webview"
 )
 
 // adversarialNappletDir is the Phase 4 sandbox fixture (D-13, D-15): a

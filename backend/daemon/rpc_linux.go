@@ -10,9 +10,9 @@ import (
 	"errors"
 	"time"
 
-	"verdana/backend"
-	"verdana/backend/controlprotocol"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/controlprotocol"
+	"kwakore/backend/serviceconfig"
 )
 
 // serviceUninstall is replaceable by package tests to force a cleanup failure

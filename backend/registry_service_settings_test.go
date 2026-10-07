@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/serviceconfig"
 )
 
 func TestServiceBlossomTrustUsesOnlyConfiguredServers(t *testing.T) {

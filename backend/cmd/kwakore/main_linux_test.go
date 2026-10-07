@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"verdana/backend/controlprotocol"
-	"verdana/backend/desktopentry"
+	"kwakore/backend/controlprotocol"
+	"kwakore/backend/desktopentry"
 )
 
 func TestCLISettingsCommands(t *testing.T) {

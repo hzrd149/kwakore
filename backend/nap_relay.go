@@ -11,7 +11,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // NAP-RELAY: the napplet's only way to the nostr network. It hands over

@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"verdana/backend"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/serviceconfig"
 )
 
 // DiagnosticError is an allow-listed summary. Detail is always generated from

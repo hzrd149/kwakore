@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"verdana/backend/webview"
+	"kwakore/backend/webview"
 )
 
 // The napplet runtime's Go half. A napplet window's host page (webview's

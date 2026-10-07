@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // ─── JS literal helpers ──────────────────────────────────────────

@@ -14,8 +14,8 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip46"
 
-	"verdana/backend/fileutil"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/fileutil"
+	"kwakore/backend/serviceconfig"
 )
 
 const maxCredentialBytes = 4096

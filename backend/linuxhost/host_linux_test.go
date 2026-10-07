@@ -14,8 +14,8 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend"
-	"verdana/backend/desktopentry"
+	"kwakore/backend"
+	"kwakore/backend/desktopentry"
 )
 
 func TestLinuxHostSession(t *testing.T) {

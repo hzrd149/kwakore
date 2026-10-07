@@ -23,10 +23,10 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
-	"verdana/backend/bunker"
-	"verdana/backend/fileutil"
-	"verdana/backend/napconfig"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/bunker"
+	"kwakore/backend/fileutil"
+	"kwakore/backend/napconfig"
+	"kwakore/backend/serviceconfig"
 )
 
 var (

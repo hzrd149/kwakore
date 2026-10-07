@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 func stateString(st backend.MediaState) string {

@@ -29,8 +29,8 @@ import (
 	"fiatjaf.com/nostr/nipb7/blossom"
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
-	"verdana/backend/napconfig"
-	"verdana/backend/webview"
+	"kwakore/backend/napconfig"
+	"kwakore/backend/webview"
 )
 
 // ─── test rig ────────────────────────────────────────────────────

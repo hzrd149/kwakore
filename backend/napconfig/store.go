@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
-	"verdana/backend/fileutil"
+	"kwakore/backend/fileutil"
 )
 
 // The NAP-CONFIG store: per scope, the schema last registered in it and the

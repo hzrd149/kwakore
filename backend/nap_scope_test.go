@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"verdana/backend/webview"
+	"kwakore/backend/webview"
 )
 
 // needNode returns node's path, or skips the test when there is none. CI sets

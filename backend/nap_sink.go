@@ -17,7 +17,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nipb7/blossom"
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // The gate layer (D-02). This file and nap_route.go are the only NAP code

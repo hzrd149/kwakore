@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 // NAP-MEDIA shell-owned playback goes to the media player the user already

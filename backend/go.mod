@@ -1,4 +1,4 @@
-module verdana/backend
+module kwakore/backend
 
 go 1.26.2
 

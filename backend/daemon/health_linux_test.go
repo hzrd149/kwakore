@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 func TestHealthReportsLiveStateAndShutdown(t *testing.T) {

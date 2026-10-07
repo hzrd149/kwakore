@@ -103,7 +103,7 @@ lib="$repo_root/desktop/internal/webviewlib/lib/linux_$arch/libwebview.so"
 [ -f "$lib" ] && [ ! -L "$lib" ] || fail "missing generated $lib"
 
 export GOOS=linux GOARCH="$arch" CGO_ENABLED=1
-ldflags="-s -w -buildid= -X verdana/backend.Version=$version"
+ldflags="-s -w -buildid= -X kwakore/backend.Version=$version"
 build() {
 	go build -trimpath -buildvcs=false "$@"
 }

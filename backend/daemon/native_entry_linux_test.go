@@ -15,8 +15,8 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend"
-	"verdana/backend/desktopentry"
+	"kwakore/backend"
+	"kwakore/backend/desktopentry"
 )
 
 // The entry the service writes at startup for an installed napplet, run

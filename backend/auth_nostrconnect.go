@@ -15,7 +15,7 @@ import (
 	"fiatjaf.com/nostr/nip04"
 	"fiatjaf.com/nostr/nip44"
 	"fiatjaf.com/nostr/nip46"
-	"verdana/backend/bunker"
+	"kwakore/backend/bunker"
 )
 
 // The client-initiated half of NIP-46: while the login screen is up the

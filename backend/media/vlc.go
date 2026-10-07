@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 // vlcPlayer drives VLC over its old remote control interface (oldrc: VLC

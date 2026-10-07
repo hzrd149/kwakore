@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	nappbridge "verdana/backend/webview"
+	nappbridge "kwakore/backend/webview"
 )
 
 // ─── fake launcher ──────────────────────────────────────────────

@@ -1,6 +1,6 @@
 // Package fileutil holds the file-writing helpers every on-disk store in
 // Verdana shares. It is a leaf: it imports nothing from the backend root, so
-// the desktop module can import verdana/backend/fileutil as well.
+// the desktop module can import kwakore/backend/fileutil as well.
 package fileutil
 
 import (

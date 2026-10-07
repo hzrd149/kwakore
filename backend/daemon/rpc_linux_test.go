@@ -23,9 +23,9 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
-	"verdana/backend"
-	"verdana/backend/controlprotocol"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/controlprotocol"
+	"kwakore/backend/serviceconfig"
 )
 
 func TestRPCSignerPublicStatusAndSwitch(t *testing.T) {

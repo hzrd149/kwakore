@@ -17,7 +17,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/serviceconfig"
 )
 
 func TestCredentialStorePrivateAndRestore(t *testing.T) {

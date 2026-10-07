@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"verdana/backend/napconfig"
+	"kwakore/backend/napconfig"
 )
 
 // setupConfigTest is setupNapTest for the NAP-CONFIG tests: a fresh data

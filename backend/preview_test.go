@@ -19,7 +19,7 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend/napconfig"
+	"kwakore/backend/napconfig"
 )
 
 type previewTestHost struct {

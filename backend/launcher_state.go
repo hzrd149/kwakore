@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"verdana/backend/fileutil"
+	"kwakore/backend/fileutil"
 )
 
 // AppState is everything the launcher remembers between runs.

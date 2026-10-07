@@ -20,9 +20,9 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend/fileutil"
-	"verdana/backend/napconfig"
-	"verdana/backend/netguard"
+	"kwakore/backend/fileutil"
+	"kwakore/backend/napconfig"
+	"kwakore/backend/netguard"
 )
 
 // backgroundSyncs tracks the shortcut and intent passes that installs,

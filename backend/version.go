@@ -7,7 +7,7 @@ import (
 )
 
 // Version is the release this build is, stamped by release builds with
-// -ldflags "-X verdana/backend.Version=v1.2.3". Empty for development builds.
+// -ldflags "-X kwakore/backend.Version=v1.2.3". Empty for development builds.
 var Version = ""
 
 // SourceURL is where Verdana's source, releases and issues live.

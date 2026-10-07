@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"verdana/backend/fileutil"
+	"kwakore/backend/fileutil"
 )
 
 var writeAtomic = fileutil.WriteFileAtomic

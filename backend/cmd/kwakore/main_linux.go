@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	"verdana/backend/controlprotocol"
-	"verdana/backend/desktopentry"
+	"kwakore/backend/controlprotocol"
+	"kwakore/backend/desktopentry"
 )
 
 func run(args []string) error {

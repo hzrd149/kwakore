@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // ─── test rig ───────────────────────────────────────────────────

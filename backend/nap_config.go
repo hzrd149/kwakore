@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"verdana/backend/napconfig"
+	"kwakore/backend/napconfig"
 )
 
 // NAP-CONFIG: a napplet declares its settings as a JSON Schema and reads

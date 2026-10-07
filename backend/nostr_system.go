@@ -6,7 +6,7 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
-	"verdana/backend/eventdb"
+	"kwakore/backend/eventdb"
 )
 
 // initSystem opens the event store and the kv store under dataDir and builds

@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"verdana/backend"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/serviceconfig"
 )
 
 func TestDaemonOpenResetsInstalledAcrossDataDirs(t *testing.T) {

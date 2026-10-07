@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // NAP-MEDIA: media sessions. A shell-owned session plays its source in the

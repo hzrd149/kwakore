@@ -17,7 +17,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
 
-	"fiatjaf.com/verdana/desktop/internal/wireline"
+	"kwakore/desktop/internal/wireline"
 )
 
 type wireMsg struct {

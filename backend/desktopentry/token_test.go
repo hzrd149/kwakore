@@ -8,8 +8,8 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
-	"verdana/backend"
-	"verdana/backend/desktopentry"
+	"kwakore/backend"
+	"kwakore/backend/desktopentry"
 )
 
 func tokenAddressCorpus() []string {

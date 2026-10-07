@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 // mpvPlayer drives mpv over its JSON IPC socket: properties it observes come

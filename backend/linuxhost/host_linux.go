@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"verdana/backend"
-	"verdana/backend/desktopentry"
-	"verdana/backend/fileutil"
-	"verdana/backend/media"
-	"verdana/backend/netguard"
+	"kwakore/backend"
+	"kwakore/backend/desktopentry"
+	"kwakore/backend/fileutil"
+	"kwakore/backend/media"
+	"kwakore/backend/netguard"
 )
 
 const readyTimeout = 10 * time.Second

@@ -16,7 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"verdana/backend/fileutil"
+	"kwakore/backend/fileutil"
 )
 
 // Managed entries live in the user's applications directory as

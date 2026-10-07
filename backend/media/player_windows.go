@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os/exec"
 
-	"verdana/backend"
+	"kwakore/backend"
 )
 
 // On Windows mpv's IPC is a named pipe and VLC's rc a TCP port; neither is

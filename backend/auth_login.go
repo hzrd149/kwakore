@@ -11,7 +11,7 @@ import (
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip05"
 	"fiatjaf.com/nostr/nip46"
-	"verdana/backend/bunker"
+	"kwakore/backend/bunker"
 )
 
 var (

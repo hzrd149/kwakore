@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"verdana/backend"
-	"verdana/backend/daemon"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/daemon"
+	"kwakore/backend/serviceconfig"
 )
 
 func TestForegroundStartReadyAndStop(t *testing.T) {

@@ -18,9 +18,9 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend"
-	"verdana/backend/linuxhost"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend"
+	"kwakore/backend/linuxhost"
+	"kwakore/backend/serviceconfig"
 )
 
 var ErrClosing = errors.New("service is shutting down")

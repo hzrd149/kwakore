@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	nappbridge "verdana/backend/webview"
+	nappbridge "kwakore/backend/webview"
 )
 
 // The one page the child serves on loopback, the napplet host page, goes

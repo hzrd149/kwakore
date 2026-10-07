@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	"verdana/backend/controlprotocol"
+	"kwakore/backend/controlprotocol"
 )
 
 func TestSocketPeerDisconnectCancelsWork(t *testing.T) {

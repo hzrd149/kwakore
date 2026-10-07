@@ -14,8 +14,8 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend/desktopentry"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/desktopentry"
+	"kwakore/backend/serviceconfig"
 )
 
 // ─── native entry rig ────────────────────────────────────────────

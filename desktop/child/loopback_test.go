@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	nappbridge "verdana/backend/webview"
+	nappbridge "kwakore/backend/webview"
 )
 
 // get runs one GET through h and checks the status and the loopback headers

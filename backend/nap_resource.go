@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"verdana/backend/netguard"
+	"kwakore/backend/netguard"
 )
 
 // NAP-RESOURCE: bytes for a napplet that has no network. Its frame can show

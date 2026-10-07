@@ -7,7 +7,7 @@ import (
 	"time"
 
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
-	"verdana/backend/eventdb"
+	"kwakore/backend/eventdb"
 )
 
 // reopens runs open in the background and reports whether it finished in

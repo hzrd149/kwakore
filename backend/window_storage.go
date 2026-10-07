@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"verdana/backend/fileutil"
-	"verdana/backend/napconfig"
+	"kwakore/backend/fileutil"
+	"kwakore/backend/napconfig"
 )
 
 // localStorageQuota caps one napp's localStorage, like browsers do (~5MB).

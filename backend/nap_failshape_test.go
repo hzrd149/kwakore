@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"verdana/backend/webview"
+	"kwakore/backend/webview"
 )
 
 // The host page answers the requests that never reach Go (too large,

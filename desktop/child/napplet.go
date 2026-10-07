@@ -11,7 +11,7 @@ import (
 
 	"github.com/abemedia/go-webview"
 
-	nappbridge "verdana/backend/webview"
+	nappbridge "kwakore/backend/webview"
 )
 
 // A napplet window loads no napp files and gets no bridge.js. Its main frame

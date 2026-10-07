@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"verdana/backend/fileutil"
+	"kwakore/backend/fileutil"
 )
 
 func TestOverridePrecedenceAndRestart(t *testing.T) {

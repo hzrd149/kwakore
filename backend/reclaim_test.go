@@ -16,7 +16,7 @@ import (
 
 	"fiatjaf.com/nostr"
 
-	"verdana/backend/napconfig"
+	"kwakore/backend/napconfig"
 )
 
 // ─── test rig ────────────────────────────────────────────────────

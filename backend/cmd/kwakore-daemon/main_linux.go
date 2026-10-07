@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"verdana/backend/daemon"
-	"verdana/backend/serviceconfig"
+	"kwakore/backend/daemon"
+	"kwakore/backend/serviceconfig"
 )
 
 var version = "development"

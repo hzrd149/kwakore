@@ -43,7 +43,7 @@ import (
 	"strings"
 	"testing"
 
-	"verdana/backend/webview"
+	"kwakore/backend/webview"
 )
 
 const (
