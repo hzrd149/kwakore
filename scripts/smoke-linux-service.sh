@@ -63,7 +63,8 @@
 #               and a symlink member are refused before extraction without
 #               disturbing the running install; a new archive swaps the
 #               release in one rename, restarts the running daemon and prunes
-#               releases older than the previous one
+#               releases older than the previous one, and re-running the live
+#               archive keeps that previous release
 #
 # A trap stops and disables the units, removes the unit files, drop-in and
 # socket directory, reloads the manager and deletes the staging directory.
@@ -720,7 +721,16 @@ run_install() {
 		fail "releases after two upgrades are not exactly the previous and current ones: $releases_now"
 	[ "$(readlink "$root/current")" = "releases/$sha3" ] || fail "second upgrade did not switch current"
 	cli_status
-	pass "install: a new archive swapped the release in one rename, restarted the running daemon, kept the previous release and pruned older ones"
+	# Re-running the helper with the archive that is already live must keep
+	# the release it replaced: the rollback target survives a no-op run.
+	"${helper[@]}" --archive "$v3" >"$stage/rerun.log" 2>&1 || fail "re-run after upgrade failed: $(cat "$stage/rerun.log")"
+	grep -q 'already installed; nothing changed' "$stage/rerun.log" || fail "re-run after upgrade did not report an unchanged install"
+	releases_now=$(ls -A "$root/releases" | LC_ALL=C sort | tr '\n' ' ')
+	[ "$releases_now" = "$(printf '%s\n' "$sha2" "$sha3" | LC_ALL=C sort | tr '\n' ' ')" ] ||
+		fail "re-running the live archive pruned the kept previous release: $releases_now"
+	[ "$(readlink "$root/current")" = "releases/$sha3" ] || fail "re-running the live archive changed current"
+	cli_status
+	pass "install: a new archive swapped the release in one rename, restarted the running daemon, kept the previous release and pruned older ones, and re-running the live archive kept the previous release"
 }
 
 if [ "$mode" = --install-only ]; then

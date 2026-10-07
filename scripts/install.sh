@@ -474,15 +474,20 @@ fi
 
 # Keep the live release and the one it replaced (a daemon that has not
 # restarted yet may still run from it); drop older releases. Only
-# hash-named directories this helper created are considered.
-for dir in "$releases"/*; do
-	name=$(basename -- "$dir")
-	[[ "$name" =~ ^[0-9a-f]{64}$ ]] || continue
-	[ -d "$dir" ] && [ ! -L "$dir" ] || continue
-	[ "releases/$name" = "$want" ] && continue
-	[ "releases/$name" = "$previous" ] && continue
-	rm -rf -- "$dir"
-done
+# hash-named directories this helper created are considered. Prune only when
+# this run swapped the release: on a re-run with the installed archive,
+# $previous is the live release itself, and pruning against it would delete
+# the kept rollback release.
+if $release_changed; then
+	for dir in "$releases"/*; do
+		name=$(basename -- "$dir")
+		[[ "$name" =~ ^[0-9a-f]{64}$ ]] || continue
+		[ -d "$dir" ] && [ ! -L "$dir" ] || continue
+		[ "releases/$name" = "$want" ] && continue
+		[ "releases/$name" = "$previous" ] && continue
+		rm -rf -- "$dir"
+	done
+fi
 
 # ─── report ──────────────────────────────────────────────────────────────────
 
