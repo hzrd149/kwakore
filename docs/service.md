@@ -374,7 +374,9 @@ If entries are missing, `kwakore diagnostics` shows a `native_entries` item
 in `recent_errors`, and the journal has the details
 (`native desktop entries not fully reconciled`). The daemon writes no entries
 when no `kwakore` CLI sits beside it, or when the CLI path contains `%`:
-GLib-based desktops ignore such entries, so they are refused instead.
+GLib-based desktops ignore such entries, so they are refused instead. It still
+removes the entry of every napplet that is no longer installed, and leaves the
+entries of installed napplets as they are.
 
 ## Paths and files
 

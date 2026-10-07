@@ -45,8 +45,9 @@ type Entry struct {
 
 var (
 	// ErrInvalidCLI is returned when the CLI path is not an absolute, clean,
-	// printable path to an executable regular file. Nothing is written or
-	// removed in that case.
+	// printable path to an executable regular file and there are entries to
+	// write. Nothing is written in that case; stale managed entries are still
+	// removed, since removal needs no CLI.
 	ErrInvalidCLI = errors.New("desktop entry CLI path is not an absolute executable file")
 
 	reconcileMu sync.Mutex
@@ -105,26 +106,45 @@ func Render(cli string, e Entry) ([]byte, error) {
 }
 
 // Reconcile makes dir hold exactly one managed entry per canonical address
-// in entries and no other managed entry. The CLI path is checked before
-// anything is touched. An entry with an invalid address is skipped and
-// reported; a repeated address keeps its first entry. Unchanged files are
-// left alone, changed ones are replaced atomically through an owner-only
-// temporary file, and only files with the managed name shape are removed.
+// in entries and no other managed entry. An entry with an invalid address is
+// skipped and reported; a repeated address keeps its first entry. Unchanged
+// files are left alone, changed ones are replaced atomically through an
+// owner-only temporary file, and only files with the managed name shape are
+// removed.
+//
+// The CLI path is needed only to write an entry. When it is refused, nothing
+// is written or rewritten and ErrInvalidCLI is reported if entries is not
+// empty, but managed entries whose address is no longer in entries are still
+// removed, so an uninstall (or nil) cleans up without a valid CLI. Entries
+// still in the set are kept as they are: they may name another installation's
+// working CLI.
 func Reconcile(dir, cli string, entries []Entry) error {
 	reconcileMu.Lock()
 	defer reconcileMu.Unlock()
 	if !filepath.IsAbs(dir) {
 		return errors.New("desktop entry directory must be absolute")
 	}
-	if err := checkCLI(cli); err != nil {
-		return err
-	}
+	cliErr := checkCLI(cli)
 
 	var errs []error
+	if cliErr != nil && len(entries) > 0 {
+		errs = append(errs, cliErr)
+	}
+	// keep holds every path that is not stale; desired holds the subset that
+	// is (re)written, which stays empty without a valid CLI.
+	keep := map[string]bool{}
 	desired := map[string][]byte{}
 	for _, e := range entries {
 		path := filepath.Join(dir, FileName(e.Address))
-		if _, seen := desired[path]; seen {
+		if keep[path] {
+			continue
+		}
+		if cliErr != nil {
+			if _, err := EncodeToken(e.Address); err != nil {
+				errs = append(errs, fmt.Errorf("desktop entry %s: %w", FileName(e.Address), err))
+				continue
+			}
+			keep[path] = true
 			continue
 		}
 		data, err := Render(cli, e)
@@ -132,6 +152,7 @@ func Reconcile(dir, cli string, entries []Entry) error {
 			errs = append(errs, fmt.Errorf("desktop entry %s: %w", FileName(e.Address), err))
 			continue
 		}
+		keep[path] = true
 		desired[path] = data
 	}
 
@@ -158,7 +179,7 @@ func Reconcile(dir, cli string, entries []Entry) error {
 			continue
 		}
 		path := filepath.Join(dir, f.Name())
-		if _, keep := desired[path]; keep {
+		if keep[path] {
 			continue
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

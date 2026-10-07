@@ -409,6 +409,73 @@ func TestEntryReconcile(t *testing.T) {
 	}
 }
 
+// Removal needs no CLI: an uninstall or a startup pass with a missing or
+// refused CLI still removes managed entries that are no longer installed,
+// keeps the installed ones as they are, and never writes a new one.
+func TestEntryReconcileRemovesStaleWithoutCLI(t *testing.T) {
+	cli := plainCLI(t)
+	missing := filepath.Join(t.TempDir(), "kwakore")
+	percentDir := filepath.Join(t.TempDir(), "50%")
+	if err := os.Mkdir(percentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	percentCLI := filepath.Join(percentDir, "kwakore")
+	if err := os.WriteFile(percentCLI, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := Entry{Address: "35129:" + testPubkey + ":a", Title: "A"}
+	b := Entry{Address: "35129:" + testPubkey + ":b", Title: "B"}
+	c := Entry{Address: "35129:" + testPubkey + ":c", Title: "C"}
+	for name, bad := range map[string]string{"empty": "", "relative": "kwakore", "missing": missing, "percent": percentCLI} {
+		dir := filepath.Join(t.TempDir(), "applications")
+		if err := Reconcile(dir, cli, []Entry{a, b}); err != nil {
+			t.Fatal(err)
+		}
+		unrelated := filepath.Join(dir, "firefox.desktop")
+		if err := os.WriteFile(unrelated, []byte("[Desktop Entry]\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		aData, err := os.ReadFile(filepath.Join(dir, FileName(a.Address)))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// uninstalling b while c is newly installed: b goes, a stays as it
+		// was, c is not written, and the refused CLI is reported
+		err = Reconcile(dir, bad, []Entry{{Address: a.Address, Title: "A renamed"}, c})
+		if !errors.Is(err, ErrInvalidCLI) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := managedFiles(t, dir); !slices.Equal(got, []string{FileName(a.Address)}) {
+			t.Fatalf("%s: managed files %v, want only a", name, got)
+		}
+		if data, _ := os.ReadFile(filepath.Join(dir, FileName(a.Address))); !bytes.Equal(data, aData) {
+			t.Fatalf("%s: kept entry rewritten without a valid CLI", name)
+		}
+
+		// the last uninstall removes every managed entry; nothing needed the
+		// CLI, so nothing is reported
+		if err := Reconcile(dir, bad, nil); err != nil {
+			t.Fatalf("%s: removing all entries: %v", name, err)
+		}
+		if got := managedFiles(t, dir); len(got) != 0 {
+			t.Fatalf("%s: entries left after removing all: %v", name, got)
+		}
+		if _, err := os.Stat(unrelated); err != nil {
+			t.Fatalf("%s: unrelated entry removed: %v", name, err)
+		}
+
+		// and a missing directory is not created just to find nothing
+		fresh := filepath.Join(t.TempDir(), "applications")
+		if err := Reconcile(fresh, bad, []Entry{c}); !errors.Is(err, ErrInvalidCLI) {
+			t.Fatalf("%s: fresh: %v", name, err)
+		}
+		if _, err := os.Stat(fresh); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: refused CLI created the directory: %v", name, err)
+		}
+	}
+}
+
 func TestEntryReject(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "applications")
 	cli := plainCLI(t)
@@ -447,9 +514,11 @@ func TestEntryReject(t *testing.T) {
 		"not executable": notExec,
 		"percent":        percentCLI,
 	} {
-		// a refused CLI path leaves the entries as they were, even when the
-		// requested set would have removed them
-		err := Reconcile(dir, bad, []Entry{{Address: "35129:" + testPubkey + ":other", Title: "Other"}})
+		// a refused CLI path writes and rewrites nothing: the kept entry stays
+		// byte for byte although its title changed, and the new one is not
+		// written
+		renamed := Entry{Address: good.Address, Title: "Good renamed"}
+		err := Reconcile(dir, bad, []Entry{renamed, {Address: "35129:" + testPubkey + ":other", Title: "Other"}})
 		if !errors.Is(err, ErrInvalidCLI) {
 			t.Fatalf("%s: %v", name, err)
 		}

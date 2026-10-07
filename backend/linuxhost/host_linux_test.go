@@ -488,16 +488,27 @@ func TestLinuxHostNativeEntry(t *testing.T) {
 		t.Fatalf("unrelated desktop file removed: %v", err)
 	}
 
-	// without an installed CLI nothing is written or removed
+	// without an installed CLI nothing is written or rewritten, and the
+	// failure is reported
 	if err := host.SyncAppShortcuts(shortcuts[:1]); err != nil {
 		t.Fatal(err)
 	}
 	broken := &Host{CLI: ""}
-	if err := broken.SyncAppShortcuts(nil); !errors.Is(err, desktopentry.ErrInvalidCLI) {
+	if err := broken.SyncAppShortcuts(shortcuts); !errors.Is(err, desktopentry.ErrInvalidCLI) {
 		t.Fatalf("missing CLI: %v", err)
 	}
 	if got := managedEntries(t, apps); len(got) != 1 {
 		t.Fatalf("a refused CLI changed entries: %v", got)
+	}
+	// but an uninstall still removes the managed entry: removal needs no CLI
+	if err := broken.SyncAppShortcuts(nil); err != nil {
+		t.Fatalf("uninstall without a CLI: %v", err)
+	}
+	if got := managedEntries(t, apps); len(got) != 0 {
+		t.Fatalf("uninstall without a CLI left entries: %v", got)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated desktop file removed: %v", err)
 	}
 }
 
