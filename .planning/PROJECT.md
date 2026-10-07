@@ -1,4 +1,4 @@
-# Kwakore (currently Verdana)
+# Kwakore
 
 ## What This Is
 
@@ -6,18 +6,16 @@ Kwakore (formerly Verdana) is a per-user Linux service for discovering, installi
 
 ## Current State
 
-**v0.1 Hardening shipped 2026-10-06** (Phases 1-5, 40 plans). The napplet runtime is contained (no `d`-tag path escape), every NAP request runs through one gated and bounded dispatcher, the desktop process boundary and secrets are hardened, frame reloads reset the sandbox session, and napplet storage and config are keyed by address plus artifact hash. The milestone was closed early for a change of project direction: relay/outbox/intent/INC conformance, resource/upload/media policy and the trusted-prompt and audit close-out work (24 requirements) moved to backlog 999.10-999.12. See `.planning/MILESTONES.md`.
+**v0.2 Linux Service Pivot shipped 2026-10-07** (Phases 6-9, 42 plans). Kwakore runs as a per-user systemd service: `kwakore.socket` activates `kwakore-daemon` on the first client, the private JSON-RPC version 1 socket and `kwakore` CLI cover status, settings, discovery, install/update/uninstall, launch/stop, permissions and signers, and each installed napplet has a native desktop entry. It installs from a checksummed generic bundle or the `programs.kwakore` NixOS module. The Gio manager/store and Android app are removed and every supported identifier is `kwakore`. The audit closed as tech debt only (23/23 requirements); see `.planning/MILESTONES.md` and `milestones/v0.2-MILESTONE-AUDIT.md`.
 
-## Current Milestone: v0.2 Linux Service Pivot
+**v0.1 Hardening shipped 2026-10-06** (Phases 1-5, 40 plans): containment, the gated NAP dispatcher, process and secret hardening, frame session reset, and artifact-keyed storage. Its unfinished conformance work is backlog 999.10-999.12.
 
-**Goal:** Deliver a simple, per-user Linux napplet service that can be fully controlled through a Unix socket and configuration files, with NixOS as a first-class installation target.
+## Next Milestone Goals
 
-**Target features:**
-- Per-user systemd service and Linux distribution packaging, including NixOS integration.
-- Documented Unix socket control for service status/configuration, napplet discovery and lifecycle, permissions, and Nostr signer options.
-- File-based configuration with clear locations, validation, reload behavior, and safe handling of signer secrets.
-- Retire the Gio manager/store UI and Android app while retaining the napplet runtime and native window integration needed to launch content.
-- Rename the project and all supported Linux-facing identifiers to `kwakore`.
+Not defined yet; start with `/gsd-new-milestone`. Candidates:
+- The deferred v0.1 NAP conformance backlog (999.10-999.12).
+- v0.2 audit tech debt: remove dead launcher paths (`nap.openSettings`, `Host.OpenDiscovery`, orphaned exports), reject control characters in napplet `d` tags daemon-side and narrow the child environment, refresh stale comments.
+- A settings or store client built against the socket API, and Omarchy integration (backlog 999.1-999.6).
 
 ## Core Value
 
@@ -30,15 +28,13 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 <!-- Shipped and relied upon in the existing codebase. -->
 
 - ✓ Shared Go backend core with platform hosts plugging in via `backend.Host` / `backend.Transport` — existing
-- ✓ Desktop launcher (Gio) with manager and store windows, tray, and one child webview process per napp window speaking JSON `WireMsg` over stdin/stdout — existing
-- ✓ Android host using the backend as a gomobile AAR with in-process WebViews — existing
-- ✓ Login via nsec, NIP-46 nostrconnect/bunker, and Amber (NIP-55) — existing
+- ✓ One child webview process per napplet window speaking JSON `WireMsg` over stdin/stdout — existing (the Gio manager/store and tray were retired in v0.2)
+- ✓ Signing via nsec and NIP-46 nostrconnect/bunker — existing (Amber/NIP-55 left with the Android app in v0.2)
 - ✓ Napp/napplet discovery, install (sha256-verified blobs), updates, detail pages, and opening by `naddr`/coordinate — existing
 - ✓ Both napplet manifest shapes read: NIP-5D (`path` tags, 35129/15129) and naps WEB-NAPPLET (single blob, `x` hash) — existing
 - ✓ Napplet runtime: sandboxed iframe without `allow-same-origin`, NIP-5D CSP, vendored `@napplet/shim` 0.30.0 (byte-identical, function-scoped so only `window.napplet` survives), host-page session start (`nap.start`), trusted srcdoc wrapper, per-window binding token on desktop — existing
 - ✓ NAP domains implemented: `shell`, `relay`, `identity`, `storage`, `theme`, `link`, `common`, `inc`, `intent`, `resource`, `upload`, `media`, `outbox`, `notify`, `config` — existing
 - ✓ Permission prompts and stored grants per napp; public-internet guard (`netguard`) for resource fetches — existing
-- ✓ Dev tab: load, reload, and publish folder napps/napplets — existing
 - ✓ A napp/napplet `d` tag can never escape the data directory: napp dirs are `napps/{sha256(id)}` behind one containment check (`nappBaseDir`/`nappAssetPath`), raw `d` unchanged — v0.1 (Phase 1)
 - ✓ Vendored `@napplet/shim` 0.30.0 byte-identical with a hash test; NIP-5D presence detection, no shell handshake; intents delivered over INC per NAP-INTENT master — v0.1 (Phase 1)
 - ✓ Pinned spec texts snapshotted under `spec/pinned/`, audit checklist skeleton `spec/CONFORMANCE.md` with Conflicts A1–A23, Android AAR bind on pull requests — v0.1 (Phase 1)
@@ -90,14 +86,17 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
   - WEB-NAPPLET event schema: `hzrd149/naps` branch `web-napplet-event` (currently `7ae5b19`); this is the upcoming napplet event schema, so support must be ready for it
   - Every ref is recorded by commit SHA in the audit checklist. Local checkouts live at `~/Projects/naps` and `~/Projects/nips`.
 - **Known deviations after v0.1:** storage keying and the shim are fixed (Phases 1 and 5). `NAPPLETS.md` still has pre-Phase-5 text (`shell.ready`, shim 0.29.2, `notify` listed as unimplemented), and `spec/CONFORMANCE.md` still has open rows for the deferred domains. 12 items were deferred at close (STATE.md Deferred Items), including test flakes in `desktop/internal/osintegration` and `applyUpdate` skipping the user's Blossom servers.
-- **Codebase map:** `.planning/codebase/` (2026-10-02, predates v0.1; refresh with `/gsd-map-codebase` before planning). `CONCERNS.md` listed the desktop security issues v0.1 addressed: child binary extraction (`desktop/embed_prod.go`), the instance listener (`desktop/singleinstance.go`), plaintext state (`backend/launcher_state.go`), per-handler permission checks (`backend/nap_*.go`), and OpenLink scheme handling (`desktop/host.go`).
-- **Test gaps:** `desktop/singleinstance.go`, `desktop/embed_prod.go`, `desktop/child`, `eventdb`, `mobile`, and Android have little or no coverage.
+- **Codebase map:** `.planning/codebase/` (2026-10-02) predates both milestones and still describes the Gio launcher and Android app; refresh with `/gsd-map-codebase` before planning. `.claude/CLAUDE.md` and `AGENTS.md` describe the current layout.
+- **Shipped v0.2 with:** Go 1.26 backend (17 packages) and napplet-only window program, plain JS host page, Bash packaging scripts, Nix package and module. v0.2 changed 286 files (+22,126 / -25,385, excluding `.planning/`).
+- **Verification split:** CI runs the backend and child Go lanes on every push and the bundle/release on `v*` tags. The real-WebKit tests, `smoke-linux-service.sh --full` and the Nix checks run locally before each tag (AR-09-01).
+- **Known debt after v0.2:** see `milestones/v0.2-MILESTONE-AUDIT.md` (dead launcher paths, unsanitized `KWAKORE_NAPP_ID`, inherited daemon environment, stale Android comments) and STATE.md Deferred Items (flaky `TestRPCInstallValidationAndFixedErrors`).
+- **Test gaps:** `eventdb` and the window program's engine paths outside the local real-WebKit tests have little coverage.
 
 ## Constraints
 
 - **Tech stack:** Go backend and Linux runtime host; plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
 - **Compatibility:** Linux distributions with a per-user systemd instance; NixOS is a first-class target
-- **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Verdana deviates on purpose today
+- **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Kwakore deviates on purpose today
 - **Testing:** Changes to parsing, permissions, storage, networking, or napplet lifecycle include focused regression tests (`CLAUDE.md`); backend and desktop test commands pass before each merge
 
 ## Key Decisions
@@ -121,7 +120,7 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 | Keyring with plaintext + warning fallback | Don't lock out headless/no-Secret-Service users | ✓ Good — Phase 3 (corrupt-state copies may keep plaintext: accepted AR-11) |
 | Audit depth: MUST + SHOULD; ambiguities recorded, not upstreamed | Traceable checklist without blocking on spec changes | ✓ Good — checklist rows for Phases 1-5; close-out deferred (999.12) |
 | Robustness via limits + tests, no fuzzing | Enough for release; keeps CI simple | ✓ Good — v0.1 Phase 2 (bounds, rate limits, quotas) |
-| Desktop first | Primary release target; Android hardening later | ✓ Good — superseded: Android to be removed (999.8) |
+| Desktop first | Primary release target; Android hardening later | ✓ Good — superseded: Android removed in v0.2 (Phase 9) |
 | Legacy `napps/{raw-id}` dirs orphaned on upgrade, never swept | Sweeping would reintroduce raw-id paths; reconfirmed despite a `v0.0.0` release (users reinstall) | ✓ Good — Phase 1 (D-04) |
 | Napplet `inc.emit` on intent convention topics broadcasts per NAP-INC (Conflict A23) | Strict spec fidelity; launcher forgery closed instead by a reserved `launcherSender` | ✓ Good — Phase 1 |
 | Napplet sessions start only from the host page (`nap.start`), pushes tagged with session gen, per-session dispatch lock | Frame cannot start/forge sessions; stale-document envelopes and handlers cannot touch the new session | ✓ Good — Phase 1 |
@@ -132,7 +131,7 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 | Identity globals (`userKeyer`/`userPubkey`) redesign deferred; Phase 3 only recovers RPC panics and reads the keyer once | Keep Phase 3 scoped; full fix belongs with identity conformance | ⚠️ Revisit — backlog 999.12 (IN-12 / AR-13) |
 | Host-page CSP = NIP-5D napplet baseline + `frame-ancestors 'none'` (not `'self'` scripts) | The srcdoc inherits the host policy; a `'self'` script policy would break every napplet (measured) | ✓ Good — Phase 4 (D-17) |
 | Launcher preamble posts one document-start marker (no global, shim bytes untouched) | Closes the delayed-load window in which a replaced document talks to the old session; deliberate deviation from NIP-5D Security 5 | ✓ Good — Phase 4 (D-18, DEC-5) |
-| Engine hardening: WebKitGTK napplet windows fail closed via purego, settings best effort, napps untouched; WebView2 args for every window kind | Close `connect-src` bypasses where engines allow; one WebView2 browser process per build | ⚠️ Revisit — WebView2/WKWebView/Android unverified (04-UAT 5–8) |
+| Engine hardening: WebKitGTK napplet windows fail closed via purego | Close `connect-src` bypasses where engines allow | ✓ Good — Linux-only after v0.2; WebView2/WKWebView/Android paths removed with those hosts |
 
 ## Evolution
 
@@ -152,4 +151,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-07 after Phase 9*
+*Last updated: 2026-10-07 after v0.2 milestone*
