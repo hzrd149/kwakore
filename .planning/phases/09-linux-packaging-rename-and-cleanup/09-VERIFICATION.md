@@ -2,9 +2,22 @@
 phase: 09-linux-packaging-rename-and-cleanup
 verified: 2026-10-07T09:31:20Z
 status: human_needed
-score: 60/64 must-haves verified
+score: 62/64 must-haves verified
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 3
+overrides:
+  - must_have: "An isolated per-user manager can run the installed-artifact smoke in CI"
+    reason: "Superseded by quick task 261007-ej4: after three CI failures, all in the systemd and sudo lanes and none in Kwakore, the repo owner limited CI to the Go tests (\"we dont need to test the full linux integrations in the CI, probably just the go tests\"), with bundle and release only on v* tags (\"Keep tag-only release\"). scripts/ci-user-manager.sh is deleted, and smoke-linux-service.sh --full is the local release acceptance run."
+    accepted_by: "hzrd149"
+    accepted_at: "2026-10-07T15:43:24Z"
+  - must_have: "The Nix package/module and generic release pass their own install/evaluation checks and Linux CI"
+    reason: "Superseded by quick task 261007-ej4: the Nix eval and build left CI and run locally (AGENTS.md lists nix eval of nix/module-test.nix, nix build of .#packages.x86_64-linux.kwakore and nix flake check). The generic release still passes the tag-gated bundle and release jobs."
+    accepted_by: "hzrd149"
+    accepted_at: "2026-10-07T15:43:24Z"
+  - must_have: "CI invokes the same installed-artifact script used for local acceptance"
+    reason: "Superseded by quick task 261007-ej4: the installed-artifact lane was removed from CI by the repo owner's decision, and smoke-linux-service.sh --full stays the local acceptance script."
+    accepted_by: "hzrd149"
+    accepted_at: "2026-10-07T15:43:24Z"
 human_verification:
   - test: "On a real desktop session, make the user manager headless (systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY; systemctl --user restart kwakore.service), then launch an installed napplet from the desktop menu (a kwakore-napplet-*.desktop entry, Terminal=true)."
     expected: "A terminal opens and visibly shows {\"error\":{\"code\":1004,\"message\":\"Unavailable\",\"data\":{\"reason\":\"session_unavailable\"}}}; or, if it only flashes, the docs/service.md#native-desktop-entries workaround (run the Exec= line or `kwakore launch ADDRESS`) shows it. Restore the environment afterwards."
@@ -12,9 +25,9 @@ human_verification:
   - test: "On a real NixOS system, enable programs.kwakore for a user, log in, run `kwakore status`, install a napplet, then `nixos-rebuild switch` to a new kwakore build, reboot or re-login, run `nix-collect-garbage -d`, and click the napplet's desktop entry before running any other kwakore command."
     expected: "kwakore.socket is active at login and kwakore.service is inactive until the first client. Entries carry Exec=\"/run/current-system/sw/bin/kwakore\" launch-token ..., keep working after the rebuild and GC, and start the daemon by socket activation. `systemctl --user reload kwakore.service` works (coreutils kill substitution)."
     why_human: "nix/module-test.nix is an evaluation test, and the package build's installCheck runs the daemon outside systemd. The NixOS VM test was only a scratch run under TCG and was not committed. WR-02 (KWAKORE_ENTRY_CLI) is covered only by TestLinuxHostNativeEntryStableCLI and module evaluation."
-  - test: "Push the branch (or open the PR) so .github/workflows/linux.yml runs, then check every job: backend, identity, child, graphical, nix, service (scripts/ci-user-manager.sh with sudo), installed (--full under xvfb on the uploaded amd64 archive), bundle (amd64 and native arm64), and the release job's publish dry path on a tag."
-    expected: "All jobs green. Every smoke marker count matches the PASS lines, no TestWebKit* test is skipped, and the nix job builds .#packages.x86_64-linux.kwakore (with retries for flaky module fetches)."
-    why_human: "The branch has no upstream and linux.yml has never run (`gh run list` shows only the old desktop.yml runs on master). Must-haves 09-09 #3 and 09-11 #4 explicitly name CI. Locally the YAML parses (9 jobs) and every smoke mode passes on the developer's real user manager, but the isolated-manager, Xvfb, arm64 and release paths need a runner."
+  - test: "Push master so the slimmed .github/workflows/linux.yml runs, then push a v* tag."
+    expected: "backend and child are green on master. On the tag, both bundle jobs (amd64, native arm64) and the release job pass and publish exactly kwakore-linux-amd64.tar.gz, kwakore-linux-arm64.tar.gz and SHA256SUMS."
+    why_human: "This needs a GitHub runner, and the CI scope was slimmed by quick task 261007-ej4 (Go lanes on every push and pull request; bundle and release only on v* tags). Run 37638803603 ran the earlier 9-job version."
 ---
 
 # Phase 9: Linux Packaging, Rename and Cleanup Verification Report
@@ -61,16 +74,16 @@ All evidence below was gathered independently on HEAD `1997e35`, after the revie
 | 09-08 | The Nix package provides the four pieces with verified adjacency | ✓ VERIFIED | Package build plus installCheck (above). |
 | 09-08 | programs.kwakore enables the same owner-only socket and foreground service (D-02) | ✓ VERIFIED (config level) | Module eval test. Real-system runtime is human item 2. |
 | 09-08 | Declarative settings are validated and the XDG path is documented (D-04) | ✓ VERIFIED | Nix-side assertions plus `kwakore-daemon validate` in `configHome`. The docs path table is in docs/service.md. |
-| 09-09 | CI builds and tests only supported Linux paths | ✓ VERIFIED (static) | `linux.yml` jobs: backend, identity, child, graphical, nix, service, installed, bundle, release. It has a "retired paths stay deleted" step and `KWAKORE_*` gates. |
+| 09-09 | CI builds and tests only supported Linux paths | ✓ VERIFIED (static) | `linux.yml` jobs: backend, identity, child, graphical, nix, service, installed, bundle, release. It has a "retired paths stay deleted" step and `KWAKORE_*` gates. Superseded by quick task 261007-ej4: jobs are now backend, child, bundle and release; Nix and service paths are checked locally. |
 | 09-09 | Release archives hold the four-piece bundle and SHA256SUMS | ✓ VERIFIED | `--bundle-only` PASS (reproducible archive, exact members, SHA256SUMS match). Installer asset names match (`install.sh:169`). |
-| 09-09 | An isolated per-user manager can run the installed-artifact smoke in CI | ? UNCERTAIN | CI has never run (human item 3). |
+| 09-09 | An isolated per-user manager can run the installed-artifact smoke in CI | PASSED (override) | Superseded by quick task 261007-ej4: after three CI failures, all in the systemd and sudo lanes and none in Kwakore, the repo owner limited CI to the Go tests, with bundle and release only on v* tags. The helper is deleted, and `smoke-linux-service.sh --full` is the local release acceptance run. Accepted by hzrd149. |
 | 09-10 | Generic install leads, with helper and manual steps before NixOS (D-03, D-11) | ✓ VERIFIED | README `### Any systemd distribution` comes before `### NixOS`. service.md has `With the install helper`, then `Manual installation`, then `Install on NixOS`. |
 | 09-10 | Paths, protocol v1, signer, status, errors and journal are documented (D-04, D-13, D-14) | ✓ VERIFIED | service.md sections Paths and files, Signer setup (nsec file/stdin, bunker, pairing), and Status, errors and logs. control-protocol.md is linked. |
 | 09-10 | Docs use kwakore consistently | ✓ VERIFIED | Full identity scan PASS. |
 | 09-11 | An installed bundle activates on first CLI connection with inspect/restart/stop (D-01, D-12) | ✓ VERIFIED | `--full` PASS "release", "activation" and "control". |
 | 09-11 | A committed napplet gets one entry and launches a real child (D-05, D-07) | ✓ VERIFIED | `--full` PASS "entry" and "graphical" (a real display here, not Xvfb). |
 | 09-11 | Headless entry emits the documented fixed JSON (D-06) | ✓ VERIFIED | `--full` PASS "headless". |
-| 09-11 | The Nix package/module and generic release pass their own checks and Linux CI | ? UNCERTAIN | Own checks pass locally. Linux CI has never run (human item 3). |
+| 09-11 | The Nix package/module and generic release pass their own checks and Linux CI | PASSED (override) | Superseded by quick task 261007-ej4: the Nix eval and build left CI and run locally (AGENTS.md). The generic release still passes the tag-gated bundle and release jobs. Own checks pass locally. Accepted by hzrd149. |
 | 09-11 | Backend and retained child tests pass after D-08, D-09 and D-10 | ✓ VERIFIED | Suites re-run (above). |
 | 09-12/13/14/19/20 | Gio root, osintegration, childbin, icon, instanceipc, instancelock, secretstore, themesystem and windowchrome are absent; child and backend build; no imports of deleted packages | ✓ VERIFIED (10) | Directory listing and `git ls-files`. Vet and build pass. |
 | 09-15 | Bundled settings and non-napplet child routes are absent; service config and napplet launch still work | ✓ VERIFIED (2) | The child exits on a non-napplet format or `WINDOW_KIND=settings` (`desktop/child/main.go:69-76`). `backend/launcher_settings.go` is retained. The graphical smoke passes. |
@@ -78,7 +91,7 @@ All evidence below was gathered independently on HEAD `1997e35`, after the revie
 | 09-17/23 | Runtime, NAP, registry and discovery output use kwakore; canonical NAP addresses are unchanged | ✓ VERIFIED (4) | Identity scan. `eventAddress`/`Napp.Address()` remain `kind:pubkey:d`. |
 | 09-18/24 | Renamed tests pass with security assertions intact; the scanner catches unreviewed names | ✓ VERIFIED (4) | Suites pass. The scanner reports 0 unreviewed, with font, fixture and historical classes. |
 
-**Score:** 60/64 truths verified (5 roadmap SCs + 59 plan truths). The 4 UNCERTAIN truths need human or CI confirmation. 0 are present but behavior-unverified.
+**Score:** 62/64 truths verified (5 roadmap SCs + 59 plan truths), 2 of them PASSED (override) by quick task 261007-ej4 (accepted by hzrd149). The 2 remaining UNCERTAIN truths (SC3 and 09-03's headless terminal surface) wait on human item 1; human item 2 confirms SC2 on a real NixOS system. 0 are present but behavior-unverified.
 
 ### Required Artifacts
 
@@ -89,9 +102,9 @@ All evidence below was gathered independently on HEAD `1997e35`, after the revie
 | `backend/desktopentry/entry_linux.go`, `token.go` | ✓ VERIFIED | Wired via `linuxhost.Host.SyncAppShortcuts`; WR-03 removal works without a CLI |
 | `backend/linuxhost/host_linux.go` | ✓ VERIFIED | Child launch, session check, CLI path resolution (WR-02 `stableCLI`), WR-04 reduced env |
 | `backend/cmd/kwakore/main_linux.go` | ✓ VERIFIED | `launch-token` path proven by the smoke |
-| `scripts/install.sh`, `build-linux-bundle.sh`, `smoke-linux-service.sh`, `ci-user-manager.sh`, `check-product-identity.sh` | ✓ VERIFIED | `bash -n` clean; smoke and scan executed |
+| `scripts/install.sh`, `build-linux-bundle.sh`, `smoke-linux-service.sh`, `ci-user-manager.sh`, `check-product-identity.sh` | ✓ VERIFIED | `bash -n` clean; smoke and scan executed. `ci-user-manager.sh` was deleted by quick task 261007-ej4 (CI no longer runs the user-service lanes). |
 | `nix/package.nix`, `nix/module.nix`, `nix/module-test.nix`, `flake.nix` | ✓ VERIFIED | Eval `true`; package builds with installCheck; flake exposes `packages.{x86_64,aarch64}-linux.kwakore`, `nixosModules.{default,kwakore}` and `overlays.default` |
-| `.github/workflows/linux.yml` | ⚠️ PRESENT, NOT RUN | Parses to 9 jobs; release action pinned to a SHA (WR-05); never executed |
+| `.github/workflows/linux.yml` | ⚠️ PRESENT, NOT RUN | Parses to 9 jobs; release action pinned to a SHA (WR-05); never executed. Superseded by quick task 261007-ej4: 4 jobs (backend, child, bundle, release); run 37638803603 ran the earlier 9-job version. |
 | `README.md`, `docs/service.md`, `docs/control-protocol.md` | ✓ VERIFIED | Content checked against artifacts (unit names, paths, CLI commands, error payloads) |
 | `backend/daemon/installed_smoke_seed_test.go` | ✓ VERIFIED | Used by the `--full` entry stage |
 
@@ -108,7 +121,7 @@ All evidence below was gathered independently on HEAD `1997e35`, after the revie
 | Nix socket/service | generic unit contract | `parseUnit` of the same templates; eval test checks line equality | ✓ WIRED |
 | Nix daemon wrapper | sibling napplet/lib/CLI | makeWrapper execs `.kwakore-daemon-wrapped` in the same bin; installCheck checks no `native_entries` error | ✓ WIRED |
 | Release archive names | installer download names | `kwakore-linux-$arch.tar.gz` + `SHA256SUMS` on both sides | ✓ WIRED |
-| CI | same installed-artifact script | `installed` job runs `smoke-linux-service.sh --full` under `ci-user-manager.sh` | ✓ WIRED (static; never run) |
+| CI | same installed-artifact script | `installed` job ran `smoke-linux-service.sh --full` under `ci-user-manager.sh`. Superseded by quick task 261007-ej4: the installed-artifact lane was removed, and `--full` stays the local acceptance script (accepted by hzrd149) | PASSED (override) |
 | Host env keys | child `os.Getenv` | identical `KWAKORE_*` names | ✓ WIRED |
 
 ### Behavioral Spot-Checks and Probe Execution
@@ -197,11 +210,11 @@ docs/service.md "Known limitations" says that NAP-CONFIG values cannot be change
 **Expected:** The socket is active and the service starts on demand. Entries use `/run/current-system/sw/bin/kwakore` and still start the daemon. Reload works.
 **Why human:** Only module evaluation and unit tests cover this; the VM test was an uncommitted scratch run.
 
-#### 3. First real run of `.github/workflows/linux.yml` (09-09 #3, 09-11 #4)
+#### 3. Run of the slimmed `.github/workflows/linux.yml` (scope slimmed by quick task 261007-ej4)
 
-**Test:** Push the branch or open the PR and inspect every job, including service (sudo `ci-user-manager.sh`), installed (`--full` under xvfb), native arm64 bundle, nix with retries, and release on a tag.
-**Expected:** All green, with marker counts matching and no skipped `TestWebKit*` tests.
-**Why human:** The branch has no upstream and the workflow has never executed.
+**Test:** Push master so the slimmed linux.yml runs, then push a `v*` tag.
+**Expected:** backend and child are green on master. On the tag, both bundle jobs (amd64, native arm64) and the release job pass and publish exactly `kwakore-linux-amd64.tar.gz`, `kwakore-linux-arm64.tar.gz` and `SHA256SUMS`.
+**Why human:** This needs a GitHub runner. 09-09 #3 and 09-11 #4 (and the CI key link) were superseded by quick task 261007-ej4 and are recorded as overrides; run 37638803603 ran the earlier 9-job version.
 
 ### Gaps Summary
 

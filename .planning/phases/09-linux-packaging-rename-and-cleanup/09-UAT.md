@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: partial
 phase: 09-linux-packaging-rename-and-cleanup
 source: [09-VERIFICATION.md]
 started: 2026-10-07T09:33:42Z
-updated: 2026-10-07T14:45:16Z
+updated: 2026-10-07T15:43:24Z
 ---
 
 ## Current Test
@@ -20,17 +20,15 @@ result: [pending]
 expected: kwakore.socket activates per configured user, systemctl --user reload logs "configuration reloaded", and desktop entries keep launching via /run/current-system/sw/bin/kwakore after nixos-rebuild, reboot and nix-collect-garbage.
 result: [pending]
 
-### 3. First real run of .github/workflows/linux.yml
-expected: All lanes pass on GitHub Actions (backend, child, graphical under xvfb, nix, service under ci-user-manager.sh, bundle amd64+arm64, installed --full, identity); WebKit tests show PASS, not SKIP.
-result: issue
-reported: "merged into master branch and push, you check on it in a few minutes" — run 37638803603 failed: user service and installed artifact jobs fail with "ci-user-manager: user@kwakore-ci-XXXXXX.service is already loaded"; 8 other jobs passed (backend, child, graphical, nix, identity, bundle amd64, bundle arm64; release skipped)
-severity: blocker
+### 3. Run of the slimmed .github/workflows/linux.yml
+expected: The slimmed linux.yml passes on master: backend and child are green on every push and pull request. bundle (amd64, arm64) and release run only on v* tags. The graphical, nix, user service and installed artifact lanes were removed by quick task 261007-ej4.
+result: [pending]
 
 ## Summary
 
 total: 3
 passed: 0
-issues: 1
+issues: 0
 pending: 3
 skipped: 0
 blocked: 0
@@ -39,7 +37,10 @@ blocked: 0
 
 - gap_id: G-09-3
   truth: "The first real run of .github/workflows/linux.yml passes every lane, including user service and installed artifact under scripts/ci-user-manager.sh"
-  status: failed
+  status: resolved
+  resolved_by: quick-261007-ej4
+  resolved_at: 2026-10-07
+  resolution: "The user service and installed artifact lanes and the CI user-manager helper (scripts/ci-user-manager.sh) were removed from CI by user decision (\"we dont need to test the full linux integrations in the CI, probably just the go tests\"; \"Keep tag-only release\"); the smoke stages stay local developer tools."
   reason: "Run 37638803603: ci-user-manager.sh exits 1 with 'user@kwakore-ci-XXXXXX.service is already loaded' before running any smoke stage"
   severity: blocker
   test: 3
