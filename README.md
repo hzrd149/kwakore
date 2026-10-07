@@ -1,139 +1,66 @@
-# Verdana
+# Kwakore
 
-Verdana is a launcher for **Nostr apps**. It finds small web apps that people
-publish on Nostr, installs them on your computer or phone, and runs each one
-in its own window. You log in once, in Verdana. The apps never see your key:
-they ask Verdana to sign, encrypt or publish, and Verdana asks you first.
+Kwakore runs **Nostr napplets** on Linux. A napplet (kinds `35129` and
+`15129`, [napplet.run](https://napplet.run)) is a single HTML file that
+someone publishes on Nostr. Kwakore finds napplets on your relays, installs
+them, and runs each one in its own window, in a locked-down sandbox where it
+can reach the outside only through NAP messages. Every file is fetched from
+Blossom servers and checked against the hash its author signed.
 
-It runs two kinds of apps, and lists both side by side:
-
-- **napps** (kind `35130`): a folder of files (HTML, JS, CSS, images) run in
-  a webview. Nostr is available to them as `window.nostr`.
-- **napplets** (kinds `35129` and `15129`, [napplet.run](https://napplet.run)):
-  a single HTML file run in a locked-down sandbox. They talk to the launcher
-  only through NAP messages. They carry a "napplet" badge.
-
-Every file an app is made of is fetched from Blossom servers and checked
-against the hash its author signed. If a file doesn't match, it isn't
-installed.
-
-Verdana runs on **Linux, macOS, Windows and Android**.
-
-The new Linux foreground `kwakore-daemon` and its configuration are described
-in the [service guide](docs/service.md). Its file-only status and diagnostics
-commands are available now; the control socket and packaging arrive in later
-phases.
+Kwakore is a per-user **systemd service**. It has no window of its own: you
+control it with the `kwakore` command, each installed napplet gets an entry
+in your desktop's application menu, and other programs can drive it through
+a private Unix socket with a documented
+[JSON-RPC protocol](docs/control-protocol.md). Napplets never see your
+Nostr key: they ask Kwakore to sign, and Kwakore asks you first.
 
 ## Install
 
-### Desktop
+Kwakore needs Linux on x86-64 or ARM64 with a systemd user manager, and
+WebKitGTK 4.1 (on Debian or Ubuntu: `sudo apt install libwebkit2gtk-4.1-0`).
+Install it as your own user, not as root.
 
-The quickest installation uses the release installer. On Linux or macOS:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.sh | bash
-```
-
-On Windows, from PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.ps1 | iex
-```
-
-These install for the current user and add Verdana to `PATH`; administrator
-access is not required. The downloaded archive is verified against the
-release's SHA-256 checksum before it is installed. You can rerun the same
-command later to update to the newest release.
-
-Verdana exposes the complete Discovery napplet catalog to system search. GNOME
-uses a live local search provider; Windows indexes entries in the **Verdana
-Discover** Start-menu folder; and macOS Spotlight indexes lightweight launchers
-in `~/Applications/Verdana Discover`. Choosing an uninstalled result opens a
-trial whose NAP storage stays in memory; when the trial closes, Verdana offers
-to install it and keep that data. GNOME search terms stay local and are not sent
-to Nostr relays. GNOME may require signing out and back in before a newly
-registered provider first appears.
-
-For troubleshooting, start Verdana with `VERDANA_SEARCH_DEBUG=1` to log the
-terms GNOME sends, the result IDs Verdana returns, metadata requests and result
-activation. Search tracing is opt-in because system searches may be private.
-
-To uninstall on Linux or macOS while keeping installed apps and settings:
+### Any systemd distribution
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.sh | bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/hzrd149/kwakore/master/scripts/install.sh | bash
+kwakore status
 ```
 
-On Windows:
+The helper downloads the latest release, verifies it against the release's
+`SHA256SUMS` before unpacking it, installs it under `~/.local/lib/kwakore`
+with the `kwakore` command in `~/.local/bin`, installs the `kwakore.socket`
+and `kwakore.service` user units and enables the socket. The first `kwakore`
+command starts the daemon. Rerun it to upgrade; `--version v0.2.0` picks a
+release.
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/hzrd149/verdana/master/scripts/install.ps1))) uninstall
-```
-
-Both scripts also have an optional purge mode when run from a downloaded copy:
-`./install.sh uninstall --purge` or `./install.ps1 uninstall -Purge`. Purging
-also deletes installed apps, login information, settings, and app storage.
-Normal uninstall removes launch-at-login configuration and generated system
-shortcuts but keeps that user data for a future reinstall.
-
-### Manual desktop install
-
-Download the archive for your system from the
-[releases page](https://github.com/hzrd149/verdana/releases). Each archive
-holds a single `verdana` binary (`verdana.exe` on Windows):
-
-| System | Archive |
-|---|---|
-| Linux x86-64 / ARM64 | `verdana-linux-amd64.tar.gz` / `verdana-linux-arm64.tar.gz` |
-| macOS Intel / Apple silicon | `verdana-darwin-amd64.tar.gz` / `verdana-darwin-arm64.tar.gz` |
-| Windows x86-64 / ARM64 | `verdana-windows-amd64.zip` / `verdana-windows-arm64.zip` |
-
-Unpack it, put the binary somewhere convenient and run it.
-
-Every tagged release also includes `SHA256SUMS`. From the directory containing
-the downloaded archive, verify it before unpacking:
-
-```sh
-sha256sum --check SHA256SUMS --ignore-missing
-```
-
-- **Linux** needs GTK 3 and WebKitGTK 4.1. On Debian or Ubuntu, that is
-  `sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0`. Most desktops already
-  have them. In a Wayland session, Verdana uses XWayland when available so
-  the desktop window manager can draw the title bar and window controls.
-  Set `VERDANA_NATIVE_WAYLAND=1` to use Gio's native Wayland backend instead;
-  compositors without server-side decorations will then use Gio's fallback
-  title bar.
-- **Windows** needs the Microsoft Edge WebView2 runtime. Windows 10 and 11
-  include it.
-- **macOS** uses the system WebKit, so it needs nothing else. The binary is
-  unsigned, so the first time you open it, right-click it and choose
-  **Open**.
-
-To play media for apps that ask for it (NAP-MEDIA), install
-[mpv](https://mpv.io) or [VLC](https://www.videolan.org).
+To install by hand instead, download `kwakore-linux-amd64.tar.gz` (or
+`-arm64`) and `SHA256SUMS` from the
+[releases page](https://github.com/hzrd149/kwakore/releases), check them with
+`sha256sum --check --ignore-missing SHA256SUMS`, and follow the
+[manual installation steps](docs/service.md#manual-installation). There is no
+uninstall command; [removal](docs/service.md#removing-kwakore) is three
+`systemctl` commands and a few `rm`s.
 
 ### NixOS
 
-The repository is a Nix flake for x86-64 and ARM64 Linux. Add it as an input
-of your system flake, following your nixpkgs so Verdana shares its GTK and
-WebKit with the rest of the system:
+The repository is a flake with a NixOS module:
 
 ```nix
 {
-  inputs.verdana = {
-    url = "github:hzrd149/verdana";
+  inputs.kwakore = {
+    url = "github:hzrd149/kwakore";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { nixpkgs, verdana, ... }: {
+  outputs = { nixpkgs, kwakore, ... }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
       modules = [
-        verdana.nixosModules.default
+        ./configuration.nix
+        kwakore.nixosModules.default
         {
-          programs.verdana.enable = true;
-          # optional: start Verdana in the background at login
-          programs.verdana.autostart = true;
+          programs.kwakore.enable = true;
+          programs.kwakore.users = [ "alice" ];
         }
       ];
     };
@@ -141,225 +68,117 @@ WebKit with the rest of the system:
 }
 ```
 
-The module installs Verdana with its desktop entry and icon. To try it without
-installing, run `nix run github:hzrd149/verdana`.
+Each listed user gets the same socket and service as on other distributions.
+`programs.kwakore.settings` sets non-secret configuration declaratively; see
+the [NixOS section](docs/service.md#install-on-nixos) for what that changes.
 
-Packagers who wrap the binary can set `VERDANA_EXECUTABLE` to a stable,
-absolute launcher path; Verdana writes that path into the shortcuts,
-autostart and search entries it creates instead of the wrapped binary's own
-path. The NixOS module sets it to `/run/current-system/sw/bin/verdana`.
-
-### Android
-
-Android 8.0 (API 26) or newer is required. Android builds are paused for now
-while work focuses on the desktop: CI no longer builds an APK on every push or
-attaches one to releases. The
-[android workflow](.github/workflows/android.yml) can still be started by hand,
-and you can [build one yourself](#building-from-source). It is a debug build,
-so Android may warn about installing an app from outside its app store.
-
-To keep your key on your phone instead of in Verdana, install a signer app
-such as [Amber](https://github.com/greenart7c3/Amber).
-
-## Logging in
-
-The first time Verdana starts, it asks you to log in. You can:
-
-- **Connect a signer** (recommended). Press **Connect signer** and scan the
-  QR code with a remote signer app such as Amber, nsec.app or Primal. Verdana
-  logs in as soon as the signer accepts. On a phone, **Open signer app**
-  passes the request to a signer installed on the same device. The QR code
-  points the signer to `wss://bucket.coracle.social` by default. You can type
-  a different relay under the code.
-- **Paste a `bunker://` URL** from your signer.
-- **Use Amber** (Android only). The **Amber** button logs in through the
-  NIP-55 signer on the phone.
-- **Paste an `nsec`.** This works, but the key is then stored unencrypted in
-  Verdana's data folder. Use a signer if you can.
-
-Verdana remembers your login and logs you in again on the next start. To
-switch accounts, use **Log out**.
-
-## Using Verdana
-
-### Desktop
-
-The launcher window has three tabs:
-
-- **Discovery** lists the napps and napplets published on your relays.
-  Filter it by name. Paste an app's address (an `naddr1…`, a `nostr:naddr1…`
-  link, or a `<kind>:<pubkey>:<d>` coordinate) into the filter to find that
-  one app. Click a card to see its details, then press **Install**.
-- **Installed** shows your apps. Press **Open** to run one, **Update** when
-  its author publishes a new version, the settings button to change what it
-  may do, and **Uninstall** to remove it.
-- **Windows** lists the app windows that are open now, so you can close or
-  bring back any of them. Tick several windows to save them as a **bundle
-  shortcut**: a single icon that reopens the whole set.
-
-Verdana stays in the **system tray** when you close its window. Apps keep
-running, and you reopen the launcher from the tray icon. The tray menu also
-has **Settings** and a **Launch at login** toggle. At the top it shows who is
-logged in: click your name to open your profile in a profile napplet. If none
-is installed, Discovery opens on the ones available.
-
-You can open an app by address from the command line:
+## Using Kwakore
 
 ```sh
-verdana naddr1…
+kwakore discover --refresh                 # napplets published on your relays
+kwakore install 35129:<pubkey hex>:<d>     # install one by its address
+kwakore launch 35129:<pubkey hex>:<d>      # open it (or use its menu entry)
+kwakore installed                          # what is installed
+kwakore uninstall --yes 35129:<pubkey hex>:<d>
 ```
 
-If Verdana is already running, the address is passed to that instance. An app
-you haven't installed is installed only after you confirm.
+Every command prints JSON. Napplets are named by their canonical address,
+`<kind>:<author public key in hex>:<d tag>`, as `discover` and `installed`
+print it.
 
-### Android
+To let napplets sign, give Kwakore a signer. Secrets are read only from stdin
+or an owner-only file, never from the command line:
 
-The launcher has **Installed** and **Discovery** tabs, which work as they do
-on the desktop. Each app window is its own card in Recents. `nostr:naddr1…` links from other apps open in Verdana: an
-installed app launches immediately, and one you haven't installed asks first.
+```sh
+kwakore signer pair start      # pair with a remote signer (NIP-46), then:
+kwakore signer pair wait
+# or a local key, typed without echo:
+read -rs NSEC && printf '%s\n' "$NSEC" | kwakore signer switch nsec --secret-stdin; unset NSEC
+kwakore signer status
+```
 
-### Permissions
-
-Apps have to ask before they **sign**, **encrypt or decrypt**, **publish**,
+Napplets ask before they **sign**, **encrypt or decrypt**, **publish**,
 **open a link**, **save a file**, **copy to the clipboard**, **upload**,
-**fetch from the web**, **show notifications** or **play media**. When an app asks, you can choose:
+**fetch from the web**, **show notifications** or **play media**. The prompt
+appears in the napplet's window and offers this time, this session, or always.
+Remembered answers can be reviewed and changed with
+`kwakore permissions get|set|clear`.
 
-- **Allow this session** or **Deny this session**: applies until the app's
-  window closes.
-- **Always allow** or **Always deny**: remembered for that app.
+Windows open on the display the user manager knows about. If napplets do not
+open, see [Graphical session](docs/service.md#graphical-session).
 
-To review or change remembered answers, open the app's settings from
-**Installed**.
+## Documentation
 
-### Settings
+- [Service guide](docs/service.md): installation, NixOS options, `systemctl`
+  control, effective paths, configuration, signer setup, status, errors and
+  logs, and known limitations.
+- [Control protocol, version 1](docs/control-protocol.md): the socket,
+  framing, methods, errors and the full CLI command table, for client
+  authors.
+- [NAPPLETS.md](NAPPLETS.md): how napplets run in Kwakore, which NAP domains
+  it implements, and how to test one.
+- [spec/CONFORMANCE.md](spec/CONFORMANCE.md): the audit of the napplet
+  runtime against the pinned NIP-5D and NAP specs.
 
-Open **Settings** from the launcher or the tray. The **Verdana** page sets:
-
-- **Theme**: System, Light or Dark. System follows your desktop's appearance,
-  including the accent color.
-- **Launch at login**: start Verdana in the background when you log in to
-  your computer.
-- **Show installed apps in the system launcher**: add an entry for every
-  installed app to your desktop's app menu, Start menu or Launchpad, so each
-  one can be started directly.
-- **Show napplets in GNOME search**: install and maintain the GNOME Shell and
-  D-Bus registration files for the complete local Discovery catalog and
-  installed napplet results.
-  Turning it off removes those files and stops returning search results.
-- **Relays**: where napps and napplets are discovered.
-- **Also discover on my relays**: after you log in, Verdana loads your relay
-  list (NIP-65) in the background and keeps it up to date. With this on (the
-  default), Discovery also asks your write (outbox) relays, so apps published
-  there show up too. Your relays are listed below it, marked read or write.
-  They are only shown here; change them in your Nostr client. Apps that use
-  the outbox API fall back to these relays when nothing better is known.
-- **Blossom servers**: where app files are fetched from first. Files are
-  always checked against their hash, wherever they come from.
-
-Each app may also have a settings page of its own (NAP-CONFIG).
-
-### Where your data lives
-
-Everything Verdana stores is kept in one folder: installed apps, their
-storage, the local event cache, your login and your settings.
-
-| System | Folder |
-|---|---|
-| Linux | `~/.config/Verdana` |
-| macOS | `~/Library/Application Support/Verdana` |
-| Windows | `%AppData%\Verdana` |
-| Android | the app's private storage |
-
-Deleting the folder resets Verdana.
+For media (NAP-MEDIA), install [mpv](https://mpv.io) or
+[VLC](https://www.videolan.org).
 
 ## Building from source
 
-You need **Go 1.26** and a C compiler, because the desktop build uses cgo.
-On Linux you also need the GTK, WebKitGTK, Wayland, X11 and EGL development
-packages. The CI installs them with:
+You need **Go 1.26**, a C compiler, `pkg-config` and the GTK 3 and
+WebKitGTK 4.1 development packages. On Debian or Ubuntu:
 
 ```sh
-sudo apt install gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
-  libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
-  libx11-dev libx11-xcb-dev libegl1-mesa-dev libgles2-mesa-dev
+sudo apt install gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
-Using [just](https://github.com/casey/just):
+With [just](https://github.com/casey/just):
 
 | Command | What it does |
 |---|---|
-| `just prod` | Builds the desktop binary at `desktop/verdana`. |
-| `just run` | Builds and starts a development build, with webview debugging and the **Dev** tab for loading and publishing your own apps. |
-| `just apk` | Builds the backend AAR and the Android debug APK. It needs the Android SDK at `/opt/android-sdk` and `gomobile`. |
-| `just install` | Same as `just apk`, then installs the APK on a connected device. |
+| `just bundle` | Builds `kwakore-daemon`, `kwakore`, the `napplet` window program and `libwebview.so` into `dist/VERSION/kwakore-VERSION-linux-ARCH/`, plus `kwakore-linux-ARCH.tar.gz` and `SHA256SUMS`. |
+| `just bundle-check` | Builds the bundle twice and checks it as CI does: identical bytes, exactly the four files, matching checksums, and a window program that starts. |
+| `just webview-libs` | Generates the pinned `libwebview.so` copies the window program and its tests need (`just bundle` does this itself). |
 
-Without `just`, build the desktop app by hand:
-
-```sh
-cd desktop
-go build -o child/napplet ./child             # napplet window program
-go build -tags napp -o child/napp ./child    # legacy napp and settings program
-go build -o verdana -tags novulkan .
-```
-
-### Install from source with Go
-
-The desktop launcher uses native GUI libraries, so install the prerequisites
-listed above first. Then clone the repository and use `go install`:
+Install a local bundle the same way as a release:
 
 ```sh
-git clone https://github.com/hzrd149/verdana.git
-cd verdana
-just go-install
+just bundle
+bash scripts/install.sh --archive dist/VERSION/kwakore-linux-amd64.tar.gz
 ```
-
-Or, without `just`:
-
-```sh
-cd verdana/desktop
-go build -o child/napplet ./child
-go build -tags napp -o child/napp ./child
-go install -tags novulkan .
-```
-
-This installs `verdana` in `GOBIN`, or in `$(go env GOPATH)/bin` when `GOBIN`
-is unset. Make sure that directory is on your `PATH`.
-
-The preliminary window builds are required because the production launcher
-embeds both webview programs into the installed executable. For that reason,
-a remote `go install` with an `@latest` version is not currently supported;
-use the release archive for the simplest install.
 
 To run the tests:
 
 ```sh
-(cd backend && go test ./...)
-(cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go test -tags novulkan ./...)
+(cd backend && go vet ./... && go test ./...)
+(cd desktop && go generate ./internal/webviewlib && go build -o child/napplet ./child && go vet ./... && go test ./...)
 ```
 
-## Making apps for Verdana
+`scripts/smoke-linux-service.sh` has three stages. `--activation-only` and
+`--install-only` run against your user manager with temporary runtime units,
+private data directories and an offline configuration, and refuse to run when
+Kwakore units already exist; `--bundle-only` (what `just bundle-check` runs)
+needs no user manager. CI runs all of these in
+[`.github/workflows/linux.yml`](.github/workflows/linux.yml).
 
-To learn how to build a napplet, start with:
+## Making napplets
 
 - [napplet.run](https://napplet.run): the napplet framework and the NIP-5D
-  runtime that Verdana implements.
+  runtime that Kwakore implements.
 - [napplet.soy](https://napplet.soy): a playground for building and sharing
   napplets, with the `soyLI` command-line tool, documentation and conformance
   checks to run before you publish.
 
-[NAPPLETS.md](NAPPLETS.md) is Verdana's own reference: how napplets run in
-the launcher, which NAP domains it implements and how to test one locally.
-The development build's **Dev**
-tab loads an app from a local folder or a dev-server URL, reloads it in place
-and publishes it to Blossom and Nostr when it's ready. [`env.d.ts`](env.d.ts)
-types the APIs a napp gets.
-
 ## Project layout
 
-- `backend/`: shared logic for both platforms. This covers Nostr, logins and
-  signers, installing, permissions, storage, the NAP runtime and the web UI
-  under `backend/webview/`.
-- `desktop/`: the Gio launcher, plus the child process (`desktop/child/`)
-  that hosts each app's webview.
-- `android/`: the Kotlin and Compose app. The backend is bound to it with
-  gomobile (`backend/mobile/`).
+- `backend/`: the service. `cmd/kwakore-daemon` and `cmd/kwakore` are the
+  daemon and CLI; `daemon/` serves the socket; `controlprotocol/` is the
+  JSON-RPC protocol; `serviceconfig/` reads configuration; `linuxhost/`
+  starts napplet windows; `desktopentry/` writes the desktop entries. The
+  root package holds the napplet runtime (NAP handlers, registry, permissions,
+  storage), and `backend/webview/` the host page and vendored shim.
+- `desktop/`: the `napplet` window program (`desktop/child/`) and the pinned
+  `libwebview.so` it loads (`desktop/internal/webviewlib/`).
+- `packaging/systemd/user/`: the user units. `scripts/`: the bundle builder,
+  install helper and smoke tests. `nix/` and `flake.nix`: the Nix package and
+  NixOS module.
