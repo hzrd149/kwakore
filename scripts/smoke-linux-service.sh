@@ -3,6 +3,7 @@
 #
 #   scripts/smoke-linux-service.sh --activation-only
 #   scripts/smoke-linux-service.sh --bundle-only
+#   scripts/smoke-linux-service.sh --install-only
 #
 # --activation-only builds kwakore-daemon and kwakore from the tracked backend
 # sources into a temporary staging directory, renders
@@ -42,14 +43,37 @@
 #               refuses a missing, relative or empty WEBVIEW_PATH instead of
 #               falling back to a library search, and the child and library
 #               resolve every shared object on this host
+#
+# --install-only builds the bundle the same way and installs it with
+# scripts/install.sh under the caller's real user manager, using a prefix in
+# a private staging directory below XDG_RUNTIME_DIR and --runtime-units, so
+# nothing is written under the home directory and the units vanish at logout
+# at the latest. A runtime drop-in points the installed service at staged,
+# offline XDG config and data. It checks:
+#
+#   install     the helper refuses a prefix napplet windows would refuse;
+#               otherwise it installs the four files side by side under the
+#               rendered ExecStart, the units equal packaging/systemd/user
+#               rendered the way a manual install would, only kwakore.socket is
+#               enabled, and the installed CLI activates the daemon; a second
+#               run changes no managed file, unit or activation state; a held
+#               lock makes the helper wait and two concurrent runs end in the
+#               same single layout; a tampered checksum, an extra ../ member
+#               and a symlink member are refused before extraction without
+#               disturbing the running install; a new archive swaps the
+#               release in one rename, restarts the running daemon and prunes
+#               releases older than the previous one
+#
+# A trap stops and disables the units, removes the unit files, drop-in and
+# socket directory, reloads the manager and deletes the staging directory.
 
 set -euo pipefail
 
 mode=${1:-}
 case "$mode" in
---activation-only | --bundle-only) ;;
+--activation-only | --bundle-only | --install-only) ;;
 *)
-	echo "usage: $0 --activation-only|--bundle-only" >&2
+	echo "usage: $0 --activation-only|--bundle-only|--install-only" >&2
 	exit 2
 	;;
 esac
@@ -204,7 +228,7 @@ command -v go >/dev/null || fail "go not found; it is needed to build the staged
 manager_state=$(systemctl --user is-system-running 2>/dev/null || true)
 case "$manager_state" in
 running | degraded) ;;
-*) fail "systemd user manager unavailable (state: ${manager_state:-unreachable}); cannot run the activation smoke" ;;
+*) fail "systemd user manager unavailable (state: ${manager_state:-unreachable}); cannot run the ${mode#--} smoke" ;;
 esac
 
 runtime_child="$XDG_RUNTIME_DIR/kwakore"
@@ -220,9 +244,307 @@ for unit in kwakore.socket kwakore.service; do
 done
 [ ! -e "$runtime_child" ] || fail "$runtime_child already exists; stop the running daemon before the smoke test"
 
+# ─── helpers ────────────────────────────────────────────────────────────────
+
+active_state() {
+	systemctl --user show -p ActiveState --value "$1"
+}
+
+main_pid() {
+	systemctl --user show -p MainPID --value kwakore.service
+}
+
+wait_state() {
+	local unit=$1 want=$2 i
+	for i in $(seq 1 100); do
+		[ "$(active_state "$unit")" = "$want" ] && return 0
+		sleep 0.1
+	done
+	fail "$unit did not reach $want (now $(active_state "$unit"))"
+}
+
+cli_status() {
+	local out
+	out=$("$cli" status) || fail "kwakore status failed: $out"
+	echo "$out" | grep -Eq '"protocol_version": *1([^0-9]|$)' || fail "status lacks protocol_version 1: $out"
+	echo "$out" | grep -Eq '"ready": *true' || fail "status is not ready: $out"
+}
+
+socket_identity() {
+	stat -c '%i %a %u %F' "$socket_path"
+}
+
+check_inode_policy() {
+	[ "$(stat -c '%a %u %F' "$runtime_child")" = "700 $uid directory" ] ||
+		fail "runtime directory is not a 0700 directory owned by $uid: $(stat -c '%a %u %F' "$runtime_child")"
+	[ "$(stat -c '%a %u %F' "$socket_path")" = "600 $uid socket" ] ||
+		fail "socket is not a 0600 socket owned by $uid: $(stat -c '%a %u %F' "$socket_path")"
+}
+
+# ─── install ────────────────────────────────────────────────────────────────
+
+# managed_state prints every file the helper owns, the unit files and enable
+# link, and the activation state, so repeated installs can be compared.
+managed_state() {
+	local f
+	(
+		cd "$install_prefix"
+		find . -mindepth 1 -printf '%y %m %p -> %l\n' | LC_ALL=C sort
+		find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+	)
+	for f in "$runtime_units/kwakore.socket" "$runtime_units/kwakore.service" "$runtime_units/sockets.target.wants/kwakore.socket"; do
+		printf '%s %s %s\n' "$f" "$(stat -c '%F %a' "$f" 2>/dev/null || echo missing)" "$(readlink "$f" || true)"
+		if [ -f "$f" ]; then sha256sum <"$f"; fi
+	done
+	printf 'socket %s %s\n' "$(active_state kwakore.socket)" "$(systemctl --user show -p UnitFileState --value kwakore.socket)"
+	printf 'service %s pid %s\n' "$(active_state kwakore.service)" "$(main_pid)"
+	printf 'socket inode %s\n' "$(socket_identity)"
+}
+
+# check_child_path mirrors linuxhost checkProgram: every component of the
+# resolved path is root- or user-owned, not group or world writable, and no
+# symlink.
+check_child_path() {
+	local path=$1 current="" part mode owner
+	IFS=/ read -ra parts <<<"${path#/}"
+	for part in "${parts[@]}"; do
+		current="$current/$part"
+		[ ! -L "$current" ] || fail "$current is a symlink on the napplet path"
+		read -r mode owner <<<"$(stat -c '%a %u' "$current")"
+		[ "$owner" = 0 ] || [ "$owner" = "$uid" ] || fail "$current is owned by $owner"
+		(((8#$mode & 8#022) == 0)) || fail "$current is group or world writable ($mode)"
+	done
+}
+
+install_cleanup() {
+	status=$?
+	trap - EXIT INT TERM
+	if [ -n "${holder:-}" ]; then kill "$holder" 2>/dev/null || true; fi
+	wait 2>/dev/null || true
+	# Stop while the unit files are still loaded so RemoveOnStop runs.
+	systemctl --user stop kwakore.service kwakore.socket >/dev/null 2>&1 || true
+	systemctl --user disable --runtime kwakore.socket >/dev/null 2>&1 || true
+	# The preconditions refused to run if any of these existed beforehand.
+	rm -f "$runtime_units/kwakore.socket" "$runtime_units/kwakore.service" "$runtime_units/kwakore.service.d/50-smoke.conf"
+	rmdir "$runtime_units/kwakore.service.d" 2>/dev/null || true
+	if [ "$wants_created" = 1 ]; then rmdir "$runtime_units/sockets.target.wants" 2>/dev/null || true; fi
+	if [ "$units_dir_created" = 1 ]; then rmdir "$runtime_units" 2>/dev/null || true; fi
+	systemctl --user daemon-reload >/dev/null 2>&1 || true
+	systemctl --user reset-failed kwakore.service kwakore.socket >/dev/null 2>&1 || true
+	rmdir "$runtime_child" 2>/dev/null || true
+	rm -rf "$stage"
+	exit "$status"
+}
+
+# repack writes the bundle's four files under another version as a new
+# archive with its own SHA256SUMS, giving a distinct release cheaply.
+repack() {
+	local v=$1 dir="$stage/repack-$1" name="kwakore-$1-linux-$arch" f
+	mkdir -p "$dir/src/$name"
+	for f in "${bundle_files[@]}"; do cp -p "$bundle/$f" "$dir/src/$name/$f"; done
+	tar --owner=0 --group=0 --numeric-owner -C "$dir/src" -czf "$dir/kwakore-linux-$arch.tar.gz" \
+		"$name/kwakore-daemon" "$name/kwakore" "$name/napplet" "$name/libwebview.so"
+	(cd "$dir" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
+	echo "$dir/kwakore-linux-$arch.tar.gz"
+}
+
+# refuse runs the helper on a hostile archive and requires the given refusal
+# with the previous install and its daemon untouched.
+refuse() {
+	local want=$1 file=$2
+	if "${helper[@]}" --archive "$file" >"$stage/refuse.log" 2>&1; then
+		fail "helper accepted a hostile archive ($want)"
+	fi
+	grep -qF "$want" "$stage/refuse.log" || fail "helper refusal lacks \"$want\": $(cat "$stage/refuse.log")"
+	managed_state >"$stage/state.refused"
+	diff -u "$stage/state1" "$stage/state.refused" >"$stage/state.diff" ||
+		fail "a refused archive changed the install: $(cat "$stage/state.diff")"
+	! ls -A "$root" | grep -q '^\.stage\.' || fail "a refused archive left a staging directory"
+}
+
+run_install() {
+	local tool dist archive sha first_pid t0 elapsed r1 r2 v2 v3 sha2 sha3 releases_now
+	for tool in tar gzip sha256sum flock od realpath; do
+		command -v "$tool" >/dev/null || fail "$tool not found"
+	done
+	[ ! -e "$runtime_units/kwakore.service.d" ] || fail "$runtime_units/kwakore.service.d already exists"
+	arch=$(host_arch)
+	units_dir_created=0
+	[ -d "$runtime_units" ] || units_dir_created=1
+	wants_created=0
+	[ -d "$runtime_units/sockets.target.wants" ] || wants_created=1
+	# Below XDG_RUNTIME_DIR, not /tmp: the daemon runs a napplet child only
+	# from a path with no group- or world-writable component, and the helper
+	# refuses such a prefix up front.
+	stage=$(mktemp -d "$XDG_RUNTIME_DIR/kwakore-install-smoke.XXXXXX")
+	holder=""
+	trap install_cleanup EXIT
+	trap 'exit 130' INT TERM
+	install_prefix="$stage/prefix"
+	root="$install_prefix/lib/kwakore"
+	cli="$install_prefix/bin/kwakore"
+	helper=(bash "$repo_root/scripts/install.sh" --prefix "$install_prefix" --runtime-units)
+
+	bash "$repo_root/scripts/build-linux-bundle.sh" --arch "$arch" --version "$bundle_version" --out "$stage/dist" >/dev/null ||
+		fail "could not build the bundle"
+	dist="$stage/dist/$bundle_version"
+	archive="$dist/kwakore-linux-$arch.tar.gz"
+	bundle="$dist/kwakore-$bundle_version-linux-$arch"
+	sha=$(sha256sum <"$archive" | cut -d' ' -f1)
+
+	mkdir -m 0700 "$stage/config" "$stage/data" "$stage/config/kwakore"
+	# Offline settings keep the smoke deterministic and off the network.
+	printf '%s\n' '{"relays":[],"blossom_servers":[],"discover_on_user_relays":false}' >"$stage/config/kwakore/config.json"
+	mkdir -p "$runtime_units/kwakore.service.d"
+	printf '%s\n' '[Service]' "Environment=\"XDG_CONFIG_HOME=$stage/config\" \"XDG_DATA_HOME=$stage/data\"" \
+		>"$runtime_units/kwakore.service.d/50-smoke.conf"
+
+	# A prefix below a group-writable directory is refused before any unit,
+	# release or link is written.
+	mkdir "$stage/shared"
+	chmod 0775 "$stage/shared"
+	if bash "$repo_root/scripts/install.sh" --prefix "$stage/shared/prefix" --runtime-units --archive "$archive" >"$stage/shared.log" 2>&1; then
+		fail "helper installed below a group-writable directory"
+	fi
+	grep -q 'group or world writable' "$stage/shared.log" || fail "unsafe prefix refusal unclear: $(cat "$stage/shared.log")"
+	[ ! -e "$runtime_units/kwakore.socket" ] && [ ! -e "$runtime_units/kwakore.service" ] ||
+		fail "a refused prefix still wrote unit files"
+	[ ! -e "$stage/shared/prefix/lib/kwakore/releases" ] || fail "a refused prefix still wrote a release"
+
+	"${helper[@]}" --archive "$archive" >"$stage/install1.log" 2>&1 || fail "helper install failed: $(cat "$stage/install1.log")"
+
+	# Units: exactly the shipped templates, with ExecStart rendered the way the
+	# manual instructions render it, and the helper's copies match too.
+	cmp -s "$runtime_units/kwakore.socket" "$units_src/kwakore.socket" || fail "installed kwakore.socket differs from the template"
+	sed "s|@BINDIR@|$root/current|g" "$units_src/kwakore.service" | cmp -s - "$runtime_units/kwakore.service" ||
+		fail "installed kwakore.service differs from the manually rendered template"
+	bash "$repo_root/scripts/install.sh" --print-unit kwakore.socket | cmp -s - "$units_src/kwakore.socket" ||
+		fail "the helper's socket template drifted from packaging/systemd/user"
+	bash "$repo_root/scripts/install.sh" --print-unit kwakore.service | cmp -s - "$units_src/kwakore.service" ||
+		fail "the helper's service template drifted from packaging/systemd/user"
+	grep -qx "ExecStart=$root/current/kwakore-daemon" "$runtime_units/kwakore.service" || fail "ExecStart is not the installed daemon"
+
+	# Payload: the ExecStart daemon resolves into the archive's release
+	# directory, beside the napplet child and library, byte for byte the bundle.
+	daemon=$(readlink -f "$root/current/kwakore-daemon")
+	[ "$daemon" = "$(realpath "$root")/releases/$sha/kwakore-daemon" ] || fail "ExecStart resolves to $daemon, not the archive's release"
+	release=$(dirname "$daemon")
+	[ "$(ls -A "$release" | LC_ALL=C sort | tr '\n' ' ')" = "kwakore kwakore-daemon libwebview.so napplet " ] ||
+		fail "release directory is not exactly the four files"
+	for f in "${bundle_files[@]}"; do
+		[ -f "$release/$f" ] && [ ! -L "$release/$f" ] || fail "installed $f is not a regular file"
+		mode=755
+		[ "$f" = libwebview.so ] && mode=644
+		[ "$(stat -c '%a %u' "$release/$f")" = "$mode $uid" ] || fail "installed $f is not mode $mode owned by $uid"
+		cmp -s "$release/$f" "$bundle/$f" || fail "installed $f differs from the bundle"
+	done
+	check_child_path "$release/napplet"
+	check_child_path "$release/libwebview.so"
+	[ "$(readlink "$cli")" = "$root/current/kwakore" ] || fail "CLI link does not point at the installed release"
+
+	# Activation: only the socket is enabled and started.
+	wait_state kwakore.socket active
+	[ "$(systemctl --user show -p UnitFileState --value kwakore.socket)" = enabled-runtime ] || fail "kwakore.socket is not enabled"
+	[ "$(active_state kwakore.service)" = inactive ] || fail "kwakore.service was active before the first client"
+	[ "$(systemctl --user is-enabled kwakore.service 2>/dev/null || true)" != enabled ] || fail "kwakore.service is enabled"
+	check_inode_policy
+	cli_status
+	wait_state kwakore.service active
+	pass "install: helper put the four files beside ExecStart, installed the exact unit templates, enabled only kwakore.socket, and the installed CLI activated the daemon"
+
+	managed_state >"$stage/state1"
+	"${helper[@]}" --archive "$archive" >"$stage/install2.log" 2>&1 || fail "second helper run failed: $(cat "$stage/install2.log")"
+	grep -q 'already installed; nothing changed' "$stage/install2.log" || fail "second run did not report an unchanged install"
+	managed_state >"$stage/state2"
+	diff -u "$stage/state1" "$stage/state2" >"$stage/state.diff" || fail "second run changed the install: $(cat "$stage/state.diff")"
+	cli_status
+	pass "install: a second run with the same archive changed no managed file, unit or activation state"
+
+	# Serialization: a held lock makes the helper wait, then it completes.
+	(
+		flock 9
+		: >"$stage/held"
+		sleep 3
+	) 9<>"$root/.install.lock" &
+	holder=$!
+	for _ in $(seq 1 50); do
+		[ -e "$stage/held" ] && break
+		sleep 0.1
+	done
+	[ -e "$stage/held" ] || fail "could not hold the install lock"
+	t0=$(date +%s%N)
+	"${helper[@]}" --archive "$archive" >"$stage/wait.log" 2>&1 || fail "helper failed behind a held lock: $(cat "$stage/wait.log")"
+	elapsed=$((($(date +%s%N) - t0) / 1000000))
+	wait "$holder"
+	holder=""
+	grep -q 'waiting for another kwakore install' "$stage/wait.log" || fail "helper did not wait for the held lock"
+	[ "$elapsed" -ge 2000 ] || fail "helper finished in ${elapsed}ms while the lock was held"
+	"${helper[@]}" --archive "$archive" >"$stage/race1.log" 2>&1 &
+	r1=$!
+	"${helper[@]}" --archive "$archive" >"$stage/race2.log" 2>&1 &
+	r2=$!
+	wait "$r1" || fail "first concurrent run failed: $(cat "$stage/race1.log")"
+	wait "$r2" || fail "second concurrent run failed: $(cat "$stage/race2.log")"
+	managed_state >"$stage/state3"
+	diff -u "$stage/state1" "$stage/state3" >"$stage/state.diff" || fail "concurrent runs changed the install: $(cat "$stage/state.diff")"
+	cli_status
+	pass "install: a held lock made the helper wait, and two concurrent runs ended in the same single layout"
+
+	# Hostile archives are refused before extraction.
+	mkdir "$stage/tamper"
+	cp "$archive" "$dist/SHA256SUMS" "$stage/tamper/"
+	printf x >>"$stage/tamper/kwakore-linux-$arch.tar.gz"
+	refuse 'checksum mismatch' "$stage/tamper/kwakore-linux-$arch.tar.gz"
+	mkdir -p "$stage/escape/src/kwakore-9-linux-$arch"
+	for f in "${bundle_files[@]}"; do cp -p "$bundle/$f" "$stage/escape/src/kwakore-9-linux-$arch/"; done
+	: >"$stage/escape/src/escaped"
+	tar -P -C "$stage/escape/src" -czf "$stage/escape/kwakore-linux-$arch.tar.gz" \
+		"kwakore-9-linux-$arch/kwakore-daemon" "kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/napplet" \
+		"kwakore-9-linux-$arch/libwebview.so" "kwakore-9-linux-$arch/../escaped" 2>/dev/null
+	tar -tzf "$stage/escape/kwakore-linux-$arch.tar.gz" 2>/dev/null | grep -qF '../escaped' || fail "could not build the ../ archive"
+	(cd "$stage/escape" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
+	refuse 'must hold exactly' "$stage/escape/kwakore-linux-$arch.tar.gz"
+	[ ! -e "$root/escaped" ] && [ ! -e "$install_prefix/lib/escaped" ] || fail "a ../ member escaped"
+	mkdir -p "$stage/link/src/kwakore-9-linux-$arch"
+	for f in kwakore-daemon kwakore libwebview.so; do cp -p "$bundle/$f" "$stage/link/src/kwakore-9-linux-$arch/"; done
+	ln -s /bin/sh "$stage/link/src/kwakore-9-linux-$arch/napplet"
+	tar -C "$stage/link/src" -czf "$stage/link/kwakore-linux-$arch.tar.gz" \
+		"kwakore-9-linux-$arch/kwakore-daemon" "kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/napplet" "kwakore-9-linux-$arch/libwebview.so"
+	(cd "$stage/link" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
+	refuse 'not a regular file' "$stage/link/kwakore-linux-$arch.tar.gz"
+	cli_status
+	pass "install: a tampered checksum, an extra ../ member and a symlink member were refused before extraction, leaving the running install untouched"
+
+	# Upgrade: a new archive swaps the release, restarts the running daemon,
+	# keeps the previous release and prunes older ones.
+	first_pid=$(main_pid)
+	v2=$(repack 0.0.0-smoke2)
+	sha2=$(sha256sum <"$v2" | cut -d' ' -f1)
+	"${helper[@]}" --archive "$v2" >"$stage/upgrade.log" 2>&1 || fail "upgrade failed: $(cat "$stage/upgrade.log")"
+	[ "$(readlink "$root/current")" = "releases/$sha2" ] || fail "upgrade did not switch current to the new release"
+	wait_state kwakore.service active
+	[ "$(main_pid)" != "$first_pid" ] || fail "upgrade did not restart the running daemon"
+	cli_status
+	v3=$(repack 0.0.0-smoke3)
+	sha3=$(sha256sum <"$v3" | cut -d' ' -f1)
+	"${helper[@]}" --archive "$v3" >"$stage/upgrade.log" 2>&1 || fail "second upgrade failed: $(cat "$stage/upgrade.log")"
+	releases_now=$(ls -A "$root/releases" | LC_ALL=C sort | tr '\n' ' ')
+	[ "$releases_now" = "$(printf '%s\n' "$sha2" "$sha3" | LC_ALL=C sort | tr '\n' ' ')" ] ||
+		fail "releases after two upgrades are not exactly the previous and current ones: $releases_now"
+	[ "$(readlink "$root/current")" = "releases/$sha3" ] || fail "second upgrade did not switch current"
+	cli_status
+	pass "install: a new archive swapped the release in one rename, restarted the running daemon, kept the previous release and pruned older ones"
+}
+
+if [ "$mode" = --install-only ]; then
+	run_install
+	exit 0
+fi
+
 # ─── staging and cleanup ────────────────────────────────────────────────────
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/kwakore-smoke.XXXXXX")
+cli="$stage/bin/kwakore"
 linked=0
 start_epoch=$(date +%s)
 
@@ -271,43 +593,6 @@ if command -v systemd-analyze >/dev/null; then
 	(cd "$stage/units" && systemd-analyze --user verify ./kwakore.socket ./kwakore.service >/dev/null 2>"$stage/verify.log") ||
 		{ cat "$stage/verify.log" >&2; fail "systemd-analyze rejected the rendered units"; }
 fi
-
-# ─── helpers ────────────────────────────────────────────────────────────────
-
-active_state() {
-	systemctl --user show -p ActiveState --value "$1"
-}
-
-main_pid() {
-	systemctl --user show -p MainPID --value kwakore.service
-}
-
-wait_state() {
-	local unit=$1 want=$2 i
-	for i in $(seq 1 100); do
-		[ "$(active_state "$unit")" = "$want" ] && return 0
-		sleep 0.1
-	done
-	fail "$unit did not reach $want (now $(active_state "$unit"))"
-}
-
-cli_status() {
-	local out
-	out=$("$stage/bin/kwakore" status) || fail "kwakore status failed: $out"
-	echo "$out" | grep -Eq '"protocol_version": *1([^0-9]|$)' || fail "status lacks protocol_version 1: $out"
-	echo "$out" | grep -Eq '"ready": *true' || fail "status is not ready: $out"
-}
-
-socket_identity() {
-	stat -c '%i %a %u %F' "$socket_path"
-}
-
-check_inode_policy() {
-	[ "$(stat -c '%a %u %F' "$runtime_child")" = "700 $uid directory" ] ||
-		fail "runtime directory is not a 0700 directory owned by $uid: $(stat -c '%a %u %F' "$runtime_child")"
-	[ "$(stat -c '%a %u %F' "$socket_path")" = "600 $uid socket" ] ||
-		fail "socket is not a 0600 socket owned by $uid: $(stat -c '%a %u %F' "$socket_path")"
-}
 
 # ─── activation ─────────────────────────────────────────────────────────────
 
