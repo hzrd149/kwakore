@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-07 — Milestone v0.2 completed and archived
+Last activity: 2026-10-07 — Completed quick task 261007-htm: human-friendly CLI output with --json
 
 ## Performance Metrics
 
@@ -172,6 +172,7 @@ None yet.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 261007-htm | Make CLI output human friendly by default with optional --json | 2026-10-07 | ec2b210 | [261007-htm-the-cli-should-be-updated-to-be-human-fr](./quick/261007-htm-the-cli-should-be-updated-to-be-human-fr/) |
 
 ## Deferred Items
 
