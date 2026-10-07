@@ -123,6 +123,72 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 	}
 }
 
+// OpenSettings starts the launcher's trusted settings page in the sibling
+// napp child. Settings never run in the napplet executable or load napp code.
+func (h *Host) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error) {
+	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		return nil, backend.ErrServiceSessionUnavailable
+	}
+	if spec.Window == "" {
+		return nil, backend.ErrServiceUnavailable
+	}
+	program := filepath.Join(filepath.Dir(h.Program), "napp")
+	if err := checkProgram(program); err != nil {
+		return nil, backend.ErrWindowProgramUnavailable
+	}
+	cmd := exec.Command(program)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(),
+		"VERDANA_WINDOW_KIND=settings",
+		"VERDANA_NAPP_ID="+spec.NappID,
+		"VERDANA_NAPP_NAME="+spec.Name,
+		"VERDANA_INSTANCE_ID="+spec.Window,
+		"VERDANA_WINDOW_WIDTH=860",
+		"VERDANA_WINDOW_HEIGHT=720",
+		"VERDANA_THEME="+spec.Theme,
+		"VERDANA_THEME_VARS="+spec.ThemeVars,
+		"VERDANA_NAPP_FORMAT=",
+		"WEBVIEW_PATH="+filepath.Dir(program),
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, backend.ErrServiceUnavailable
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, backend.ErrServiceUnavailable
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, backend.ErrServiceUnavailable
+	}
+	transport := &childTransport{cmd: cmd, enc: json.NewEncoder(stdin), stdin: stdin, done: make(chan struct{})}
+	go readSettingsChild(transport, spec.Window, stdout)
+	return transport, nil
+}
+
+func readSettingsChild(c *childTransport, window string, stdout io.ReadCloser) {
+	defer close(c.done)
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), backend.MaxInboundWireMsg+1)
+	for scanner.Scan() {
+		var msg backend.WireMsg
+		if json.Unmarshal(scanner.Bytes(), &msg) == nil {
+			backend.HandleSettingsMessage(window, msg)
+		}
+	}
+	if scanner.Err() != nil {
+		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+	}
+	_ = stdout.Close()
+	_ = c.stdin.Close()
+	_ = c.cmd.Wait()
+	backend.SettingsClosed(window)
+}
+
 type childTransport struct {
 	cmd       *exec.Cmd
 	stdin     io.Closer
@@ -334,7 +400,4 @@ type linuxNotification struct{}
 func (linuxNotification) Dismiss() error { return nil }
 func (*Host) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
 	return media.Play(req, onState)
-}
-func (*Host) OpenSettings(backend.SettingsSpec) (backend.Transport, error) {
-	return nil, backend.ErrServiceUnavailable
 }

@@ -225,3 +225,63 @@ func TestLinuxHostRejectsForgedReadyAndReaps(t *testing.T) {
 		t.Fatalf("forged ready frame opened child: %v", err)
 	}
 }
+
+func TestLinuxHostSettingsChild(t *testing.T) {
+	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-settings-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(dir, "napplet")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "libwebview.so"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	host := New(program)
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	if _, err := host.OpenSettings(backend.SettingsSpec{Window: "settings-1"}); !errors.Is(err, backend.ErrServiceSessionUnavailable) {
+		t.Fatalf("headless: %v", err)
+	}
+	t.Setenv("DISPLAY", ":stale")
+	if _, err := host.OpenSettings(backend.SettingsSpec{Window: "settings-1"}); !errors.Is(err, backend.ErrWindowProgramUnavailable) {
+		t.Fatalf("missing sibling: %v", err)
+	}
+	settings := filepath.Join(dir, "napp")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$VERDANA_WINDOW_KIND|$VERDANA_INSTANCE_ID|$VERDANA_NAPP_ID|$VERDANA_NAPP_FORMAT|$WEBVIEW_PATH\" > '" + filepath.Join(dir, "env") + "'\nsleep 30\n"
+	if err := os.WriteFile(settings, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := host.OpenSettings(backend.SettingsSpec{Window: "settings-1", NappID: "sample"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := tr.(*childTransport)
+	defer child.Close()
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, _ := os.ReadFile(filepath.Join(dir, "env"))
+		if len(data) > 0 {
+			want := "settings|settings-1|sample||" + dir
+			if strings.TrimSpace(string(data)) != want {
+				t.Fatalf("settings env = %q, want %q", data, want)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("settings child did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	child.Close()
+	select {
+	case <-child.done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("settings child survived close")
+	}
+}
