@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 15
+current_plan: 16
 status: executing
-stopped_at: Completed 09-06-PLAN.md
-last_updated: "2026-10-07T07:00:58.982Z"
+stopped_at: Completed 09-07-PLAN.md
+last_updated: "2026-10-07T07:06:48.824Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 3568f39c18ef3d4c20df787ca8b839d1f06883e1
+state_head: a1b5329c2d3db45bf5cd1b3e035edbd2b4c834af
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 32
-  percent: 74
+  completed_plans: 33
+  percent: 75
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 15
+Current Plan: 16
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 74%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -131,6 +131,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P20 | 2 min | 1 tasks | 13 files |
 | Phase 09 P15 | 8 min | 2 tasks | 25 files |
 | Phase 09 P06 | 10min | 1 tasks | 65 files |
+| Phase 09 P07 | 12min | 1 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-15: the child is napplet-only and refuses the napp format and settings kind before a webview exists; the napp build tag is now a no-op until 09-08/09-09 drop it
 - [Phase 09]: 09-15: NAP-CONFIG isolation tests now write through napconfig.Save plus pushConfigValues; nothing outside tests writes NAP-CONFIG values after the settings page retirement
 - [Phase 09]: 09-06: Go modules are kwakore/backend and kwakore/desktop (replace kwakore/backend => ../backend) with no alias for the verdana paths; go mod tidy ran in both, dropping 64 Gio-era requirements from desktop
+- [Phase 09]: 09-07: host-child environment keys are KWAKORE_* with no VERDANA_ fallback; WEBVIEW_PATH keeps its upstream name; test gates VERDANA_WEBKIT_SMOKE/VERDANA_REQUIRE_NODE left for 09-09/09-24 so CI does not skip silently
 
 ### Pending Todos
 
@@ -234,8 +236,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T07:00:58.871Z
-Stopped at: Completed 09-06-PLAN.md
+Last session: 2026-10-07T07:06:48.724Z
+Stopped at: Completed 09-07-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
