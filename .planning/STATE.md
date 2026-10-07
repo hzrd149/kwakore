@@ -2,21 +2,21 @@
 gsd_state_version: "1.0"
 milestone: v0.2
 milestone_name: Linux Service Pivot
-current_phase: 06
-current_phase_name: Daemon Core and Configuration
-current_plan: 06-05 pending
-status: ready_to_execute
-stopped_at: Phase 6 gap-closure plans 06-05 and 06-06 verified; Phase 7 live UAT remains deferred
-last_updated: "2026-10-07T01:29:49.708Z"
+current_phase: 07
+current_phase_name: Unix Socket and CLI
+current_plan: 07-05 complete
+status: verification_deferred_human
+stopped_at: Phase 06 verified; Phase 07 live UAT remains deferred
+last_updated: "2026-10-07T01:53:01.621Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 7 implementation complete; live UAT deferred
-state_head: e01a8af9e48093c76ff4c0c50a000ab8b9b833f5
+last_activity_desc: Phase 06 complete, transitioned to Phase 07
+state_head: 3889e5345ff0851a661d7d3c8d7d26135a0d6a72
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 13
+  percent: 25
 ---
 
 # Project State
@@ -26,21 +26,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** v0.2 Linux Service Pivot and Kwakore Rename, Phase 7 live verification
+**Current focus:** Phase 07 live UAT
 
 ## Current Position
 
-Phase: 06 (Daemon Core and Configuration) — READY TO EXECUTE
-Current Plan: 06-05 pending
-Status: Phase 6 gap closure ready to execute; Phase 7 live UAT remains deferred in 07-UAT.md
-**Progress:** 11/13 v0.2 plans completed ([████████░░] 85%)
-Last activity: 2026-10-06 — Phase 6 gap-closure plans 06-05 and 06-06 verified
+Phase: 07 — Unix Socket and CLI
+Current Plan: 07-05 complete
+Status: Phase 07 automated verification passed; live UAT deferred
+**Progress:** 13/13 v0.2 plans completed; 1/4 phases verified ([███░░░░░░░] 25%)
+Last activity: 2026-10-06 — Phase 06 complete, transitioned to Phase 07
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 44
+- Total plans completed: 46
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -53,7 +53,7 @@ Last activity: 2026-10-06 — Phase 6 gap-closure plans 06-05 and 06-06 verified
 | 03 | 10 | - | - |
 | 04 | 6 | - | - |
 | 05 | 12 | - | - |
-| 6 | 4 | - | - |
+| 06 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -131,7 +131,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 6 regression, 2026-10-06]: Phase 7 made shutdown wait for active registry leases without a deadline so stores remain safe, but Phase 6 Plan 01 requires a five-second maximum drain. `06-VERIFICATION.md` is now `gaps_found` (19/20). Resolve the shutdown contract before marking Phase 6 complete again.
+- [Phase 6 regression, resolved 2026-10-06]: Plans 06-05 and 06-06 added interrupted-mutation recovery and a five-second foreground signal deadline. `06-VERIFICATION.md` now passes 27/27.
 
 - [Backlog 999.11]: Research spike needed. Media loopback proxy design, streaming Blossom hash verification (A14), mpv/VLC behavior on Windows
 - [Backlog 999.10]: Re-check upstream PR heads (`gh pr view 80 -R napplet/naps`, other draft PRs) for drift before starting; re-pin deliberately if moved
@@ -185,7 +185,7 @@ Phase 7 automated verification covers 18/18 must-haves. The user deferred the tw
 ## Session Continuity
 
 Last session: 2026-10-06T23:51:30Z
-Stopped at: Phase 7 live UAT deferred by user
+Stopped at: Phase 06 complete, ready to plan Phase 07
 Resume file: .planning/phases/07-unix-socket-and-cli/07-UAT.md
 
 ## Operator Next Steps
