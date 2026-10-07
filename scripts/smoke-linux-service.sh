@@ -10,6 +10,11 @@
 #
 #   activation  enabling only kwakore.socket leaves the service inactive; the
 #               first `kwakore status` starts it and reports ready protocol 1
+#   control     systemctl --user status/restart/stop/start stay coherent, the
+#               manager-owned socket survives a daemon stop, repeated restarts
+#               and a direct foreground start never replace the active socket,
+#               inode owner and modes hold, and the user journal records the
+#               daemon ready lines
 #
 # The units are linked and enabled with --runtime only, so nothing is written
 # under ~/.config/systemd. The staged service runs with XDG_CONFIG_HOME and
@@ -24,9 +29,8 @@
 
 set -euo pipefail
 
-mode=""
 case "${1:-}" in
---activation-only) mode=activation ;;
+--activation-only) ;;
 *)
 	echo "usage: $0 --activation-only" >&2
 	exit 2
@@ -173,3 +177,83 @@ socket_before=$(socket_identity)
 cli_status
 wait_state kwakore.service active
 pass "activation: first kwakore status started kwakore.service through the 0600 user socket"
+
+# ─── control ────────────────────────────────────────────────────────────────
+
+# systemctl stop prints a fixed note while the socket can still re-trigger the
+# service; keep it out of the PASS output.
+stop_service() {
+	systemctl --user stop kwakore.service 2>"$stage/stop.log" || fail "systemctl --user stop failed: $(cat "$stage/stop.log")"
+	wait_state kwakore.service inactive
+}
+
+systemctl --user status kwakore.service --no-pager >"$stage/status.log" 2>&1 ||
+	fail "systemctl --user status kwakore.service reported failure: $(cat "$stage/status.log")"
+grep -q 'Active: active (running)' "$stage/status.log" || fail "status does not show active (running)"
+first_pid=$(main_pid)
+[ "$first_pid" -gt 0 ] || fail "kwakore.service has no main PID"
+
+systemctl --user restart kwakore.service
+wait_state kwakore.service active
+second_pid=$(main_pid)
+[ "$second_pid" -gt 0 ] && [ "$second_pid" != "$first_pid" ] || fail "restart did not replace the daemon process"
+cli_status
+
+stop_service
+[ "$(active_state kwakore.socket)" = active ] || fail "stopping the daemon deactivated the manager-owned socket"
+[ "$(socket_identity)" = "$socket_before" ] || fail "socket inode changed when the daemon stopped"
+systemctl --user status kwakore.service --no-pager >/dev/null 2>&1 && fail "status of a stopped service reported success"
+cli_status
+wait_state kwakore.service active
+pass "control: stopped daemon left the socket listening and the next client re-activated it"
+
+stop_service
+systemctl --user start kwakore.service
+wait_state kwakore.service active
+cli_status
+[ "$(socket_identity)" = "$socket_before" ] || fail "explicit start replaced the socket inode"
+
+# A direct foreground start beside the managed service must refuse, not rebind.
+direct_out=$(XDG_CONFIG_HOME="$stage/config" XDG_DATA_HOME="$stage/data" timeout 10 "$stage/bin/kwakore-daemon" 2>&1) &&
+	fail "a direct daemon started beside the managed service: $direct_out"
+[ "$(socket_identity)" = "$socket_before" ] || fail "a direct daemon start replaced the managed socket"
+[ "$(active_state kwakore.service)" = active ] || fail "a direct daemon start disturbed the managed service"
+pass "control: systemctl --user status/restart/stop/start coherent; a direct start beside it refused"
+
+# Rapid repeated restarts: the unit pins StartLimitBurst=5 in 10s. From a reset
+# counter five restarts succeed and the sixth fails with systemd's fixed
+# message; both units fail, the manager removes its inode instead of anything
+# replacing it, and clients get the fixed Unavailable error until reset.
+systemctl --user reset-failed kwakore.service
+for n in 1 2 3 4 5; do
+	systemctl --user restart kwakore.service 2>"$stage/restart.log" ||
+		fail "restart $n of 5 failed inside the start limit: $(cat "$stage/restart.log")"
+done
+systemctl --user restart kwakore.service 2>"$stage/restart.log" && fail "a sixth restart in ten seconds was not rate limited"
+grep -q 'start of the service was attempted too often' "$stage/restart.log" ||
+	fail "rate-limited restart lacks the fixed message: $(cat "$stage/restart.log")"
+wait_state kwakore.service failed
+wait_state kwakore.socket failed
+[ "$(systemctl --user show -p Result --value kwakore.service)" = start-limit-hit ] || fail "service result is not start-limit-hit"
+[ "$(systemctl --user show -p Result --value kwakore.socket)" = service-start-limit-hit ] || fail "socket result is not service-start-limit-hit"
+[ ! -e "$socket_path" ] || fail "a socket remained at the path after the manager released it: $(socket_identity)"
+unavailable=$("$stage/bin/kwakore" status 2>&1 >/dev/null) && fail "status succeeded with no socket"
+[ "$unavailable" = '{"error":{"code":1004,"message":"Unavailable"}}' ] || fail "status without a socket is not the fixed Unavailable error: $unavailable"
+systemctl --user reset-failed kwakore.service kwakore.socket
+systemctl --user start kwakore.socket
+wait_state kwakore.socket active
+[ "$(active_state kwakore.service)" = inactive ] || fail "recovered socket started the service without a client"
+check_inode_policy
+cli_status
+wait_state kwakore.service active
+pass "control: sixth rapid restart rate limited with fixed messages, no socket replaced, reset-failed recovers activation"
+
+if command -v journalctl >/dev/null; then
+	journal=$(journalctl --user -u kwakore.service --since "@$start_epoch" -o cat --no-pager 2>/dev/null || true)
+	echo "$journal" | grep -q "kwakore-daemon .* ready (config: $stage/config/kwakore/config.json)" ||
+		fail "user journal has no daemon ready line for the staged service"
+	echo "$journal" | grep -q 'Stopped kwakore.service' || fail "user journal has no manager stop record"
+	pass "control: user journal records daemon ready lines and manager stop records"
+else
+	fail "journalctl not found; cannot inspect the user journal"
+fi

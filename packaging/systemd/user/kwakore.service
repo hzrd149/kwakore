@@ -8,6 +8,14 @@ Description=Kwakore napplet daemon
 Documentation=https://github.com/hzrd149/kwakore/blob/master/docs/service.md
 Requires=kwakore.socket
 After=kwakore.socket
+# Explicit so the burst edge is the same on every distribution: a sixth start
+# within ten seconds fails this unit with start-limit-hit and the socket with
+# service-start-limit-hit. Clients then get the fixed Unavailable error until
+# `systemctl --user reset-failed kwakore.service kwakore.socket` and
+# `systemctl --user start kwakore.socket`. The limit also stops a daemon that
+# exits without accepting from being re-triggered forever by a queued client.
+StartLimitIntervalSec=10s
+StartLimitBurst=5
 
 [Service]
 Type=simple

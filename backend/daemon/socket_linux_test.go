@@ -305,7 +305,14 @@ func TestSocketAccessReplacesOwnedStaleSocket(t *testing.T) {
 // XDG_RUNTIME_DIR at it.
 func activationRuntime(t *testing.T) string {
 	t.Helper()
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	// a short root keeps the socket under the 108-byte sun_path limit even
+	// for long subtest names, which t.TempDir would embed
+	root, err := os.MkdirTemp("", "kws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	runtimeDir := filepath.Join(root, "runtime")
 	if err := os.MkdirAll(filepath.Join(runtimeDir, "kwakore"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -428,5 +435,303 @@ func TestActivatedSocketServesInheritedListener(t *testing.T) {
 	// the user manager keeps listening, so the daemon must not unlink its inode
 	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSocket == 0 {
 		t.Fatalf("manager-owned socket removed on close: %v", err)
+	}
+}
+
+// clearActivation removes any ambient sd_listen_fds variables for a direct run.
+func clearActivation(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"} {
+		t.Setenv(name, "")
+		_ = os.Unsetenv(name)
+	}
+}
+
+// pathState captures what sits at path so a refusal can be shown to leave it
+// untouched: no fallback bind, no unlink, no replacement.
+func pathState(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "absent"
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	return strconv.FormatUint(st.Ino, 10) + " " + info.Mode().String()
+}
+
+func TestActivatedSocketRejectsMalformedActivation(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	cases := []struct {
+		name string
+		// closes is true when the descriptor was validated as ours to consume:
+		// PID and count matched, so a rejected descriptor is closed, never served.
+		closes bool
+		setup  func(t *testing.T) rig
+	}{
+		{"wrong pid", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, strconv.Itoa(os.Getpid()+1), "1")
+			return r
+		}},
+		{"signed pid", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, "+"+pid, "1")
+			return r
+		}},
+		{"empty pid", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, "", "1")
+			return r
+		}},
+		{"missing pid", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "1")
+			_ = os.Unsetenv("LISTEN_PID")
+			return r
+		}},
+		{"names without pid or count", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "1")
+			_ = os.Unsetenv("LISTEN_PID")
+			_ = os.Unsetenv("LISTEN_FDS")
+			return r
+		}},
+		{"two descriptors", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "2")
+			return r
+		}},
+		{"zero descriptors", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "0")
+			return r
+		}},
+		{"padded count", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "01")
+			return r
+		}},
+		{"two names", false, func(t *testing.T) rig {
+			r := validRig(t)
+			setActivation(t, r.fd, pid, "1")
+			t.Setenv("LISTEN_FDNAMES", "kwakore.socket:other.socket")
+			return r
+		}},
+		{"datagram socket", true, func(t *testing.T) rig {
+			path := activationRuntime(t)
+			fd, ino := inheritedFD(t, "unixgram", path)
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+		{"regular file", true, func(t *testing.T) rig {
+			path := activationRuntime(t)
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			fd, err := unix.Open(path, unix.O_RDONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ino := fdInode(t, fd)
+			t.Cleanup(func() {
+				if !fdClosed(fd, ino) {
+					_ = unix.Close(fd)
+				}
+			})
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+		{"tcp socket", true, func(t *testing.T) rig {
+			path := activationRuntime(t)
+			l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fd := dupConnFD(t, l)
+			_ = l.Close()
+			ino := fdInode(t, fd)
+			t.Cleanup(func() {
+				if !fdClosed(fd, ino) {
+					_ = unix.Close(fd)
+				}
+			})
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+		{"bound but not listening", true, func(t *testing.T) rig {
+			path := activationRuntime(t)
+			fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := unix.Bind(fd, &unix.SockaddrUnix{Name: path}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, 0600); err != nil {
+				t.Fatal(err)
+			}
+			ino := fdInode(t, fd)
+			t.Cleanup(func() {
+				if !fdClosed(fd, ino) {
+					_ = unix.Close(fd)
+				}
+			})
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+		{"other path", true, func(t *testing.T) rig {
+			path := activationRuntime(t)
+			fd, ino := inheritedFD(t, "unix", filepath.Join(filepath.Dir(path), "other.sock"))
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+		{"world readable socket", true, func(t *testing.T) rig {
+			r := validRig(t)
+			if err := os.Chmod(r.path, 0666); err != nil {
+				t.Fatal(err)
+			}
+			setActivation(t, r.fd, pid, "1")
+			return r
+		}},
+		{"public socket directory", true, func(t *testing.T) rig {
+			r := validRig(t)
+			if err := os.Chmod(filepath.Dir(r.path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			setActivation(t, r.fd, pid, "1")
+			return r
+		}},
+		{"foreign uid", true, func(t *testing.T) rig {
+			r := validRig(t)
+			previous := runtimeUID
+			runtimeUID = func() uint32 { return previous() + 1 }
+			t.Cleanup(func() { runtimeUID = previous })
+			setActivation(t, r.fd, pid, "1")
+			return r
+		}},
+		{"symlinked runtime directory", true, func(t *testing.T) rig {
+			realPath := activationRuntime(t)
+			realRuntime := filepath.Dir(filepath.Dir(realPath))
+			link := filepath.Join(filepath.Dir(realRuntime), "link")
+			if err := os.Symlink(realRuntime, link); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("XDG_RUNTIME_DIR", link)
+			// bound through the link, so the socket name matches SocketPath
+			path := filepath.Join(link, "kwakore", "daemon.sock")
+			fd, ino := inheritedFD(t, "unix", path)
+			setActivation(t, fd, pid, "1")
+			return rig{path, fd, ino}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.setup(t)
+			before := pathState(r.path)
+			listener, err := (&Service{}).Listen()
+			if err == nil {
+				listener.Close()
+				t.Fatal("malformed activation was served")
+			}
+			if after := pathState(r.path); after != before {
+				t.Fatalf("refusal changed the socket path: %s -> %s", before, after)
+			}
+			for _, name := range []string{"LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"} {
+				if _, ok := os.LookupEnv(name); ok {
+					t.Fatalf("%s left in the environment", name)
+				}
+			}
+			if closed := fdClosed(r.fd, r.ino); closed != tc.closes {
+				t.Fatalf("descriptor closed = %v, want %v", closed, tc.closes)
+			}
+		})
+	}
+}
+
+type rig struct {
+	path string
+	fd   int
+	ino  uint64
+}
+
+// validRig is a correct inherited listener; cases break one property of it.
+func validRig(t *testing.T) rig {
+	t.Helper()
+	path := activationRuntime(t)
+	fd, ino := inheritedFD(t, "unix", path)
+	return rig{path, fd, ino}
+}
+
+func TestDirectSocketModes(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, path string) (cleanup func())
+		ok    bool
+	}{
+		{"absent metadata binds", func(t *testing.T, path string) func() { return nil }, true},
+		{"stale owned socket replaced", func(t *testing.T, path string) func() {
+			stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stale.SetUnlinkOnClose(false)
+			_ = stale.Close()
+			return nil
+		}, true},
+		{"active socket kept", func(t *testing.T, path string) func() {
+			active, err := (&Service{}).Listen()
+			if err != nil {
+				t.Fatal(err)
+			}
+			return func() { active.Close() }
+		}, false},
+		{"foreign file kept", func(t *testing.T, path string) func() {
+			if err := os.WriteFile(path, []byte("not a socket"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}, false},
+		{"symlinked runtime directory", func(t *testing.T, path string) func() {
+			runtimeDir := filepath.Dir(filepath.Dir(path))
+			link := filepath.Join(filepath.Dir(runtimeDir), "link")
+			if err := os.Symlink(runtimeDir, link); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("XDG_RUNTIME_DIR", link)
+			return nil
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearActivation(t)
+			path := activationRuntime(t)
+			if cleanup := tc.setup(t, path); cleanup != nil {
+				defer cleanup()
+			}
+			before := pathState(path)
+			listener, err := (&Service{}).Listen()
+			if !tc.ok {
+				if err == nil {
+					listener.Close()
+					t.Fatal("unsafe direct start was accepted")
+				}
+				if after := pathState(path); after != before {
+					t.Fatalf("refused direct start changed the socket path: %s -> %s", before, after)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("direct start refused: %v", err)
+			}
+			if info, err := os.Lstat(path); err != nil || info.Mode().Perm() != 0600 || info.Mode()&os.ModeSocket == 0 {
+				t.Fatalf("direct socket must be a 0600 socket: %v, %v", info, err)
+			}
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			// a socket this process bound is its own to unlink
+			if _, err := os.Lstat(path); !os.IsNotExist(err) {
+				t.Fatalf("owned direct socket remains: %v", err)
+			}
+		})
 	}
 }

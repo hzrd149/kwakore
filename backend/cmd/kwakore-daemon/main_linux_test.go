@@ -9,10 +9,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -129,7 +131,16 @@ func TestForegroundHelper(t *testing.T) {
 			}
 		}
 	}
+	if os.Getenv("KWAKORE_TEST_ACTIVATED") == "1" {
+		// systemd writes LISTEN_PID after fork; exec.Cmd cannot, so the
+		// helper names itself before the daemon validates the metadata.
+		os.Setenv("LISTEN_PID", strconv.Itoa(os.Getpid()))
+	}
 	if err := run(nil); err != nil {
+		if os.Getenv("KWAKORE_TEST_EXPECT_FAILURE") == "1" {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(3)
+		}
 		t.Fatal(err)
 	}
 	if path := os.Getenv("KWAKORE_FOREGROUND_CHECK_SOCKET"); path != "" {
@@ -827,4 +838,165 @@ func captureRunOutput(args []string) ([]byte, error) {
 		return nil, copyErr
 	}
 	return buf.Bytes(), runErr
+}
+
+// managerListener plays the user manager for kwakore.socket: it owns a 0600
+// listener at the daemon path inside a 0700 directory and returns a file to
+// pass as descriptor 3.
+func managerListener(t *testing.T, runtimeDir string) (string, *os.File) {
+	t.Helper()
+	socketPath := filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetUnlinkOnClose(false)
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := l.File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = l.Close()
+	t.Cleanup(func() { _ = file.Close() })
+	return socketPath, file
+}
+
+func socketStatus(t *testing.T, socketPath string) {
+	t.Helper()
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial activated socket: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"service.status\",\"id\":1}\n")); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Result struct {
+			ProtocolVersion int `json:"protocol_version"`
+			Health          struct {
+				Ready bool `json:"ready"`
+			} `json:"health"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(line, &response); err != nil || response.Result.ProtocolVersion != 1 || !response.Result.Health.Ready {
+		t.Fatalf("status through activated socket: %s, %v", line, err)
+	}
+}
+
+func socketInode(t *testing.T, path string) uint64 {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("manager socket missing: %v", err)
+	}
+	return info.Sys().(*syscall.Stat_t).Ino
+}
+
+// TestActivatedSocketForegroundDaemon runs the real foreground command the way
+// kwakore.service does: one inherited listener at fd 3, LISTEN_FDS=1. The
+// daemon serves status through it, a second start beside it is refused, and
+// stopping the daemon leaves the manager's socket in place for the next client.
+func TestActivatedSocketForegroundDaemon(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath, inherited := managerListener(t, runtimeDir)
+	inode := socketInode(t, socketPath)
+	env := append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(env, "KWAKORE_TEST_ACTIVATED=1", "LISTEN_FDS=1", "LISTEN_FDNAMES=kwakore.socket")
+	cmd.ExtraFiles = []*os.File{inherited}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := make(chan struct{}, 1)
+	go func() {
+		if bufio.NewScanner(stdout).Scan() {
+			ready <- struct{}{}
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("activated daemon not ready: %s", stderr.String())
+	}
+	socketStatus(t, socketPath)
+
+	// repeated starts beside a live daemon refuse and keep the manager inode
+	for _, extra := range [][]string{
+		nil,
+		{"KWAKORE_TEST_ACTIVATED=1", "LISTEN_FDS=2"},
+	} {
+		second := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+		second.Env = append(append(append([]string{}, env...), "KWAKORE_TEST_EXPECT_FAILURE=1"), extra...)
+		out, err := second.CombinedOutput()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 3 {
+			t.Fatalf("second start %v was not refused: %v: %s", extra, err, out)
+		}
+		if got := socketInode(t, socketPath); got != inode {
+			t.Fatalf("second start %v replaced the manager socket", extra)
+		}
+	}
+	socketStatus(t, socketPath)
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("activated shutdown: %v stderr=%s", err, stderr.String())
+	}
+	if got := socketInode(t, socketPath); got != inode {
+		t.Fatal("daemon stop replaced the manager socket")
+	}
+	// the manager still holds the listener, so a new client queues on it
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("manager socket stopped listening with the daemon: %v", err)
+	}
+	conn.Close()
+}
+
+// TestActivatedSocketMalformedMetadataRefusesStart proves the foreground
+// command never binds its own socket when activation metadata is wrong.
+func TestActivatedSocketMalformedMetadataRefusesStart(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestForegroundHelper$")
+	cmd.Env = append(os.Environ(), "KWAKORE_FOREGROUND_HELPER=1", "KWAKORE_TEST_EXPECT_FAILURE=1", "LISTEN_PID=1", "LISTEN_FDS=1", "XDG_RUNTIME_DIR="+runtimeDir, "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
+		t.Fatalf("malformed activation started: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "systemd socket activation metadata is invalid") {
+		t.Fatalf("missing fixed activation error: %s", out)
+	}
+	if _, err := os.Lstat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("malformed activation fell back to a direct bind: %v", err)
+	}
 }
