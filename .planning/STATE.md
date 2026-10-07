@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 13
+current_plan: 14
 status: executing
-stopped_at: Completed 09-20-PLAN.md
-last_updated: "2026-10-07T06:41:40.242Z"
+stopped_at: Completed 09-15-PLAN.md
+last_updated: "2026-10-07T06:54:52.636Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: f3ad23e92a846ad314a688b8f78af2e453a5a9ff
+state_head: dc35a8a6074cc9df159e180773ddc83dacce244c
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 30
-  percent: 70
+  completed_plans: 31
+  percent: 72
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 13
+Current Plan: 14
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 70%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 72%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -129,6 +129,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P14 | 3 min | 1 tasks | 11 files |
 | Phase 09 P19 | 2 min | 1 tasks | 12 files |
 | Phase 09 P20 | 2 min | 1 tasks | 13 files |
+| Phase 09 P15 | 8 min | 2 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -176,6 +177,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-14: retired desktop/internal/childbin and desktop/internal/icon in one commit (no importers after 09-12, D-10); webviewlib comments naming childbin.Ensure logged for the next plan that edits webviewlib
 - [Phase 09]: 09-19: retired desktop/internal/instanceipc and desktop/internal/instancelock in one commit (no importers after 09-12, D-10); the daemon systemd user socket replaces Gio single-instance forwarding; desktop.yml/CLAUDE.md/AGENTS.md mentions logged for 09-09/09-10
 - [Phase 09]: 09-20: secretstore, themesystem and windowchrome retired in one commit with no stub (D-10); the daemon already ran without Options.Secrets, and desktop/internal now holds only webviewlib and wireline
+- [Phase 09]: 09-15: config.openSettings is declined with no answer (NAP-CONFIG fire-and-forget) and still charges the 2 s limiter; nap.openSettings returns the fixed error "settings are not available"
+- [Phase 09]: 09-15: the child is napplet-only and refuses the napp format and settings kind before a webview exists; the napp build tag is now a no-op until 09-08/09-09 drop it
+- [Phase 09]: 09-15: NAP-CONFIG isolation tests now write through napconfig.Save plus pushConfigValues; nothing outside tests writes NAP-CONFIG values after the settings page retirement
 
 ### Pending Todos
 
@@ -228,8 +232,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:41:40.148Z
-Stopped at: Completed 09-20-PLAN.md
+Last session: 2026-10-07T06:54:52.522Z
+Stopped at: Completed 09-15-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
