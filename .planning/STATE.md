@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 12
+current_plan: 13
 status: executing
-stopped_at: Completed 09-19-PLAN.md
-last_updated: "2026-10-07T06:38:30.439Z"
+stopped_at: Completed 09-20-PLAN.md
+last_updated: "2026-10-07T06:41:40.242Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 0ecf9dca76a63e6b3a3138156e3def84ca501626
+state_head: f3ad23e92a846ad314a688b8f78af2e453a5a9ff
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 29
-  percent: 67
+  completed_plans: 30
+  percent: 70
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 12
+Current Plan: 13
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 67%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 70%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -128,6 +128,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P13 | 2 min | 1 tasks | 29 files |
 | Phase 09 P14 | 3 min | 1 tasks | 11 files |
 | Phase 09 P19 | 2 min | 1 tasks | 12 files |
+| Phase 09 P20 | 2 min | 1 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-13: desktop/internal/osintegration deleted in one commit (29 files); backend/desktopentry via linuxhost Host.SyncAppShortcuts is the only native entry writer
 - [Phase 09]: 09-14: retired desktop/internal/childbin and desktop/internal/icon in one commit (no importers after 09-12, D-10); webviewlib comments naming childbin.Ensure logged for the next plan that edits webviewlib
 - [Phase 09]: 09-19: retired desktop/internal/instanceipc and desktop/internal/instancelock in one commit (no importers after 09-12, D-10); the daemon systemd user socket replaces Gio single-instance forwarding; desktop.yml/CLAUDE.md/AGENTS.md mentions logged for 09-09/09-10
+- [Phase 09]: 09-20: secretstore, themesystem and windowchrome retired in one commit with no stub (D-10); the daemon already ran without Options.Secrets, and desktop/internal now holds only webviewlib and wireline
 
 ### Pending Todos
 
@@ -226,8 +228,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:38:30.337Z
-Stopped at: Completed 09-19-PLAN.md
+Last session: 2026-10-07T06:41:40.148Z
+Stopped at: Completed 09-20-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
