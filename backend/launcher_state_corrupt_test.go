@@ -455,7 +455,7 @@ func TestDataDirIsPrivate(t *testing.T) {
 	withFreshStateDir(t)
 
 	// an existing dir from an older build, created 0755
-	existing := filepath.Join(t.TempDir(), "verdana")
+	existing := filepath.Join(t.TempDir(), "kwakore")
 	if err := os.Mkdir(existing, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestDataDirIsPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	// and a brand new one
-	fresh := filepath.Join(t.TempDir(), "a", "verdana")
+	fresh := filepath.Join(t.TempDir(), "a", "kwakore")
 
 	for _, d := range []string{existing, fresh} {
 		dataDir = d

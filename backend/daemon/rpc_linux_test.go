@@ -221,8 +221,8 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	      await window.napplet.storage.setItem("real-child-forged", "missing-binding-or-id");
 	      return;
 	    }
-	    binding.postMessage(JSON.stringify({id:"forged-rpc",method:"__verdana_napplet_rpc",params:["forged-token","nap.reset","null"]}));
-	    binding.postMessage(JSON.stringify({id:"forged-answer",method:"__verdana_napplet_answer",params:["forged-token",Number(id),true,0,"always"]}));
+	    binding.postMessage(JSON.stringify({id:"forged-rpc",method:"__kwakore_napplet_rpc",params:["forged-token","nap.reset","null"]}));
+	    binding.postMessage(JSON.stringify({id:"forged-answer",method:"__kwakore_napplet_answer",params:["forged-token",Number(id),true,0,"always"]}));
 	    await window.napplet.storage.setItem("real-child-forged", id);
 	  }, 2000);
 	}, 10);

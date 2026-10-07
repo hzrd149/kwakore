@@ -331,11 +331,11 @@ const otherClientKeyHex = "22222222222222222222222222222222222222222222222222222
 // ─── found / not found rows ─────────────────────────────────────
 
 func TestSecretsItemAccount(t *testing.T) {
-	a := secretsItemAccount("/home/a/.config/Verdana")
+	a := secretsItemAccount("/home/a/.config/kwakore")
 	if !strings.HasPrefix(a, "login-secrets:") || len(a) != len("login-secrets:")+12 {
 		t.Fatalf("account = %q", a)
 	}
-	if a == secretsItemAccount("/home/b/.config/Verdana") {
+	if a == secretsItemAccount("/home/b/.config/kwakore") {
 		t.Fatal("two data dirs share a keyring item")
 	}
 }
