@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"fiatjaf.com/verdana/desktop/internal/media"
+	"verdana/backend/media"
 	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"verdana/backend"
 	"verdana/backend/fileutil"

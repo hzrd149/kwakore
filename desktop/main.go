@@ -10,7 +10,7 @@ import (
 	"verdana/backend"
 
 	"fiatjaf.com/verdana/desktop/internal/instancelock"
-	"fiatjaf.com/verdana/desktop/internal/media"
+	"verdana/backend/media"
 	"fiatjaf.com/verdana/desktop/internal/osintegration"
 	"fiatjaf.com/verdana/desktop/internal/secretstore"
 	"fiatjaf.com/verdana/desktop/internal/windowchrome"
