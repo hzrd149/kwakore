@@ -104,14 +104,14 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
-**Plans:** 3/24 plans executed
+**Plans:** 4/24 plans executed
 
 Plans:
 
 - [x] 09-01-PLAN.md — User socket activation tracer and manager lifecycle
 - [x] 09-02-PLAN.md — Generic Linux bundle and install helper
 - [x] 09-03-PLAN.md — Safe native entry token and writer
-- [ ] 09-04-PLAN.md — Service entry reconciliation
+- [x] 09-04-PLAN.md — Service entry reconciliation
 - [ ] 09-05-PLAN.md — Android Kotlin source retirement
 - [ ] 09-21-PLAN.md — Android build and resource retirement
 - [ ] 09-22-PLAN.md — Gomobile, Android CI and installer retirement

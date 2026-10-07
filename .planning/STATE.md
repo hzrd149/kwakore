@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 4
+current_plan: 5
 status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-10-07T05:53:24.219Z"
+stopped_at: Completed 09-04-PLAN.md
+last_updated: "2026-10-07T06:09:21.620Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 63351714d9da970e2fde472bd990ad79336a618f
+state_head: ad8cdd5040b9a1b773413b28fc00cb3c0f47938f
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 21
-  percent: 49
+  completed_plans: 22
+  percent: 51
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 4
+Current Plan: 5
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([█████░░░░░] 49%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([█████░░░░░] 51%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -120,6 +120,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P01 | 9min | 3 tasks | 6 files |
 | Phase 09 P02 | 16min | 2 tasks | 5 files |
 | Phase 09 P03 | 12min | 2 tasks | 8 files |
+| Phase 09 P04 | 16min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-03: kwakore launch-token TOKEN decodes an unpadded base64url canonical address before dialing, refuses --socket, and sends the unchanged napplet.launch request; the codec lives in leaf package backend/desktopentry, pinned to ParseCanonicalServiceAddress by an equivalence test
 - [Phase 09]: 09-03: generated entries are 0600 kwakore-napplet-<sha256[:16]>.desktop with Exec "CLI" launch-token TOKEN and Terminal=true; Terminal=true visibility still needs the 09-11 live shell check
 - [Phase 09]: 09-03: a CLI path containing % is refused for desktop entries because GLib resolves the Exec program before expanding %%
+- [Phase 09]: 09-04: service native entries come only from committed canonical napplet records; reconciled at startup before readiness and synchronously after every committed mutation, with ticket-coalesced passes reading the registry under the pass lock
+- [Phase 09]: 09-04: entry Exec uses the kwakore CLI beside the daemon, keeping the stable lib/kwakore/current link when the daemon was started through it; reconcile failures surface as the fixed native_entries diagnostic
 
 ### Pending Todos
 
@@ -208,8 +211,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T05:53:24.140Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-10-07T06:09:21.544Z
+Stopped at: Completed 09-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
