@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Kwakore is the v0.2 name for the project currently called Verdana. It is becoming a per-user Linux service for discovering, installing, and running Nostr napps and napplets with native operating-system integration. It exposes control through a user-only Unix socket and configuration files so distributions and users can build their own settings applications. The existing Gio manager/store UI and Android app are being retired in v0.2.
+Kwakore (formerly Verdana) is a per-user Linux service for discovering, installing, and running Nostr napplets with native operating-system integration. A systemd user socket starts `kwakore-daemon` on demand; control goes through a user-only Unix socket (JSON-RPC protocol version 1, the `kwakore` CLI, which accepts canonical and NIP-19 `naddr` addresses) and configuration files, so distributions and users can build their own settings applications. Each installed napplet gets a native desktop entry. It ships as a checksummed generic Linux bundle with an install helper and as a Nix package with a per-user NixOS module. The Gio manager/store UI and the Android app were retired in v0.2.
 
 ## Current State
 
@@ -52,15 +52,16 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 - ✓ A napplet that reloads or navigates its own frame gets a fresh frame and session (old session reset first, replies and refusals bound to the sending frame, reload loops halted after 3 in 10 s); a document-start marker closes the delayed-load gap; the host page and every loopback response carry an enforced CSP with `frame-ancestors 'none'`; WebKitGTK napplet windows fail closed unless WebRTC, media capture and preconnect read back off — v0.1 (Phase 4; self-made `javascript:`/unclosed `document.open()` documents keep the session: accepted residual, SEED-002)
 - ✓ Every napplet's data is bound to the artifact installed: ids are the NIP-01 address (root and `d="root"` never share), storage and NAP-CONFIG are keyed by address + artifact hash with hashed file names and no fallback, updates/uninstall/window close reclaim data, the registry picks the NIP-01 latest event (id and signature checked) and shows an invalid latest as unavailable, blob downloads are public-only (user-configured servers excepted), trials verify every file, and shortcut files on Linux/macOS/Windows carry only launch tokens — v0.1 (Phase 5)
 
+- ✓ Per-user daemon with XDG configuration, validated settings, reload and diagnostics — v0.2 (Phase 6)
+- ✓ Versioned, user-only Unix socket control protocol and scriptable `kwakore` CLI for service and napplet management — v0.2 (Phase 7; the CLI accepts `naddr`/`nostr:naddr` and forwards relay hints on install, quick task 261007-cth)
+- ✓ Napplet launch/stop, permissions and signer options through the daemon without exposing secrets — v0.2 (Phase 8)
+- ✓ systemd user socket activation, generic Linux bundle and checksummed install helper, Nix package and per-user NixOS module, native desktop entries per installed napplet — v0.2 (Phase 9)
+- ✓ Gio manager/store UI, Android app and gomobile retired; the napplet child is napplet-only; Go modules, units, paths, environment keys, bridge names and docs renamed to `kwakore` with an identity gate — v0.2 (Phase 9)
+
 ### Active
 
 <!-- Empty between milestones. Define with /gsd-new-milestone. -->
 
-- [ ] Run the napplet runtime as a per-user systemd service on common Linux distributions, with NixOS support.
-- [ ] Control the daemon's features and settings through a documented, user-only Unix socket and configuration files.
-- [ ] Manage Nostr signer options without exposing secrets through the control interface.
-- [ ] Remove the Gio manager/store UI and Android app while preserving native napplet integration.
-- [ ] Rename Verdana to kwakore across code, package identifiers, Linux integration, documentation, and CI.
 
 **Deferred from v0.1 (backlog 999.10-999.12, unmet requirements listed in `milestones/v0.1-REQUIREMENTS.md`):**
 - Relay, outbox, intent and INC domains conform strictly (RELY-01..06, INTN-01..03)
@@ -103,9 +104,11 @@ A Linux user can run an untrusted napplet through a simple, controllable local s
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Per-user systemd service with a user-only Unix socket | Keeps control and napplet state within each user's session and lets native clients integrate without a bundled settings UI | — Pending v0.2 |
-| Retire Gio manager/store UI and Android app | Reduce product scope around the Linux service and its reusable runtime | — Pending v0.2 |
-| Rename the project to `kwakore` in v0.2 | Align the product name and native identifiers with the service pivot | — Pending v0.2 |
+| Per-user systemd service with a user-only Unix socket | Keeps control and napplet state within each user's session and lets native clients integrate without a bundled settings UI | ✓ Shipped (Phases 6-9): socket-activated, SO_PEERCRED-checked, strict LISTEN_* adoption |
+| Retire Gio manager/store UI and Android app | Reduce product scope around the Linux service and its reusable runtime | ✓ Done (Phase 9); NAP-CONFIG values lost their only UI (documented limitation) |
+| Rename the project to `kwakore` in v0.2 | Align the product name and native identifiers with the service pivot | ✓ Done (Phase 9), direct with no aliases (D-08); gated by `scripts/check-product-identity.sh` |
+| CI runs only the Go lanes; release on `v*` tags | Three consecutive CI failures came from runner systemd/sudo integration, not Kwakore (user, 2026-10-07) | ✓ Quick task 261007-ej4; real-engine, Nix and installed-artifact smoke run locally before each tag (AR-09-01) |
+| CLI accepts NIP-19 `naddr` but the wire protocol stays canonical-only | One identity string keys records, entries, permissions and storage; humans and agents paste `naddr` | ✓ Quick task 261007-cth |
 | Conformance measured against NIP-5D + naps (`napplet/naps`), WEB-NAPPLET from `hzrd149/naps` | NIP-5D defines the runtime contract, naps the per-domain messages; WEB-NAPPLET is the future event schema | ✓ Good — v0.1 (`spec/pinned/`, `spec/CONFORMANCE.md`) |
 | Pin specs to upstream heads by SHA | Reproducible audit against a moving target | ✓ Good — Phase 1 (`spec/pinned/`) |
 | Conform strictly, including storage keyed by artifact hash | Public release as a spec-correct runtime; accept one-time data reset with a notice | ✓ Good — v0.1 Phase 5 (update/uninstall confirm dialogs) |
@@ -149,4 +152,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-06 after defining v0.2 milestone direction*
+*Last updated: 2026-10-07 after Phase 9*

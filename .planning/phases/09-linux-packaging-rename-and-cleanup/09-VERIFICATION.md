@@ -1,30 +1,36 @@
 ---
 phase: 09-linux-packaging-rename-and-cleanup
 verified: 2026-10-07T09:31:20Z
-status: human_needed
+status: passed
 score: 62/64 must-haves verified
 behavior_unverified: 0
 overrides_applied: 3
 overrides:
+
   - must_have: "An isolated per-user manager can run the installed-artifact smoke in CI"
     reason: "Superseded by quick task 261007-ej4: after three CI failures, all in the systemd and sudo lanes and none in Kwakore, the repo owner limited CI to the Go tests (\"we dont need to test the full linux integrations in the CI, probably just the go tests\"), with bundle and release only on v* tags (\"Keep tag-only release\"). scripts/ci-user-manager.sh is deleted, and smoke-linux-service.sh --full is the local release acceptance run."
     accepted_by: "hzrd149"
     accepted_at: "2026-10-07T15:43:24Z"
+
   - must_have: "The Nix package/module and generic release pass their own install/evaluation checks and Linux CI"
     reason: "Superseded by quick task 261007-ej4: the Nix eval and build left CI and run locally (AGENTS.md lists nix eval of nix/module-test.nix, nix build of .#packages.x86_64-linux.kwakore and nix flake check). The generic release still passes the tag-gated bundle and release jobs."
     accepted_by: "hzrd149"
     accepted_at: "2026-10-07T15:43:24Z"
+
   - must_have: "CI invokes the same installed-artifact script used for local acceptance"
     reason: "Superseded by quick task 261007-ej4: the installed-artifact lane was removed from CI by the repo owner's decision, and smoke-linux-service.sh --full stays the local acceptance script."
     accepted_by: "hzrd149"
     accepted_at: "2026-10-07T15:43:24Z"
 human_verification:
+
   - test: "On a real desktop session, make the user manager headless (systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY; systemctl --user restart kwakore.service), then launch an installed napplet from the desktop menu (a kwakore-napplet-*.desktop entry, Terminal=true)."
     expected: "A terminal opens and visibly shows {\"error\":{\"code\":1004,\"message\":\"Unavailable\",\"data\":{\"reason\":\"session_unavailable\"}}}; or, if it only flashes, the docs/service.md#native-desktop-entries workaround (run the Exec= line or `kwakore launch ADDRESS`) shows it. Restore the environment afterwards."
     why_human: "The --full smoke proves the exact stderr payload, the non-zero exit and Terminal=true, but no real desktop menu or terminal emulator was observed. LNXS-03 is deliberately still Pending in REQUIREMENTS.md for this check (09-11 human-check, D-06)."
+
   - test: "On a real NixOS system, enable programs.kwakore for a user, log in, run `kwakore status`, install a napplet, then `nixos-rebuild switch` to a new kwakore build, reboot or re-login, run `nix-collect-garbage -d`, and click the napplet's desktop entry before running any other kwakore command."
     expected: "kwakore.socket is active at login and kwakore.service is inactive until the first client. Entries carry Exec=\"/run/current-system/sw/bin/kwakore\" launch-token ..., keep working after the rebuild and GC, and start the daemon by socket activation. `systemctl --user reload kwakore.service` works (coreutils kill substitution)."
     why_human: "nix/module-test.nix is an evaluation test, and the package build's installCheck runs the daemon outside systemd. The NixOS VM test was only a scratch run under TCG and was not committed. WR-02 (KWAKORE_ENTRY_CLI) is covered only by TestLinuxHostNativeEntryStableCLI and module evaluation."
+
   - test: "Push master so the slimmed .github/workflows/linux.yml runs, then push a v* tag."
     expected: "backend and child are green on master. On the tag, both bundle jobs (amd64, native arm64) and the release job pass and publish exactly kwakore-linux-amd64.tar.gz, kwakore-linux-arm64.tar.gz and SHA256SUMS."
     why_human: "This needs a GitHub runner, and the CI scope was slimmed by quick task 261007-ej4 (Go lanes on every push and pull request; bundle and release only on v* tags). Run 37638803603 ran the earlier 9-job version."

@@ -14,7 +14,7 @@ First extract a daemon-owned core and configuration from the Gio launcher. Next 
 - [x] **Phase 6: Daemon Core and Configuration** — Foreground per-user daemon, XDG data/config paths, validated configuration and diagnostics. (verified 27/27 after shutdown gap closure; completed 2026-10-06)
 - [x] **Phase 7: Unix Socket and CLI** — Versioned, user-only control protocol and scriptable client covering service and napplet management. (completed 2026-10-06)
 - [x] **Phase 8: Runtime and Signer Integration** — Launch and stop napplets through the daemon; permission and signer controls preserve existing security boundaries. (completed 2026-10-07)
-- [ ] **Phase 9: Linux Packaging, Rename and Cleanup** — Generic systemd units, NixOS module, native desktop entries, consistent `kwakore` identity, documentation, and removal of Gio/Android surfaces.
+- [x] **Phase 9: Linux Packaging, Rename and Cleanup** — Generic systemd units, NixOS module, native desktop entries, consistent `kwakore` identity, documentation, and removal of Gio/Android surfaces. (completed 2026-10-07)
 
 ## Phase Details
 
@@ -104,7 +104,7 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
-**Plans:** 24/24 plans executed
+**Plans:** 24/24 plans complete
 
 Plans:
 

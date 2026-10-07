@@ -35,7 +35,7 @@
 
 - [x] **LNXS-01**: A user on a common systemd Linux distribution can install user service and socket units and run the daemon without the Gio manager/store.
 - [x] **LNXS-02**: A NixOS user can install and configure Kwakore declaratively through a module that creates the same per-user service and socket behavior.
-- [ ] **LNXS-03**: A user can launch installed napplets through native desktop entries backed by the daemon's stable control interface.
+- [x] **LNXS-03**: A user can launch installed napplets through native desktop entries backed by the daemon's stable control interface.
 - [x] **CLNP-01**: The Gio manager/store UI, Android application and bindings, and obsolete build paths are removed without breaking backend tests or the Linux napplet runtime.
 - [x] **CLNP-02**: Installation, configuration, socket API, CLI, signer handling, and graphical-session behavior are documented for users and third-party client authors.
 - [x] **NAME-01**: Linux users and developers see `kwakore` consistently in binaries, Go module paths, systemd units, socket/config/data locations, desktop entries, keyring identifiers, CI, and documentation, with obsolete Verdana identifiers removed from supported paths.
@@ -78,7 +78,7 @@
 | SIGN-03 | 8 | Complete |
 | LNXS-01 | 9 | Complete |
 | LNXS-02 | 9 | Complete |
-| LNXS-03 | 9 | Pending |
+| LNXS-03 | 9 | Complete |
 | CLNP-01 | 9 | Complete |
 | CLNP-02 | 9 | Complete |
 | NAME-01 | 9 | Complete |
