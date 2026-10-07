@@ -286,9 +286,11 @@ func TestLinuxHostRejectsForgedReadyAndReaps(t *testing.T) {
 }
 
 // TestLinuxHostChildEnvironment pins the host side of the child handoff
-// (D-08): every window field reaches the child under a KWAKORE_ key, the
-// library selector keeps its upstream WEBVIEW_PATH name, and the host writes
-// no VERDANA_ key for an old reader to pick up.
+// (D-08, D-10): every field the napplet-only program reads reaches it under a
+// KWAKORE_ key, the library selector keeps its upstream WEBVIEW_PATH name,
+// the host writes no VERDANA_ key for an old reader to pick up, and nothing
+// the program no longer reads (the data directory layout, the author's
+// description) is handed to it.
 func TestLinuxHostChildEnvironment(t *testing.T) {
 	for _, kv := range os.Environ() {
 		if key, _, _ := strings.Cut(kv, "="); strings.HasPrefix(key, "VERDANA_") {
@@ -308,7 +310,7 @@ func TestLinuxHostChildEnvironment(t *testing.T) {
 	envFile := filepath.Join(dir, "child.env")
 	// the fake child records its environment before the ready frame, so the
 	// file is complete once the window opens
-	script := "#!/bin/sh\n/usr/bin/env > '" + envFile + "'\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"null\"}\\n'\nsleep 30\n"
+	script := "#!/bin/sh\n/usr/bin/env -0 > '" + envFile + "'\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"null\"}\\n'\nsleep 30\n"
 	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -316,51 +318,72 @@ func TestLinuxHostChildEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("DISPLAY", ":stale")
+	open := func(spec backend.WindowSpec) map[string]string {
+		t.Helper()
+		_ = os.Remove(envFile)
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		transport, err := New(program).OpenWindowContext(ctx, spec)
+		if err != nil {
+			t.Fatalf("open %q: %v", spec.Name, err)
+		}
+		child := transport.(*childTransport)
+		t.Cleanup(child.Close)
+		data, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, entry := range strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00") {
+			key, value, _ := strings.Cut(entry, "=")
+			if strings.HasPrefix(key, "VERDANA_") {
+				t.Errorf("host wrote the old key %s", key)
+			}
+			got[key] = value
+		}
+		for _, dead := range []string{"KWAKORE_NAPP_DIR", "KWAKORE_NAPP_URL", "KWAKORE_NAPP_DESC", "KWAKORE_NAPP_STORAGE_FILE", "KWAKORE_NAPP_REQUIRES"} {
+			if value, ok := got[dead]; ok {
+				t.Errorf("host wrote %s=%q, which the napplet program does not read", dead, value)
+			}
+		}
+		return got
+	}
+
 	spec := backend.WindowSpec{
 		NappID: "35129:abc:notes", Dir: "/data/napps/notes", URL: "kwakore://notes/",
 		Name: "Notes", Description: "A notes napplet", Instance: "7",
 		Width: 640, Height: 480, Requires: []string{"nap:storage", "nap:theme"},
 		Format: backend.FormatNapplet, Theme: "dark", ThemeVars: `{"bg":"#000"}`,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	transport, err := New(program).OpenWindowContext(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := transport.(*childTransport)
-	t.Cleanup(child.Close)
-	data, err := os.ReadFile(envFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		key, value, _ := strings.Cut(line, "=")
-		if strings.HasPrefix(key, "VERDANA_") {
-			t.Errorf("host wrote the old key %s", key)
-		}
-		got[key] = value
-	}
+	got := open(spec)
 	for key, want := range map[string]string{
-		"KWAKORE_NAPP_ID":           spec.NappID,
-		"KWAKORE_NAPP_DIR":          spec.Dir,
-		"KWAKORE_NAPP_URL":          spec.URL,
-		"KWAKORE_NAPP_NAME":         spec.Name,
-		"KWAKORE_NAPP_DESC":         spec.Description,
-		"KWAKORE_NAPP_STORAGE_FILE": backend.StorageFile(spec.NappID),
-		"KWAKORE_INSTANCE_ID":       spec.Instance,
-		"KWAKORE_WINDOW_WIDTH":      "640",
-		"KWAKORE_WINDOW_HEIGHT":     "480",
-		"KWAKORE_NAPP_REQUIRES":     "nap:storage,nap:theme",
-		"KWAKORE_NAPP_FORMAT":       backend.FormatNapplet,
-		"KWAKORE_THEME":             spec.Theme,
-		"KWAKORE_THEME_VARS":        spec.ThemeVars,
-		"WEBVIEW_PATH":              dir,
+		"KWAKORE_NAPP_ID":       spec.NappID,
+		"KWAKORE_NAPP_NAME":     spec.Name,
+		"KWAKORE_INSTANCE_ID":   spec.Instance,
+		"KWAKORE_WINDOW_WIDTH":  "640",
+		"KWAKORE_WINDOW_HEIGHT": "480",
+		"KWAKORE_NAPP_FORMAT":   backend.FormatNapplet,
+		"KWAKORE_THEME":         spec.Theme,
+		"KWAKORE_THEME_VARS":    spec.ThemeVars,
+		"WEBVIEW_PATH":          dir,
 	} {
 		if value, ok := got[key]; !ok || value != want {
 			t.Errorf("%s = %q (set %v), want %q", key, value, ok, want)
 		}
+	}
+
+	// author text that exec or the kernel would refuse in an environment
+	// entry (NUL, over 128 KiB) still opens the window: the description is
+	// not passed at all and the name is reduced to one capped title line
+	hostile := spec
+	hostile.Instance = "8"
+	hostile.Name = "Bad\x00Name\n\u202e" + strings.Repeat("n", 200<<10)
+	hostile.Description = "desc\x00" + strings.Repeat("d", 200<<10)
+	got = open(hostile)
+	name := got["KWAKORE_NAPP_NAME"]
+	if !strings.HasPrefix(name, "Bad Name ") || len([]rune(name)) != maxWindowTitleRunes ||
+		strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\u202e' }) {
+		t.Fatalf("hostile name reached the child as %q", name)
 	}
 }
 

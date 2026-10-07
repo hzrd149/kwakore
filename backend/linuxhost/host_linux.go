@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"kwakore/backend"
 	"kwakore/backend/desktopentry"
@@ -90,6 +92,27 @@ func cliInBundle(path, bundle string) bool {
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0
 }
 
+// maxWindowTitleRunes caps the napplet name the child shows as its title.
+const maxWindowTitleRunes = 256
+
+// windowTitleText reduces an author's napplet name to one title line:
+// invalid UTF-8 is replaced, control and format runes (NUL among them)
+// become spaces, whitespace collapses, and the result is capped in runes.
+func windowTitleText(name string) string {
+	name = strings.ToValidUTF8(name, "\uFFFD")
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, name)
+	name = strings.Join(strings.Fields(name), " ")
+	if utf8.RuneCountInString(name) > maxWindowTitleRunes {
+		name = strings.TrimSpace(string([]rune(name)[:maxWindowTitleRunes]))
+	}
+	return name
+}
+
 // DefaultProgramPath is relative to the daemon executable, not cwd or PATH.
 // Phase 9 packages this sibling and its adjacent libwebview.so together.
 func DefaultProgramPath() string {
@@ -124,17 +147,16 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 	defer cancel()
 	cmd := exec.Command(h.Program)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Only what the napplet-only program reads (D-10). The name is author
+	// data and is reduced to a title line first: exec refuses an environment
+	// entry holding NUL and Linux refuses one over 128 KiB, so a raw name
+	// could keep a napplet from ever opening a window.
 	cmd.Env = append(os.Environ(),
 		"KWAKORE_NAPP_ID="+spec.NappID,
-		"KWAKORE_NAPP_DIR="+spec.Dir,
-		"KWAKORE_NAPP_URL="+spec.URL,
-		"KWAKORE_NAPP_NAME="+spec.Name,
-		"KWAKORE_NAPP_DESC="+spec.Description,
-		"KWAKORE_NAPP_STORAGE_FILE="+backend.StorageFile(spec.NappID),
+		"KWAKORE_NAPP_NAME="+windowTitleText(spec.Name),
 		"KWAKORE_INSTANCE_ID="+spec.Instance,
 		"KWAKORE_WINDOW_WIDTH="+strconv.Itoa(spec.Width),
 		"KWAKORE_WINDOW_HEIGHT="+strconv.Itoa(spec.Height),
-		"KWAKORE_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),
 		"KWAKORE_NAPP_FORMAT="+spec.Format,
 		"KWAKORE_THEME="+spec.Theme,
 		"KWAKORE_THEME_VARS="+spec.ThemeVars,
