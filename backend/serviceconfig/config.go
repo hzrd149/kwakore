@@ -62,7 +62,7 @@ type Effective struct {
 }
 
 func Defaults() Effective {
-	return Effective{Relays: []string{"wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"}, BlossomServers: []string{"https://relay.nostrapps.com", "https://nostr.download"}, DiscoverOnUserRelays: true}
+	return Effective{Relays: []string{"wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"}, BlossomServers: []string{"https://relay.nostrapps.com", "https://nostr.download"}, DiscoverOnUserRelays: true, Signer: Signer{Mode: "none"}}
 }
 
 func merge(file, override Config) Effective {
@@ -77,16 +77,34 @@ func merge(file, override Config) Effective {
 		if c.DiscoverOnUserRelays != nil {
 			v.DiscoverOnUserRelays = *c.DiscoverOnUserRelays
 		}
+		if c.Signer != nil {
+			v.Signer = *c.Signer
+		}
 	}
 	return v
 }
 
 func validateMerged(file, override Config) error {
 	v := merge(file, override)
-	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays})
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, Signer: &v.Signer})
 }
 
 func validate(c Config) error {
+	if c.Signer != nil {
+		s := *c.Signer
+		if s.Mode != "none" && s.Mode != "nsec" && s.Mode != "bunker" {
+			return errors.New("signer: invalid mode")
+		}
+		if s.Mode != "bunker" && s.Relay != "" {
+			return errors.New("signer: relay is only valid for bunker")
+		}
+		if s.Mode == "bunker" {
+			u, err := url.Parse(s.Relay)
+			if err != nil || u.Scheme != "wss" || u.Hostname() == "" || u.Hostname() != strings.ToLower(u.Hostname()) || u.User != nil || u.Fragment != "" || u.RawQuery != "" || u.ForceQuery || u.Opaque != "" || u.String() != s.Relay || strings.HasSuffix(u.Path, "/") {
+				return errors.New("signer: invalid relay; use a canonical wss URL")
+			}
+		}
+	}
 	for _, field := range []struct {
 		name   string
 		values *[]string
@@ -133,16 +151,24 @@ func read(path string) (Config, error) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := rejectSecretFields(raw); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	for key := range raw {
-		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" {
+		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "signer" {
 			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, or discover_on_user_relays", path, key)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
-			return Config{}, fmt.Errorf("%s: %s must be an array or boolean, not null; omit the setting to use its default", path, key)
+			return Config{}, fmt.Errorf("%s: %s must not be null; omit the setting to use its default", path, key)
 		}
 	}
 	if err := checkDuplicateKeys(b); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if signerRaw, ok := raw["signer"]; ok && len(signerRaw) > 0 && signerRaw[0] == '{' {
+		if err := checkDuplicateKeys(signerRaw); err != nil {
+			return Config{}, fmt.Errorf("%s: signer: %w", path, err)
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -157,6 +183,46 @@ func read(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return c, nil
+}
+
+func rejectSecretFields(raw map[string]json.RawMessage) error {
+	for key, value := range raw {
+		if secretField(key) {
+			return fmt.Errorf("%s: secret field is forbidden", safeSecretField(key, "file"))
+		}
+		if key != "signer" {
+			continue
+		}
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(value, &nested) != nil {
+			continue
+		}
+		for name := range nested {
+			if secretField(name) {
+				return fmt.Errorf("signer.%s: secret field is forbidden", safeSecretField(name, "field"))
+			}
+		}
+	}
+	return nil
+}
+
+func safeSecretField(name, fallback string) string {
+	switch name {
+	case "secret", "nsec", "private_key", "client_key", "login", "password", "credential", "bunker_url", "auth_token":
+		return name
+	default:
+		return fallback
+	}
+}
+
+func secretField(name string) bool {
+	s := strings.ToLower(name)
+	for _, fragment := range []string{"secret", "nsec", "key", "login", "token", "password", "credential", "bunker_url", "auth"} {
+		if strings.Contains(s, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkDuplicateKeys(b []byte) error {

@@ -89,3 +89,37 @@ func TestDaemonSignerRestore(t *testing.T) {
 		t.Fatalf("secret in state: %v", err)
 	}
 }
+
+func TestReloadSignerReconcilesAndKeepsValidConfig(t *testing.T) {
+	p := daemonPaths(t)
+	secret := nip19.EncodeNsec(nostr.Generate())
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.credentials.write("nsec", secret); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"signer":{"mode":"nsec"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil || s.signer.Status().ConnectionState != "connected" {
+		t.Fatalf("reload: %v %+v", err, s.signer.Status())
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"signer":{"mode":"none","secret":"sentinel"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err == nil || s.signer.Status().ConnectionState != "connected" || s.manager.Effective().Signer.Mode != "nsec" {
+		t.Fatalf("unsafe reload: %v %+v", err, s.signer.Status())
+	}
+	if err := s.credentials.write("none", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"signer":{"mode":"none"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil || s.signer.Status().ConnectionState != "disconnected" {
+		t.Fatalf("clear: %v %+v", err, s.signer.Status())
+	}
+}

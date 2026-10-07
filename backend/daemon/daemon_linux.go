@@ -102,15 +102,47 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	}
 	workContext, cancelWork := context.WithCancel(context.Background())
 	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}
-	record, err := credentials.read()
-	if err != nil {
-		s.Close()
-		return nil, errCredential
-	}
-	if record.Mode == "nsec" {
-		_, _ = s.signer.Switch(context.Background(), "nsec", record.Secret, nil)
-	}
+	// Startup stays available with a disconnected public status when the
+	// requested signer cannot be restored. The private record never enters
+	// ordinary service configuration or diagnostics.
+	_ = s.reconcileSigner(context.Background())
 	return s, nil
+}
+
+func (s *Service) reconcileSigner(ctx context.Context) error {
+	requested := s.manager.Effective().Signer.Mode
+	if requested == "" {
+		requested = "none"
+	}
+	current := s.signer.Status()
+	if current.Mode == requested && (requested == "none" || current.ConnectionState == "connected") {
+		return nil
+	}
+	rec, err := s.credentials.read()
+	if err != nil {
+		_, _ = s.signer.Switch(ctx, requested, "", nil)
+		return errCredential
+	}
+	secret := ""
+	if requested == "nsec" && rec.Mode == "nsec" {
+		secret = rec.Secret
+	}
+	_, err = s.signer.Switch(ctx, requested, secret, nil)
+	return err
+}
+
+func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backend.SignerStatus, error) {
+	done, err := s.Begin()
+	if err != nil {
+		return backend.SignerStatus{}, err
+	}
+	defer done()
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: mode}); err != nil {
+		return backend.SignerStatus{}, errCredential
+	}
+	return s.signer.Switch(ctx, mode, secret, s.credentials.write)
 }
 
 func checkNoSymlinkComponents(path string) error {
@@ -230,7 +262,13 @@ func (s *Service) Reload() error {
 		return err
 	}
 	s.notifySettingsChange(before)
-	return err
+	if before.Signer != s.manager.Effective().Signer {
+		if err := s.reconcileSigner(s.workContext); err != nil {
+			s.recordError("signer", "signer unavailable")
+			return errCredential
+		}
+	}
+	return nil
 }
 
 // reloadWarning contains only a fixed reason, the known config basename (or
@@ -242,7 +280,7 @@ func reloadWarning(path string, err error) string {
 		name = "[redacted]"
 	}
 	field := "file"
-	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays"} {
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "signer"} {
 		if strings.Contains(err.Error(), name) {
 			field = name
 			break

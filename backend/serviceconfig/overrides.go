@@ -70,17 +70,22 @@ func privateFile(path string) error {
 
 // SetOverride persists one supported non-secret setting.
 func (m *Manager) SetOverride(field string, value any) error {
-	return m.change(field, value, false)
+	return m.change(field, value, false, false)
 }
 
 func (m *Manager) ClearOverride(field string) error {
-	return m.change(field, nil, true)
+	return m.change(field, nil, true, false)
 }
 
-func (m *Manager) change(field string, value any, clear bool) error {
+// SetSignerOverride is reserved for the explicit signer command.
+func (m *Manager) SetSignerOverride(signer Signer) error {
+	return m.change("signer", signer, false, true)
+}
+
+func (m *Manager) change(field string, value any, clear, signerAllowed bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !FieldName(field) {
+	if !FieldName(field) && !(signerAllowed && field == "signer") {
 		return fmt.Errorf("unsupported setting %q", field)
 	}
 	if m.persistenceErr != nil {
@@ -122,6 +127,12 @@ func (m *Manager) change(field string, value any, clear bool) error {
 				return fmt.Errorf("%s: expected boolean", field)
 			}
 			next.DiscoverOnUserRelays = &v
+		case "signer":
+			v, ok := value.(Signer)
+			if !ok {
+				return errors.New("signer: invalid value")
+			}
+			next.Signer = &v
 		}
 	} else {
 		switch field {
@@ -198,6 +209,10 @@ func cloneConfig(c Config) Config {
 	if c.DiscoverOnUserRelays != nil {
 		v := *c.DiscoverOnUserRelays
 		n.DiscoverOnUserRelays = &v
+	}
+	if c.Signer != nil {
+		v := *c.Signer
+		n.Signer = &v
 	}
 	return n
 }
