@@ -82,6 +82,36 @@ func TestServiceSignerStaleResult(t *testing.T) {
 	}
 }
 
+func TestSignerConsumerSnapshot(t *testing.T) {
+	s := &ServiceSigner{}
+	t.Cleanup(s.Close)
+	secret := nip19.EncodeNsec(nostr.Generate())
+	ci := &Instance{nap: newNapSession()}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 80; i++ {
+			_, _ = bridgeRPC(ci)("getPublicKey", "")
+			_, _, _ = PublishDev(context.Background(), "missing-dev", nil, nil, false, nil)
+			c := &napCall{ci: ci, gen: ci.nap.gen, Type: "upload.info"}
+			napUploadInfo(c)
+		}
+	}()
+	for i := 0; i < 20; i++ {
+		if _, err := s.Switch(context.Background(), "nsec", secret, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Switch(context.Background(), "none", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wg.Wait()
+	if LoggedIn() {
+		t.Fatal("consumer work revived signer")
+	}
+}
+
 func TestServiceSignerBunkerLiveHandshakeAndSigning(t *testing.T) {
 	srv := httptest.NewServer(khatru.NewRelay())
 	defer srv.Close()
