@@ -113,6 +113,8 @@ func TestCLIContract(t *testing.T) {
 		{"discover", []string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "3"}, "napplet.discover", `{"query":"hello","refresh":true,"offset":2,"limit":3}`},
 		{"installed", []string{"installed", "--offset", "2", "--limit", "3"}, "napplet.installed", `{"offset":2,"limit":3}`},
 		{"install", []string{"install", address}, "napplet.install", `{"address":"` + address + `"}`},
+		{"launch", []string{"launch", address}, "napplet.launch", `{"address":"` + address + `"}`},
+		{"stop", []string{"stop", "42"}, "napplet.stop", `{"window_id":"42"}`},
 		{"update", []string{"update", address}, "napplet.update", `{"address":"` + address + `"}`},
 		{"uninstall", []string{"uninstall", "--yes", address}, "napplet.uninstall", `{"address":"` + address + `","confirm":true}`},
 	} {
@@ -241,7 +243,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
 		{"discover"}, {"installed"}, {"install", address}, {"update", address},
-		{"uninstall", "--yes", address},
+		{"uninstall", "--yes", address}, {"launch", address}, {"stop", "42"},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {

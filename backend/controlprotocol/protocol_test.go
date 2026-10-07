@@ -162,3 +162,22 @@ func TestProcessFramePartialCleanupData(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessFrameSessionUnavailableData(t *testing.T) {
+	frame := []byte(`{"jsonrpc":"2.0","method":"napplet.launch","id":1}`)
+	for _, tc := range []struct {
+		data any
+		want bool
+	}{
+		{SessionUnavailableData{Reason: "session_unavailable"}, true},
+		{SessionUnavailableData{Reason: "private"}, false},
+		{map[string]string{"reason": "session_unavailable", "secret": "leak"}, false},
+	} {
+		out := ProcessFrame(frame, func(string, json.RawMessage) (any, *Error) {
+			return nil, &Error{Code: Unavailable, Message: "secret", Data: tc.data}
+		})
+		if bytes.Contains(out, []byte("secret")) || bytes.Contains(out, []byte("private")) || bytes.Contains(out, []byte(`"reason":"session_unavailable"`)) != tc.want {
+			t.Fatalf("unexpected error metadata: %s", out)
+		}
+	}
+}
