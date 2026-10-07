@@ -92,6 +92,12 @@ func Start(opts Options) (func(), error) {
 	}
 
 	loadState()
+	if serviceConfig != nil {
+		if err := recoverRegistryMutations(); err != nil {
+			closeStores()
+			return nil, fmt.Errorf("registry recovery required before service readiness: %w", err)
+		}
+	}
 	// before anything reads the installed list: napplets installed under
 	// the ids of earlier builds are forgotten here, once (D-23)
 	dropPreAddressNapplets()

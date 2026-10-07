@@ -62,6 +62,65 @@ func TestOverridePrecedenceAndRestart(t *testing.T) {
 	}
 }
 
+func TestInterruptedOverrideWriteLoadsCommittedFile(t *testing.T) {
+	for _, renamed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before-rename", true: "after-rename"}[renamed], func(t *testing.T) {
+			p := testPaths(t)
+			if err := os.MkdirAll(p.DataDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			old := []byte(`{"discover_on_user_relays":true}`)
+			newBytes := []byte(`{"discover_on_user_relays":false}`)
+			if err := os.WriteFile(p.OverrideFile, old, 0600); err != nil {
+				t.Fatal(err)
+			}
+			tmp, err := os.CreateTemp(p.DataDir, ".tmp-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tmp.Write(newBytes); err != nil {
+				t.Fatal(err)
+			}
+			if err := tmp.Sync(); err != nil {
+				t.Fatal(err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if renamed {
+				if err := os.Rename(tmp.Name(), p.OverrideFile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m, err := Load(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Effective().DiscoverOnUserRelays == renamed {
+				t.Fatalf("effective value does not match committed file after rename=%v", renamed)
+			}
+			b, err := os.ReadFile(p.OverrideFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := old
+			if renamed {
+				want = newBytes
+			}
+			if string(b) != string(want) {
+				t.Fatalf("committed bytes = %q", b)
+			}
+			info, err := os.Stat(p.OverrideFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0600 {
+				t.Fatalf("committed file mode %v", info.Mode())
+			}
+		})
+	}
+}
+
 func TestOverrideClearPreservesOtherFields(t *testing.T) {
 	p := testPaths(t)
 	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"]}`), 0600); err != nil {
