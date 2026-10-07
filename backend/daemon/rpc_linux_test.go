@@ -18,10 +18,23 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 	"verdana/backend"
 	"verdana/backend/controlprotocol"
 	"verdana/backend/serviceconfig"
 )
+
+func TestRPCSignerPublicStatusAndSwitch(t *testing.T) {
+	s, reader, conn, _ := rpcService(t)
+	_ = s
+	secret := nip19.EncodeNsec(nostr.Generate())
+	result, rpcErr, raw := rpcCall(t, reader, conn, "signer.switch", `{"mode":"nsec","secret":"`+secret+`"}`)
+	if rpcErr != nil || strings.Contains(raw, secret) || !strings.Contains(string(result), `"connection_state":"connected"`) { t.Fatalf("switch: %s %+v", raw, rpcErr) }
+	status, rpcErr, raw := rpcCall(t, reader, conn, "signer.status", `{}`)
+	if rpcErr != nil || strings.Contains(raw, secret) || !strings.Contains(string(status), `"mode":"nsec"`) { t.Fatalf("status: %s %+v", raw, rpcErr) }
+	_, rpcErr, raw = rpcCall(t, reader, conn, "signer.switch", `{"mode":"nsec","secret":"private-sentinel"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || strings.Contains(raw, "private-sentinel") { t.Fatalf("failure leaked: %s %+v", raw, rpcErr) }
+}
 
 func TestRPCLinuxHostLaunch(t *testing.T) {
 	paths := daemonPaths(t)
