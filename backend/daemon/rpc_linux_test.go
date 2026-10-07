@@ -221,6 +221,15 @@ func TestRPCPermissionsGetInstalledSavedRules(t *testing.T) {
 	}
 }
 
+func TestRPCPermissionsSetRejectsInvalidPermission(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	address := "35129:" + strings.Repeat("a", 64) + ":notes"
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.permissions.set", `{"address":"`+address+`","permission":"invented","decision":"allow"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("invalid permission accepted: %+v", rpcErr)
+	}
+}
+
 func TestRPCSettingsMutateReload(t *testing.T) {
 	s, reader, conn, paths := rpcService(t)
 	if err := os.WriteFile(paths.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`), 0600); err != nil {
