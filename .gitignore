@@ -19,3 +19,6 @@ android/local.properties
 # nix build outputs
 /result
 /result-*
+
+# linux service bundles (just bundle)
+/dist/

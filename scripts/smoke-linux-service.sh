@@ -2,11 +2,12 @@
 # Linux user-service smoke test for Kwakore.
 #
 #   scripts/smoke-linux-service.sh --activation-only
+#   scripts/smoke-linux-service.sh --bundle-only
 #
-# Builds kwakore-daemon and kwakore from the tracked backend sources into a
-# temporary staging directory, renders packaging/systemd/user/*.{socket,service}
-# against those binaries, and exercises them under the caller's real per-user
-# systemd manager:
+# --activation-only builds kwakore-daemon and kwakore from the tracked backend
+# sources into a temporary staging directory, renders
+# packaging/systemd/user/*.{socket,service} against those binaries, and
+# exercises them under the caller's real per-user systemd manager:
 #
 #   activation  enabling only kwakore.socket leaves the service inactive; the
 #               first `kwakore status` starts it and reports ready protocol 1
@@ -26,13 +27,29 @@
 # The script refuses to run when kwakore units or the runtime socket directory
 # already exist, rather than disturbing a real installation. It exits non-zero
 # when no user manager is reachable; it never reports a pass it did not observe.
+#
+# --bundle-only needs no user manager. It builds this machine's bundle twice
+# with scripts/build-linux-bundle.sh into a temporary output directory and
+# checks:
+#
+#   bundle      both runs leave the same file set and the same archive bytes;
+#               the archive holds exactly kwakore-daemon, kwakore, napplet and
+#               libwebview.so as regular files in one directory and matches
+#               SHA256SUMS; the unpacked files are owner-only-writable regular
+#               files with the expected modes, ELF for this architecture, and
+#               identical to the archive members
+#   child       the bundled napplet child starts and its hardened loader
+#               refuses a missing, relative or empty WEBVIEW_PATH instead of
+#               falling back to a library search, and the child and library
+#               resolve every shared object on this host
 
 set -euo pipefail
 
-case "${1:-}" in
---activation-only) ;;
+mode=${1:-}
+case "$mode" in
+--activation-only | --bundle-only) ;;
 *)
-	echo "usage: $0 --activation-only" >&2
+	echo "usage: $0 --activation-only|--bundle-only" >&2
 	exit 2
 	;;
 esac
@@ -49,9 +66,138 @@ pass() {
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 units_src="$repo_root/packaging/systemd/user"
 
+[ "$(uname -s)" = Linux ] || fail "Linux is required"
+
+# ─── bundle ─────────────────────────────────────────────────────────────────
+
+bundle_version=0.0.0-smoke
+bundle_files=(kwakore-daemon kwakore napplet libwebview.so)
+
+host_arch() {
+	case "$(uname -m)" in
+	x86_64 | amd64) echo amd64 ;;
+	aarch64 | arm64) echo arm64 ;;
+	*) fail "unsupported machine $(uname -m)" ;;
+	esac
+}
+
+# file_set lists every path under $1 with its type, mode and content hash, so
+# two runs can be compared byte for byte.
+file_set() {
+	(
+		cd "$1"
+		find . -mindepth 1 -printf '%y %m %p\n' | LC_ALL=C sort
+		find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+	)
+}
+
+# elf_machine prints e_machine of an ELF file (little-endian targets only).
+elf_machine() {
+	[ "$(od -An -tx1 -N4 "$1" | tr -d ' \n')" = 7f454c46 ] || return 1
+	od -An -tu2 -j18 -N2 "$1" | tr -d ' \n'
+}
+
+check_bundle() {
+	local release=$1 arch=$2 name archive bundle f mode want_machine out
+	name="kwakore-$bundle_version-linux-$arch"
+	archive="kwakore-linux-$arch.tar.gz"
+	bundle="$release/$name"
+	case "$arch" in
+	amd64) want_machine=62 ;;
+	arm64) want_machine=183 ;;
+	esac
+
+	[ "$(cd "$release" && ls -A | LC_ALL=C sort | tr '\n' ' ')" = ".lock SHA256SUMS $name $archive " ] ||
+		fail "unexpected release directory contents: $(cd "$release" && ls -A | tr '\n' ' ')"
+	[ "$(wc -l <"$release/SHA256SUMS")" = 1 ] || fail "SHA256SUMS does not name exactly one archive"
+	grep -Eq "^[0-9a-f]{64}  $archive\$" "$release/SHA256SUMS" || fail "SHA256SUMS does not name $archive"
+	(cd "$release" && sha256sum --quiet --strict -c SHA256SUMS) || fail "archive does not match SHA256SUMS"
+
+	out=$(tar -tzf "$release/$archive" | LC_ALL=C sort | tr '\n' ' ')
+	[ "$out" = "$name/kwakore $name/kwakore-daemon $name/libwebview.so $name/napplet " ] ||
+		fail "archive members are not exactly the four bundle files: $out"
+	tar -tvzf "$release/$archive" | grep -qv '^-' && fail "archive holds a member that is not a regular file"
+	mkdir "$stage/unpacked"
+	tar -xzf "$release/$archive" -C "$stage/unpacked"
+
+	[ "$(ls -A "$bundle" | LC_ALL=C sort | tr '\n' ' ')" = "kwakore kwakore-daemon libwebview.so napplet " ] ||
+		fail "bundle directory is not exactly the four files: $(ls -A "$bundle" | tr '\n' ' ')"
+	[ "$(stat -c '%a %u' "$bundle")" = "755 $uid" ] || fail "bundle directory is not 0755 owned by $uid"
+	for f in "${bundle_files[@]}"; do
+		[ -f "$bundle/$f" ] && [ ! -L "$bundle/$f" ] || fail "$f is not a regular file"
+		mode=755
+		[ "$f" = libwebview.so ] && mode=644
+		[ "$(stat -c '%a %u %h' "$bundle/$f")" = "$mode $uid 1" ] ||
+			fail "$f is not mode $mode, owned by $uid with one link: $(stat -c '%a %u %h' "$bundle/$f")"
+		[ "$(elf_machine "$bundle/$f")" = "$want_machine" ] || fail "$f is not an ELF file for linux/$arch"
+		cmp -s "$bundle/$f" "$stage/unpacked/$name/$f" || fail "$f differs from its archive member"
+	done
+	pass "bundle: archive holds exactly kwakore-daemon, kwakore, napplet and libwebview.so, matching SHA256SUMS and the unpacked directory"
+
+	out=$("$bundle/kwakore-daemon" version) || fail "bundled daemon did not run: $out"
+	[ "$out" = "$bundle_version" ] || fail "bundled daemon reports version $out, not $bundle_version"
+
+	# The hardened loader (desktop/child/libcheck.go) must refuse to fall back
+	# to a dlopen search when WEBVIEW_PATH does not name the library's
+	# directory. Reaching each refusal also proves the child runs on this host.
+	child_refuses() {
+		local want=$1 status=0
+		shift
+		env "$@" VERDANA_NAPP_FORMAT=napplet "$bundle/napplet" </dev/null >/dev/null 2>"$stage/child.log" || status=$?
+		[ "$status" = 1 ] && grep -qF "$want" "$stage/child.log" ||
+			fail "napplet child (status $status) did not refuse with \"$want\": $(cat "$stage/child.log")"
+		grep -qF 'window program started' "$stage/child.log" || fail "napplet child did not start: $(cat "$stage/child.log")"
+	}
+	child_refuses 'WEBVIEW_PATH is not set' -u WEBVIEW_PATH
+	child_refuses 'is not absolute' WEBVIEW_PATH=relative/dir
+	mkdir "$stage/nolib"
+	child_refuses 'no such file or directory' WEBVIEW_PATH="$stage/nolib"
+	pass "child: bundled napplet starts and refuses a missing, relative or empty WEBVIEW_PATH"
+
+	if [ "$arch" = "$(host_arch)" ] && command -v ldd >/dev/null; then
+		for f in napplet libwebview.so; do
+			ldd "$bundle/$f" >"$stage/ldd.log" 2>&1 || fail "ldd $f failed: $(cat "$stage/ldd.log")"
+			grep -q 'not found' "$stage/ldd.log" && fail "$f has unresolved libraries on this host: $(grep 'not found' "$stage/ldd.log")"
+		done
+		ldd "$bundle/libwebview.so" | grep -q 'libwebkit2gtk-4\.1\.so' ||
+			fail "libwebview.so does not link WebKitGTK 4.1"
+		pass "child: napplet and libwebview.so resolve every shared object, including WebKitGTK 4.1"
+	else
+		fail "ldd is required to check the bundled child's libraries"
+	fi
+}
+
+run_bundle() {
+	local arch out
+	command -v go >/dev/null || fail "go not found; it is needed to build the bundle"
+	for tool in tar gzip sha256sum flock od; do
+		command -v "$tool" >/dev/null || fail "$tool not found"
+	done
+	arch=$(host_arch)
+	uid=$(id -u)
+	stage=$(mktemp -d "${TMPDIR:-/tmp}/kwakore-bundle-smoke.XXXXXX")
+	trap 'rm -rf "$stage"' EXIT
+	trap 'exit 130' INT TERM
+	out="$stage/dist"
+	bash "$repo_root/scripts/build-linux-bundle.sh" --arch "$arch" --version "$bundle_version" --out "$out" >/dev/null ||
+		fail "first bundle build failed"
+	file_set "$out/$bundle_version" >"$stage/run1"
+	bash "$repo_root/scripts/build-linux-bundle.sh" --arch "$arch" --version "$bundle_version" --out "$out" >/dev/null ||
+		fail "second bundle build failed"
+	file_set "$out/$bundle_version" >"$stage/run2"
+	diff -u "$stage/run1" "$stage/run2" >"$stage/run.diff" ||
+		fail "consecutive bundle builds differ: $(cat "$stage/run.diff")"
+	pass "bundle: two consecutive builds left the same file set, modes and archive bytes"
+	check_bundle "$out/$bundle_version" "$arch"
+}
+
+if [ "$mode" = --bundle-only ]; then
+	run_bundle
+	exit 0
+fi
+
 # ─── environment preconditions ──────────────────────────────────────────────
 
-[ "$(uname -s)" = Linux ] || fail "Linux is required"
 command -v systemctl >/dev/null || fail "systemctl not found; a systemd user manager is required"
 command -v go >/dev/null || fail "go not found; it is needed to build the staged binaries"
 [ -n "${XDG_RUNTIME_DIR:-}" ] || fail "XDG_RUNTIME_DIR is unset; run inside a user session with a systemd user manager"

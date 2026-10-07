@@ -1,18 +1,27 @@
-run: webview-libs
-    cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true VERDANA_SEARCH_DEBUG=1 ./verdana
+# Linux service bundle: kwakore-daemon, kwakore, the napplet child and
+# libwebview.so side by side in dist/<version>/kwakore-<version>-linux-<arch>/,
+# plus dist/<version>/kwakore-linux-<arch>.tar.gz and SHA256SUMS. The daemon
+# runs the napplet sibling of its own executable, so the four files ship and
+# install together (scripts/install.sh, packaging/systemd/user). Extra
+# arguments go to the script: --version VERSION, --out DIR. Building the other
+# architecture needs CC set to a C cross compiler for it.
+#
+# build the Linux service bundle and checksummed archive for this machine
+bundle *args:
+    bash scripts/build-linux-bundle.sh {{args}}
 
-prod: webview-libs
-    cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go build -o verdana -tags 'novulkan' .
+# build the linux/amd64 service bundle and archive
+bundle-linux-amd64 *args:
+    bash scripts/build-linux-bundle.sh --arch amd64 {{args}}
 
-# Install the production desktop launcher into GOBIN (or GOPATH/bin). The
-# child webview host must be built first because it is embedded in Verdana.
-go-install: webview-libs
-    cd desktop && go build -o child/napplet ./child && go build -tags napp -o child/napp ./child && go install -tags 'novulkan' .
+# build the linux/arm64 service bundle and archive (cross builds need CC)
+bundle-linux-arm64 *args:
+    bash scripts/build-linux-bundle.sh --arch arm64 {{args}}
 
-# napp windows load libwebview from the launcher's verified per-user dir, so
-# the launcher embeds it. The copies come from the pinned go-webview module and
-# are git-ignored; every build needs them. GOOS/GOARCH must be unset here:
-# go generate builds its copy program for this machine.
+# The napplet child loads libwebview.so from the directory it is installed in
+# (WEBVIEW_PATH, set by the daemon). The copies come from the pinned go-webview
+# module and are git-ignored; the bundle and child tests need them. GOOS/GOARCH
+# must be unset here: go generate builds its copy program for this machine.
 webview-libs:
     cd desktop && go generate ./internal/webviewlib
 
