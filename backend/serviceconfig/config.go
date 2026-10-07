@@ -46,12 +46,19 @@ type Config struct {
 	Relays               *[]string `json:"relays,omitempty"`
 	BlossomServers       *[]string `json:"blossom_servers,omitempty"`
 	DiscoverOnUserRelays *bool     `json:"discover_on_user_relays,omitempty"`
+	Signer               *Signer   `json:"signer,omitempty"`
+}
+
+type Signer struct {
+	Mode  string `json:"mode"`
+	Relay string `json:"relay,omitempty"`
 }
 
 type Effective struct {
 	Relays               []string `json:"relays"`
 	BlossomServers       []string `json:"blossom_servers"`
 	DiscoverOnUserRelays bool     `json:"discover_on_user_relays"`
+	Signer               Signer   `json:"signer"`
 }
 
 func Defaults() Effective {

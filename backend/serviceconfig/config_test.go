@@ -42,6 +42,22 @@ func TestConfigDefaultsAndPresence(t *testing.T) {
 	}
 }
 
+func TestConfigSignerNonSecretAndRejectsCredentials(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"signer":{"mode":"nsec"}}`), 0600); err != nil { t.Fatal(err) }
+	m, err := Load(p)
+	if err != nil || m.Effective().Signer.Mode != "nsec" { t.Fatalf("signer config: %+v %v", m, err) }
+	for _, body := range []string{
+		`{"signer":{"mode":"nsec","secret":"secret-sentinel"}}`,
+		`{"signer":{"mode":"none","client_key":"secret-sentinel"}}`,
+		`{"private_key":"secret-sentinel"}`,
+	} {
+		if err := os.WriteFile(p.ConfigFile, []byte(body), 0600); err != nil { t.Fatal(err) }
+		err := m.Reload()
+		if err == nil || strings.Contains(err.Error(), "secret-sentinel") || m.Effective().Signer.Mode != "nsec" { t.Fatalf("unsafe reload: %v", err) }
+	}
+}
+
 func TestConfigRejectsMalformed(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"unknown", `{"private_key":"secret"}`, "private_key"},
