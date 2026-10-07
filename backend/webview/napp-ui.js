@@ -1,4 +1,4 @@
-// napp-ui.js: the helpers that build Verdana's kit elements, as
+// napp-ui.js: the helpers that build the launcher's kit elements, as
 // window.napp.ui, for napps that declare `requires: ["ui"]`. The launcher
 // injects this file beside napp-ui.css, before the napp's own scripts.
 //

@@ -58,7 +58,7 @@ func NappPageCSP() string { return "frame-ancestors 'none'" }
 // drop it as an unknown type anyway, but it never gets there: the host page
 // (napplet-host.js, DOCUMENT_MARKER) consumes it, counts it per frame, and
 // never forwards or answers it.
-const DocumentMarker = "__verdana.document"
+const DocumentMarker = "__kwakore.document"
 
 // NappletSrcdoc puts the launcher's preamble in front of everything the
 // napplet's document does: the CSP first, then one script holding the shim,

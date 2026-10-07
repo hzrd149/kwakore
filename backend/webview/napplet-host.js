@@ -19,9 +19,9 @@
   if (window !== window.top) return
 
   // ── talking to the host ─────────────────────────────────────────
-  // Desktop: __verdanaNappletRPC, a wrapper the child process defines in the
+  // Desktop: __kwakoreNappletRPC, a wrapper the child process defines in the
   // top frame that adds this window's secret token to every call. Android: the
-  // __verdanaHost web message channel, which only this page's origin gets.
+  // __kwakoreHost web message channel, which only this page's origin gets.
   const rpc = (() => {
     const decode = value => {
       const val = typeof value === "string" ? JSON.parse(value) : value
@@ -30,12 +30,12 @@
     }
     const encode = params => (params !== undefined ? JSON.stringify(params) : "null")
 
-    if (typeof window.__verdanaNappletRPC === "function") {
-      const bound = window.__verdanaNappletRPC
+    if (typeof window.__kwakoreNappletRPC === "function") {
+      const bound = window.__kwakoreNappletRPC
       return (method, params) => bound(method, encode(params)).then(decode)
     }
 
-    const port = window.__verdanaHost
+    const port = window.__kwakoreHost
     if (!port) return () => Promise.reject(new Error("no napplet host to talk to"))
 
     const pending = new Map()
@@ -222,7 +222,7 @@
   // ignores a frame that is no longer current, so the other changes nothing.
   // A marker is consumed here, never forwarded to Go or answered; a napplet
   // that forges one only gets itself rebuilt, under the reload cap.
-  const DOCUMENT_MARKER = "__verdana.document"
+  const DOCUMENT_MARKER = "__kwakore.document"
   let markers = 0
 
   window.addEventListener("message", event => {

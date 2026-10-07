@@ -235,8 +235,8 @@
   const checks = {
     scope: async () => {
       const names = [
-        "NappletShimPrelude", "nostr", "__verdanaNappletRPC", "__verdana_napplet_rpc",
-        "__verdana_napplet_answer", "__verdana_prompt_answer", "__bridge_rpc",
+        "NappletShimPrelude", "nostr", "__kwakoreNappletRPC", "__kwakore_napplet_rpc",
+        "__kwakore_napplet_answer", "__kwakore_prompt_answer", "__bridge_rpc",
       ]
       for (const name of names) {
         const type = typeof window[name]
@@ -251,11 +251,11 @@
     parent: async step => {
       let value
       let err = throws(() => {
-        value = parent.__verdanaNappletRPC
+        value = parent.__kwakoreNappletRPC
       })
-      if (err) note("parent", "PASS", "reading parent.__verdanaNappletRPC threw " + errText(err))
-      else if (value === undefined) note("parent", "INFO", "parent.__verdanaNappletRPC reads undefined")
-      else note("parent", "FAIL", "parent.__verdanaNappletRPC is readable (" + typeof value + ")")
+      if (err) note("parent", "PASS", "reading parent.__kwakoreNappletRPC threw " + errText(err))
+      else if (value === undefined) note("parent", "INFO", "parent.__kwakoreNappletRPC reads undefined")
+      else note("parent", "FAIL", "parent.__kwakoreNappletRPC is readable (" + typeof value + ")")
 
       err = throws(() => {
         value = parent.document
@@ -303,8 +303,8 @@
       // where params are the bound function's arguments. Both carry a
       // forged token, so the child must refuse them and log that it did.
       const forged = [
-        { id: "adv-forged-rpc", method: "__verdana_napplet_rpc", params: ["forged-token", "nap.openSettings", "null"] },
-        { id: "adv-forged-answer", method: "__verdana_napplet_answer", params: ["forged-token", 1, true, 0, "once"] },
+        { id: "adv-forged-rpc", method: "__kwakore_napplet_rpc", params: ["forged-token", "nap.openSettings", "null"] },
+        { id: "adv-forged-answer", method: "__kwakore_napplet_answer", params: ["forged-token", 1, true, 0, "once"] },
       ]
       let reached = 0
 
@@ -336,8 +336,8 @@
 
       // the binding globals themselves, should an engine put them in here
       const globals = {
-        __verdana_napplet_rpc: ["forged-token", "nap.openSettings", "null"],
-        __verdanaNappletRPC: ["nap.openSettings", "null"],
+        __kwakore_napplet_rpc: ["forged-token", "nap.openSettings", "null"],
+        __kwakoreNappletRPC: ["nap.openSettings", "null"],
         __bridge_rpc: ["nap.openSettings", "null"],
       }
       for (const name of Object.keys(globals)) {

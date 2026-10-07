@@ -274,7 +274,7 @@
   // ── talking to the host ─────────────────────────────────────────
   // Two shells inject this same file. The desktop's webview binds a
   // promise-returning __bridge_rpc; on Android there is a web message channel
-  // instead (__verdanaHost), which answers with a {t:"resp", id, …} message.
+  // instead (__kwakoreHost), which answers with a {t:"resp", id, …} message.
   // Nothing below this closure knows which one it got.
   const rpc = (() => {
     const decode = value => {
@@ -289,7 +289,7 @@
       return (method, params) => bound(method, encode(params)).then(decode)
     }
 
-    const port = window.__verdanaHost
+    const port = window.__kwakoreHost
     if (!port) return () => Promise.reject(new Error("no napp host to talk to"))
 
     const pending = new Map()

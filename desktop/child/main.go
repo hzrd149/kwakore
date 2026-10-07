@@ -334,7 +334,7 @@ func promptOverlayCode(pv promptView) string {
 }
 
 func promptHideCode() string {
-	return ";(function(){var o = document.getElementById('__verdana_prompt');" +
+	return ";(function(){var o = document.getElementById('__kwakore_prompt');" +
 		"if (o && o.parentNode) o.parentNode.removeChild(o);})();"
 }
 
@@ -346,7 +346,7 @@ const promptShowScript = "function(p, answer){" +
 	"try { var v = (window.__nappTheme && window.__nappTheme.vars) || {};" +
 	"return v[k] || fallback } catch(e) { return fallback }" +
 	"};" +
-	"var old = document.getElementById('__verdana_prompt');" +
+	"var old = document.getElementById('__kwakore_prompt');" +
 	"if (old && old.parentNode) old.parentNode.removeChild(old);" +
 	"var dark = window.__nappTheme && window.__nappTheme.name === 'dark';" +
 	"var bg = tok('surface', dark ? '#17181b' : '#ffffff');" +
@@ -361,7 +361,7 @@ const promptShowScript = "function(p, answer){" +
 	"var suggestText = tok('suggest-text', dark ? '#b6e3c1' : '#14532d');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
 	"var o = document.createElement('div');" +
-	"o.id = '__verdana_prompt';" +
+	"o.id = '__kwakore_prompt';" +
 	"o.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;" +
 	"z-index:2147483647;background:' + bg + ';color:' + fg" +
 	"+ ';font:14px sans-serif;overflow:auto;padding:24px;box-sizing:border-box;" +

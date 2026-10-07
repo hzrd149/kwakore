@@ -40,10 +40,10 @@ func runNapplet(w webview.WebView) {
 	nappletToken = newWindowToken()
 	// the host page is the launcher's own, so its top-frame wrapper (which
 	// holds the token) is what the overlay answers through
-	overlayAnswer = "window.__verdana_prompt_answer"
+	overlayAnswer = "window.__kwakore_prompt_answer"
 
-	_ = w.Bind("__verdana_napplet_rpc", nappletRPC)
-	_ = w.Bind("__verdana_napplet_answer", nappletAnswer)
+	_ = w.Bind("__kwakore_napplet_rpc", nappletRPC)
+	_ = w.Bind("__kwakore_napplet_answer", nappletAnswer)
 
 	// Everything below runs in the top frame only. The token lives in this
 	// closure and in the two wrappers it defines; the napplet's frame cannot
@@ -51,10 +51,10 @@ func runNapplet(w webview.WebView) {
 	// touch this window's globals.
 	w.Init("(function(){if (window !== window.top) return;" +
 		"var t = " + jsString(nappletToken) + ";" +
-		"window.__verdanaNappletRPC = function(m, p){ return window.__verdana_napplet_rpc(t, m, p) };" +
+		"window.__kwakoreNappletRPC = function(m, p){ return window.__kwakore_napplet_rpc(t, m, p) };" +
 		// the prompt overlay (promptShowScript) answers through this name
-		"window.__verdana_prompt_answer = function(id, ok, index, scope){" +
-		"return window.__verdana_napplet_answer(t, id, ok, index, scope) };" +
+		"window.__kwakore_prompt_answer = function(id, ok, index, scope){" +
+		"return window.__kwakore_napplet_answer(t, id, ok, index, scope) };" +
 		"window.name = " + jsString(meta.Instance) + ";" +
 		themeInitScript(meta.Theme, meta.ThemeVars) +
 		"})();")

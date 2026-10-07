@@ -33,14 +33,14 @@ var nappletHostJS string
 
 // The @napplet/shim browser prelude (see shim/README.md): what makes
 // window.napplet exist inside a napplet's sandboxed frame. The file is
-// upstream's, unmodified; Verdana-specific behavior lives in Go and in
+// upstream's, unmodified; kwakore-specific behavior lives in Go and in
 // napplet-host.js, never in these bytes.
 //
 //go:embed shim/prelude.global.js
 var shimPrelude string
 
 // ShimVersion is the @napplet/shim release prelude.global.js is, byte for
-// byte (no Verdana patches).
+// byte (no kwakore patches).
 const ShimVersion = "0.30.0"
 
 // ShimSHA256 is the sha256 of npm @napplet/shim@0.30.0 dist/prelude.global.js.
@@ -130,11 +130,11 @@ func UIKitScript(requires []string) string {
 		"var css = " + string(css) + ";" +
 		"function kit(){" +
 		// a page can be torn down and built again under us; one style is enough
-		"if (document.getElementById('__verdana_ui')) return true;" +
+		"if (document.getElementById('__kwakore_ui')) return true;" +
 		"var root = document.head || document.documentElement;" +
 		"if (!root) return false;" +
 		"var s = document.createElement('style');" +
-		"s.id = '__verdana_ui';" +
+		"s.id = '__kwakore_ui';" +
 		"s.textContent = css;" +
 		"root.appendChild(s);" +
 		"return true;" +

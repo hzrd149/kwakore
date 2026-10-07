@@ -52,7 +52,7 @@ console.error = (...args) => { errors.push(args.map(String).join(" ")) }
 globalThis.window = globalThis
 window.top = window
 window.addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn) }
-window.__verdanaNappletRPC = (method, params) => {
+window.__kwakoreNappletRPC = (method, params) => {
   log.push(method)
   rpcs.push({ method, params })
   if (holding.has(method)) {
@@ -618,7 +618,7 @@ fireMessage(f0.contentWindow, { type: MARKER })
 await flush(6)
 return {
   Boots: before.boots, Resets: before.resets,
-  Msgs: rpcs.filter(r => r.method === "nap.msg" && r.params.includes("__verdana")).length,
+  Msgs: rpcs.filter(r => r.method === "nap.msg" && r.params.includes(MARKER)).length,
   Posted: f0.contentWindow.posted.length + stranger.posted.length,
   Errors: errors, Replaced: f0.removed && count("nap.reset") === 1 && count("nap.boot") === 2,
 }
