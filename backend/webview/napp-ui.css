@@ -1,4 +1,4 @@
-/* napp-ui.css: Verdana's kit, for napps that declare `requires: ["ui"]`.
+/* napp-ui.css: Kwakore's kit, for napps that declare `requires: ["ui"]`.
  *
  * The launcher injects this file into such a napp's page, ahead of the napp's
  * own styles, so whatever the napp writes still wins. It is classes only: no
