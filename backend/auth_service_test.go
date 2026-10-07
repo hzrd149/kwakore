@@ -4,14 +4,61 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
+	"fiatjaf.com/nostr/khatru"
 	"fiatjaf.com/nostr/nip19"
+	"fiatjaf.com/nostr/nip46"
+	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
 )
+
+func TestServiceSignerBunkerLiveHandshakeAndSigning(t *testing.T) {
+	srv := httptest.NewServer(khatru.NewRelay())
+	defer srv.Close()
+	relay := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	remote := nostr.Generate()
+	signer := nip46.NewStaticKeySigner(remote)
+	pool := nostr.NewPool()
+	requests := pool.SubscribeMany(ctx, []string{relay}, nostr.Filter{Kinds: []nostr.Kind{nostr.KindNostrConnect}, Tags: nostr.TagMap{"p": []string{remote.Public().Hex()}}, Since: nostr.Now() - 5}, nostr.SubscriptionOptions{})
+	go func() {
+		for ie := range requests {
+			_, _, answer, err := signer.HandleRequest(ctx, ie.Event)
+			if err != nil {
+				continue
+			}
+			if err := answer.Sign(remote); err != nil {
+				continue
+			}
+			r, err := pool.EnsureRelay(relay)
+			if err == nil {
+				_ = r.Publish(ctx, answer)
+			}
+		}
+	}()
+	time.Sleep(200 * time.Millisecond)
+	oldSys := sys
+	sys = &sdk.System{Pool: nostr.NewPool()}
+	s := &ServiceSigner{}
+	t.Cleanup(func() { s.Close(); sys.Pool.Close("test over"); sys = oldSys; pool.Close("test over") })
+	input := "bunker://" + remote.Public().Hex() + "?relay=" + url.QueryEscape(relay)
+	status, err := s.SwitchBunker(ctx, input, nostr.Generate(), false, nil, nil)
+	if err != nil || status.ConnectionState != "connected" || status.PublicKey != remote.Public().Hex() {
+		t.Fatalf("live handshake: %+v %v", status, err)
+	}
+	evt := &nostr.Event{Kind: 1, Content: "service-signing", CreatedAt: nostr.Now()}
+	if err := userKeyer.SignEvent(ctx, evt); err != nil || !evt.VerifySignature() || evt.PubKey != remote.Public() {
+		t.Fatalf("post-handshake remote signing: %v", err)
+	}
+}
 
 func TestServiceSignerBunkerUserKeyAndSigning(t *testing.T) {
 	client := nostr.Generate()

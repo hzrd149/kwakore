@@ -128,7 +128,7 @@ func Listen(ctx context.Context, pool *nostr.Pool, url string, clientPub nostr.P
 			}
 		}
 		if err != nil {
-			log.Debug().Err(err).Str("relay", url).Msg("bunker relay unavailable")
+			log.Debug().Msg("bunker relay unavailable")
 		}
 
 		select {
@@ -149,8 +149,8 @@ func readNostrConnect(ctx context.Context, sub *nostr.Subscription, onEvent func
 			return
 		case <-sub.EndOfStoredEvents:
 			ready()
-		case reason := <-sub.ClosedReason:
-			log.Debug().Str("relay", sub.Relay.URL).Str("reason", reason).Msg("bunker subscription closed")
+		case <-sub.ClosedReason:
+			log.Debug().Msg("bunker subscription closed")
 			return
 		case evt, ok := <-sub.Events:
 			if !ok {
