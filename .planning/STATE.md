@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 8
 current_phase_name: Runtime and Signer Integration
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-10-07T02:47:13.561Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-10-07T02:56:51.595Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 8 execution started
-state_head: 48d47e768590c844dc2d613bfbe3835d3d78d74d
+state_head: 960363d95e0924b2528b8c544ec945ff8a4c8a42
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 18
-  completed_plans: 14
+  completed_plans: 15
   percent: 50
 ---
 
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 8 (Runtime and Signer Integration) — EXECUTING
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 5
 Status: Ready to execute
-**Progress:** 14/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
+**Progress:** 15/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
 Last activity: 2026-10-06 — Phase 8 execution started
 
 ## Performance Metrics
@@ -112,6 +112,7 @@ Last activity: 2026-10-06 — Phase 8 execution started
 | Phase 06 P03 | 4min | 2 tasks | 7 files |
 | Phase 06 P04 | 8min | 2 tasks | 7 files |
 | Phase 08 P01 | 10min | 3 tasks | 16 files |
+| Phase 08 P02 | 8min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 06]: Recent service errors retain at most 32 fixed sanitized summaries; unexpected config basenames are redacted.
 - [Phase 8]: Service window IDs use fresh opaque 128-bit hex tokens so stale IDs cannot stop windows after daemon restart.
 - [Phase 8]: The Linux child executable and adjacent libwebview.so are resolved beside the daemon and checked before each spawn.
+- [Phase 8]: Permission reads keep manifest domain declarations separate from host permission rules and omit session-only answers.
+- [Phase 8]: A socket dispatch allow requires an existing handler target on that exact saved rule; the socket cannot invent a target.
 
 ### Pending Todos
 
@@ -181,10 +184,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T02:46:48.531Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-10-07T02:56:51.564Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Phase 8 Plan 01 is complete; continue with 08-02-PLAN.md.
+- Phase 8 Plan 02 is complete; continue with 08-03-PLAN.md.

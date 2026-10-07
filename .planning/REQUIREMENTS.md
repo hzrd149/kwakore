@@ -20,7 +20,7 @@
 - [x] **SOCK-03**: A user can perform every supported socket operation with a scriptable CLI using machine-readable output.
 - [x] **SOCK-04**: A client can search/discover napplets and list installed napplets through the socket.
 - [x] **SOCK-05**: A client can install, update, and uninstall napplets through the socket.
-- [ ] **SOCK-06**: A client can inspect and change per-napplet permissions through the socket without bypassing runtime consent rules.
+- [x] **SOCK-06**: A client can inspect and change per-napplet permissions through the socket without bypassing runtime consent rules.
 
 ### Configuration and Signers
 
@@ -69,7 +69,7 @@
 | SOCK-03 | 7 | Complete |
 | SOCK-04 | 7 | Complete |
 | SOCK-05 | 7 | Complete |
-| SOCK-06 | 8 | Pending |
+| SOCK-06 | 8 | Complete |
 | CONF-01 | 6 | Complete |
 | CONF-02 | 6 | Complete |
 | CONF-03 | 6 | Complete |
