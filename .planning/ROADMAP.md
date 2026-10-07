@@ -23,6 +23,18 @@ First extract a daemon-owned core and configuration from the Gio launcher. Next 
 **Goal:** A user can run the Linux daemon independently of the old manager window and configure it predictably.
 **Depends on:** v0.1 runtime foundation.
 **Requirements:** SRVC-02, SRVC-05, CONF-01, CONF-02, CONF-03.
+**Plans:** 6 plans (4 executed; 2 gap-closure plans ready).
+
+Plans:
+- [x] 06-01-PLAN.md — Foreground daemon and validated XDG startup
+- [x] 06-02-PLAN.md — Mutable settings and precedence
+- [x] 06-03-PLAN.md — Live configuration and reload
+- [x] 06-04-PLAN.md — Health, diagnostics, and service guide
+- [ ] 06-05-PLAN.md — Durable recovery for interrupted mutations
+- [ ] 06-06-PLAN.md — Five-second signal deadline and restart proof
+
+**Wave 5** *(after Waves 1–4)*: 06-05 mutation recovery.
+**Wave 6** *(blocked on Wave 5)*: 06-06 bounded foreground shutdown.
 **Success criteria:**
 
 1. The daemon runs in the foreground, reports health/version/diagnostics, and shuts down cleanly without opening a manager/store window.

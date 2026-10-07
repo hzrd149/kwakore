@@ -6,12 +6,12 @@
     {
       "number": "6",
       "name": "Daemon Core and Configuration",
-      "status": "complete"
+      "status": "pending"
     },
     {
       "number": "7",
       "name": "Unix Socket and CLI",
-      "status": "in_progress"
+      "status": "pending"
     },
     {
       "number": "8",
@@ -26,8 +26,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 7)",
-    "reason": "Phase 7 of 4 — needs a plan"
+    "label": "Execute Phase 6 gap-closure plans",
+    "reason": "Phase 6 shutdown regression has two verified gap-closure plans"
   },
-  "updated_at": "2026-10-06T20:33:29.212Z"
+  "updated_at": "2026-10-07T01:29:49.719Z"
 }
