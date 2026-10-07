@@ -69,12 +69,12 @@ Plans:
 **Goal:** The daemon controls napplet windows, permissions, and signer options while retaining v0.1 security boundaries.
 **Depends on:** Phase 7.
 **Requirements:** SRVC-03, SRVC-04, SOCK-06, SIGN-01, SIGN-02, SIGN-03.
-**Plans:** 5 plans
+**Plans:** 1/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — Daemon-owned Linux child launch, confirmed stop, and headless error
+- [x] 08-01-PLAN.md — Daemon-owned Linux child launch, confirmed stop, and headless error
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

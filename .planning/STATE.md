@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 8
 current_phase_name: Runtime and Signer Integration
-current_plan: Not started
+current_plan: 2
 status: executing
-stopped_at: Phase 7 complete, ready to plan Phase 8
-last_updated: "2026-10-07T02:34:38.422Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-10-07T02:47:13.561Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 7 complete, transitioned to Phase 8
-state_head: a4d7d3ab7dfe2eb1302c8cdf7cfe39013d2d9fcd
+last_activity_desc: Phase 8 execution started
+state_head: 48d47e768590c844dc2d613bfbe3835d3d78d74d
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 18
-  completed_plans: 13
-  percent: 0
+  completed_plans: 14
+  percent: 50
 ---
 
 # Project State
@@ -26,15 +26,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** Phase 08 planning
+**Current focus:** Phase 8 — Runtime and Signer Integration
 
 ## Current Position
 
-Phase: 8 (Runtime and Signer Integration) — READY TO EXECUTE
-Current Plan: Not started
+Phase: 8 (Runtime and Signer Integration) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 5
 Status: Ready to execute
-**Progress:** 13/13 v0.2 plans completed; 2/4 phases verified ([░░░░░░░░░░] 0%)
-Last activity: 2026-10-06 — Phase 7 complete, transitioned to Phase 8
+**Progress:** 14/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
+Last activity: 2026-10-06 — Phase 8 execution started
 
 ## Performance Metrics
 
@@ -110,6 +111,7 @@ Last activity: 2026-10-06 — Phase 7 complete, transitioned to Phase 8
 | Phase 06 P02 | 5min | 2 tasks | 4 files |
 | Phase 06 P03 | 4min | 2 tasks | 7 files |
 | Phase 06 P04 | 8min | 2 tasks | 7 files |
+| Phase 08 P01 | 10min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -125,6 +127,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 06]: Reload diagnostics and stderr contain only a config basename, supported field name, and fixed validation reason.
 - [Phase 06]: Offline status and diagnostics use null for unavailable live facts; a lock file is not live evidence.
 - [Phase 06]: Recent service errors retain at most 32 fixed sanitized summaries; unexpected config basenames are redacted.
+- [Phase 8]: Service window IDs use fresh opaque 128-bit hex tokens so stale IDs cannot stop windows after daemon restart.
+- [Phase 8]: The Linux child executable and adjacent libwebview.so are resolved beside the daemon and checked before each spawn.
 
 ### Pending Todos
 
@@ -177,10 +181,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T23:51:30Z
-Stopped at: Phase 7 complete, ready to plan Phase 8
+Last session: 2026-10-07T02:46:48.531Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Phase 7 is complete; Phase 8 is ready for discussion and planning.
+- Phase 8 Plan 01 is complete; continue with 08-02-PLAN.md.

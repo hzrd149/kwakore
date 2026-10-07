@@ -9,8 +9,8 @@
 
 - [ ] **SRVC-01**: A Linux user can start, stop, restart, and inspect the Kwakore daemon through their per-user systemd manager.
 - [x] **SRVC-02**: A user can run the daemon in the foreground for development and diagnosis without systemd.
-- [ ] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
-- [ ] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
+- [x] **SRVC-03**: A user can launch and stop an installed napplet through the daemon, with the existing sandbox and permission boundaries preserved.
+- [x] **SRVC-04**: A client receives a clear error when launching requires a graphical session that is unavailable.
 - [x] **SRVC-05**: A client can inspect daemon health, version, active windows, and actionable diagnostic information.
 
 ### Local Control
@@ -61,8 +61,8 @@
 |-------------|-------|--------|
 | SRVC-01 | 9 | Pending |
 | SRVC-02 | 6 | Complete |
-| SRVC-03 | 8 | Pending |
-| SRVC-04 | 8 | Pending |
+| SRVC-03 | 8 | Complete |
+| SRVC-04 | 8 | Complete |
 | SRVC-05 | 6 | Complete |
 | SOCK-01 | 7 | Complete |
 | SOCK-02 | 7 | Complete |
