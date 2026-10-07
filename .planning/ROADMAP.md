@@ -104,7 +104,7 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
-**Plans:** 21/24 plans executed
+**Plans:** 22/24 plans executed
 
 Plans:
 
@@ -129,7 +129,7 @@ Plans:
 - [x] 09-18-PLAN.md — Service identity test expectations
 - [x] 09-24-PLAN.md — NAP and window tests with semantic identity scan
 - [x] 09-08-PLAN.md — Nix package and per-user module
-- [ ] 09-09-PLAN.md — Linux CI and release bundles
+- [x] 09-09-PLAN.md — Linux CI and release bundles
 - [ ] 09-10-PLAN.md — Generic-first setup, protocol and identity docs
 - [ ] 09-11-PLAN.md — Installed-artifact smoke and CI gate
 
