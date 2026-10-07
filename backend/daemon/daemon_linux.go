@@ -28,6 +28,10 @@ var ErrClosing = errors.New("service is shutting down")
 // windowProgramPath is replaceable by the socket integration test.
 var windowProgramPath = linuxhost.DefaultProgramPath
 
+// nativeEntryCLIPath names the CLI native desktop entries run; the entry
+// launch test replaces it with a freshly built CLI.
+var nativeEntryCLIPath = linuxhost.DefaultCLIPath
+
 type Service struct {
 	mu                sync.Mutex
 	operationMu       sync.Mutex
@@ -103,7 +107,7 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	if err := recoverSignerTransition(credentials, m); err != nil {
 		return nil, err
 	}
-	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: linuxhost.New(windowProgramPath())})
+	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: &linuxhost.Host{Program: windowProgramPath(), CLI: nativeEntryCLIPath()}})
 	if err != nil {
 		return nil, err
 	}
