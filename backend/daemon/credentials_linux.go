@@ -11,15 +11,19 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip46"
+
 	"verdana/backend/fileutil"
 )
 
 const maxCredentialBytes = 4096
 
 type credentialRecord struct {
-	Version int    `json:"version"`
-	Mode    string `json:"mode"`
-	Secret  string `json:"secret,omitempty"`
+	Version   int    `json:"version"`
+	Mode      string `json:"mode"`
+	Secret    string `json:"secret,omitempty"`
+	ClientKey string `json:"client_key,omitempty"`
 }
 
 type credentialStore struct{ path string }
@@ -66,7 +70,7 @@ func (s *credentialStore) read() (credentialRecord, error) {
 	var rec credentialRecord
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&rec) != nil || rec.Version != 1 || (rec.Mode != "none" && rec.Mode != "nsec") || (rec.Mode == "none" && rec.Secret != "") || (rec.Mode == "nsec" && (rec.Secret == "" || len(rec.Secret) > 256)) {
+	if dec.Decode(&rec) != nil || rec.Version != 1 || (rec.Mode != "none" && rec.Mode != "nsec" && rec.Mode != "bunker") || (rec.Mode == "none" && rec.Secret != "") || (rec.Mode == "nsec" && (rec.Secret == "" || len(rec.Secret) > 256)) || (rec.Mode == "bunker" && (len(rec.Secret) > 2048 || !nip46.IsValidBunkerURL(rec.Secret))) || (rec.ClientKey != "" && !validCredentialKey(rec.ClientKey)) || (rec.Mode == "bunker" && rec.ClientKey == "") {
 		return credentialRecord{}, errCredential
 	}
 	if dec.Decode(new(any)) != io.EOF {
@@ -76,19 +80,43 @@ func (s *credentialStore) read() (credentialRecord, error) {
 }
 
 func (s *credentialStore) write(mode, secret string) error {
-	if mode != "none" && mode != "nsec" || len(secret) > 256 || (mode == "nsec" && secret == "") || (mode == "none" && secret != "") {
+	if mode != "none" && mode != "nsec" && mode != "bunker" || len(secret) > 2048 || (mode == "nsec" && (secret == "" || len(secret) > 256)) || (mode == "none" && secret != "") || (mode == "bunker" && !nip46.IsValidBunkerURL(secret)) {
 		return errCredential
 	}
 	// Refuse an unsafe existing destination before atomic replacement.
+	previous, err := s.read()
+	if err != nil {
+		return errCredential
+	}
+	key := previous.ClientKey
+	if mode == "bunker" && key == "" {
+		key = nostr.Generate().Hex()
+	}
+	return s.writeRecord(credentialRecord{Version: 1, Mode: mode, Secret: secret, ClientKey: key})
+}
+
+func (s *credentialStore) writeBunker(secret, clientKey string) error {
+	if len(secret) > 2048 || !nip46.IsValidBunkerURL(secret) || !validCredentialKey(clientKey) {
+		return errCredential
+	}
+	return s.writeRecord(credentialRecord{Version: 1, Mode: "bunker", Secret: secret, ClientKey: clientKey})
+}
+
+func validCredentialKey(raw string) bool {
+	key, err := nostr.SecretKeyFromHex(raw)
+	return err == nil && key.Hex() == raw
+}
+
+func (s *credentialStore) writeRecord(rec credentialRecord) error {
 	if _, err := s.read(); err != nil {
 		return errCredential
 	}
-	data, _ := json.Marshal(credentialRecord{Version: 1, Mode: mode, Secret: secret})
+	data, _ := json.Marshal(rec)
 	if err := credentialWriteAtomic(s.path, data, 0600); err != nil {
 		return errCredential
 	}
 	got, err := s.read()
-	if err != nil || got.Mode != mode || got.Secret != secret {
+	if err != nil || got != rec {
 		return errCredential
 	}
 	return nil

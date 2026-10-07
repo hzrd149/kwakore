@@ -313,11 +313,11 @@ func decodeSignerSwitch(params json.RawMessage) (string, string, *controlprotoco
 	if mode == "none" && len(fields) == 1 {
 		return mode, "", nil
 	}
-	if mode != "nsec" || len(fields) != 2 || len(fields["secret"]) > 512 {
+	if (mode != "nsec" && mode != "bunker") || len(fields) != 2 || len(fields["secret"]) > 4096 {
 		return "", "", invalid
 	}
 	var secret string
-	if json.Unmarshal(fields["secret"], &secret) != nil || secret == "" || len(secret) > 256 {
+	if json.Unmarshal(fields["secret"], &secret) != nil || secret == "" || len(secret) > 2048 || mode == "nsec" && len(secret) > 256 {
 		return "", "", invalid
 	}
 	return mode, secret, nil

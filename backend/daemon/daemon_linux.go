@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"fiatjaf.com/nostr"
+
 	"verdana/backend"
 	"verdana/backend/linuxhost"
 	"verdana/backend/serviceconfig"
@@ -127,6 +129,18 @@ func (s *Service) reconcileSigner(ctx context.Context) error {
 	if requested == "nsec" && rec.Mode == "nsec" {
 		secret = rec.Secret
 	}
+	if requested == "bunker" {
+		if rec.Mode != "bunker" || rec.ClientKey == "" {
+			_, _ = s.signer.Switch(ctx, "bunker", "", nil)
+			return errCredential
+		}
+		key, keyErr := nostr.SecretKeyFromHex(rec.ClientKey)
+		if keyErr != nil {
+			return errCredential
+		}
+		_, err = s.signer.SwitchBunker(ctx, rec.Secret, key, true, nil, nil)
+		return err
+	}
 	_, err = s.signer.Switch(ctx, requested, secret, nil)
 	return err
 }
@@ -141,6 +155,20 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 	defer s.operationMu.Unlock()
 	if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: mode}); err != nil {
 		return backend.SignerStatus{}, errCredential
+	}
+	if mode == "bunker" {
+		rec, err := s.credentials.read()
+		if err != nil {
+			return backend.SignerStatus{}, errCredential
+		}
+		key := nostr.Generate()
+		if rec.ClientKey != "" {
+			key, err = nostr.SecretKeyFromHex(rec.ClientKey)
+			if err != nil {
+				return backend.SignerStatus{}, errCredential
+			}
+		}
+		return s.signer.SwitchBunker(ctx, secret, key, false, s.credentials.write, s.credentials.writeBunker)
 	}
 	return s.signer.Switch(ctx, mode, secret, s.credentials.write)
 }

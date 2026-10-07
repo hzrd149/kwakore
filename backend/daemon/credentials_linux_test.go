@@ -40,15 +40,38 @@ func TestCredentialStorePrivateAndRestore(t *testing.T) {
 
 func TestBunkerCredentialStableClientKey(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	s, err := openCredentialStore(dir)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	url := "bunker://" + nostr.Generate().Public().Hex() + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
-	if err := s.write("bunker", url); err != nil { t.Fatal(err) }
+	if err := s.write("bunker", url); err != nil {
+		t.Fatal(err)
+	}
 	again, err := openCredentialStore(dir)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	rec, err := again.read()
-	if err != nil || rec.Mode != "bunker" || rec.Secret != url { t.Fatalf("restore: %+v %v", rec, err) }
+	if err != nil || rec.Mode != "bunker" || rec.Secret != url || !validCredentialKey(rec.ClientKey) {
+		t.Fatalf("restore: %+v %v", rec, err)
+	}
+	if err := again.write("none", ""); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := again.read()
+	if err != nil || retained.ClientKey != rec.ClientKey {
+		t.Fatalf("client key changed: %+v %v", retained, err)
+	}
+	if err := os.WriteFile(again.path, []byte(`{"version":1,"mode":"bunker","secret":"`+url+`","client_key":"invalid-sentinel"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.read(); err == nil || err.Error() != errCredential.Error() {
+		t.Fatalf("invalid key accepted or leaked: %v", err)
+	}
 }
 
 func TestCredentialStoreRejectsUnsafeFile(t *testing.T) {

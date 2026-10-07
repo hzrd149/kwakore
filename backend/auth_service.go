@@ -9,6 +9,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
+	"fiatjaf.com/nostr/nip46"
 )
 
 // SignerStatus is the complete public signer read surface.
@@ -19,10 +20,11 @@ type SignerStatus struct {
 }
 
 type ServiceSigner struct {
-	mu         sync.Mutex
-	generation uint64
-	status     SignerStatus
-	keyer      *revocableKeyer
+	mu            sync.Mutex
+	generation    uint64
+	status        SignerStatus
+	keyer         *revocableKeyer
+	pendingCancel context.CancelFunc
 }
 
 // revocableKeyer keeps a captured old service signer from signing after a
@@ -111,6 +113,10 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.generation++
+	if s.pendingCancel != nil {
+		s.pendingCancel()
+		s.pendingCancel = nil
+	}
 	stopped := s.stopLocked(ctx)
 	s.status = SignerStatus{Mode: mode, ConnectionState: "disconnected"}
 	failed := errors.New("signer unavailable")
@@ -161,10 +167,74 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 	return s.status, nil
 }
 
+var serviceBunkerConnect = func(sessionCtx, handshakeCtx context.Context, clientKey nostr.SecretKey, input string, skipConnect bool) (nostr.Keyer, error) {
+	return loginBunkerWithHandshake(sessionCtx, handshakeCtx, clientKey, input, skipConnect, nil)
+}
+
+// SwitchBunker retires the old session before connecting. The network handshake
+// runs outside the state lock so a later switch can cancel and fence its result.
+func (s *ServiceSigner) SwitchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, clear func(string, string) error, persist func(string, string) error) (SignerStatus, error) {
+	failed := errServiceSignerUnavailable
+	s.mu.Lock()
+	s.generation++
+	generation := s.generation
+	if s.pendingCancel != nil {
+		s.pendingCancel()
+	}
+	stopped := s.stopLocked(ctx)
+	s.status = SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}
+	if !stopped || clear != nil && clear("none", "") != nil {
+		status := s.status
+		s.mu.Unlock()
+		return status, failed
+	}
+	if len(input) == 0 || len(input) > 2048 || !nip46.IsValidBunkerURL(input) {
+		status := s.status
+		s.mu.Unlock()
+		return status, failed
+	}
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	s.pendingCancel = cancel
+	s.mu.Unlock()
+
+	handshakeCtx, timeoutCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer timeoutCancel()
+	stopHandshake := context.AfterFunc(sessionCtx, timeoutCancel)
+	defer stopHandshake()
+	k, err := serviceBunkerConnect(sessionCtx, handshakeCtx, clientKey, input, skipConnect)
+	var pk nostr.PubKey
+	if err == nil && handshakeCtx.Err() == nil {
+		pk, err = k.GetPublicKey(handshakeCtx)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.generation != generation || sessionCtx.Err() != nil || handshakeCtx.Err() != nil || err != nil || pk == nostr.ZeroPK {
+		cancel()
+		return s.status, failed
+	}
+	if persist != nil && persist(input, clientKey.Hex()) != nil {
+		cancel()
+		return s.status, failed
+	}
+	s.pendingCancel = nil
+	sessionCancel = cancel
+	s.keyer = &revocableKeyer{active: true, inner: k}
+	userKeyer = s.keyer
+	userPubkey = pk
+	s.status = SignerStatus{Mode: "bunker", PublicKey: pk.Hex(), ConnectionState: "connected"}
+	pushIdentityChanged()
+	return s.status, nil
+}
+
 // Close ends the live session without changing retained credentials.
 func (s *ServiceSigner) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.generation++
+	if s.pendingCancel != nil {
+		s.pendingCancel()
+		s.pendingCancel = nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	s.stopLocked(ctx)

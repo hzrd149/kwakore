@@ -238,16 +238,20 @@ var finishLogin = setProfileFromUser
 // connection (or ignore it) while the login times out. The first RPC
 // (get_public_key) then tells whether the bunker still knows us.
 func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, skipConnect bool, onAuth func(string)) (nostr.Keyer, error) {
-	parsed, err := nip46.ParseBunkerInput(ctx, input)
+	return loginBunkerWithHandshake(ctx, ctx, clientKey, input, skipConnect, onAuth)
+}
+
+func loginBunkerWithHandshake(sessionCtx, handshakeCtx context.Context, clientKey nostr.SecretKey, input string, skipConnect bool, onAuth func(string)) (nostr.Keyer, error) {
+	parsed, err := nip46.ParseBunkerInput(handshakeCtx, input)
 	if err != nil {
 		return nil, err
 	}
-	b, err := bunker.NewSigner(ctx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
+	b, err := bunker.NewSigner(sessionCtx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
 	if err != nil {
 		return nil, err
 	}
 	if !skipConnect {
-		if err := b.Connect(ctx, parsed.Secret); err != nil {
+		if err := b.Connect(handshakeCtx, parsed.Secret); err != nil {
 			return nil, err
 		}
 	}
