@@ -93,7 +93,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			// The keyer and pubkey are read once: a logout or another login
 			// may clear them while this runs, and a second read of a nil
 			// keyer would panic
-			keyer, cached := userKeyer, userPubkey
+			keyer, cached := identitySnapshot()
 			if keyer == nil {
 				return "", errors.New("not logged in")
 			}
@@ -111,7 +111,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 		case "signEvent":
 			// read once, as in getPublicKey: the approval prompt below can
 			// take as long as the user does
-			keyer := userKeyer
+			keyer, _ := identitySnapshot()
 			if keyer == nil {
 				return nil, errors.New("not logged in")
 			}
@@ -135,7 +135,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 
 		case "nip04.encrypt", "nip04.decrypt", "nip44.encrypt", "nip44.decrypt":
 			// read once, as in signEvent
-			keyer := userKeyer
+			keyer, _ := identitySnapshot()
 			if keyer == nil {
 				return "", errors.New("not logged in")
 			}

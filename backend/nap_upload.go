@@ -97,7 +97,8 @@ func init() {
 }
 
 func napUploadInfo(c *napCall) {
-	enabled := userKeyer != nil && userPubkey != nostr.ZeroPK && sys != nil
+	keyer, pubkey := identitySnapshot()
+	enabled := keyer != nil && pubkey != nostr.ZeroPK && sys != nil
 	c.reply(map[string]any{"info": map[string]any{
 		"rails": []map[string]any{{
 			"rail": "blossom", "enabled": enabled, "returns": []string{"https", "blossom"},
@@ -119,11 +120,11 @@ func napUpload(c *napCall) {
 		c.reply(map[string]any{"error": "unsupported rail"})
 		return
 	}
-	if userKeyer == nil || userPubkey == nostr.ZeroPK {
+	keyer, pubkey := identitySnapshot()
+	if keyer == nil || pubkey == nostr.ZeroPK {
 		c.reply(map[string]any{"error": "not-signed-in"})
 		return
 	}
-	keyer, pubkey := userKeyer, userPubkey
 	if len(r.Data.Blob.B64) == 0 || base64.StdEncoding.DecodedLen(len(r.Data.Blob.B64)) > napUploadMaxBytes {
 		c.reply(map[string]any{"error": "file too large"})
 		return
@@ -223,7 +224,7 @@ func napRunUpload(ctx context.Context, c *napCall, status napUploadStatus, data 
 	// so a remote signer is asked once
 	auth, err := c.uploadAuth(ctx, keyer, wantHash)
 	if err != nil {
-		log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Msg("NAP-UPLOAD could not sign the Blossom authorization")
+		log.Warn().Str("napplet", c.ci.napp.ID).Msg("NAP-UPLOAD could not sign the Blossom authorization")
 	}
 	var descriptors []*blossom.BlobDescriptor
 	for _, server := range servers {

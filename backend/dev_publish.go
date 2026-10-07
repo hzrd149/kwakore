@@ -32,16 +32,17 @@ type DevPublishInfo struct {
 func DevPublishDefaults() (servers, relays []string) {
 	servers = []string{"https://relay.nostrapps.com", "https://nostr.download"}
 	relays = Relays()
+	_, pubkey := identitySnapshot()
 
-	if sys != nil && userPubkey != nostr.ZeroPK {
+	if sys != nil && pubkey != nostr.ZeroPK {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		for _, server := range sys.FetchBlossomServerList(ctx, userPubkey).Items {
+		for _, server := range sys.FetchBlossomServerList(ctx, pubkey).Items {
 			servers = nostr.AppendUnique(servers, server.Value())
 		}
 
-		for _, relay := range sys.FetchWriteRelays(ctx, userPubkey) {
+		for _, relay := range sys.FetchWriteRelays(ctx, pubkey) {
 			relays = nostr.AppendUnique(relays, relay)
 		}
 	}
@@ -79,7 +80,8 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 			onStep(fmt.Sprintf(format, args...))
 		}
 	}
-	if userKeyer == nil {
+	keyer, _ := identitySnapshot()
+	if keyer == nil {
 		return 0, 0, errors.New("not logged in")
 	}
 	if sys == nil {
@@ -138,7 +140,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 				step("  failed: cannot open file: %v", openErr)
 				continue
 			}
-			client := blossom.NewClient(server, userKeyer)
+			client := blossom.NewClient(server, keyer)
 			descriptor, uploadErr := client.UploadBlob(ctx, f, mime.TypeByExtension(filepath.Ext(path)))
 			f.Close()
 			switch {
@@ -166,7 +168,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		}
 	}
 	if napp.IsNapplet() {
-		return publishDevNapplet(ctx, napp, serversForEvent, iconSha, iconMime, relays, protected, step)
+		return publishDevNapplet(ctx, keyer, napp, serversForEvent, iconSha, iconMime, relays, protected, step)
 	}
 
 	tags := make(nostr.Tags, 0, len(napp.Paths)+len(napp.Actions)+len(napp.Requires)+8)
@@ -202,9 +204,9 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	tags = append(tags, nostr.Tag{"d", napp.D})
 	step("signing kind:35130 event (%d tags, %d path tags)...", len(tags), len(napp.Paths))
 	event := nostr.Event{Kind: 35130, CreatedAt: nostr.Now(), Tags: tags}
-	if err := userKeyer.SignEvent(ctx, &event); err != nil {
-		step("signing failed: %v", err)
-		return 0, 0, fmt.Errorf("signing manifest: %w", err)
+	if err := keyer.SignEvent(ctx, &event); err != nil {
+		step("signing failed: signer unavailable")
+		return 0, 0, errServiceSignerUnavailable
 	}
 	return publishManifest(ctx, event, relays, step)
 }
@@ -241,6 +243,7 @@ func publishManifest(ctx context.Context, event nostr.Event, relays []string, st
 // against the launcher's own validation before it goes out.
 func publishDevNapplet(
 	ctx context.Context,
+	keyer nostr.Keyer,
 	napp Napp,
 	servers []string,
 	iconSha, iconMime string,
@@ -277,9 +280,9 @@ func publishDevNapplet(
 
 	step("signing kind:35129 napplet event (%d tags)...", len(tags))
 	event := nostr.Event{Kind: KindNapplet, CreatedAt: nostr.Now(), Tags: tags, Content: content}
-	if err := userKeyer.SignEvent(ctx, &event); err != nil {
-		step("signing failed: %v", err)
-		return 0, 0, fmt.Errorf("signing manifest: %w", err)
+	if err := keyer.SignEvent(ctx, &event); err != nil {
+		step("signing failed: signer unavailable")
+		return 0, 0, errServiceSignerUnavailable
 	}
 	if _, err := nappletFromEvent(event); err != nil {
 		return 0, 0, fmt.Errorf("the napplet event would be invalid: %w", err)
