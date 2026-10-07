@@ -254,8 +254,9 @@ func readChild(c *childTransport, instance string, stdout io.ReadCloser, ready, 
 	backend.WindowClosed(instance)
 }
 
-// checkProgram rejects symlinks, shared-writable path components and files
-// not owned by this user or root. The child independently checks the library.
+// checkProgram rejects symlinks, shared-writable path components (other than
+// sticky directories) and files not owned by this user or root. The child
+// independently checks the library.
 func checkProgram(program string) error {
 	if !filepath.IsAbs(program) || filepath.Clean(program) != program {
 		return errors.New("window program path")
@@ -269,7 +270,15 @@ func checkProgram(program string) error {
 			}
 			current = filepath.Join(current, part)
 			info, err := os.Lstat(current)
-			if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
+			if err != nil || info.Mode()&os.ModeSymlink != 0 {
+				return errors.New("unsafe window program path")
+			}
+			// A shared-writable directory is accepted only with the sticky
+			// bit, as on the root-owned 1775 /nix/store: others can add
+			// entries there but cannot rename or remove the entry below it,
+			// and that entry must itself pass the owner check.
+			sharedSticky := info.IsDir() && info.Mode()&os.ModeSticky != 0 && i < len(parts)-1
+			if info.Mode().Perm()&0022 != 0 && !sharedSticky {
 				return errors.New("unsafe window program path")
 			}
 			owner, ok := info.Sys().(*syscall.Stat_t)

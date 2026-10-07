@@ -171,6 +171,61 @@ func TestLinuxHostRejectsUnsafeProgram(t *testing.T) {
 	}
 }
 
+// The Nix store is a root-owned 1775 directory, so a packaged child sits
+// below a group-writable component. The sticky bit keeps others from
+// replacing the package directory, so that layout must pass while the same
+// directory without the sticky bit still fails.
+func TestLinuxHostAcceptsStickySharedDirectory(t *testing.T) {
+	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(dir, "store")
+	bin := filepath.Join(store, "pkg", "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(bin, "napplet")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "libwebview.so"), []byte("test"), 0444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(store, 0775|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkProgram(program); err != nil {
+		t.Fatalf("program below a sticky group-writable directory: %v", err)
+	}
+	if err := os.Chmod(store, 0775); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkProgram(program); err == nil {
+		t.Fatal("accepted a group-writable directory without the sticky bit")
+	}
+	// the sticky exception is for directories above the program only
+	if err := os.Chmod(store, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bin, 0777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkProgram(program); err != nil {
+		t.Fatalf("sticky program directory: %v", err)
+	}
+	if err := os.Chmod(program, 0757); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkProgram(program); err == nil {
+		t.Fatal("accepted a world-writable program")
+	}
+}
+
 func TestLinuxHostStopReapsUnresponsiveChild(t *testing.T) {
 	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
 	if err != nil {
