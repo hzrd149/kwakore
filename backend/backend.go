@@ -107,10 +107,9 @@ func Start(opts Options) (func(), error) {
 	// (D-08)
 	sweepNappletData()
 	if serviceConfig != nil {
-		ls.mu.Lock()
-		ls.installed = installedNapps()
-		ls.sortDiscovery()
-		ls.mu.Unlock()
+		// native entries follow the recovered registry before the
+		// service reports ready (D-07)
+		publishServiceRegistry()
 		buildUserIndex()
 		return closeStores, nil
 	}

@@ -117,3 +117,29 @@ func TestDiagnosticsRedactsSensitiveConfigBasename(t *testing.T) {
 		t.Fatalf("diagnostics exposed private config name: %s", b)
 	}
 }
+
+// The test binary has no kwakore CLI beside it, so the startup native entry
+// pass cannot write entries. Start runs that pass before the Service exists;
+// the failure must still reach diagnostics, once and as fixed text.
+func TestServiceNativeEntryDiagnostics(t *testing.T) {
+	apps := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", apps)
+	p := daemonPaths(t)
+	s, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var found []DiagnosticError
+	for _, item := range s.Diagnostics().RecentErrors {
+		if item.Category == "native_entries" {
+			found = append(found, item)
+		}
+	}
+	if len(found) != 1 || found[0].Detail != "native desktop entry reconciliation failed" || found[0].Time.IsZero() {
+		t.Fatalf("native entry failure in diagnostics: %+v", found)
+	}
+	if entries, err := os.ReadDir(apps); err != nil || len(entries) != 0 {
+		t.Fatalf("a refused CLI touched the data home: %v %v", entries, err)
+	}
+}

@@ -109,6 +109,13 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	}
 	workContext, cancelWork := context.WithCancel(context.Background())
 	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}
+	// Native entry passes report failures as a fixed summary only: the
+	// joined error names files and paths and goes to the journal instead.
+	// A failure of the startup pass, which ran inside Start, is replayed
+	// here.
+	backend.SetNativeEntryReporter(func(error) {
+		s.recordError("native_entries", "native desktop entry reconciliation failed")
+	})
 	// Startup stays available with a disconnected public status when the
 	// requested signer cannot be restored. The private record never enters
 	// ordinary service configuration or diagnostics.
@@ -496,6 +503,7 @@ func (s *Service) Close() {
 		if s.signer != nil {
 			s.signer.Close()
 		}
+		backend.SetNativeEntryReporter(nil)
 		if s.closeBackend != nil {
 			s.closeBackend()
 		}

@@ -209,6 +209,10 @@ type settingsChangeHost struct {
 
 func (h *settingsChangeHost) StateChanged() { h.changes++ }
 
+// AppShortcutsSupported keeps the startup native entry pass off this host,
+// whose embedded Host is nil.
+func (h *settingsChangeHost) AppShortcutsSupported() bool { return false }
+
 func TestDaemonSettingNotifiesOnlyForEffectiveChange(t *testing.T) {
 	p := daemonPaths(t)
 	if err := os.MkdirAll(p.DataDir, 0700); err != nil {

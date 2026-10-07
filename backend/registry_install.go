@@ -35,6 +35,11 @@ var backgroundSyncs sync.WaitGroup
 // Ordering is installedNapps' business (most recently launched first), and the
 // discovery list gets resorted around the new set: an install or uninstall
 // moves its napp between the top and bottom halves of that list.
+//
+// Every committed install, update and uninstall (a partial cleanup included)
+// ends here. The service reconciles its native entries synchronously, so
+// they match the registry by the time the mutation returns; the launcher
+// keeps its best-effort background pass.
 func refreshInstalled() {
 	ls.mu.Lock()
 	ls.installed = installedNapps()
@@ -42,6 +47,10 @@ func refreshInstalled() {
 	ls.mu.Unlock()
 	notifyState()
 	backgroundSyncs.Go(broadcastIntentChanges)
+	if serviceConfig != nil {
+		_ = syncNativeEntries()
+		return
+	}
 	backgroundSyncs.Go(syncAppShortcuts)
 }
 
