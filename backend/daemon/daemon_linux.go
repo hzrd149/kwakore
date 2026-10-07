@@ -42,6 +42,8 @@ type Service struct {
 	errorNext    int
 	errorCount   int
 	manager      *serviceconfig.Manager
+	signer       *backend.ServiceSigner
+	credentials  *credentialStore
 	closeBackend func()
 	lock         *os.File
 }
@@ -61,6 +63,10 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 		return nil, err
 	}
 	if err := checkPrivateDir(paths.DataDir); err != nil {
+		return nil, err
+	}
+	credentials, err := openCredentialStore(paths.DataDir)
+	if err != nil {
 		return nil, err
 	}
 	lockPath := filepath.Join(paths.DataDir, "daemon.lock")
@@ -95,7 +101,16 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 		return nil, err
 	}
 	workContext, cancelWork := context.WithCancel(context.Background())
-	return &Service{ready: true, start: time.Now(), version: version, manager: m, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}, nil
+	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}
+	record, err := credentials.read()
+	if err != nil {
+		s.Close()
+		return nil, errCredential
+	}
+	if record.Mode == "nsec" {
+		_, _ = s.signer.Switch(context.Background(), "nsec", record.Secret, nil)
+	}
+	return s, nil
 }
 
 func checkNoSymlinkComponents(path string) error {
@@ -262,6 +277,9 @@ func (s *Service) Close() {
 	s.mu.Unlock()
 	s.closeOnce.Do(func() {
 		s.work.Wait()
+		if s.signer != nil {
+			s.signer.Close()
+		}
 		if s.closeBackend != nil {
 			s.closeBackend()
 		}
