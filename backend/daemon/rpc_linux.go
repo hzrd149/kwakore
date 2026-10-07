@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -358,7 +359,7 @@ func decodePairStart(params json.RawMessage) (string, *controlprotocol.Error) {
 
 func decodeSignerSwitch(params json.RawMessage) (string, string, *controlprotocol.Error) {
 	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
-	if err := controlprotocol.ValidateNamedParams(params, "mode", "secret"); err != nil {
+	if err := controlprotocol.ValidateNamedParams(params, "mode", "secret", "socket"); err != nil {
 		return "", "", err
 	}
 	var fields map[string]json.RawMessage
@@ -371,6 +372,20 @@ func decodeSignerSwitch(params json.RawMessage) (string, string, *controlprotoco
 	}
 	if mode == "none" && len(fields) == 1 {
 		return mode, "", nil
+	}
+	if mode == "system" {
+		// The socket travels in the secret slot; it is not a secret.
+		if err := controlprotocol.ValidateNamedParams(params, "mode", "socket"); err != nil {
+			return "", "", err
+		}
+		if len(fields) == 1 {
+			return mode, "", nil
+		}
+		var socket string
+		if len(fields) != 2 || len(fields["socket"]) > 512 || json.Unmarshal(fields["socket"], &socket) != nil || !filepath.IsAbs(socket) || filepath.Clean(socket) != socket || len(socket) > 107 {
+			return "", "", invalid
+		}
+		return mode, socket, nil
 	}
 	if (mode != "nsec" && mode != "bunker") || len(fields) != 2 || len(fields["secret"]) > 4096 {
 		return "", "", invalid

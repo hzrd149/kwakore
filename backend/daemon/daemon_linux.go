@@ -141,6 +141,10 @@ func (s *Service) reconcileSigner(ctx context.Context) error {
 		_, _ = s.signer.Switch(ctx, requested, "", nil)
 		return errCredential
 	}
+	if requested == "system" {
+		_, err = s.signer.SwitchSystem(ctx, s.manager.SystemSignerSocket(), nil)
+		return err
+	}
 	secret := ""
 	if requested == "nsec" && rec.Mode == "nsec" {
 		secret = rec.Secret
@@ -161,6 +165,9 @@ func (s *Service) reconcileSigner(ctx context.Context) error {
 	return err
 }
 
+// SwitchSigner selects a signer. For the system mode, secret is instead the
+// socket to connect to, or empty for the configured one; no credential is
+// written, so a stored nsec or bunker client key is kept for a later switch.
 func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backend.SignerStatus, error) {
 	done, err := s.Begin()
 	if err != nil {
@@ -180,6 +187,16 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 			return backend.SignerStatus{}, errCredential
 		}
 		signerConfig.Relay = parsed.Query().Get("relay")
+	}
+	if mode == "system" {
+		signerConfig.Socket = secret
+		socket := secret
+		if socket == "" {
+			socket = s.manager.FileSystemSignerSocket()
+		}
+		return s.signer.SwitchSystem(ctx, socket, func() error {
+			return s.commitSignerTransition(signerConfig, func() error { return nil })
+		})
 	}
 	if mode == "bunker" {
 		rec, err := s.credentials.read()

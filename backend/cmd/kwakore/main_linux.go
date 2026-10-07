@@ -334,6 +334,19 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		if len(args) == 3 && args[1] == "switch" && args[2] == "none" {
 			return "signer.switch", json.RawMessage(`{"mode":"none"}`), socketPath, nil
 		}
+		if len(args) == 3 && args[1] == "switch" && args[2] == "system" {
+			return "signer.switch", json.RawMessage(`{"mode":"system"}`), socketPath, nil
+		}
+		if len(args) == 5 && args[1] == "switch" && args[2] == "system" && args[3] == "--signer-socket" {
+			if !filepath.IsAbs(args[4]) || filepath.Clean(args[4]) != args[4] {
+				return "", nil, "", inputFailure("signer socket must be an absolute, clean path")
+			}
+			params, _ := json.Marshal(struct {
+				Mode   string `json:"mode"`
+				Socket string `json:"socket"`
+			}{"system", args[4]})
+			return "signer.switch", params, socketPath, nil
+		}
 		if len(args) == 3 && args[1] == "pair" && args[2] == "start" {
 			var raw [16]byte
 			if _, err := rand.Read(raw[:]); err != nil {
@@ -696,7 +709,7 @@ func validSignerResponse(result json.RawMessage) bool {
 	if json.Unmarshal(fields["mode"], &mode) != nil || json.Unmarshal(fields["public_key"], &pubkey) != nil || json.Unmarshal(fields["connection_state"], &state) != nil {
 		return false
 	}
-	if mode != "none" && mode != "nsec" && mode != "bunker" {
+	if mode != "none" && mode != "nsec" && mode != "bunker" && mode != "system" {
 		return false
 	}
 	if state != "connected" && state != "disconnected" {

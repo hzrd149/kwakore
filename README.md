@@ -116,6 +116,9 @@ open, see [Graphical session](docs/service.md#graphical-session).
 - [Control protocol, version 1](docs/control-protocol.md): the socket,
   framing, methods, errors and the full CLI command table, for client
   authors.
+- [System signer protocol](docs/system-signer.md): the local socket a
+  system service implements so Kwakore signs as the logged-in user without
+  holding the key.
 - [NAPPLETS.md](NAPPLETS.md): how napplets run in Kwakore, which NAP domains
   it implements, and how to test one.
 - [spec/CONFORMANCE.md](spec/CONFORMANCE.md): the audit of the napplet

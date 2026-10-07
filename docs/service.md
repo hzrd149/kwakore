@@ -225,8 +225,9 @@ and WebKitGTK as the rest of the system:
 | --- | --- |
 | `programs.kwakore.enable` | install the package system-wide and add the user units |
 | `programs.kwakore.package` | the package; defaults to `nix/package.nix` built against your nixpkgs |
-| `programs.kwakore.users` | users whose user manager starts `kwakore.socket` at login; must name at least one. Other users' managers skip both units |
-| `programs.kwakore.settings` | optional declarative `config.json`: `relays`, `blossom_servers`, `discover_on_user_relays` and `signer` (`mode`, and `relay` for bunker) |
+| `programs.kwakore.users` | users whose user manager starts `kwakore.socket` at login. Other users' managers skip both units |
+| `programs.kwakore.groups` | groups whose members get the units too, for systems that create users at runtime; `users` and `groups` together must name at least one |
+| `programs.kwakore.settings` | optional declarative `config.json`: `relays`, `blossom_servers`, `discover_on_user_relays` and `signer` (`mode`, `relay` for bunker, `socket` for system) |
 
 The module renders the same `kwakore.socket` and `kwakore.service` as the
 generic install, so the socket path, modes, activation and `systemctl --user`
@@ -238,15 +239,12 @@ your choice.
 
 **Settings and the effective config path.** With `settings` unset, the
 service reads the user's own `~/.config/kwakore/config.json` like any other
-installation. With `settings` set, the service runs with `XDG_CONFIG_HOME`
-pointing at a store directory that holds only `kwakore/config.json`, built
-from those values and checked by `kwakore-daemon validate` at build time.
-Then:
+installation. With `settings` set, the service runs with `KWAKORE_CONFIG_FILE`
+naming a `config.json` in the store, built from those values and checked by
+`kwakore-daemon validate` at build time. Then:
 
 - the file under the user's home is ignored by the service, while
   `kwakore-daemon validate` run from a login shell still reads the home file;
-- napplet windows inherit that `XDG_CONFIG_HOME`, so GTK and fontconfig user
-  configuration under `~/.config` does not apply inside them;
 - overrides made with `kwakore settings set` still go to
   `~/.local/share/kwakore/settings-overrides.json` and win field by field.
 
@@ -390,7 +388,7 @@ shell's. `systemctl --user show-environment` shows it.
 
 | Purpose | Default path | Rule |
 | --- | --- | --- |
-| Declarative config | `~/.config/kwakore/config.json` | `$XDG_CONFIG_HOME/kwakore/config.json`; on NixOS with `settings`, a store path |
+| Declarative config | `~/.config/kwakore/config.json` | `$KWAKORE_CONFIG_FILE`, else `$XDG_CONFIG_HOME/kwakore/config.json`; on NixOS with `settings`, a store path |
 | Data directory | `~/.local/share/kwakore` | `$XDG_DATA_HOME/kwakore`, owner-only `0700` |
 | Mutable overrides | `~/.local/share/kwakore/settings-overrides.json` | owner-only `0600`, written only by the service |
 | Signer credentials | `~/.local/share/kwakore/signer-credentials.json` | owner-only `0600`, written only by `signer switch` and pairing |
@@ -426,8 +424,11 @@ The first three values are the built-in defaults. `relays` accepts canonical
 `https://` URLs with a host. URL hosts must be lowercase; duplicate URLs, user
 information, queries and fragments are rejected, and relay URLs with a
 trailing slash in the path are rejected. `discover_on_user_relays` is a
-boolean. `signer` selects a mode (`none`, `nsec` or `bunker`) and, for bunker
-only, a canonical `wss://` pairing `relay`; it never holds a secret. An
+boolean. `signer` selects a mode (`none`, `nsec`, `bunker` or `system`) and,
+for bunker only, a canonical `wss://` pairing `relay`, or for system only, the
+absolute path of the signer service's `socket`; it never holds a secret.
+`KWAKORE_CONFIG_FILE`, when set to an absolute path, names the configuration
+file in place of `$XDG_CONFIG_HOME/kwakore/config.json`. An
 omitted field takes its default. An explicit empty array disables that list;
 an explicit `false` disables discovery on the user's relays. `null` is never
 an alias for omission.
@@ -521,6 +522,14 @@ which prints the connected status. `kwakore signer pair cancel` drops a
 pending offer. The pairing relay is the configured `signer.relay`, or
 `wss://bucket.coracle.social` when unset. Amber (NIP-55) is not available on
 Linux.
+
+**A system signer.** On a system that signs users in with their Nostr key, a
+privileged service can sign for each user over a local socket, so the key
+never reaches Kwakore and the user is signed in from login. Select it with
+`kwakore signer switch system` (the socket from `config.json`, or
+`/run/nostr-signer.sock`) or `--signer-socket PATH`, or declaratively with
+`signer: {"mode": "system", "socket": …}`. See
+[the system signer protocol](system-signer.md).
 
 **Checking and logging out:**
 

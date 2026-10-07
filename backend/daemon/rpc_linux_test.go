@@ -104,6 +104,33 @@ func TestRPCSignerBunkerValidSwitch(t *testing.T) {
 	}
 }
 
+func TestRPCSignerSystemSwitch(t *testing.T) {
+	s, reader, conn, _ := rpcService(t)
+	socket := filepath.Join(t.TempDir(), "absent.sock")
+	result, rpcErr, raw := rpcCall(t, reader, conn, "signer.switch", `{"mode":"system","socket":"`+socket+`"}`)
+	if rpcErr != nil || !strings.Contains(string(result), `"mode":"system"`) || !strings.Contains(string(result), `"connection_state":"disconnected"`) {
+		t.Fatalf("system switch: %s %+v", raw, rpcErr)
+	}
+	if got := s.manager.Effective().Signer; got.Mode != "system" || got.Socket != socket {
+		t.Fatalf("persisted signer: %+v", got)
+	}
+	for _, params := range []string{
+		`{"mode":"system","socket":"relative.sock"}`,
+		`{"mode":"system","secret":"/run/x.sock"}`,
+		`{"mode":"nsec","socket":"/run/x.sock"}`,
+		`{"mode":"none","socket":"/run/x.sock"}`,
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "signer.switch", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted %s: %+v", params, rpcErr)
+		}
+	}
+	result, rpcErr, raw = rpcCall(t, reader, conn, "signer.switch", `{"mode":"none"}`)
+	if rpcErr != nil || !strings.Contains(string(result), `"mode":"none"`) {
+		t.Fatalf("switch away: %s %+v", raw, rpcErr)
+	}
+}
+
 // The CI contract. Since quick task 261007-ej4, .github/workflows/linux.yml
 // runs only the Go lanes (backend, child) on every push and pull request, and
 // builds the per-arch bundles and publishes the release only on v* tags. The

@@ -152,9 +152,9 @@ let
       ok = builtins.match ".*ConditionUser=[|]?carol.*" (socket.text + service.text) == null;
     }
     {
-      name = "the service has no PATH override, RuntimeDirectory or XDG_CONFIG_HOME without settings";
+      name = "the service has no PATH override, RuntimeDirectory or config file without settings";
       ok =
-        builtins.match ".*(Environment=\"PATH=|RuntimeDirectory|XDG_CONFIG_HOME).*" service.text == null
+        builtins.match ".*(Environment=\"PATH=|RuntimeDirectory|XDG_CONFIG_HOME|KWAKORE_CONFIG_FILE).*" service.text == null
         && plain.programs.kwakore.effectiveSettings == null;
     }
     {
@@ -189,8 +189,8 @@ let
   };
   configuredService = configured.systemd.user.services.kwakore;
   # only compared as text; a regular expression may not carry store context
-  configHome = builtins.unsafeDiscardStringContext (
-    configuredService.environment.XDG_CONFIG_HOME or ""
+  configFile = builtins.unsafeDiscardStringContext (
+    configuredService.environment.KWAKORE_CONFIG_FILE or ""
   );
   settingsChecks = [
     {
@@ -223,18 +223,19 @@ let
         };
     }
     {
-      name = "the service reads config.json from a store-backed XDG_CONFIG_HOME";
+      name = "the service reads a store-backed config.json without moving XDG_CONFIG_HOME";
       ok =
-        lib.hasPrefix builtins.storeDir configHome
-        && lib.hasSuffix "-kwakore-config" configHome
+        lib.hasPrefix builtins.storeDir configFile
+        && lib.hasSuffix "-kwakore-config/kwakore/config.json" configFile
         &&
-          builtins.match ".*Environment=\"XDG_CONFIG_HOME=${lib.escapeRegex configHome}\".*"
-            configured.systemd.user.units."kwakore.service".text != null;
+          builtins.match ".*Environment=\"KWAKORE_CONFIG_FILE=${lib.escapeRegex configFile}\".*"
+            configured.systemd.user.units."kwakore.service".text != null
+        && !(configuredService.environment ? XDG_CONFIG_HOME);
     }
     {
       name = "settings change no unit line other than the environment";
       ok =
-        builtins.filter (l: !serviceEnvironment l && !lib.hasPrefix "Environment=\"XDG_CONFIG_HOME=" l) (
+        builtins.filter (l: !serviceEnvironment l && !lib.hasPrefix "Environment=\"KWAKORE_CONFIG_FILE=" l) (
           unitLines configured.systemd.user.units."kwakore.service".text
         ) == lib.sort (a: b: a < b) (
           builtins.filter (l: !lib.hasPrefix "ConditionUser=" l) expectedService ++ [ "ConditionUser=|alice" ]
@@ -247,6 +248,36 @@ let
     {
       name = "valid settings pass";
       ok = failures configured == [ ];
+    }
+  ];
+
+  # ─── groups and the system signer ────────────────────────────────────
+  grouped = evalWith {
+    enable = true;
+    package = stub;
+    groups = [ "nostr" ];
+    settings.signer = {
+      mode = "system";
+      socket = "/run/kwak-userd.sock";
+    };
+  };
+  groupChecks = [
+    {
+      name = "a group alone enables both units for its members";
+      ok =
+        failures grouped == [ ]
+        && builtins.elem "ConditionGroup=|nostr" (unitLines grouped.systemd.user.units."kwakore.socket".text)
+        && builtins.elem "ConditionGroup=|nostr" (unitLines grouped.systemd.user.units."kwakore.service".text)
+        && builtins.match ".*ConditionUser=.*" grouped.systemd.user.units."kwakore.service".text == null;
+    }
+    {
+      name = "the system signer and its socket reach config.json";
+      ok = builtins.fromJSON grouped.programs.kwakore.effectiveSettings == {
+        signer = {
+          mode = "system";
+          socket = "/run/kwak-userd.sock";
+        };
+      };
     }
   ];
 
@@ -321,8 +352,26 @@ let
       ok = rejects { signer.mode = "bunker"; } "programs.kwakore.settings.signer.relay: bunker needs";
     }
     {
-      name = "an empty user list is rejected";
-      ok = builtins.any (lib.hasInfix "programs.kwakore.users must name at least one user") (
+      name = "a socket outside system mode is rejected";
+      ok = rejects {
+        signer = {
+          mode = "nsec";
+          socket = "/run/nostr-signer.sock";
+        };
+      } "programs.kwakore.settings.signer.socket: socket is only valid for system";
+    }
+    {
+      name = "a relative system signer socket is rejected";
+      ok = rejects {
+        signer = {
+          mode = "system";
+          socket = "signer.sock";
+        };
+      } "programs.kwakore.settings.signer.socket: use an absolute path";
+    }
+    {
+      name = "an empty user and group list is rejected";
+      ok = builtins.any (lib.hasInfix "programs.kwakore.users or programs.kwakore.groups must name") (
         failures (evalWith {
           enable = true;
           package = stub;
@@ -353,9 +402,9 @@ let
           real.systemd.user.units."kwakore.service".text != null
         && lib.isDerivation real.programs.kwakore.package
         &&
-          builtins.match ".*-kwakore-config" real.systemd.user.services.kwakore.environment.XDG_CONFIG_HOME
+          builtins.match ".*-kwakore-config/kwakore/config.json" real.systemd.user.services.kwakore.environment.KWAKORE_CONFIG_FILE
           != null;
     }
   ];
 in
-checkAll (plainChecks ++ settingsChecks ++ rejectChecks ++ otherChecks)
+checkAll (plainChecks ++ settingsChecks ++ groupChecks ++ rejectChecks ++ otherChecks)

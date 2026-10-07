@@ -224,3 +224,45 @@ func TestReloadRejectsWholeCandidateThenRestoresDefaultsWithOverride(t *testing.
 		t.Fatalf("missing file did not reveal defaults under override: %+v", got)
 	}
 }
+
+func TestConfigSystemSignerSocket(t *testing.T) {
+	p := testPaths(t)
+	m, err := Load(p)
+	if err != nil || m.SystemSignerSocket() != DefaultSystemSignerSocket {
+		t.Fatalf("default socket: %v", err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"signer":{"mode":"system","socket":"/run/kwak-userd.sock"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err != nil || m.SystemSignerSocket() != "/run/kwak-userd.sock" {
+		t.Fatalf("configured socket: %v", err)
+	}
+	// A switch back to system without a socket keeps the file's socket.
+	if err := m.SetSignerOverride(Signer{Mode: "system"}); err != nil || m.SystemSignerSocket() != "/run/kwak-userd.sock" || m.FileSystemSignerSocket() != "/run/kwak-userd.sock" {
+		t.Fatalf("override without socket: %v", err)
+	}
+	for _, body := range []string{
+		`{"signer":{"mode":"nsec","socket":"/run/kwak-userd.sock"}}`,
+		`{"signer":{"mode":"system","socket":"run/kwak-userd.sock"}}`,
+		`{"signer":{"mode":"system","socket":"/run/../kwak-userd.sock"}}`,
+	} {
+		if err := os.WriteFile(p.ConfigFile, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Reload(); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestConfigFileEnvironmentOverride(t *testing.T) {
+	t.Setenv("KWAKORE_CONFIG_FILE", "/etc/kwakore/config.json")
+	p, err := ResolvePaths()
+	if err != nil || p.ConfigFile != "/etc/kwakore/config.json" {
+		t.Fatalf("config file = %q, %v", p.ConfigFile, err)
+	}
+	t.Setenv("KWAKORE_CONFIG_FILE", "relative.json")
+	if _, err := ResolvePaths(); err == nil {
+		t.Fatal("accepted a relative KWAKORE_CONFIG_FILE")
+	}
+}

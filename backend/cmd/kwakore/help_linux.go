@@ -39,6 +39,8 @@ Settings and signer:
   signer switch nsec|bunker --secret-stdin
   signer switch nsec|bunker --secret-file PATH
                                  Switch signer using a private secret source
+  signer switch system [--signer-socket PATH]
+                                 Sign through the system signer service
   signer pair start|wait|cancel  Pair with a signer
 
 Options:

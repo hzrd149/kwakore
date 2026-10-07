@@ -73,6 +73,8 @@ let
   # one triggering condition per configured user: the units are installed
   # for every user manager and skipped for everyone else
   conditionUser = map (user: "|" + user) cfg.users;
+  # and one per configured group; all of them are OR-ed together
+  conditionGroup = map (group: "|" + group) cfg.groups;
 
   # serviceconfig's public file schema (backend/serviceconfig/config.go)
   knownSettings = [
@@ -122,7 +124,7 @@ let
     lib.subtractLists knownSettings (builtins.attrNames settings)
   );
   extraSignerKeys = lib.optionals (signer != null) (
-    lib.subtractLists [ "mode" "relay" ] (builtins.attrNames signer)
+    lib.subtractLists [ "mode" "relay" "socket" ] (builtins.attrNames signer)
   );
 
   effective = lib.optionalAttrs hasSettings (
@@ -132,7 +134,9 @@ let
         if signer == null then
           null
         else
-          { inherit (signer) mode; } // lib.optionalAttrs (signer.relay != null) { inherit (signer) relay; };
+          { inherit (signer) mode; }
+          // lib.optionalAttrs (signer.relay != null) { inherit (signer) relay; }
+          // lib.optionalAttrs (signer.socket != null) { inherit (signer) socket; };
     }
   );
   effectiveJSON = if hasSettings then builtins.toJSON effective else null;
@@ -164,7 +168,7 @@ let
       if secretLike name then
         "${describeSecret "programs.kwakore.settings.signer" name}: secret field is forbidden; supply signer secrets with `kwakore signer` --secret-stdin or --secret-file"
       else
-        "programs.kwakore.settings.signer.${name}: unknown setting; use mode or relay"
+        "programs.kwakore.settings.signer.${name}: unknown setting; use mode, relay or socket"
     ) extraSignerKeys
     ++ urlErrors "relays" validRelay "use a canonical wss:// URL with a host" settings.relays
     ++
@@ -176,6 +180,12 @@ let
     ++ lib.optional (
       signer != null && signer.mode != "bunker" && signer.relay != null
     ) "programs.kwakore.settings.signer.relay: relay is only valid for bunker"
+    ++ lib.optional (
+      signer != null && signer.mode != "system" && signer.socket != null
+    ) "programs.kwakore.settings.signer.socket: socket is only valid for system"
+    ++ lib.optional (
+      signer != null && signer.socket != null && !(lib.hasPrefix "/" signer.socket)
+    ) "programs.kwakore.settings.signer.socket: use an absolute path"
   );
 
   # A store tree holding only kwakore/config.json, checked by the packaged
@@ -224,6 +234,17 @@ in
       '';
     };
 
+    groups = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "users" ];
+      description = ''
+        Groups whose members' user managers start kwakore.socket, for systems
+        that create users at runtime. Combined with users: a user who is
+        listed or is in one of these groups gets the service.
+      '';
+    };
+
     settings = lib.mkOption {
       default = null;
       description = ''
@@ -233,13 +254,10 @@ in
         Unset (the default): the daemon reads the user's own
         $XDG_CONFIG_HOME/kwakore/config.json (~/.config/kwakore/config.json).
 
-        Set: the user service runs with XDG_CONFIG_HOME pointing at a store
-        directory holding only kwakore/config.json built from these values,
-        and the file under the user's home is ignored by the service. The
-        napplet child inherits that XDG_CONFIG_HOME, so GTK and fontconfig
-        user configuration under ~/.config does not apply inside napplet
-        windows. A kwakore-daemon validate run from a login shell still reads
-        the home file.
+        Set: the user service runs with KWAKORE_CONFIG_FILE pointing at a
+        config.json in the store built from these values, and the file under
+        the user's home is ignored by the service. A kwakore-daemon validate
+        run from a login shell still reads the home file.
 
         Either way, overrides made through the socket (`kwakore settings set`)
         stay in $XDG_DATA_HOME/kwakore/settings-overrides.json and take
@@ -281,8 +299,14 @@ in
                         "none"
                         "nsec"
                         "bunker"
+                        "system"
                       ];
                       description = "Signer mode.";
+                    };
+                    socket = lib.mkOption {
+                      type = lib.types.nullOr lib.types.str;
+                      default = null;
+                      description = "Absolute path of the system signer's socket, system mode only.";
                     };
                     relay = lib.mkOption {
                       type = lib.types.nullOr lib.types.str;
@@ -310,8 +334,8 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.users != [ ];
-        message = "programs.kwakore.users must name at least one user whose user manager runs the socket";
+        assertion = cfg.users != [ ] || cfg.groups != [ ];
+        message = "programs.kwakore.users or programs.kwakore.groups must name at least one user or group whose user manager runs the socket";
       }
     ]
     ++ map (message: {
@@ -324,6 +348,7 @@ in
     systemd.user.sockets.kwakore = {
       unitConfig = socketTemplate.Unit // {
         ConditionUser = conditionUser;
+        ConditionGroup = conditionGroup;
       };
       socketConfig = socketTemplate.Socket;
       wantedBy = [ socketTemplate.Install.WantedBy ];
@@ -332,6 +357,7 @@ in
     systemd.user.services.kwakore = {
       unitConfig = serviceTemplate.Unit // {
         ConditionUser = conditionUser;
+        ConditionGroup = conditionGroup;
       };
       serviceConfig = render serviceTemplate.Service;
       # NixOS would otherwise pin PATH to coreutils, findutils, grep, sed and
@@ -350,7 +376,7 @@ in
         KWAKORE_ENTRY_CLI = "/run/current-system/sw/bin/kwakore";
       }
       // lib.optionalAttrs hasSettings {
-        XDG_CONFIG_HOME = "${configHome}";
+        KWAKORE_CONFIG_FILE = "${configHome}/kwakore/config.json";
       };
     };
   };

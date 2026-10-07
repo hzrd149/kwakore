@@ -38,8 +38,17 @@ func ResolvePaths() (Paths, error) {
 	if !filepath.IsAbs(configRoot) || !filepath.IsAbs(dataRoot) {
 		return Paths{}, errors.New("XDG_CONFIG_HOME and XDG_DATA_HOME must be absolute paths")
 	}
+	configFile := filepath.Join(configRoot, "kwakore", "config.json")
+	// KWAKORE_CONFIG_FILE names the file directly, so a system-managed file
+	// does not have to move XDG_CONFIG_HOME, which napplet windows inherit.
+	if override := os.Getenv("KWAKORE_CONFIG_FILE"); override != "" {
+		if !filepath.IsAbs(override) {
+			return Paths{}, errors.New("KWAKORE_CONFIG_FILE must be an absolute path")
+		}
+		configFile = override
+	}
 	dataDir := filepath.Join(dataRoot, "kwakore")
-	return Paths{ConfigFile: filepath.Join(configRoot, "kwakore", "config.json"), DataDir: dataDir, OverrideFile: filepath.Join(dataDir, "settings-overrides.json")}, nil
+	return Paths{ConfigFile: configFile, DataDir: dataDir, OverrideFile: filepath.Join(dataDir, "settings-overrides.json")}, nil
 }
 
 type Config struct {
@@ -50,8 +59,9 @@ type Config struct {
 }
 
 type Signer struct {
-	Mode  string `json:"mode"`
-	Relay string `json:"relay,omitempty"`
+	Mode   string `json:"mode"`
+	Relay  string `json:"relay,omitempty"`
+	Socket string `json:"socket,omitempty"`
 }
 
 type Effective struct {
@@ -92,8 +102,14 @@ func validateMerged(file, override Config) error {
 func validate(c Config) error {
 	if c.Signer != nil {
 		s := *c.Signer
-		if s.Mode != "none" && s.Mode != "nsec" && s.Mode != "bunker" {
+		if s.Mode != "none" && s.Mode != "nsec" && s.Mode != "bunker" && s.Mode != "system" {
 			return errors.New("signer: invalid mode")
+		}
+		if s.Mode != "system" && s.Socket != "" {
+			return errors.New("signer: socket is only valid for system")
+		}
+		if s.Socket != "" && (!filepath.IsAbs(s.Socket) || filepath.Clean(s.Socket) != s.Socket || len(s.Socket) > 107) {
+			return errors.New("signer: invalid socket; use an absolute, clean path")
 		}
 		if s.Mode != "bunker" && s.Relay != "" {
 			return errors.New("signer: relay is only valid for bunker")
@@ -347,6 +363,38 @@ func (m *Manager) ConfiguredBlossomServers() []string {
 }
 
 func (m *Manager) Paths() Paths { return m.paths }
+
+// DefaultSystemSignerSocket is where the system signer listens when no
+// configuration names a socket.
+const DefaultSystemSignerSocket = "/run/nostr-signer.sock"
+
+// SystemSignerSocket is the socket the system signer mode connects to: the
+// effective one, else the configuration file's (so that an explicit switch
+// back to system without a socket keeps the administrator's choice), else
+// the default.
+func (m *Manager) SystemSignerSocket() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.effective.Signer.Mode == "system" && m.effective.Signer.Socket != "" {
+		return m.effective.Signer.Socket
+	}
+	return m.fileSystemSignerSocketLocked()
+}
+
+// FileSystemSignerSocket is the configuration file's system signer socket,
+// else the default: what a switch to system without a socket connects to.
+func (m *Manager) FileSystemSignerSocket() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.fileSystemSignerSocketLocked()
+}
+
+func (m *Manager) fileSystemSignerSocketLocked() string {
+	if m.file.Signer != nil && m.file.Signer.Socket != "" {
+		return m.file.Signer.Socket
+	}
+	return DefaultSystemSignerSocket
+}
 
 func FieldName(name string) bool {
 	return strings.Contains(" relays blossom_servers discover_on_user_relays ", " "+name+" ")
