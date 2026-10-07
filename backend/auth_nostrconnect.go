@@ -52,7 +52,7 @@ func buildNostrConnectURI(clientPub nostr.PubKey, relays []string, secret string
 	}
 	q.Set("secret", secret)
 	q.Set("perms", strings.Join(nostrConnectPerms, ","))
-	q.Set("name", "Verdana")
+	q.Set("name", "Kwakore")
 	return "nostrconnect://" + clientPub.Hex() + "?" + q.Encode()
 }
 

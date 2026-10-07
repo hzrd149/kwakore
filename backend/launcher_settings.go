@@ -8,9 +8,8 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-// The launcher's own settings, as the settings window's Verdana page edits
-// them: the discovery relays (state.Relays, see SetRelays) and the Blossom
-// servers files are fetched from.
+// Kwakore's own settings: the discovery relays (state.Relays, see
+// SetRelays) and the Blossom servers files are fetched from.
 
 // defaultBlossomServers are where napp files are looked for first when the
 // user never chose: the napp host most napps are published to, and a big

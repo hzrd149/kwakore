@@ -39,7 +39,7 @@ type mpvSession struct {
 }
 
 func startMpv(path string, req backend.MediaRequest, onState func(backend.MediaState)) (sharedPlayer, backend.MediaPlayer, error) {
-	dir, err := os.MkdirTemp("", "verdana-mpv-")
+	dir, err := os.MkdirTemp("", "kwakore-mpv-")
 	if err != nil {
 		return nil, nil, err
 	}

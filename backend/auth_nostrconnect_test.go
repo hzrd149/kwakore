@@ -69,7 +69,7 @@ func TestBuildNostrConnectURIRoundTrip(t *testing.T) {
 	if q.Get("secret") != "s3cret" {
 		t.Fatalf("secret = %q", q.Get("secret"))
 	}
-	if q.Get("name") != "Verdana" {
+	if q.Get("name") != "Kwakore" {
 		t.Fatalf("name = %q", q.Get("name"))
 	}
 	if !strings.Contains(q.Get("perms"), "sign_event") {

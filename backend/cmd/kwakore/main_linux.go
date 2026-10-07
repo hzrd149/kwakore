@@ -614,7 +614,7 @@ func localPairURI(clientPublicKey, relay, secret string) string {
 	q.Set("relay", relay)
 	q.Set("secret", secret)
 	q.Set("perms", "get_public_key,sign_event,nip44_encrypt,nip44_decrypt,nip04_encrypt,nip04_decrypt")
-	q.Set("name", "Verdana")
+	q.Set("name", "Kwakore")
 	return "nostrconnect://" + clientPublicKey + "?" + q.Encode()
 }
 

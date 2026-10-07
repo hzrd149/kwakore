@@ -76,7 +76,7 @@ type AppState struct {
 
 	// ExposeInstalledApps mirrors installed napps and napplets into the
 	// desktop's native application launcher. AppShortcutNameStyle is "plain"
-	// or "hosted" ("Name — Verdana").
+	// or "hosted" ("Name — Kwakore").
 	ExposeInstalledApps  bool   `json:"expose_installed_apps,omitempty"`
 	AppShortcutNameStyle string `json:"app_shortcut_name_style,omitempty"`
 

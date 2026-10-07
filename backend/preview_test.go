@@ -435,7 +435,7 @@ func TestTryNappletVerifiesEveryPath(t *testing.T) {
 		notices := liveNotices(noticeTrialFailed)
 		if len(notices) != 1 || notices[0].Kind != noticeKindError ||
 			notices[0].Title != "Couldn't try "+n.D ||
-			notices[0].Detail != "One of its files couldn't be downloaded or didn't match its manifest, so Verdana didn't open it. Check your connection and try again." {
+			notices[0].Detail != "One of its files couldn't be downloaded or didn't match its manifest, so Kwakore didn't open it. Check your connection and try again." {
 			t.Errorf("trial-failed notice = %+v", notices)
 		}
 		if _, ok := InstalledNapp(n.ID); ok {
@@ -594,7 +594,7 @@ func TestTryNappletUnavailableRaisesTrialFailed(t *testing.T) {
 	notices := liveNotices(noticeTrialFailed)
 	if len(notices) != 1 || notices[0].Kind != noticeKindError ||
 		!strings.HasPrefix(notices[0].Title, "Couldn't try ") ||
-		notices[0].Detail != "Its latest version is invalid, so Verdana didn't open it." {
+		notices[0].Detail != "Its latest version is invalid, so Kwakore didn't open it." {
 		t.Errorf("trial-failed notice = %+v", notices)
 	}
 	if r.host.count() != 0 {
@@ -806,7 +806,7 @@ func TestTrialPromotionDifferentHashDiscards(t *testing.T) {
 		n := trialDataNotice(trial)
 		if len(n) != 1 || n[0].Kind != noticeKindWarning ||
 			n[0].Title != "Trial data from Pixel Paint wasn't kept" ||
-			n[0].Detail != "It was saved by a different version than the one now installed, so Verdana discarded it." {
+			n[0].Detail != "It was saved by a different version than the one now installed, so Kwakore discarded it." {
 			t.Errorf("notice = %+v", n)
 		}
 	})
@@ -857,7 +857,7 @@ func TestTrialPromotionKeepsExistingInstalledData(t *testing.T) {
 			t.Error("the installed version's config was forgotten")
 		}
 		n := trialDataNotice(trial)
-		if len(n) != 1 || n[0].Detail != "This napplet already had saved data on this device. Verdana kept that and discarded the trial's data." {
+		if len(n) != 1 || n[0].Detail != "This napplet already had saved data on this device. Kwakore kept that and discarded the trial's data." {
 			t.Errorf("notice = %+v", n)
 		}
 	})

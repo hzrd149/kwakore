@@ -70,7 +70,7 @@ func syncAppShortcuts() {
 	for _, napp := range napps {
 		name := napp.Label()
 		if naming == AppShortcutNameHosted {
-			name += " — Verdana"
+			name += " — Kwakore"
 		}
 		shortcut := AppShortcut{ID: napp.ID, Token: LaunchToken(napp.ID), Name: name, Description: napp.Description}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

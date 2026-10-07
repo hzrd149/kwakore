@@ -67,7 +67,7 @@ type Host interface {
 	AutostartEnabled() bool
 	SetAutostart(bool) error
 
-	// SyncAppShortcuts reconciles Verdana-owned system launcher entries with
+	// SyncAppShortcuts reconciles Kwakore-owned system launcher entries with
 	// the complete desired set. Passing nil removes every managed entry. The
 	// service calls it with one Address-only shortcut per installed napplet,
 	// in address order, at startup and after every committed mutation.
@@ -79,7 +79,7 @@ type Host interface {
 	SyncSearchNapplets([]AppShortcut) error
 
 	// GNOMESearchIntegration reconciles the files GNOME Shell needs to find
-	// and D-Bus activate Verdana's search provider. Unsupported platforms do
+	// and D-Bus activate Kwakore's search provider. Unsupported platforms do
 	// not expose the setting.
 	GNOMESearchSupported() bool
 	SetGNOMESearchIntegration(bool) error
@@ -192,7 +192,7 @@ type ShortcutFile struct {
 }
 
 // AppShortcut is one installed napp or napplet exposed as a native system
-// application entry. Icon may be nil; platforms then use Verdana's icon.
+// application entry. Icon may be nil; platforms then use Kwakore's icon.
 //
 // ID is the in-memory key (platforms may hash it for a file name); Token is
 // LaunchToken(ID). Writers put Token, never ID, into shortcut files and

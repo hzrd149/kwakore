@@ -41,7 +41,7 @@ func dirSyncUnsupported(err error) bool {
 
 // TightenDir makes dir private (0700) when it is a real directory we own
 // that still grants group or other access, as data dirs created by older
-// Verdana builds (0755) do. A symlink or a non-directory is refused rather
+// Kwakore builds (0755) do. A symlink or a non-directory is refused rather
 // than followed, and a directory owned by someone else is left alone.
 func TightenDir(dir string) error {
 	fi, err := os.Lstat(dir)

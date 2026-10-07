@@ -76,7 +76,7 @@ func TestRequiresNoticeOnLaunch(t *testing.T) {
 	got := notices[0]
 	if got.Kind != noticeKindWarning || got.Path != "" ||
 		got.Title != "Unsupported features in Pixel Paint" ||
-		got.Detail != "Pixel Paint asks for features Verdana doesn't support: foo, bar; it may not work." {
+		got.Detail != "Pixel Paint asks for features Kwakore doesn't support: foo, bar; it may not work." {
 		t.Errorf("notice = %+v", got)
 	}
 	if ids := liveNoticeIDs(); len(ids) != 1 {
@@ -91,7 +91,7 @@ func TestRequiresNoticeOnLaunch(t *testing.T) {
 	wide := nip5dNapplet("wide", many...)
 	launchForNotice(t, wide)
 	w := liveNotices(noticeNappletRequiresPrefix + wide.Address())
-	if len(w) != 1 || w[0].Detail != "wide asks for features Verdana doesn't support: x0, x1, x2, x3, x4, x5, x6, x7, +3 more; it may not work." {
+	if len(w) != 1 || w[0].Detail != "wide asks for features Kwakore doesn't support: x0, x1, x2, x3, x4, x5, x6, x7, +3 more; it may not work." {
 		t.Errorf("wide notice = %+v", w)
 	}
 

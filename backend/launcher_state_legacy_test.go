@@ -143,7 +143,7 @@ func TestLegacyNappletRecordsDropped(t *testing.T) {
 	}
 	if n := notices[0]; n.Kind != noticeKindWarning ||
 		n.Title != "Napplets need to be installed again" ||
-		n.Detail != "Verdana now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover." ||
+		n.Detail != "Kwakore now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover." ||
 		n.Path != "" {
 		t.Errorf("notice = %+v", n)
 	}

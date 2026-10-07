@@ -1,4 +1,4 @@
-// Package backend is everything Verdana does that isn't drawing: the nostr
+// Package backend is everything Kwakore does that isn't drawing: the nostr
 // system and its local eventstore, the napp registry (discovery, install,
 // launch), the action router and the whole window.nostr / window.nostrdb /
 // window.napp surface a napp gets — env.d.ts is the contract for that surface

@@ -53,46 +53,46 @@ const (
 // hashes and D-Bus names go to the log, never here.
 const (
 	keyringFallbackTitle  = "Secure storage unavailable"
-	keyringFallbackDetail = "Your login is kept in a private file on this device instead of the system keyring. Verdana tries the keyring again the next time it starts."
+	keyringFallbackDetail = "Your login is kept in a private file on this device instead of the system keyring. Kwakore tries the keyring again the next time it starts."
 
 	stateCorruptTitle  = "Saved launcher data couldn't be read"
-	stateCorruptDetail = "Verdana started with default settings. The unreadable file was kept here:"
+	stateCorruptDetail = "Kwakore started with default settings. The unreadable file was kept here:"
 
 	childUnavailableTitle  = "Napp windows can't open"
-	childUnavailableDetail = "Verdana's window program is missing or was changed on disk, so it was not started. Reinstall Verdana to fix this."
+	childUnavailableDetail = "Kwakore's window program is missing or was changed on disk, so it was not started. Reinstall Kwakore to fix this."
 
 	// the napplet-hardening detail stays neutral about the cause: the same
 	// notice covers a switch that reads back on, a feature that was renamed
 	// in a newer engine, and symbols or a window that could not be reached,
 	// and no single remedy fixes all of them (IN-10)
 	nappletHardeningTitle  = "A napplet was closed before it ran"
-	nappletHardeningDetail = "Verdana couldn't switch off unsafe features of this system's web engine, so it did not run the napplet. Updating Verdana or the system web engine may help."
+	nappletHardeningDetail = "Kwakore couldn't switch off unsafe features of this system's web engine, so it did not run the napplet. Updating Kwakore or the system web engine may help."
 
 	// napplets-reinstall: the one start that dropped napplets installed
 	// under the old ids (05-UI-SPEC.md S4, UI-D7)
 	nappletsReinstallTitle  = "Napplets need to be installed again"
-	nappletsReinstallDetail = "Verdana now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover."
+	nappletsReinstallDetail = "Kwakore now ties each napplet's data to the exact version you installed, so napplets installed by an earlier version were removed. Find them again under Discover."
 
 	// napplet-requires: a NIP-5D napplet that opened although it asks for
 	// NAP domains this launcher does not implement (D-15, REG-04). The
 	// window still opens: NIP-5D lets the shell warn instead of refusing.
 	nappletRequiresTitle  = "Unsupported features in %s"
-	nappletRequiresDetail = "%s asks for features Verdana doesn't support: %s; it may not work."
+	nappletRequiresDetail = "%s asks for features Kwakore doesn't support: %s; it may not work."
 
 	// trial-data-discarded: the data a trial saved was not carried into the
 	// installed napplet (D-09 different version, D-25 existing data)
 	trialDataTitle            = "Trial data from %s wasn't kept"
-	trialDataDifferentVersion = "It was saved by a different version than the one now installed, so Verdana discarded it."
-	trialDataExistingData     = "This napplet already had saved data on this device. Verdana kept that and discarded the trial's data."
+	trialDataDifferentVersion = "It was saved by a different version than the one now installed, so Kwakore discarded it."
+	trialDataExistingData     = "This napplet already had saved data on this device. Kwakore kept that and discarded the trial's data."
 
 	// napplet-trial-failed: a Try that opened no window (D-13, S3)
 	trialFailedTitle       = "Couldn't try %s"
-	trialFailedBlob        = "One of its files couldn't be downloaded or didn't match its manifest, so Verdana didn't open it. Check your connection and try again."
-	trialFailedUnavailable = "Its latest version is invalid, so Verdana didn't open it."
+	trialFailedBlob        = "One of its files couldn't be downloaded or didn't match its manifest, so Kwakore didn't open it. Check your connection and try again."
+	trialFailedUnavailable = "Its latest version is invalid, so Kwakore didn't open it."
 
 	// childUnavailableFetchErr is the store's FetchErr line for a launch
 	// that failed closed (lowercase, Go error convention).
-	childUnavailableFetchErr = "launch failed: the napp window program is missing or was modified; reinstall Verdana"
+	childUnavailableFetchErr = "launch failed: the napp window program is missing or was modified; reinstall Kwakore"
 )
 
 // noticeRank is the fixed display order (05-UI-SPEC S4): the errors first
@@ -285,7 +285,7 @@ func noticeDomains(domains []string) string {
 }
 
 // raiseNappletRequires warns that a NIP-5D napplet which just opened asks
-// for NAP domains Verdana does not implement (D-15, REG-04). Every launch
+// for NAP domains Kwakore does not implement (D-15, REG-04). Every launch
 // raises it again in its address's slot, even after a dismissal. It never
 // raises the manager window: the napplet's own window just opened and
 // keeps the focus. A WEB-NAPPLET's R and O tags never get here, since

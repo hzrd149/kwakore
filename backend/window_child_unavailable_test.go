@@ -114,7 +114,7 @@ func TestChildUnavailableLaunchShowsNoticeOnce(t *testing.T) {
 	n := setupChildUnavailable(t, childUnavailableErr())
 
 	msg := launchAndWait(t, n)
-	if msg != "launch failed: the napp window program is missing or was modified; reinstall Verdana" {
+	if msg != "launch failed: the napp window program is missing or was modified; reinstall Kwakore" {
 		t.Fatalf("FetchErr = %q", msg)
 	}
 	notices := Snapshot().Notices

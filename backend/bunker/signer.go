@@ -88,7 +88,7 @@ func NewSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.SecretKey,
 		onAuth:    onAuth,
 		conv44:    conv44,
 		conv04:    conv04,
-		idPrefix:  "verdana-" + strconv.Itoa(rand.Intn(1<<16)),
+		idPrefix:  "kwakore-" + strconv.Itoa(rand.Intn(1<<16)),
 		listeners: make(map[string]chan nip46.Response),
 	}
 
@@ -121,7 +121,7 @@ func Listen(ctx context.Context, pool *nostr.Pool, url string, clientPub nostr.P
 		relay, err := pool.EnsureRelay(url)
 		if err == nil {
 			var sub *nostr.Subscription
-			sub, err = relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{Label: "verdana-bunker"})
+			sub, err = relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{Label: "kwakore-bunker"})
 			if err == nil {
 				backoff = time.Second
 				readNostrConnect(ctx, sub, onEvent, ready)

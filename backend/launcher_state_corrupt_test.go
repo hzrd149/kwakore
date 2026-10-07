@@ -128,7 +128,7 @@ func TestLoadStateCorruptIsKeptAside(t *testing.T) {
 		t.Fatalf("notice id/kind = %q/%q", n.ID, n.Kind)
 	}
 	if n.Title != "Saved launcher data couldn't be read" ||
-		n.Detail != "Verdana started with default settings. The unreadable file was kept here:" {
+		n.Detail != "Kwakore started with default settings. The unreadable file was kept here:" {
 		t.Fatalf("notice copy = %q / %q", n.Title, n.Detail)
 	}
 	if !filepath.IsAbs(n.Path) || n.Path != copyPath {
