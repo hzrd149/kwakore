@@ -76,15 +76,16 @@ the [NixOS section](docs/service.md#install-on-nixos) for what that changes.
 
 ```sh
 kwakore discover --refresh                 # napplets published on your relays
-kwakore install 35129:<pubkey hex>:<d>     # install one by its address
+kwakore install naddr1…                    # install one from its naddr (or nostr:naddr1…)
 kwakore launch 35129:<pubkey hex>:<d>      # open it (or use its menu entry)
 kwakore installed                          # what is installed
 kwakore uninstall --yes 35129:<pubkey hex>:<d>
 ```
 
-Every command prints JSON. Napplets are named by their canonical address,
-`<kind>:<author public key in hex>:<d tag>`, as `discover` and `installed`
-print it.
+Every command prints JSON. Napplets can be named by an `naddr1…` (bare or as a
+`nostr:` link) or by their canonical address,
+`<kind>:<author public key in hex>:<d tag>`; `discover` and `installed` print
+the canonical form. See [napplet addresses](docs/service.md#napplet-addresses).
 
 To let napplets sign, give Kwakore a signer. Secrets are read only from stdin
 or an owner-only file, never from the command line:

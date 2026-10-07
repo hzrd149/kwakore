@@ -1121,3 +1121,69 @@ func TestCLIDoesNotLinkBackendOrNostr(t *testing.T) {
 		t.Fatal("CLI does not use napaddr")
 	}
 }
+
+func TestCLIInstallForwardsRelayHints(t *testing.T) {
+	canonical, naddr := testNaddr(t, 35129, "n-143146b0d6f", []string{"wss://relay.napplet.soy", "relay.damus.io"})
+	q := mustJSONString(canonical)
+	for _, form := range []string{naddr, "nostr:" + strings.ToUpper(naddr)} {
+		method, params, _, err := command([]string{"install", form})
+		if err != nil || method != "napplet.install" || string(params) != `{"address":`+q+`,"relays":["wss://relay.napplet.soy"]}` {
+			t.Fatalf("install %q: %s %s %v", form, method, params, err)
+		}
+	}
+	// canonical input and an naddr without usable hints send address only
+	_, bare := testNaddr(t, 35129, "n-143146b0d6f", []string{"relay.damus.io"})
+	for _, form := range []string{canonical, bare} {
+		_, params, _, err := command([]string{"install", form})
+		if err != nil || string(params) != `{"address":`+q+`}` {
+			t.Fatalf("install %q: %s %v", form, params, err)
+		}
+	}
+	// every other command sends address-only params
+	for _, tc := range addressCommands(canonical) {
+		if tc.method == "napplet.install" {
+			continue
+		}
+		method, params, _, err := command(withAddress(tc.args, naddr))
+		if err != nil || method != tc.method || string(params) != tc.params {
+			t.Fatalf("%v: %s %s %v", tc.args, method, params, err)
+		}
+	}
+
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	seen := make(chan string, 1)
+	go func() {
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			seen <- ""
+			return
+		}
+		defer conn.Close()
+		line, _ := bufio.NewReader(conn).ReadBytes('\n')
+		seen <- string(line)
+		_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
+	}()
+	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "install", naddr)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil || stderr.Len() != 0 || string(out) != "{}\n" {
+		t.Fatalf("out=%q stderr=%q err=%v", out, stderr.String(), err)
+	}
+	want, _ := json.Marshal(controlprotocol.Request{
+		JSONRPC: "2.0", Method: "napplet.install",
+		Params: json.RawMessage(`{"address":` + q + `,"relays":["wss://relay.napplet.soy"]}`), ID: json.RawMessage("1"),
+	})
+	if got := <-seen; got != string(want)+"\n" {
+		t.Fatalf("request %q, want %q", got, want)
+	}
+}

@@ -161,7 +161,7 @@ the defaults:
 
 ```sh
 kwakore installed                 # optional: list napplets, then
-kwakore uninstall --yes ADDRESS   # remove each one and its desktop entry
+kwakore uninstall --yes ADDRESS   # remove each one and its desktop entry (canonical or naddr1…)
 systemctl --user stop kwakore.socket kwakore.service
 systemctl --user disable kwakore.socket
 rm "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/kwakore.socket" \
@@ -573,12 +573,42 @@ stdout, and exits 1. Codes and messages are fixed (the full table is in the
 | `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` | the daemon has no `DISPLAY` or `WAYLAND_DISPLAY` ([graphical session](#graphical-session)) |
 | `{"error":{"code":1002,"message":"Not found"}}` | the address is not installed (or, for `stop`, the window is gone) |
 | `{"error":{"code":1006,"message":"Invalid configuration"}}` | a `settings set` value or a reload failed validation; nothing changed |
-| `{"error":{"code":-32602,"message":"Invalid params"}}` | the command line itself is wrong: unknown command, bad address, bad secret source |
+| `{"error":{"code":-32602,"message":"Invalid params"}}` | the command line itself is wrong: unknown command, bad option, bad secret source or launch token |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"invalid_address","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the ADDRESS is not an address in an accepted form ([napplet addresses](#napplet-addresses)) |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsupported_nip19","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the ADDRESS is an `npub`, `nprofile`, `note`, `nevent`, `nsec` or `nrelay`, which cannot name a napplet; it was not sent anywhere |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsafe_identifier","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the napplet's d tag holds control, format or line separator characters; only `uninstall --yes` accepts it |
 | `{"error":{"code":1008,"message":"client timeout; operation outcome unknown; check service, signer, or installed state"}}` | the CLI stopped waiting; check `status`, `signer status` or `installed` before retrying |
 
-Addresses are canonical coordinates, `<kind>:<64 lowercase hex public
-key>:<identifier>`, such as those `kwakore installed` and `kwakore discover`
-print. Convert an `naddr1…` with any NIP-19 tool first.
+<a id="napplet-addresses"></a>**Napplet addresses.** Every `ADDRESS`
+argument (`install`, `update`, `uninstall`, `launch`, `permissions`) may be:
+
+- the canonical coordinate `<kind>:<64 lowercase hex public key>:<d tag>`,
+  as `kwakore installed` and `kwakore discover` print it;
+- a bare `naddr1…`;
+- a `nostr:naddr1…` link.
+
+The `nostr:` scheme may use any letter case; the `naddr` itself must be all
+lowercase or all uppercase. The CLI decodes it and sends only the canonical
+coordinate, so results always show the canonical form. Other NIP-19 codes
+(`npub`, `nprofile`, `note`, `nevent`, `nsec`, `nrelay`) are refused without
+being decoded or sent, and web links or text with spaces around the address
+are refused too; the error never repeats what you typed.
+
+```sh
+kwakore install nostr:naddr1…    # install from a shared link
+kwakore launch naddr1…           # the same napplet, by the same code
+```
+
+`install` also uses the naddr's relay hints (up to 8 `ws://` or `wss://`
+URLs) to find the napplet, for that install only; hints pointing at local or
+private hosts are skipped, and none are kept. Running `install` again with the
+naddr updates an installed napplet from those relays; `update` uses only the
+author's and your configured relays.
+
+A d tag with control, format or line separator characters (such as a tab or
+a right-to-left override) is refused with `unsafe_identifier`, because it can
+hide or reorder text in a terminal. `uninstall --yes` still accepts it, so
+such a napplet can always be removed.
 
 <a id="invalid-configuration"></a>**Invalid configuration.** A bad
 `config.json` or override file stops the daemon from starting. The error names

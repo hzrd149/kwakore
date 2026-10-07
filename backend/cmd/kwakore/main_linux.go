@@ -420,9 +420,17 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		if err != nil {
 			return "", nil, "", err
 		}
+		// Only install carries an naddr's relay hints (already filtered,
+		// deduplicated and capped by napaddr); the daemon refuses them on
+		// update, and running install again updates an installed napplet.
+		var relays []string
+		if args[0] == "install" {
+			relays = addr.Relays
+		}
 		params, _ := json.Marshal(struct {
-			Address string `json:"address"`
-		}{addr.Canonical})
+			Address string   `json:"address"`
+			Relays  []string `json:"relays,omitempty"`
+		}{addr.Canonical, relays})
 		return "napplet." + args[0], params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "launch" {
