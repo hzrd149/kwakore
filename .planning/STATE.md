@@ -5,8 +5,8 @@ milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
 current_plan: 24
-status: verifying
-stopped_at: Completed 09-11-PLAN.md
+status: verification_deferred_human
+stopped_at: Phase 9 verified human_needed (60/64); human verification deferred
 last_updated: "2026-10-07T09:01:46.321Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
 Current Plan: 24
 Total Plans in Phase: 24
-Status: Phase complete — ready for verification
+Status: Executed and reviewed — human verification deferred (09-UAT.md)
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
@@ -261,12 +261,22 @@ Items acknowledged and deferred at milestone close, most recent first:
 | deferred_items | 05/deferred-items.md: applyUpdate skips user's Blossom servers when manifest names any | acknowledged | 2026-10-06 | v0.1 |
 | deferred_items | 05/deferred-items.md: NAPPLETS.md pre-Phase-5 text (shell.ready, shim 0.29.2, notify) | acknowledged | 2026-10-06 | v0.1 |
 
+## Deferred Verification
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 9 | verification_deferred_human | /gsd-verify-work 9 |
+
 ## Session Continuity
 
 Last session: 2026-10-07T09:01:46.219Z
-Stopped at: Completed 09-11-PLAN.md
-Resume file: None
+Stopped at: Phase 9 human verification deferred by user; autonomous mode stopped
+Resume file: .planning/phases/09-linux-packaging-rename-and-cleanup/09-UAT.md
 
 ## Operator Next Steps
 
-- Phase 8 is verified and complete; execute Phase 9 with `/gsd-execute-phase 9`.
+- Phase 9: all 24 plans executed, code review fixed (5/5 warnings), verification `human_needed` 60/64. Run `/gsd-verify-work 9` for the 3 human items in 09-UAT.md (desktop-menu headless launch for LNXS-03, real NixOS rebuild+GC, first GitHub Actions run of linux.yml — needs a push).
+- Then resume the milestone with `/gsd-autonomous --from 9` (audit → complete → cleanup).
+- Security capability is active and no 09-SECURITY.md exists: run `/gsd-secure-phase 9` before advancing.
+- Follow-up (advisory, from verification): a `d` tag with NUL/control characters passes canonical-address validation and reaches KWAKORE_NAPP_ID; exec then fails safely with Unavailable. Reject control/format characters in `d` or sanitize, with a regression test.
+- Local cleanup: untracked stale binaries `desktop/verdana` and `desktop/child/napp` are no longer ignored; delete them so they can't be committed.
