@@ -12,6 +12,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"verdana/backend/serviceconfig"
 )
 
 func TestCredentialStorePrivateAndRestore(t *testing.T) {
@@ -145,6 +146,84 @@ func TestDaemonSignerRestore(t *testing.T) {
 	state, err := os.ReadFile(filepath.Join(p.DataDir, "state.json"))
 	if err != nil || bytes.Contains(state, []byte(secret)) {
 		t.Fatalf("secret in state: %v", err)
+	}
+}
+
+func TestDaemonFailedSignerSwitchRetainsCredentialAcrossRestart(t *testing.T) {
+	for _, attempt := range []struct{ mode, secret string }{
+		{"nsec", "malformed-nsec"},
+		{"bunker", "bunker://invalid"},
+	} {
+		t.Run(attempt.mode, func(t *testing.T) {
+			p := daemonPaths(t)
+			first, err := Open(p, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret := nip19.EncodeNsec(nostr.Generate())
+			old, err := first.SwitchSigner(context.Background(), "nsec", secret)
+			if err != nil || old.ConnectionState != "connected" {
+				t.Fatalf("initial switch: %+v %v", old, err)
+			}
+			if _, err := first.SwitchSigner(context.Background(), attempt.mode, attempt.secret); err == nil {
+				t.Fatal("invalid replacement accepted")
+			}
+			rec, err := first.credentials.read()
+			if err != nil || rec.Mode != "nsec" || rec.Secret != secret || first.manager.Effective().Signer.Mode != "nsec" {
+				t.Fatalf("failed switch changed durable signer: mode=%q config=%q err=%v", rec.Mode, first.manager.Effective().Signer.Mode, err)
+			}
+			first.Close()
+			second, err := Open(p, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer second.Close()
+			if got := second.signer.Status(); got.ConnectionState != "connected" || got.PublicKey != old.PublicKey {
+				t.Fatalf("previous signer did not restore: %+v", got)
+			}
+		})
+	}
+}
+
+func TestDaemonInterruptedSignerTransitionRestoresPrevious(t *testing.T) {
+	p := daemonPaths(t)
+	first, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSecret := nip19.EncodeNsec(nostr.Generate())
+	old, err := first.SwitchSigner(context.Background(), "nsec", oldSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := first.credentials.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.credentials.beginTransition(rec, first.manager.Effective().Signer); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.credentials.write("nsec", nip19.EncodeNsec(nostr.Generate())); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.manager.SetSignerOverride(serviceconfig.Signer{Mode: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	second, err := Open(p, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	got, err := second.credentials.read()
+	if err != nil || got != rec || second.manager.Effective().Signer.Mode != "nsec" {
+		t.Fatalf("interrupted transition was not rolled back: mode=%q err=%v", got.Mode, err)
+	}
+	if status := second.signer.Status(); status.ConnectionState != "connected" || status.PublicKey != old.PublicKey {
+		t.Fatalf("previous signer did not restore: %+v", status)
+	}
+	if pending, err := second.credentials.readTransition(); err != nil || pending != nil {
+		t.Fatalf("transition journal was not cleared: %v", err)
 	}
 }
 

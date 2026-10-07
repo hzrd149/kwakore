@@ -15,6 +15,7 @@ import (
 	"fiatjaf.com/nostr/nip46"
 
 	"verdana/backend/fileutil"
+	"verdana/backend/serviceconfig"
 )
 
 const maxCredentialBytes = 4096
@@ -27,6 +28,15 @@ type credentialRecord struct {
 }
 
 type credentialStore struct{ path string }
+
+// A prepared transition retains the last known-good signer until both
+// durable records have been written. Startup rolls it back after a crash.
+type signerTransition struct {
+	Version   int                  `json:"version"`
+	Previous  credentialRecord     `json:"previous"`
+	Signer    serviceconfig.Signer `json:"signer"`
+	Committed bool                 `json:"committed,omitempty"`
+}
 
 var errCredential = errors.New("signer credential unavailable")
 var credentialWriteAtomic = fileutil.WriteFileAtomic
@@ -117,6 +127,93 @@ func (s *credentialStore) writeRecord(rec credentialRecord) error {
 	}
 	got, err := s.read()
 	if err != nil || got != rec {
+		return errCredential
+	}
+	return nil
+}
+
+func (s *credentialStore) transitionPath() string { return s.path + ".transition" }
+
+func (s *credentialStore) readTransition() (*signerTransition, error) {
+	path := s.transitionPath()
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errCredential
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > maxCredentialBytes {
+		return nil, errCredential
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || owner.Uid != uint32(os.Geteuid()) {
+		return nil, errCredential
+	}
+	data := make([]byte, info.Size())
+	if _, err := io.ReadFull(f, data); err != nil {
+		return nil, errCredential
+	}
+	var transition signerTransition
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&transition) != nil || dec.Decode(new(any)) != io.EOF || transition.Version != 1 || transition.Previous.Version != 1 {
+		return nil, errCredential
+	}
+	return &transition, nil
+}
+
+func (s *credentialStore) beginTransition(previous credentialRecord, signer serviceconfig.Signer) error {
+	if pending, err := s.readTransition(); err != nil || pending != nil {
+		return errCredential
+	}
+	data, err := json.Marshal(signerTransition{Version: 1, Previous: previous, Signer: signer})
+	if err != nil || len(data) > maxCredentialBytes {
+		return errCredential
+	}
+	if err := credentialWriteAtomic(s.transitionPath(), data, 0600); err != nil {
+		return errCredential
+	}
+	if pending, err := s.readTransition(); err != nil || pending == nil || pending.Previous != previous || pending.Signer != signer {
+		return errCredential
+	}
+	return nil
+}
+
+func (s *credentialStore) commitTransition() error {
+	pending, err := s.readTransition()
+	if err != nil || pending == nil || pending.Committed {
+		return errCredential
+	}
+	pending.Committed = true
+	data, err := json.Marshal(pending)
+	if err != nil || len(data) > maxCredentialBytes {
+		return errCredential
+	}
+	writeErr := credentialWriteAtomic(s.transitionPath(), data, 0600)
+	observed, readErr := s.readTransition()
+	if readErr != nil || observed == nil || *observed != *pending {
+		return errCredential
+	}
+	// A sync error after rename may report failure even though the committed
+	// marker is readable. Recovery will finish cleanup if the process stops.
+	_ = writeErr
+	return nil
+}
+
+func (s *credentialStore) endTransition() error {
+	if err := os.Remove(s.transitionPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errCredential
+	}
+	dir, err := os.Open(filepath.Dir(s.path))
+	if err != nil {
+		return errCredential
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
 		return errCredential
 	}
 	return nil

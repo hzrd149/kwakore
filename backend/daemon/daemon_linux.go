@@ -29,26 +29,27 @@ var ErrClosing = errors.New("service is shutting down")
 var windowProgramPath = linuxhost.DefaultProgramPath
 
 type Service struct {
-	mu           sync.Mutex
-	operationMu  sync.Mutex
-	work         sync.WaitGroup
-	workContext  context.Context
-	cancelWork   context.CancelFunc
-	closeDone    chan struct{}
-	closeOnce    sync.Once
-	closing      bool
-	ready        bool
-	start        time.Time
-	version      string
-	warning      string
-	recentErrors [32]DiagnosticError
-	errorNext    int
-	errorCount   int
-	manager      *serviceconfig.Manager
-	signer       *backend.ServiceSigner
-	credentials  *credentialStore
-	closeBackend func()
-	lock         *os.File
+	mu                sync.Mutex
+	operationMu       sync.Mutex
+	work              sync.WaitGroup
+	workContext       context.Context
+	cancelWork        context.CancelFunc
+	closeDone         chan struct{}
+	closeOnce         sync.Once
+	closing           bool
+	ready             bool
+	start             time.Time
+	version           string
+	warning           string
+	recentErrors      [32]DiagnosticError
+	errorNext         int
+	errorCount        int
+	manager           *serviceconfig.Manager
+	signer            *backend.ServiceSigner
+	credentials       *credentialStore
+	setSignerOverride func(serviceconfig.Signer) error
+	closeBackend      func()
+	lock              *os.File
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
@@ -99,6 +100,9 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return nil, fmt.Errorf("daemon already running for this user; inspect status or stop the existing instance: %w", err)
 	}
+	if err := recoverSignerTransition(credentials, m); err != nil {
+		return nil, err
+	}
 	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: linuxhost.New(windowProgramPath())})
 	if err != nil {
 		return nil, err
@@ -139,7 +143,7 @@ func (s *Service) reconcileSigner(ctx context.Context) error {
 		if keyErr != nil {
 			return errCredential
 		}
-		_, err = s.signer.SwitchBunker(ctx, rec.Secret, key, true, nil, nil)
+		_, err = s.signer.SwitchBunker(ctx, rec.Secret, key, true, nil)
 		return err
 	}
 	_, err = s.signer.Switch(ctx, requested, secret, nil)
@@ -155,6 +159,9 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 	s.signer.PreemptPending()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := recoverSignerTransition(s.credentials, s.manager); err != nil {
+		return backend.SignerStatus{}, errCredential
+	}
 	signerConfig := serviceconfig.Signer{Mode: mode}
 	if mode == "bunker" {
 		parsed, parseErr := url.Parse(secret)
@@ -162,9 +169,6 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 			return backend.SignerStatus{}, errCredential
 		}
 		signerConfig.Relay = parsed.Query().Get("relay")
-	}
-	if err := s.manager.SetSignerOverride(signerConfig); err != nil {
-		return backend.SignerStatus{}, errCredential
 	}
 	if mode == "bunker" {
 		rec, err := s.credentials.read()
@@ -178,9 +182,80 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 				return backend.SignerStatus{}, errCredential
 			}
 		}
-		return s.signer.SwitchBunker(ctx, secret, key, false, s.credentials.write, s.credentials.writeBunker)
+		return s.signer.SwitchBunker(ctx, secret, key, false, func(url, clientKey string) error {
+			return s.commitSignerTransition(signerConfig, func() error { return s.credentials.writeBunker(url, clientKey) })
+		})
 	}
-	return s.signer.Switch(ctx, mode, secret, s.credentials.write)
+	return s.signer.Switch(ctx, mode, secret, func(mode, secret string) error {
+		return s.commitSignerTransition(signerConfig, func() error { return s.credentials.write(mode, secret) })
+	})
+}
+
+func (s *Service) commitSignerTransition(next serviceconfig.Signer, writeCredential func() error) error {
+	previous, err := s.credentials.read()
+	if err != nil {
+		return errCredential
+	}
+	oldSigner := s.manager.Effective().Signer
+	if err := s.credentials.beginTransition(previous, oldSigner); err != nil {
+		_ = recoverSignerTransition(s.credentials, s.manager)
+		return errCredential
+	}
+	if err := writeCredential(); err != nil {
+		_ = recoverSignerTransition(s.credentials, s.manager)
+		return errCredential
+	}
+	setOverride := s.setSignerOverride
+	if setOverride == nil {
+		setOverride = s.manager.SetSignerOverride
+	}
+	if err := setOverride(next); err != nil {
+		_ = recoverSignerTransition(s.credentials, s.manager)
+		return errCredential
+	}
+	if err := s.credentials.commitTransition(); err != nil {
+		_ = recoverSignerTransition(s.credentials, s.manager)
+		return errCredential
+	}
+	// Once the marker is committed, an interrupted cleanup is completed on
+	// startup. Both durable records now describe the new signer.
+	_ = s.credentials.endTransition()
+	return nil
+}
+
+func recoverSignerTransition(credentials *credentialStore, manager *serviceconfig.Manager) error {
+	pending, err := credentials.readTransition()
+	if err != nil || pending == nil {
+		return err
+	}
+	if pending.Committed {
+		return credentials.endTransition()
+	}
+	current, err := credentials.read()
+	if err != nil {
+		return errCredential
+	}
+	if current != pending.Previous {
+		_ = credentials.writeRecord(pending.Previous)
+		if current, err = credentials.read(); err != nil || current != pending.Previous {
+			return errCredential
+		}
+	}
+	observed, err := serviceconfig.Load(manager.Paths())
+	if err != nil {
+		return errCredential
+	}
+	if observed.Effective().Signer != pending.Signer {
+		_ = manager.SetSignerOverride(pending.Signer)
+		observed, err = serviceconfig.Load(manager.Paths())
+		if err != nil || observed.Effective().Signer != pending.Signer {
+			return errCredential
+		}
+	}
+	if err := credentials.endTransition(); err != nil {
+		return errCredential
+	}
+	return nil
 }
 
 func (s *Service) StartSignerPair(secret string) (backend.ServicePairStart, error) {

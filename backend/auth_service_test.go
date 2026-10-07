@@ -117,7 +117,7 @@ func TestServiceSignerStaleResult(t *testing.T) {
 	t.Cleanup(s.Close)
 	url := "bunker://" + remote.Public().Hex() + "?relay=wss%3A%2F%2Fexample.com"
 	done := make(chan error, 1)
-	go func() { _, err := s.SwitchBunker(context.Background(), url, client, false, nil, nil); done <- err }()
+	go func() { _, err := s.SwitchBunker(context.Background(), url, client, false, nil); done <- err }()
 	<-entered
 	if _, err := s.Switch(context.Background(), "none", "", nil); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestServiceSignerBunkerLiveHandshakeAndSigning(t *testing.T) {
 	s := &ServiceSigner{}
 	t.Cleanup(func() { s.Close(); sys.Pool.Close("test over"); sys = oldSys; pool.Close("test over") })
 	input := "bunker://" + remote.Public().Hex() + "?relay=" + url.QueryEscape(relay)
-	status, err := s.SwitchBunker(ctx, input, nostr.Generate(), false, nil, nil)
+	status, err := s.SwitchBunker(ctx, input, nostr.Generate(), false, nil)
 	if err != nil || status.ConnectionState != "connected" || status.PublicKey != remote.Public().Hex() {
 		t.Fatalf("live handshake: %+v %v", status, err)
 	}
@@ -218,7 +218,7 @@ func TestServiceSignerBunkerUserKeyAndSigning(t *testing.T) {
 	s := &ServiceSigner{}
 	t.Cleanup(s.Close)
 	url := "bunker://" + remote.Public().Hex() + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
-	status, err := s.SwitchBunker(context.Background(), url, client, false, nil, func(gotURL, gotKey string) error {
+	status, err := s.SwitchBunker(context.Background(), url, client, false, func(gotURL, gotKey string) error {
 		if gotURL != url || gotKey != client.Hex() {
 			t.Error("wrong private credential")
 		}
@@ -253,7 +253,7 @@ func TestServiceSignerBunkerSuperseded(t *testing.T) {
 	s := &ServiceSigner{}
 	done := make(chan error, 1)
 	url := "bunker://" + remote.Public().Hex() + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
-	go func() { _, err := s.SwitchBunker(context.Background(), url, client, false, nil, nil); done <- err }()
+	go func() { _, err := s.SwitchBunker(context.Background(), url, client, false, nil); done <- err }()
 	<-entered
 	if _, err := s.Switch(context.Background(), "none", "", nil); err != nil {
 		t.Fatal(err)
@@ -272,7 +272,7 @@ func TestServiceSignerBunkerFixedRemoteError(t *testing.T) {
 	t.Cleanup(func() { serviceBunkerConnect = old })
 	s := &ServiceSigner{}
 	url := "bunker://" + nostr.Generate().Public().Hex() + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
-	_, err := s.SwitchBunker(context.Background(), url, nostr.Generate(), false, nil, nil)
+	_, err := s.SwitchBunker(context.Background(), url, nostr.Generate(), false, nil)
 	if err == nil || strings.Contains(err.Error(), "private-sentinel") {
 		t.Fatalf("leaked remote failure: %v", err)
 	}

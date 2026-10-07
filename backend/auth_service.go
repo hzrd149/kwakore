@@ -138,18 +138,15 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 	s.status = SignerStatus{Mode: mode, ConnectionState: "disconnected"}
 	failed := errors.New("signer unavailable")
 	if !stopped {
-		if persist != nil {
-			_ = persist("none", "")
-		}
 		return s.status, failed
 	}
 	if mode != "none" && mode != "nsec" {
 		return s.status, failed
 	}
-	if persist != nil && persist("none", "") != nil {
-		return s.status, failed
-	}
 	if mode == "none" {
+		if persist != nil && persist("none", "") != nil {
+			return s.status, failed
+		}
 		return s.status, nil
 	}
 	if len(secret) > 256 {
@@ -188,15 +185,15 @@ var serviceBunkerConnect = func(sessionCtx, handshakeCtx context.Context, client
 
 // SwitchBunker retires the old session before connecting. The network handshake
 // runs outside the state lock so a later switch can cancel and fence its result.
-func (s *ServiceSigner) SwitchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, clear func(string, string) error, persist func(string, string) error) (SignerStatus, error) {
-	return s.switchBunker(ctx, input, clientKey, skipConnect, clear, persist, 0)
+func (s *ServiceSigner) SwitchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, persist func(string, string) error) (SignerStatus, error) {
+	return s.switchBunker(ctx, input, clientKey, skipConnect, persist, 0)
 }
 
 func (s *ServiceSigner) SwitchBunkerPair(ctx context.Context, input string, clientKey nostr.SecretKey, expectedGeneration uint64, persist func(string, string) error) (SignerStatus, error) {
-	return s.switchBunker(ctx, input, clientKey, true, nil, persist, expectedGeneration)
+	return s.switchBunker(ctx, input, clientKey, true, persist, expectedGeneration)
 }
 
-func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, clear func(string, string) error, persist func(string, string) error, expected uint64) (SignerStatus, error) {
+func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, persist func(string, string) error, expected uint64) (SignerStatus, error) {
 	failed := errServiceSignerUnavailable
 	s.mu.Lock()
 	if expected != 0 && s.generation != expected {
@@ -214,7 +211,7 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 	}
 	stopped := s.stopLocked(ctx)
 	s.status = SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}
-	if !stopped || clear != nil && clear("none", "") != nil {
+	if !stopped {
 		status := s.status
 		s.mu.Unlock()
 		return status, failed
