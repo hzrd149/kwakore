@@ -21,7 +21,8 @@
 #
 # The daemon finds the child as the sibling "napplet" of its own resolved
 # executable and passes that directory to it as WEBVIEW_PATH, and native
-# entries name the "kwakore" found beside it. All four are real files in one
+# entries name the "kwakore" found beside it (through the system profile's
+# link to it under nix/module.nix, KWAKORE_ENTRY_CLI). All four are real files in one
 # directory, never symlinks into other store paths, so both lookups land
 # here. The user units come from packaging/systemd/user through nix/module.nix.
 let

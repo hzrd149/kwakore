@@ -535,6 +535,77 @@ func TestLinuxHostNativeEntry(t *testing.T) {
 	}
 }
 
+// The NixOS module names a profile path (/run/current-system/sw/bin/kwakore)
+// that survives rebuilds and garbage collection. It is used only while it
+// resolves to the running daemon's own CLI; anything else falls back to the
+// CLI beside the daemon.
+func TestLinuxHostNativeEntryStableCLI(t *testing.T) {
+	root := t.TempDir()
+	bundle := filepath.Join(root, "store", "aaa-kwakore", "bin")
+	next := filepath.Join(root, "store", "bbb-kwakore", "bin")
+	for _, dir := range []string{bundle, next} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"kwakore-daemon", "kwakore", "napplet"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	daemon := filepath.Join(bundle, "kwakore-daemon")
+	beside := filepath.Join(bundle, "kwakore")
+	// a profile directory of per-file symlinks, as buildEnv makes it
+	profile := filepath.Join(root, "sw", "bin")
+	if err := os.MkdirAll(profile, 0700); err != nil {
+		t.Fatal(err)
+	}
+	stable := filepath.Join(profile, "kwakore")
+	link := func(target string) {
+		t.Helper()
+		_ = os.Remove(stable)
+		if err := os.Symlink(target, stable); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// the profile names this daemon's CLI: entries carry the profile path
+	link(beside)
+	if got := cliPath(stable, daemon, daemon); got != stable {
+		t.Fatalf("stable path: %q, want %q", got, stable)
+	}
+	// unset, relative or unclean values are ignored
+	for _, bad := range []string{"", "sw/bin/kwakore", profile + "/./kwakore", profile + "//kwakore"} {
+		if got := cliPath(bad, daemon, daemon); got != beside {
+			t.Fatalf("%q: %q, want the CLI beside the daemon %q", bad, got, beside)
+		}
+	}
+	// after a rebuild the profile names the next generation's CLI; the old
+	// daemon still running keeps its own CLI until it restarts
+	link(filepath.Join(next, "kwakore"))
+	if got := cliPath(stable, daemon, daemon); got != beside {
+		t.Fatalf("another generation's CLI accepted: %q", got)
+	}
+	// a path that resolves to some other file of the bundle is not the CLI
+	link(filepath.Join(bundle, "napplet"))
+	if got := cliPath(stable, daemon, daemon); got != beside {
+		t.Fatalf("a non-CLI bundle file accepted: %q", got)
+	}
+	// a dangling profile link is ignored
+	link(filepath.Join(root, "store", "gone-kwakore", "bin", "kwakore"))
+	if got := cliPath(stable, daemon, daemon); got != beside {
+		t.Fatalf("dangling profile link accepted: %q", got)
+	}
+	// a non-executable CLI is no CLI on either path
+	link(beside)
+	if err := os.Chmod(beside, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := cliPath(stable, daemon, daemon); got != "" {
+		t.Fatalf("non-executable CLI accepted: %q", got)
+	}
+}
+
 func TestLinuxHostNativeEntryCLIPath(t *testing.T) {
 	root := t.TempDir()
 	release := filepath.Join(root, "releases", "abc")

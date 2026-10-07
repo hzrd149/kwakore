@@ -339,7 +339,17 @@ in
       # PATH, where it finds xdg-open, the clipboard tools, notify-send and
       # media players.
       enableDefaultPath = false;
-      environment = lib.optionalAttrs hasSettings {
+      environment = {
+        # Native desktop entries name this profile path instead of the store
+        # path beside the daemon. Entries are rewritten only when the daemon
+        # starts, so a store path would break once a rebuild and garbage
+        # collection remove it while the daemon is down, and the entry is what
+        # would start it. The package is in environment.systemPackages, so
+        # this path follows every rebuild; the daemon uses it only while it
+        # resolves to its own CLI (backend/linuxhost, stableCLI).
+        KWAKORE_ENTRY_CLI = "/run/current-system/sw/bin/kwakore";
+      }
+      // lib.optionalAttrs hasSettings {
         XDG_CONFIG_HOME = "${configHome}";
       };
     };

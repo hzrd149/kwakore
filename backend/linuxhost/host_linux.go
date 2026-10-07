@@ -44,14 +44,57 @@ func New(program string) *Host { return &Host{Program: program, CLI: DefaultCLIP
 // cliName is the control CLI's file name inside the installed bundle.
 const cliName = "kwakore"
 
+// entryCLIEnv names an optional stable path for the CLI that native entries
+// carry, for packages whose bundle directory does not outlive an upgrade.
+// The NixOS module sets it to /run/current-system/sw/bin/kwakore: the store
+// path beside the daemon changes with every rebuild and is garbage collected,
+// and entries are only rewritten when the daemon starts, so an entry naming
+// the store path could outlive its CLI and with it the user's way to start
+// the daemon. See stableCLI for when it is used.
+const entryCLIEnv = "KWAKORE_ENTRY_CLI"
+
 // DefaultCLIPath is the kwakore CLI shipped beside the running daemon, or ""
-// when there is none. See cliBeside.
+// when there is none. See cliPath.
 func DefaultCLIPath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	return cliBeside(os.Args[0], exe)
+	return cliPath(os.Getenv(entryCLIEnv), os.Args[0], exe)
+}
+
+// cliPath prefers the stable path from entryCLIEnv when it names this very
+// daemon's CLI, and otherwise picks the CLI beside the daemon.
+func cliPath(stable, arg0, exe string) string {
+	if path := stableCLI(stable, exe); path != "" {
+		return path
+	}
+	return cliBeside(arg0, exe)
+}
+
+// stableCLI returns path when it is an absolute, clean path that resolves to
+// the kwakore CLI in the running daemon's own bundle (an executable regular
+// file), and "" otherwise. The path itself may go through symlinks, which is
+// the point: it keeps naming the current CLI after the next upgrade. A value
+// that resolves anywhere else, including another generation's bundle, is
+// ignored, so an entry never names some other installation's binary.
+func stableCLI(path, exe string) string {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return ""
+	}
+	real, err := filepath.EvalSymlinks(exe)
+	if err != nil || !filepath.IsAbs(real) {
+		return ""
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil || target != filepath.Join(filepath.Dir(real), cliName) {
+		return ""
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return ""
+	}
+	return path
 }
 
 // cliBeside picks the CLI path native entries carry. The daemon's real

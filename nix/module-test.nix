@@ -91,6 +91,9 @@ let
   # environment NixOS adds to every service; PATH must not be among them
   nixosEnvironment =
     l: lib.hasPrefix "Environment=\"LOCALE_ARCHIVE=" l || lib.hasPrefix "Environment=\"TZDIR=" l;
+  # the stable CLI path native entries carry instead of the store path
+  entryCLILine = "Environment=\"KWAKORE_ENTRY_CLI=/run/current-system/sw/bin/kwakore\"";
+  serviceEnvironment = l: nixosEnvironment l || l == entryCLILine;
 
   expectedSocket = lib.sort (a: b: a < b) (unitLines (template "kwakore.socket") ++ conditions);
   expectedService = lib.sort (a: b: a < b) (
@@ -101,7 +104,7 @@ let
     ) (unitLines (template "kwakore.service"))
     ++ conditions
   );
-  renderedService = builtins.filter (l: !nixosEnvironment l) (unitLines service.text);
+  renderedService = builtins.filter (l: !serviceEnvironment l) (unitLines service.text);
 
   plainChecks = [
     {
@@ -111,6 +114,17 @@ let
     {
       name = "the service unit equals the generic template with only @BINDIR@ and kill substituted";
       ok = renderedService == expectedService;
+    }
+    {
+      name = "native entries name the system profile's CLI, which survives rebuilds and garbage collection";
+      ok =
+        builtins.elem entryCLILine (unitLines service.text)
+        &&
+          plain.systemd.user.services.kwakore.environment.KWAKORE_ENTRY_CLI
+          == "/run/current-system/sw/bin/kwakore"
+        # the profile path resolves to this package because the module puts
+        # it in the system profile
+        && builtins.elem stub plain.environment.systemPackages;
     }
     {
       name = "the socket keeps the generic per-user path and owner-only modes";
@@ -220,11 +234,15 @@ let
     {
       name = "settings change no unit line other than the environment";
       ok =
-        builtins.filter (l: !nixosEnvironment l && !lib.hasPrefix "Environment=\"XDG_CONFIG_HOME=" l) (
+        builtins.filter (l: !serviceEnvironment l && !lib.hasPrefix "Environment=\"XDG_CONFIG_HOME=" l) (
           unitLines configured.systemd.user.units."kwakore.service".text
         ) == lib.sort (a: b: a < b) (
           builtins.filter (l: !lib.hasPrefix "ConditionUser=" l) expectedService ++ [ "ConditionUser=|alice" ]
         );
+    }
+    {
+      name = "settings keep the stable entry CLI path";
+      ok = builtins.elem entryCLILine (unitLines configured.systemd.user.units."kwakore.service".text);
     }
     {
       name = "valid settings pass";

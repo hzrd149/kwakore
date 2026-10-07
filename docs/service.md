@@ -268,11 +268,15 @@ secret in Nix: the store is world-readable. Use the
   module turns that off, so the daemon finds `xdg-open`, the clipboard tools,
   `notify-send` and media players on the user manager's `PATH`, as on other
   distributions.
-- Native desktop entries name the store path of the CLI
-  (`/nix/store/…-kwakore-VERSION/bin/kwakore`). They are rewritten when the
-  daemon next starts, so after `nixos-rebuild switch` run
-  `systemctl --user restart kwakore.service` before collecting garbage;
-  otherwise entries can point at a CLI that no longer exists until then.
+- Native desktop entries run `/run/current-system/sw/bin/kwakore`, not the
+  store path of the CLI: the module sets `KWAKORE_ENTRY_CLI` to that path,
+  which follows every `nixos-rebuild switch` and survives garbage collection,
+  including `nix.gc.automatic`. The daemon checks that path when it starts
+  and uses it only if it resolves to the daemon's own CLI. If it does not
+  (for example, a daemon started from a generation that is not the current
+  system), entries name that daemon's store path until the next daemon start
+  rewrites them, and such an entry stops working once that store path is
+  collected; `systemctl --user restart kwakore.service` rewrites them at once.
 
 ## Run and control the service
 
@@ -360,7 +364,8 @@ author text reaches the command line. The CLI decodes and checks it, connects
 to the standard user socket (so systemd starts the daemon if needed) and asks
 for `napplet.launch`. The CLI path is the `kwakore` beside the running daemon,
 which for the helper is `~/.local/lib/kwakore/current/kwakore`, so entries
-keep working across upgrades.
+keep working across upgrades. With the NixOS module it is
+`/run/current-system/sw/bin/kwakore` (see the NixOS notes).
 
 Entries set `Terminal=true`. Your desktop opens a terminal for the launch; on
 success the CLI prints the opened window and exits, and on failure the fixed
