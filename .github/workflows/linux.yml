@@ -48,16 +48,23 @@ jobs:
           KWAKORE_REQUIRE_NODE: "1"
         run: go test ./...
 
+  # the installer and smoke scripts parse, and every supported path (code,
+  # units, Nix, CI, docs) uses only the kwakore name outside the reviewed
+  # exceptions in scripts/check-product-identity.sh
+  identity:
+    name: identity and scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
       - name: check shell scripts
         run: |
           for script in scripts/*.sh; do
             bash -n "$script"
           done
 
-      # the runtime sources carry only reviewed uses of the old product name;
-      # the full scan joins once the docs rewrite (09-10) lands
-      - name: product identity (runtime)
-        run: bash scripts/check-product-identity.sh --runtime-only
+      - name: product identity (full)
+        run: bash scripts/check-product-identity.sh
 
   child:
     name: child
@@ -91,6 +98,34 @@ jobs:
       - name: test desktop
         working-directory: desktop
         run: go test ./...
+
+      # the retired Gio launcher, Android app, gomobile bindings, settings
+      # window and non-Linux build paths (D-09, D-10) stay deleted: none of
+      # them may come back, both modules stay tidy, and building and testing
+      # write only ignored outputs
+      - name: retired paths stay deleted
+        run: |
+          set -euo pipefail
+          retired=(
+            android backend/mobile backend/tools.go backend/window_settings.go
+            backend/webview/napplet-settings.html backend/webview/napplet-settings.js
+            desktop/child/settings.go desktop/child/program_napp.go desktop/child/napp
+            desktop/internal/childbin desktop/internal/icon desktop/internal/instanceipc
+            desktop/internal/instancelock desktop/internal/osintegration desktop/internal/secretstore
+            desktop/internal/themesystem desktop/internal/windowchrome
+            .github/workflows/android.yml .github/workflows/desktop.yml scripts/install.ps1
+          )
+          for path in "${retired[@]}"; do
+            if [ -e "$path" ]; then echo "retired path is back: $path"; exit 1; fi
+          done
+          if compgen -G 'desktop/*.go' >/dev/null; then
+            echo "the retired desktop root package is back: $(ls desktop/*.go)"
+            exit 1
+          fi
+          (cd backend && go mod tidy -diff)
+          (cd desktop && go mod tidy -diff)
+          dirty=$(git status --porcelain --untracked-files=all)
+          [ -z "$dirty" ] || { echo "the build left unignored files:"; echo "$dirty"; exit 1; }
 
   # the real napplet child on a real WebKitGTK under xvfb. Both steps fail on a
   # missing prerequisite instead of skipping, and both require PASS lines, so
@@ -196,7 +231,8 @@ jobs:
           nix flake check --all-systems --no-build
 
   # an isolated per-user systemd manager (scripts/ci-user-manager.sh) runs the
-  # socket activation and installer smokes against real user units
+  # socket activation and installer smokes against real user units built from
+  # this tree; the installed job below runs the released archive itself
   service:
     name: user service
     runs-on: ubuntu-24.04
@@ -229,6 +265,62 @@ jobs:
           want=$(grep -c 'pass "install:' scripts/smoke-linux-service.sh)
           got=$(grep -c '^PASS install:' "$log" || true)
           [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS install lines, got $got"; exit 1; }
+
+  # D-12 release acceptance: the exact kwakore-linux-amd64.tar.gz the bundle
+  # job uploaded (and the release job publishes) is installed with
+  # scripts/install.sh under an isolated user manager, socket-activated,
+  # controlled with systemctl --user, given an offline napplet whose native
+  # entry opens a real child under xvfb, then made headless for the fixed
+  # session_unavailable error, and uninstalled. Every segment must print all
+  # of its PASS lines; the script prints no skips.
+  installed:
+    name: installed artifact
+    needs: [bundle]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # runtime libraries for the bundled child and cgo for the seed helper
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: install graphical test display
+        run: sudo apt-get install -y --no-install-recommends xvfb
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kwakore-linux-amd64
+          path: ${{ runner.temp }}/release
+
+      - name: installed artifact smoke
+        env:
+          NO_AT_BRIDGE: "1"
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release"
+          manifest=$(ls -A "$release" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$manifest" = "kwakore-linux-amd64.sha256 kwakore-linux-amd64.tar.gz kwakore-linux-amd64.version " ] ||
+            { echo "unexpected amd64 artifact: $manifest"; exit 1; }
+          version=$(cat "$release/kwakore-linux-amd64.version")
+          log="$RUNNER_TEMP/kwakore-full.log"
+          xvfb-run -a bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --full \
+            --archive "$release/kwakore-linux-amd64.tar.gz" \
+            --sha256sums "$release/kwakore-linux-amd64.sha256" | tee "$log"
+          grep -Fq "PASS release: the helper installed kwakore $version from the checksummed kwakore-linux-amd64.tar.gz" "$log" ||
+            { echo "the smoke did not install the uploaded $version archive"; exit 1; }
+          for marker in release activation control entry signer graphical headless uninstall; do
+            want=$(grep -c "pass \"$marker:" scripts/smoke-linux-service.sh)
+            got=$(grep -c "^PASS $marker:" "$log" || true)
+            [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS $marker lines, got $got"; exit 1; }
+          done
+          if grep -Ei '^(SKIP|FAIL)' "$log"; then
+            echo "the installed artifact smoke skipped or failed a segment"
+            exit 1
+          fi
 
   # one native job per architecture; each writes only its own archive name,
   # so the two never race on an output file
@@ -292,6 +384,18 @@ jobs:
           (cd "$release" && sha256sum --strict -c SHA256SUMS)
           [ "$("$release/kwakore-$version-linux-$ARCH/kwakore-daemon" version)" = "$version" ] ||
             { echo "bundled daemon does not report $version"; exit 1; }
+          # this architecture's manifest names only kwakore files: exactly
+          # the archive, its checksum line and the four bundle members
+          top="kwakore-$version-linux-$ARCH"
+          [ "$(cut -d' ' -f3- "$release/SHA256SUMS")" = "kwakore-linux-$ARCH.tar.gz" ] ||
+            { echo "SHA256SUMS does not name exactly kwakore-linux-$ARCH.tar.gz"; exit 1; }
+          members=$(tar -tzf "$release/kwakore-linux-$ARCH.tar.gz" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$members" = "$top/kwakore $top/kwakore-daemon $top/libwebview.so $top/napplet " ] ||
+            { echo "kwakore-linux-$ARCH.tar.gz does not hold exactly the four kwakore files: $members"; exit 1; }
+          if tar -tzf "$release/kwakore-linux-$ARCH.tar.gz" | grep -i 'verd''ana'; then
+            echo "kwakore-linux-$ARCH.tar.gz names the old product"
+            exit 1
+          fi
           mkdir "$RUNNER_TEMP/upload"
           cp "$release/kwakore-linux-$ARCH.tar.gz" "$RUNNER_TEMP/upload/"
           # this job's own checksum line; the release job joins both
@@ -306,7 +410,7 @@ jobs:
 
   release:
     name: release
-    needs: [backend, child, graphical, nix, service, bundle]
+    needs: [backend, identity, child, graphical, nix, service, installed, bundle]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
