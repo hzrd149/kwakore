@@ -121,6 +121,25 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
 		t.Fatalf("accepted uninstalled address: %+v", rpcErr)
 	}
+	t.Setenv("DISPLAY", "")
+	_, rpcErr, raw := rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || !strings.Contains(raw, `"reason":"session_unavailable"`) {
+		t.Fatalf("headless launch: %s %+v", raw, rpcErr)
+	}
+}
+
+func TestRPCWindowStop(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"1"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
+		t.Fatalf("unknown window stop: %+v", rpcErr)
+	}
+	for _, params := range []string{`{}`, `{"window_id":"x"}`, `{"window_id":"01"}`, `{"window_id":null}`, `{"window_id":"1","extra":true}`} {
+		_, rpcErr, _ = rpcCall(t, reader, conn, "napplet.stop", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted invalid stop %s: %+v", params, rpcErr)
+		}
+	}
 }
 
 func TestRPCSettingsMutateReload(t *testing.T) {
