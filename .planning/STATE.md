@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 9
+current_plan: 10
 status: executing
-stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-07T06:28:48.870Z"
+stopped_at: Completed 09-13-PLAN.md
+last_updated: "2026-10-07T06:31:44.663Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: c2b0da02e8c54f4910c8001c6c16caa3c38e7361
+state_head: 82d3ad9e1e9162cea5e7b44f73117d9f775de2c4
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 26
-  percent: 60
+  completed_plans: 27
+  percent: 63
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 9
+Current Plan: 10
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([██████░░░░] 60%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([██████░░░░] 63%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -125,6 +125,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P21 | 1 min | 1 tasks | 12 files |
 | Phase 09 P22 | 2 min | 1 tasks | 14 files |
 | Phase 09 P12 | 4 min | 1 tasks | 37 files |
+| Phase 09 P13 | 2 min | 1 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-22: deleted backend/mobile, android.yml, install.ps1 and backend/tools.go (gomobile pin); go mod tidy dropped x/mobile, x/mod, x/tools, go-cmp from backend and desktop; justfile aar/apk/install, .gitignore android entries and the desktop.yml install.ps1 step removed (Rule 3); CONFORMANCE/README/nix/CLAUDE.md Android mentions left for 09-10
 - [Phase 09]: 09-12: the 35 desktop root package main files were deleted in one commit (D-10); CONFORMANCE 5D-5/S-1 lost citations of the deleted desktop tests so the checklist test passes
 - [Phase 09]: 09-12: desktop/go.mod left untidy (gio, systray, beeep now unused) to tidy once after the remaining internal packages go or at the module rename
+- [Phase 09]: 09-13: desktop/internal/osintegration deleted in one commit (29 files); backend/desktopentry via linuxhost Host.SyncAppShortcuts is the only native entry writer
 
 ### Pending Todos
 
@@ -220,8 +222,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:28:48.792Z
-Stopped at: Completed 09-12-PLAN.md
+Last session: 2026-10-07T06:31:44.585Z
+Stopped at: Completed 09-13-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
