@@ -31,7 +31,7 @@ type ServicePermissionResult struct {
 	Permission Permission `json:"permission"`
 	Subject    string     `json:"subject"`
 	Decision   Decision   `json:"decision,omitempty"`
-	Cleared    bool       `json:"cleared,omitempty"`
+	Cleared    *bool      `json:"cleared,omitempty"`
 }
 
 func servicePermissionNappLocked(address string) (string, Napp, bool) {
@@ -166,7 +166,8 @@ func ServicePermissionClear(ctx context.Context, address string, perm Permission
 	previous, existed := state.Rules[key]
 	if !existed {
 		stateMu.Unlock()
-		return ServicePermissionResult{Address: address, Permission: perm, Subject: subject, Cleared: false}, nil
+		cleared := false
+		return ServicePermissionResult{Address: address, Permission: perm, Subject: subject, Cleared: &cleared}, nil
 	}
 	delete(state.Rules, key)
 	if err := saveState(); err != nil {
@@ -179,5 +180,6 @@ func ServicePermissionClear(ctx context.Context, address string, perm Permission
 	if perm == PermDispatch {
 		backgroundSyncs.Go(broadcastIntentChanges)
 	}
-	return ServicePermissionResult{Address: address, Permission: perm, Subject: subject, Cleared: true}, nil
+	cleared := true
+	return ServicePermissionResult{Address: address, Permission: perm, Subject: subject, Cleared: &cleared}, nil
 }

@@ -120,7 +120,9 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(getErr)
 		}
 		return result, nil
-	case "napplet.permissions.set", "napplet.permissions.clear":
+	case "napplet.permissions.set":
+		fallthrough
+	case "napplet.permissions.clear":
 		address, perm, subject, decision, err := decodePermissionParams(params, method == "napplet.permissions.set")
 		if err != nil {
 			return nil, err

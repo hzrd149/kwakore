@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -134,6 +135,9 @@ func run(args []string) error {
 		return rpcFailure{RPC: *fixed}
 	}
 	if len(result) == 0 {
+		return errors.New("invalid daemon response")
+	}
+	if strings.HasPrefix(method, "napplet.permissions.") && !validPermissionResponse(method, params, result) {
 		return errors.New("invalid daemon response")
 	}
 	_, err = os.Stdout.Write(append(result, '\n'))
@@ -301,6 +305,54 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{args[1]})
 		return "napplet.stop", params, socketPath, nil
 	}
+	if len(args) >= 2 && args[0] == "permissions" {
+		verb := args[1]
+		if verb == "get" && len(args) == 3 && validCommandAddress(args[2]) {
+			params, _ := json.Marshal(struct {
+				Address string `json:"address"`
+			}{args[2]})
+			return "napplet.permissions.get", params, socketPath, nil
+		}
+		if (verb == "set" && (len(args) == 5 || len(args) == 7)) ||
+			(verb == "clear" && (len(args) == 4 || len(args) == 6)) {
+			if !validCommandAddress(args[2]) || !permissionField(args[3]) {
+				return "", nil, "", inputFailure("invalid permission command")
+			}
+			var subject string
+			base := 4
+			if verb == "set" {
+				if args[4] != "allow" && args[4] != "deny" {
+					return "", nil, "", inputFailure("invalid permission decision")
+				}
+				base = 5
+			}
+			if len(args) == base+2 {
+				if args[base] != "--subject" || args[base+1] == "" || strings.HasPrefix(args[base+1], "--") || len(args[base+1]) > 256 {
+					return "", nil, "", inputFailure("invalid permission subject")
+				}
+				subject = args[base+1]
+			}
+			if args[3] == "dispatch" && subject == "" {
+				return "", nil, "", inputFailure("dispatch requires --subject")
+			}
+			if verb == "set" {
+				params, _ := json.Marshal(struct {
+					Address    string `json:"address"`
+					Permission string `json:"permission"`
+					Decision   string `json:"decision"`
+					Subject    string `json:"subject,omitempty"`
+				}{args[2], args[3], args[4], subject})
+				return "napplet.permissions.set", params, socketPath, nil
+			}
+			params, _ := json.Marshal(struct {
+				Address    string `json:"address"`
+				Permission string `json:"permission"`
+				Subject    string `json:"subject,omitempty"`
+			}{args[2], args[3], subject})
+			return "napplet.permissions.clear", params, socketPath, nil
+		}
+		return "", nil, "", inputFailure("invalid permission command")
+	}
 	if len(args) >= 1 && args[0] == "uninstall" {
 		flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
@@ -348,7 +400,81 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|launch ADDRESS|stop WINDOW_ID|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|launch ADDRESS|stop WINDOW_ID|permissions get|set|clear|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+}
+
+func validCommandAddress(address string) bool { return address != "" && len(address) <= 4096 }
+
+func permissionField(field string) bool {
+	switch field {
+	case "sign", "encrypt", "decrypt", "publish", "open_link", "save_file", "copy_text", "upload", "fetch", "notify", "media", "dispatch":
+		return true
+	}
+	return false
+}
+
+func validPermissionResponse(method string, params, result json.RawMessage) bool {
+	if len(result) == 0 || result[0] != '{' {
+		return false
+	}
+	var requested struct{ Address, Permission, Decision, Subject string }
+	if json.Unmarshal(params, &requested) != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil {
+		return false
+	}
+	var address string
+	if json.Unmarshal(fields["address"], &address) != nil || address != requested.Address {
+		return false
+	}
+	if method == "napplet.permissions.get" {
+		if len(fields) != 4 || controlprotocol.ValidateNamedParams(result, "address", "required_domains", "optional_domains", "saved_rules") != nil {
+			return false
+		}
+		var domains []string
+		for _, name := range []string{"required_domains", "optional_domains"} {
+			if raw := fields[name]; len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &domains) != nil {
+				return false
+			}
+		}
+		var rules []json.RawMessage
+		raw := fields["saved_rules"]
+		if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &rules) != nil {
+			return false
+		}
+		for _, rawRule := range rules {
+			if len(rawRule) == 0 || rawRule[0] != '{' || controlprotocol.ValidateNamedParams(rawRule, "permission", "subject", "decision") != nil {
+				return false
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rawRule, &fields) != nil || len(fields) != 3 {
+				return false
+			}
+			var permission, subject, decision string
+			if json.Unmarshal(fields["permission"], &permission) != nil ||
+				json.Unmarshal(fields["subject"], &subject) != nil ||
+				json.Unmarshal(fields["decision"], &decision) != nil ||
+				!permissionField(permission) || (decision != "allow" && decision != "deny") {
+				return false
+			}
+		}
+		return true
+	}
+	var permission, subject string
+	if json.Unmarshal(fields["permission"], &permission) != nil || permission != requested.Permission ||
+		json.Unmarshal(fields["subject"], &subject) != nil || subject != requested.Subject {
+		return false
+	}
+	if method == "napplet.permissions.set" {
+		var decision string
+		return len(fields) == 4 && controlprotocol.ValidateNamedParams(result, "address", "permission", "subject", "decision") == nil &&
+			json.Unmarshal(fields["decision"], &decision) == nil && decision == requested.Decision
+	}
+	var cleared bool
+	return len(fields) == 4 && controlprotocol.ValidateNamedParams(result, "address", "permission", "subject", "cleared") == nil &&
+		json.Unmarshal(fields["cleared"], &cleared) == nil
 }
 
 func settingField(field string) bool {

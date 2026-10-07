@@ -116,6 +116,9 @@ func TestCLIContract(t *testing.T) {
 		{"install", []string{"install", address}, "napplet.install", `{"address":"` + address + `"}`},
 		{"launch", []string{"launch", address}, "napplet.launch", `{"address":"` + address + `"}`},
 		{"stop", []string{"stop", windowID}, "napplet.stop", `{"window_id":"` + windowID + `"}`},
+		{"permissions get", []string{"permissions", "get", address}, "napplet.permissions.get", `{"address":"` + address + `"}`},
+		{"permissions set", []string{"permissions", "set", address, "dispatch", "deny", "--subject", "view"}, "napplet.permissions.set", `{"address":"` + address + `","permission":"dispatch","decision":"deny","subject":"view"}`},
+		{"permissions clear", []string{"permissions", "clear", address, "dispatch", "--subject", "view"}, "napplet.permissions.clear", `{"address":"` + address + `","permission":"dispatch","subject":"view"}`},
 		{"update", []string{"update", address}, "napplet.update", `{"address":"` + address + `"}`},
 		{"uninstall", []string{"uninstall", "--yes", address}, "napplet.uninstall", `{"address":"` + address + `","confirm":true}`},
 	} {
@@ -130,13 +133,15 @@ func TestCLIContract(t *testing.T) {
 				defer conn.Close()
 				line, _ := bufio.NewReader(conn).ReadBytes('\n')
 				seen <- line
-				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"method":"` + tc.method + `"}}` + "\n"))
+				result := cliContractResult(tc.method, address)
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + result + `}` + "\n"))
 			}()
 			cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, tc.args...)...)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			out, err := cmd.Output()
-			if err != nil || stderr.Len() != 0 || string(out) != `{"method":"`+tc.method+`"}`+"\n" {
+			wantResult := cliContractResult(tc.method, address)
+			if err != nil || stderr.Len() != 0 || string(out) != wantResult+"\n" {
 				t.Fatalf("out=%q stderr=%q err=%v", out, stderr.String(), err)
 			}
 			var request controlprotocol.Request
@@ -202,6 +207,27 @@ func TestCLIContract(t *testing.T) {
 			}
 		})
 	}
+	for _, response := range []string{
+		`{"jsonrpc":"2.0","id":2,"result":{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[]}}`,
+		`{"jsonrpc":"2.0","id":1,"result":{"address":"other","required_domains":[],"optional_domains":[],"saved_rules":[]}}`,
+		`{"jsonrpc":"2.0","id":1,"result":{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[{"permission":"sign","decision":"secret"}]}}`,
+	} {
+		go func() {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = bufio.NewReader(conn).ReadBytes('\n')
+			_, _ = conn.Write([]byte(response + "\n"))
+		}()
+		cmd := exec.Command(cli, "--socket", listener.Addr().String(), "permissions", "get", address)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"code":1004`) || strings.Contains(stderr.String(), "secret") {
+			t.Fatalf("permission peer response accepted: %q %q %v", stdout.String(), stderr.String(), err)
+		}
+	}
 	for _, args := range [][]string{{"--timeout", "0s", "status"}, {"--timeout", "garbage", "status"}, {"status"}} {
 		cmd := exec.Command(cli, args...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
@@ -238,6 +264,18 @@ func TestCLIContract(t *testing.T) {
 	if err := json.Unmarshal(stderr.Bytes(), &timed); err != nil || timed.Error.Code != controlprotocol.Timeout || !strings.Contains(strings.ToLower(timed.Error.Message), "unknown") || !strings.Contains(strings.ToLower(timed.Error.Message), "installed") {
 		t.Fatalf("timeout stderr=%q err=%v", stderr.String(), err)
 	}
+}
+
+func cliContractResult(method, address string) string {
+	switch method {
+	case "napplet.permissions.get":
+		return `{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[]}`
+	case "napplet.permissions.set":
+		return `{"address":"` + address + `","permission":"dispatch","subject":"view","decision":"deny"}`
+	case "napplet.permissions.clear":
+		return `{"address":"` + address + `","permission":"dispatch","subject":"view","cleared":true}`
+	}
+	return `{"method":"` + method + `"}`
 }
 
 func TestCLIContractPeerUIDOverride(t *testing.T) {
@@ -289,6 +327,23 @@ func TestCLIContractCatalog(t *testing.T) {
 	slices.Sort(catalog)
 	if !slices.Equal(methods, catalog) {
 		t.Fatalf("CLI methods %v differ from protocol catalog %v", methods, catalog)
+	}
+}
+
+func TestCLIPermissionsRejectAmbiguousSyntax(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	for _, args := range [][]string{
+		{"permissions", "get", address, "extra"},
+		{"permissions", "set", address, "sign", "ask"},
+		{"permissions", "set", address, "dispatch", "allow"},
+		{"permissions", "set", address, "sign", "allow", "--subject"},
+		{"permissions", "set", address, "sign", "allow", "view", "--subject"},
+		{"permissions", "clear", address, "sign", "extra"},
+		{"permissions", "clear", address, "sign", "--subject", "--other"},
+	} {
+		if _, _, _, err := command(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
 	}
 }
 
