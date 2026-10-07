@@ -1,12 +1,14 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"github.com/rs/zerolog"
 )
 
 func TestServiceSignerNsecTransition(t *testing.T) {
@@ -32,5 +34,17 @@ func TestServiceSignerNsecTransition(t *testing.T) {
 	_, err = signer.Switch(context.Background(), "nsec", nip19.EncodeNsec(first), func(string, string) error { return errors.New("private sentinel") })
 	if err == nil || err.Error() != "signer unavailable" || signer.Status().ConnectionState != "disconnected" {
 		t.Fatalf("persistence failure leaked or retained signer: %v %+v", err, signer.Status())
+	}
+}
+
+func TestSignerLeakNoSecretInCapturedLog(t *testing.T) {
+	var captured bytes.Buffer
+	previous := log
+	log = zerolog.New(&captured)
+	t.Cleanup(func() { log = previous })
+	signer := &ServiceSigner{}
+	_, err := signer.Switch(context.Background(), "nsec", "private-sentinel", nil)
+	if err == nil || bytes.Contains(captured.Bytes(), []byte("private-sentinel")) || bytes.Contains([]byte(err.Error()), []byte("private-sentinel")) {
+		t.Fatalf("signer failure leaked: %v %q", err, captured.String())
 	}
 }
