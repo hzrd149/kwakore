@@ -160,6 +160,67 @@ func TestRPCPermissionsGetRejectsNoncanonicalAddress(t *testing.T) {
 	}
 }
 
+func TestRPCPermissionsGetInstalledSavedRules(t *testing.T) {
+	paths := daemonPaths(t)
+	napp := backend.Napp{D: "notes", Author: nostr.Generate().Public(), Format: backend.FormatNapplet,
+		RequiredDomains: []string{"relay.example"}, OptionalDomains: []string{"media.example"}}
+	other := backend.Napp{D: "other", Author: nostr.Generate().Public(), Format: backend.FormatNapplet}
+	napp.ID, other.ID = napp.Address(), other.Address()
+	state := backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp, other.ID: other},
+		Rules: map[string]backend.Rule{}}
+	// State uses the same escaped three-part key format as RuleKey.ruleID.
+	state.Rules[napp.ID+"\x1fsign\x1f"] = backend.Rule{Decision: backend.DecisionDeny}
+	state.Rules[other.ID+"\x1fsign\x1f"] = backend.Rule{Decision: backend.DecisionAllow}
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DataDir, "state.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	result, rpcErr, _ := rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.get", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	var got backend.ServicePermissionsResult
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Address != napp.Address() || !reflect.DeepEqual(got.RequiredDomains, []string{"relay.example"}) ||
+		!reflect.DeepEqual(got.OptionalDomains, []string{"media.example"}) ||
+		!reflect.DeepEqual(got.SavedRules, []backend.ServiceSavedRule{{Permission: backend.PermSign, Decision: backend.DecisionDeny}}) {
+		t.Fatalf("scoped permission view: %+v", got)
+	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.permissions.get", `{"address":"`+nostr.Generate().Public().Hex()+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("bad address: %+v", rpcErr)
+	}
+}
+
 func TestRPCSettingsMutateReload(t *testing.T) {
 	s, reader, conn, paths := rpcService(t)
 	if err := os.WriteFile(paths.ConfigFile, []byte(`{"relays":["wss://file.example"],"blossom_servers":["https://file.example"],"discover_on_user_relays":true}`), 0600); err != nil {

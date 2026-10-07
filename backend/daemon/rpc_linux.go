@@ -103,6 +103,23 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		defer done()
 		return backend.ServiceInstalled(offset, limit), nil
+	case "napplet.permissions.get":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, getErr := backend.ServicePermissionsGet(workCtx, address)
+		if getErr != nil {
+			return nil, mutationError(getErr)
+		}
+		return result, nil
 	case "napplet.launch":
 		address, err := decodeAddressParams(params)
 		if err != nil {
