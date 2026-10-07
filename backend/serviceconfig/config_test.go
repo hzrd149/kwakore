@@ -55,6 +55,9 @@ func TestConfigSignerNonSecretAndRejectsCredentials(t *testing.T) {
 		`{"signer":{"mode":"nsec","secret":"secret-sentinel"}}`,
 		`{"signer":{"mode":"none","client_key":"secret-sentinel"}}`,
 		`{"private_key":"secret-sentinel"}`,
+		`{"signer":{"mode":"bunker","relay":"wss://relay.example/?token=secret-sentinel"}}`,
+		`{"signer":{"mode":"nsec","mode":"none","secret":"secret-sentinel"}}`,
+		`{"signer":null}`,
 	} {
 		if err := os.WriteFile(p.ConfigFile, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -63,6 +66,17 @@ func TestConfigSignerNonSecretAndRejectsCredentials(t *testing.T) {
 		if err == nil || strings.Contains(err.Error(), "secret-sentinel") || m.Effective().Signer.Mode != "nsec" {
 			t.Fatalf("unsafe reload: %v", err)
 		}
+	}
+}
+
+func TestSecretFieldOverrideRejectsBeforeValueFormatting(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.OverrideFile, []byte(`{"signer":{"mode":"nsec","secret":"private-sentinel"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || strings.Contains(err.Error(), "private-sentinel") || !strings.Contains(err.Error(), "signer.secret") {
+		t.Fatalf("override leaked or accepted: %v", err)
 	}
 }
 

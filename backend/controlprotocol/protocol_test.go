@@ -49,7 +49,7 @@ func TestProtocolDocsMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := regexp.MustCompile(`case "((?:service|settings|napplet)\.[a-z.]+)"`).FindAllSubmatch(router, -1)
+	cases := regexp.MustCompile(`case "((?:service|settings|napplet|signer)\.[a-z.]+)"`).FindAllSubmatch(router, -1)
 	var routed []string
 	for _, match := range cases {
 		routed = append(routed, string(match[1]))

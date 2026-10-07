@@ -5,6 +5,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,6 +64,27 @@ func TestCredentialStoreRejectsUnsafeFile(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreAtomicFailureIsNotSuccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openCredentialStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := credentialWriteAtomic
+	credentialWriteAtomic = func(string, []byte, os.FileMode) error { return errors.New("private-sentinel") }
+	t.Cleanup(func() { credentialWriteAtomic = old })
+	if err := s.write("nsec", "nsec-test"); err == nil || err.Error() != errCredential.Error() {
+		t.Fatalf("write failure: %v", err)
+	}
+	rec, err := s.read()
+	if err != nil || rec.Mode != "none" {
+		t.Fatalf("failed write changed record: %+v %v", rec, err)
+	}
+}
+
 func TestDaemonSignerRestore(t *testing.T) {
 	p := daemonPaths(t)
 	first, err := Open(p, "test")
@@ -70,7 +92,7 @@ func TestDaemonSignerRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret := nip19.EncodeNsec(nostr.Generate())
-	status, err := first.signer.Switch(context.Background(), "nsec", secret, first.credentials.write)
+	status, err := first.SwitchSigner(context.Background(), "nsec", secret)
 	if err != nil || status.ConnectionState != "connected" {
 		t.Fatalf("switch: %+v %v", status, err)
 	}

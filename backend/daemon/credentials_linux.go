@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -24,6 +25,7 @@ type credentialRecord struct {
 type credentialStore struct{ path string }
 
 var errCredential = errors.New("signer credential unavailable")
+var credentialWriteAtomic = fileutil.WriteFileAtomic
 
 func openCredentialStore(dataDir string) (*credentialStore, error) {
 	if err := checkNoSymlinkComponents(dataDir); err != nil {
@@ -40,7 +42,7 @@ func openCredentialStore(dataDir string) (*credentialStore, error) {
 }
 
 func (s *credentialStore) read() (credentialRecord, error) {
-	fd, err := syscall.Open(s.path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Open(s.path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return credentialRecord{Version: 1, Mode: "none"}, nil
 	}
@@ -57,25 +59,24 @@ func (s *credentialStore) read() (credentialRecord, error) {
 	if !ok || owner.Uid != uint32(os.Geteuid()) {
 		return credentialRecord{}, errCredential
 	}
-	data := make([]byte, info.Size()+1)
-	n, err := f.Read(data)
-	if err != nil && n == 0 {
-		return credentialRecord{}, errCredential
-	}
-	if n != int(info.Size()) {
+	data := make([]byte, info.Size())
+	if _, err := io.ReadFull(f, data); err != nil {
 		return credentialRecord{}, errCredential
 	}
 	var rec credentialRecord
-	dec := json.NewDecoder(bytes.NewReader(data[:n]))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if dec.Decode(&rec) != nil || rec.Version != 1 || (rec.Mode != "none" && rec.Mode != "nsec") || (rec.Mode == "none" && rec.Secret != "") || (rec.Mode == "nsec" && (rec.Secret == "" || len(rec.Secret) > 256)) {
+		return credentialRecord{}, errCredential
+	}
+	if dec.Decode(new(any)) != io.EOF {
 		return credentialRecord{}, errCredential
 	}
 	return rec, nil
 }
 
 func (s *credentialStore) write(mode, secret string) error {
-	if mode != "none" && mode != "nsec" || len(secret) > 256 || (mode == "nsec" && secret == "") {
+	if mode != "none" && mode != "nsec" || len(secret) > 256 || (mode == "nsec" && secret == "") || (mode == "none" && secret != "") {
 		return errCredential
 	}
 	// Refuse an unsafe existing destination before atomic replacement.
@@ -83,7 +84,7 @@ func (s *credentialStore) write(mode, secret string) error {
 		return errCredential
 	}
 	data, _ := json.Marshal(credentialRecord{Version: 1, Mode: mode, Secret: secret})
-	if err := fileutil.WriteFileAtomic(s.path, data, 0600); err != nil {
+	if err := credentialWriteAtomic(s.path, data, 0600); err != nil {
 		return errCredential
 	}
 	got, err := s.read()

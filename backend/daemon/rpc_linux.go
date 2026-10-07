@@ -33,6 +33,30 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		return nil, controlprotocol.FixedError(controlprotocol.Closing)
 	}
 	switch method {
+	case "signer.status":
+		if err := controlprotocol.ValidateNamedParams(params); err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		return s.signer.Status(), nil
+	case "signer.switch":
+		mode, secret, err := decodeSignerSwitch(params)
+		if err != nil {
+			return nil, err
+		}
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, timeoutCancel := context.WithTimeout(workCtx, 20*time.Second)
+		defer timeoutCancel()
+		status, switchErr := s.SwitchSigner(workCtx, mode, secret)
+		if switchErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Unavailable)
+		}
+		return status, nil
 	case "service.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -159,6 +183,8 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		defer cancelWork()
 		workCtx, cancelDeadline := context.WithTimeout(workCtx, 12*time.Second)
 		defer cancelDeadline()
+		s.operationMu.Lock()
+		defer s.operationMu.Unlock()
 		result, launchErr := backend.ServiceLaunch(workCtx, address)
 		if launchErr != nil {
 			return nil, mutationError(launchErr)
@@ -269,6 +295,32 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
 	}
+}
+
+func decodeSignerSwitch(params json.RawMessage) (string, string, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	if err := controlprotocol.ValidateNamedParams(params, "mode", "secret"); err != nil {
+		return "", "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", "", invalid
+	}
+	var mode string
+	if json.Unmarshal(fields["mode"], &mode) != nil {
+		return "", "", invalid
+	}
+	if mode == "none" && len(fields) == 1 {
+		return mode, "", nil
+	}
+	if mode != "nsec" || len(fields) != 2 || len(fields["secret"]) > 512 {
+		return "", "", invalid
+	}
+	var secret string
+	if json.Unmarshal(fields["secret"], &secret) != nil || secret == "" || len(secret) > 256 {
+		return "", "", invalid
+	}
+	return mode, secret, nil
 }
 
 func decodeUninstallParams(params json.RawMessage) (string, bool, *controlprotocol.Error) {

@@ -88,12 +88,44 @@ func TestCLISettingsCommands(t *testing.T) {
 
 func TestCLISecretInputFileAndArgvBoundary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(path, []byte("nsec-private-sentinel\n"), 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, []byte("nsec-private-sentinel\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	method, params, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", path})
-	if err != nil || method != "signer.switch" || !strings.Contains(string(params), "nsec-private-sentinel") { t.Fatalf("file input: %s %s %v", method, params, err) }
-	if _, _, _, err := command([]string{"signer", "switch", "nsec", "nsec-private-sentinel"}); err == nil || strings.Contains(err.Error(), "nsec-private-sentinel") { t.Fatalf("argv accepted/leaked: %v", err) }
-	if err := os.Chmod(path, 0644); err != nil { t.Fatal(err) }
-	if _, _, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", path}); err == nil { t.Fatal("public file accepted") }
+	if err != nil || method != "signer.switch" || !strings.Contains(string(params), "nsec-private-sentinel") {
+		t.Fatalf("file input: %s %s %v", method, params, err)
+	}
+	if _, _, _, err := command([]string{"signer", "switch", "nsec", "nsec-private-sentinel"}); err == nil || strings.Contains(err.Error(), "nsec-private-sentinel") {
+		t.Fatalf("argv accepted/leaked: %v", err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", path}); err == nil {
+		t.Fatal("public file accepted")
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(filepath.Dir(path), "linked")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", link}); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}
+
+func TestSignerLeakMalformedPeerResult(t *testing.T) {
+	for _, result := range []string{
+		`{"mode":"nsec","public_key":"","connection_state":"disconnected","secret":"private-sentinel"}`,
+		`{"mode":"nsec","public_key":"private-sentinel","connection_state":"connected"}`,
+		`{"mode":"none","public_key":"","connection_state":"connected"}`,
+	} {
+		if validSignerResponse(json.RawMessage(result)) {
+			t.Fatalf("accepted private/malformed result: %s", result)
+		}
+	}
 }
 
 func TestCLIContract(t *testing.T) {
@@ -119,6 +151,8 @@ func TestCLIContract(t *testing.T) {
 		{"diagnostics", []string{"diagnostics"}, "service.diagnostics", ""},
 		{"get", []string{"settings", "get"}, "settings.get", ""},
 		{"reload", []string{"settings", "reload"}, "settings.reload", ""},
+		{"signer status", []string{"signer", "status"}, "signer.status", ""},
+		{"signer none", []string{"signer", "switch", "none"}, "signer.switch", `{"mode":"none"}`},
 		{"set", []string{"settings", "set", "relays", `[]`}, "settings.set", `{"field":"relays","value":[]}`},
 		{"clear", []string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
 		{"discover", []string{"discover", "--query", "hello", "--refresh", "--offset", "2", "--limit", "3"}, "napplet.discover", `{"query":"hello","refresh":true,"offset":2,"limit":3}`},
@@ -279,6 +313,8 @@ func TestCLIContract(t *testing.T) {
 
 func cliContractResult(method, address string) string {
 	switch method {
+	case "signer.status", "signer.switch":
+		return `{"mode":"none","public_key":"","connection_state":"disconnected"}`
 	case "napplet.permissions.get":
 		return `{"address":"` + address + `","required_domains":[],"optional_domains":[],"saved_rules":[]}`
 	case "napplet.permissions.set":
@@ -318,6 +354,7 @@ func TestCLIContractCatalog(t *testing.T) {
 	windowID := strings.Repeat("b", 32)
 	commands := [][]string{
 		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
+		{"signer", "status"}, {"signer", "switch", "none"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
 		{"discover"}, {"installed"}, {"install", address}, {"update", address},
 		{"uninstall", "--yes", address}, {"launch", address}, {"stop", windowID},

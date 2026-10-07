@@ -140,6 +140,9 @@ func run(args []string) error {
 	if strings.HasPrefix(method, "napplet.permissions.") && !validPermissionResponse(method, params, result) {
 		return errors.New("invalid daemon response")
 	}
+	if strings.HasPrefix(method, "signer.") && !validSignerResponse(result) {
+		return errors.New("invalid daemon response")
+	}
 	_, err = os.Stdout.Write(append(result, '\n'))
 	return err
 }
@@ -154,7 +157,7 @@ func isTimeout(err error) bool {
 type timeoutFailure struct{}
 
 func (timeoutFailure) Error() string {
-	return "client timeout; operation outcome unknown; check status or installed state"
+	return "client timeout; operation outcome unknown; check service, signer, or installed state"
 }
 
 func globalOptions(args []string) ([]string, string, time.Duration, error) {
@@ -244,6 +247,46 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		case "diagnostics":
 			return "service.diagnostics", nil, socketPath, nil
 		}
+	}
+	if len(args) >= 2 && args[0] == "signer" {
+		if len(args) == 2 && args[1] == "status" {
+			return "signer.status", nil, socketPath, nil
+		}
+		if len(args) == 3 && args[1] == "switch" && args[2] == "none" {
+			return "signer.switch", json.RawMessage(`{"mode":"none"}`), socketPath, nil
+		}
+		if len(args) == 5 && args[1] == "switch" && args[2] == "nsec" {
+			var secret string
+			var err error
+			switch args[3] {
+			case "--secret-stdin":
+				return "", nil, "", inputFailure("invalid signer secret source")
+			case "--secret-file":
+				secret, err = readSignerSecretFile(args[4])
+			default:
+				return "", nil, "", inputFailure("invalid signer secret source")
+			}
+			if err != nil {
+				return "", nil, "", inputFailure("invalid signer secret source")
+			}
+			params, _ := json.Marshal(struct {
+				Mode   string `json:"mode"`
+				Secret string `json:"secret"`
+			}{"nsec", secret})
+			return "signer.switch", params, socketPath, nil
+		}
+		if len(args) == 4 && args[1] == "switch" && args[2] == "nsec" && args[3] == "--secret-stdin" {
+			secret, err := readSignerSecret(os.Stdin)
+			if err != nil {
+				return "", nil, "", inputFailure("invalid signer secret source")
+			}
+			params, _ := json.Marshal(struct {
+				Mode   string `json:"mode"`
+				Secret string `json:"secret"`
+			}{"nsec", secret})
+			return "signer.switch", params, socketPath, nil
+		}
+		return "", nil, "", inputFailure("invalid signer command")
 	}
 	if len(args) >= 1 && args[0] == "installed" {
 		flags := flag.NewFlagSet("installed", flag.ContinueOnError)
@@ -400,7 +443,83 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|launch ADDRESS|stop WINDOW_ID|permissions get|set|clear|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed|discover|install|update|uninstall|launch|stop|permissions|settings|signer")
+}
+
+func readSignerSecret(r io.Reader) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(r, 257))
+	if err != nil || len(b) > 256 {
+		return "", errors.New("invalid signer secret")
+	}
+	secret := strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r")
+	if secret == "" || strings.ContainsAny(secret, "\r\n\x00") {
+		return "", errors.New("invalid signer secret")
+	}
+	return secret, nil
+}
+
+func readSignerSecretFile(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", errors.New("invalid signer secret file")
+	}
+	// Walk with directory descriptors so no path component follows a symlink.
+	parts := strings.Split(strings.TrimPrefix(filepath.Clean(path), "/"), "/")
+	dirFD, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return "", errors.New("invalid signer secret file")
+	}
+	defer func() { unix.Close(dirFD) }()
+	for _, part := range parts[:len(parts)-1] {
+		next, err := unix.Openat(dirFD, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return "", errors.New("invalid signer secret file")
+		}
+		unix.Close(dirFD)
+		dirFD = next
+	}
+	fd, err := unix.Openat(dirFD, parts[len(parts)-1], unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return "", errors.New("invalid signer secret file")
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 || info.Size() > 256 {
+		return "", errors.New("invalid signer secret file")
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || owner.Uid != uint32(os.Geteuid()) {
+		return "", errors.New("invalid signer secret file")
+	}
+	return readSignerSecret(f)
+}
+
+func validSignerResponse(result json.RawMessage) bool {
+	if len(result) == 0 || result[0] != '{' || controlprotocol.ValidateNamedParams(result, "mode", "public_key", "connection_state") != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil || len(fields) != 3 {
+		return false
+	}
+	var mode, pubkey, state string
+	if json.Unmarshal(fields["mode"], &mode) != nil || json.Unmarshal(fields["public_key"], &pubkey) != nil || json.Unmarshal(fields["connection_state"], &state) != nil {
+		return false
+	}
+	if mode != "none" && mode != "nsec" && mode != "bunker" {
+		return false
+	}
+	if state != "connected" && state != "disconnected" {
+		return false
+	}
+	if state == "disconnected" {
+		return pubkey == ""
+	}
+	if mode == "none" {
+		return false
+	}
+	decoded, err := hex.DecodeString(pubkey)
+	return len(decoded) == 32 && err == nil && hex.EncodeToString(decoded) == pubkey
 }
 
 func validCommandAddress(address string) bool { return address != "" && len(address) <= 4096 }
