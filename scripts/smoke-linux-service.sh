@@ -438,7 +438,9 @@ check_activation_control() {
 			fail "restart $n of 5 failed inside the start limit: $(cat "$stage/restart.log")"
 	done
 	systemctl --user restart kwakore.service 2>"$stage/restart.log" && fail "a sixth restart in ten seconds was not rate limited"
-	grep -q 'start of the service was attempted too often' "$stage/restart.log" ||
+	# systemctl's wording varies by version (259 names the start limit, 255 only
+	# says the job failed); the unit Results checked below are authoritative.
+	grep -Eq 'start of the service was attempted too often|Job for kwakore\.service failed' "$stage/restart.log" ||
 		fail "rate-limited restart lacks the fixed message: $(cat "$stage/restart.log")"
 	wait_state kwakore.service failed
 	wait_state kwakore.socket failed
