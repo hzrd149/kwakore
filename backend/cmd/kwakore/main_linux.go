@@ -31,6 +31,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(args) == 0 || (len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")) {
+		_, err := io.WriteString(os.Stdout, cliHelp)
+		return err
+	}
 	method, params, _, err := command(args)
 	if err != nil {
 		return err
@@ -581,7 +585,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed|discover|install|update|uninstall|launch|launch-token|stop|permissions|settings|signer")
+	return "", nil, "", inputFailure("unknown or incomplete command; run 'kwakore help' for usage")
 }
 
 func readSignerSecret(r io.Reader, limit int) (string, error) {

@@ -1220,3 +1220,31 @@ func TestCLIHumanOutputAndJSONOption(t *testing.T) {
 		t.Fatalf("control output: %q %v", out.String(), err)
 	}
 }
+
+func TestCLIHelpWithoutDaemon(t *testing.T) {
+	cli := filepath.Join(t.TempDir(), "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	for _, args := range [][]string{nil, {"help"}, {"--help"}, {"-h"}, {"--json", "help"}} {
+		cmd := exec.Command(cli, args...)
+		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil || stderr.Len() != 0 {
+			t.Fatalf("%v: err=%v stderr=%q", args, err, stderr.String())
+		}
+		for _, want := range []string{"Usage:", "--json", "installed [--offset N]", "signer pair start|wait|cancel", "Examples:"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("%v: help missing %q", args, want)
+			}
+		}
+	}
+	cmd := exec.Command(cli, "bogus")
+	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "kwakore help") {
+		t.Fatalf("invalid command: stdout=%q stderr=%q err=%v", stdout.String(), stderr.String(), err)
+	}
+}
