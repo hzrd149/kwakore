@@ -65,8 +65,8 @@ func buildChild(t *testing.T) string {
 // rendering, then extra (later entries win).
 func childEnv(dir string, extra ...string) []string {
 	env := append(os.Environ(),
-		"VERDANA_INSTANCE_ID=webkit-test",
-		"VERDANA_NAPP_ID=webkit-test",
+		"KWAKORE_INSTANCE_ID=webkit-test",
+		"KWAKORE_NAPP_ID=webkit-test",
 		"WEBVIEW_PATH="+dir,
 		"WEBKIT_DISABLE_COMPOSITING_MODE=1",
 		"WEBKIT_DISABLE_DMABUF_RENDERER=1",
@@ -122,7 +122,7 @@ func TestWebKitEngineHardening(t *testing.T) {
 	bin := buildChild(t)
 
 	hardened := []string{"webkit hardening applied", "webrtc=false", "media_stream=false", "link_preconnect=false"}
-	log, err := runChild(t, bin, "VERDANA_WINDOW_KIND=", "VERDANA_NAPP_FORMAT=napplet")
+	log, err := runChild(t, bin, "KWAKORE_WINDOW_KIND=", "KWAKORE_NAPP_FORMAT=napplet")
 	if err != nil {
 		t.Fatalf("child failed: %v\n%s", err, log)
 	}

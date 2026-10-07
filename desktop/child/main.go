@@ -58,20 +58,20 @@ func main() {
 		Logger()
 
 	meta = nappMeta{
-		ID:        os.Getenv("VERDANA_NAPP_ID"),
-		Name:      os.Getenv("VERDANA_NAPP_NAME"),
-		Instance:  os.Getenv("VERDANA_INSTANCE_ID"),
-		Theme:     os.Getenv("VERDANA_THEME"),
-		ThemeVars: os.Getenv("VERDANA_THEME_VARS"),
+		ID:        os.Getenv("KWAKORE_NAPP_ID"),
+		Name:      os.Getenv("KWAKORE_NAPP_NAME"),
+		Instance:  os.Getenv("KWAKORE_INSTANCE_ID"),
+		Theme:     os.Getenv("KWAKORE_THEME"),
+		ThemeVars: os.Getenv("KWAKORE_THEME_VARS"),
 	}
 	// this program only hosts napplets (D-10): the napp (35130) window and
 	// the bundled settings page were retired with the Gio launcher, so any
 	// other kind of window is refused before a webview exists
-	if os.Getenv("VERDANA_NAPP_FORMAT") != "napplet" {
+	if os.Getenv("KWAKORE_NAPP_FORMAT") != "napplet" {
 		log.Error().Msg("napp cannot run in the napplet program")
 		os.Exit(1)
 	}
-	if os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
+	if os.Getenv("KWAKORE_WINDOW_KIND") == "settings" {
 		log.Error().Msg("settings cannot run in the napplet program")
 		os.Exit(1)
 	}
@@ -116,9 +116,9 @@ func jsString(s string) string {
 // initial_size via the launcher, falling back to a roomy default. Values are
 // clamped like nostrapps sanitizes them (positive, capped at 2000, with a
 // minimum that keeps the window usable).
-func windowWidth() int { return clampWindowSize(envSize("VERDANA_WINDOW_WIDTH", 1024), 320, 2000) }
+func windowWidth() int { return clampWindowSize(envSize("KWAKORE_WINDOW_WIDTH", 1024), 320, 2000) }
 
-func windowHeight() int { return clampWindowSize(envSize("VERDANA_WINDOW_HEIGHT", 700), 240, 2000) }
+func windowHeight() int { return clampWindowSize(envSize("KWAKORE_WINDOW_HEIGHT", 700), 240, 2000) }
 
 func envSize(key string, fallback int) int {
 	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {

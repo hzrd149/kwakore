@@ -22,7 +22,7 @@ func TestWindowProgramsRejectWrongFormat(t *testing.T) {
 	} {
 		t.Run(tc.format+"_"+tc.windowKind, func(t *testing.T) {
 			cmd := exec.Command(bin)
-			cmd.Env = append(os.Environ(), "VERDANA_NAPP_FORMAT="+tc.format, "VERDANA_WINDOW_KIND="+tc.windowKind)
+			cmd.Env = append(os.Environ(), "KWAKORE_NAPP_FORMAT="+tc.format, "KWAKORE_WINDOW_KIND="+tc.windowKind)
 			out, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(out), tc.want) {
 				t.Fatalf("run = %v, %s", err, out)

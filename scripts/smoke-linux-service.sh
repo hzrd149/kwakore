@@ -167,7 +167,7 @@ check_bundle() {
 	child_refuses() {
 		local want=$1 status=0
 		shift
-		env "$@" VERDANA_NAPP_FORMAT=napplet "$bundle/napplet" </dev/null >/dev/null 2>"$stage/child.log" || status=$?
+		env "$@" KWAKORE_NAPP_FORMAT=napplet "$bundle/napplet" </dev/null >/dev/null 2>"$stage/child.log" || status=$?
 		[ "$status" = 1 ] && grep -qF "$want" "$stage/child.log" ||
 			fail "napplet child (status $status) did not refuse with \"$want\": $(cat "$stage/child.log")"
 		grep -qF 'window program started' "$stage/child.log" || fail "napplet child did not start: $(cat "$stage/child.log")"

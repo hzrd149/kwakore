@@ -102,7 +102,7 @@ func (f *fakeLauncher) seed(scope, key, value string) {
 func (f *fakeLauncher) start(bin string, extra ...string) {
 	t := f.t
 	t.Helper()
-	env := append([]string{"VERDANA_WINDOW_KIND=", "VERDANA_NAPP_FORMAT=napplet", "NO_AT_BRIDGE=1"}, extra...)
+	env := append([]string{"KWAKORE_WINDOW_KIND=", "KWAKORE_NAPP_FORMAT=napplet", "NO_AT_BRIDGE=1"}, extra...)
 	cmd := exec.Command(bin)
 	cmd.Env = childEnv(filepath.Dir(bin), env...)
 	cmd.Stderr = &f.stderr
