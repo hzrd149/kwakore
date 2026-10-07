@@ -21,6 +21,9 @@ import (
 
 var ErrClosing = errors.New("service is shutting down")
 
+// windowProgramPath is replaceable by the socket integration test.
+var windowProgramPath = func() string { return "" }
+
 type Service struct {
 	mu           sync.Mutex
 	operationMu  sync.Mutex

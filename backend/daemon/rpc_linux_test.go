@@ -5,6 +5,8 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -15,10 +17,86 @@ import (
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
 	"verdana/backend"
 	"verdana/backend/controlprotocol"
 	"verdana/backend/serviceconfig"
 )
+
+func TestRPCLinuxHostLaunch(t *testing.T) {
+	paths := daemonPaths(t)
+	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
+	napp := backend.Napp{D: "window", Name: "Window", Format: backend.FormatNapplet,
+		Kind: backend.KindNapplet, Author: key.Public(), ArtifactHash: strings.Repeat("a", 64)}
+	napp.ID = napp.Address()
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := json.Marshal(backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp}})
+	if err := os.WriteFile(filepath.Join(paths.DataDir, "state.json"), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(napp.ID))
+	dir := filepath.Join(paths.DataDir, "napps", hex.EncodeToString(sum[:]))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>ready</p>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	programDir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-window-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(programDir) })
+	if err := os.Chmod(programDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(programDir, "napplet")
+	script := "#!/bin/sh\nsleep 0.2\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\"}\\n'\nwhile IFS= read -r line; do case \"$line\" in *'\"t\":\"close\"'*) exit 0;; esac; done\n"
+	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(programDir, "libwebview.so"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DISPLAY", ":99")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	oldProgram := windowProgramPath
+	windowProgramPath = func() string { return program }
+	t.Cleanup(func() { windowProgramPath = oldProgram })
+
+	s, err := Open(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	start := time.Now()
+	result, rpcErr, _ := rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil || !strings.Contains(string(result), `"outcome":"opened"`) || !strings.Contains(string(result), `"window_id":`) {
+		t.Fatalf("launch response: %s %+v", result, rpcErr)
+	}
+	if time.Since(start) < 150*time.Millisecond {
+		t.Fatal("launch returned before host-page nap.start")
+	}
+}
 
 func TestRPCSettingsMutateReload(t *testing.T) {
 	s, reader, conn, paths := rpcService(t)
