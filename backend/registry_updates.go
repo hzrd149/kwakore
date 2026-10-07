@@ -409,19 +409,14 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 		log.Warn().Str("napp", current.ID).Str("event", newer.EventID).Msg("refusing to update to an older version")
 		return ServiceUpdateResult{}, errOlderVersion
 	}
-	// files and record change together, under stateMu
-	removeOld, err := swapInstallDir(staging, base)
+	// The journal preserves both copies until state.json commits its token.
+	previous, _, err = commitInstallMutation(current.ID, "update", staging, base, newer, true)
 	if err != nil {
 		stateMu.Unlock()
-		os.RemoveAll(staging)
 		return ServiceUpdateResult{}, err
 	}
-	state.InstalledNapps[current.ID] = newer
 	result := ServiceUpdateResult{Address: newer.Address(), Outcome: "updated", PreviousVersion: serviceVersion(previous), InstalledVersion: serviceVersion(state.InstalledNapps[current.ID])}
-	delete(state.LastLaunched, current.ID)
-	saveState()
 	stateMu.Unlock()
-	removeOld()
 
 	// the previously available update is now the installed version
 	mergeUpdateState(current.ID, nil)

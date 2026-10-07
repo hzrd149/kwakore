@@ -43,6 +43,8 @@ type AppState struct {
 
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
+	// MutationTokens are committed in the same replacement as installed records.
+	MutationTokens map[string]string `json:"mutation_tokens,omitempty"`
 
 	// BlossomServers are the servers napp and napplet files are fetched
 	// from before any the napp or its author names. Nil (never set) means

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -148,16 +149,13 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 		log.Warn().Str("napp", n.ID).Str("event", n.EventID).Msg("refusing to install over a newer version")
 		return ServiceInstallResult{}, errOlderVersion
 	}
-	// files and record change together, under stateMu
-	removeOld, err := swapInstallDir(staging, base)
+	// Intent precedes the directory swap; its token shares the state commit.
+	previous, overwrote, err := commitInstallMutation(n.ID, "install", staging, base, n, false)
 	if err != nil {
 		stateMu.Unlock()
-		os.RemoveAll(staging)
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		return ServiceInstallResult{}, err
 	}
-	previous, overwrote := state.InstalledNapps[n.ID]
-	state.InstalledNapps[n.ID] = n
 	outcome := "installed"
 	if overwrote {
 		outcome = "updated"
@@ -166,9 +164,7 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 		}
 	}
 	result := ServiceInstallResult{Address: n.Address(), Outcome: outcome, InstalledVersion: serviceVersion(state.InstalledNapps[n.ID])}
-	saveState()
 	stateMu.Unlock()
-	removeOld()
 
 	// an uninstall of this very version that was waiting for a window to
 	// close must not delete what is installed again (D-24); the reclaim
@@ -232,17 +228,45 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 		return ServiceUninstallResult{}, errNotInstalled
 	}
 	result := ServiceUninstallResult{Address: record.Address(), PreviousVersion: serviceVersion(record), RecordRemoved: true}
-	lastLaunched, hadLastLaunched := state.LastLaunched[id]
-	delete(state.InstalledNapps, id)
-	delete(state.LastLaunched, id)
-	if err := saveState(); err != nil {
-		state.InstalledNapps[id] = record
-		if hadLastLaunched {
-			state.LastLaunched[id] = lastLaunched
-		}
+	base, baseErr := nappBaseDir(id)
+	if baseErr != nil {
+		stateMu.Unlock()
+		reclaimMu.Unlock()
+		return ServiceUninstallResult{}, baseErr
+	}
+	m := mutationIntent{Version: 1, ID: id, Operation: "uninstall", Token: randomID()[:32], PriorEvent: record.EventID, HadPrior: true, Prior: &record, Base: filepath.Base(base)}
+	if err := writeMutation(m); err != nil {
 		stateMu.Unlock()
 		reclaimMu.Unlock()
 		return ServiceUninstallResult{}, err
+	}
+	lastLaunched, hadLastLaunched := state.LastLaunched[id]
+	if state.MutationTokens == nil {
+		state.MutationTokens = make(map[string]string)
+	}
+	priorToken, hadToken := state.MutationTokens[id]
+	delete(state.InstalledNapps, id)
+	delete(state.LastLaunched, id)
+	state.MutationTokens[id] = m.Token
+	if err := saveState(); err != nil {
+		state.InstalledNapps[id] = record
+		if hadToken {
+			state.MutationTokens[id] = priorToken
+		} else {
+			delete(state.MutationTokens, id)
+		}
+		if hadLastLaunched {
+			state.LastLaunched[id] = lastLaunched
+		}
+		// The atomic rename may have committed before a directory fsync error.
+		// Inspect the durable token while stateMu still excludes other writers.
+		var disk AppState
+		if b, readErr := os.ReadFile(statePath); readErr == nil && json.Unmarshal(b, &disk) == nil && disk.MutationTokens[id] == m.Token {
+			state = disk
+		}
+		stateMu.Unlock()
+		reclaimMu.Unlock()
+		return ServiceUninstallResult{}, errors.Join(err, reconcileMutation(m))
 	}
 	stateMu.Unlock()
 	napplet := installed && record.IsNapplet()
@@ -271,21 +295,34 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 		cleanupErr = errors.Join(cleanupErr, removeStaleStaging(base))
 	}
 
+	deferredReclaim := false
+	otherCleanupErr := cleanupErr
 	if napplet {
 		complete, err := reclaimNapplet(record, instancesForNapp(id))
 		cleanupErr = errors.Join(cleanupErr, err)
 		if !complete {
+			deferredReclaim = err == nil
 			cleanupErr = errors.Join(cleanupErr, ErrServicePartialCleanup)
 		}
 	}
 
 	// what the user allowed or denied it is about the copy they had; a
 	// reinstall starts from asking again
-	cleanupErr = errors.Join(cleanupErr, ForgetPermission(id, ""))
+	permissionErr := ForgetPermission(id, "")
+	cleanupErr = errors.Join(cleanupErr, permissionErr)
 	// a napp that isn't installed can't be anyone's habitual handler, and
 	// whatever the next one installed under that id shouldn't inherit it
-	cleanupErr = errors.Join(cleanupErr, forgetActionUsage(id))
-	cleanupErr = errors.Join(cleanupErr, forgetDispatchTarget(id))
+	usageErr := forgetActionUsage(id)
+	dispatchErr := forgetDispatchTarget(id)
+	cleanupErr = errors.Join(cleanupErr, usageErr, dispatchErr)
+	if deferredReclaim && otherCleanupErr == nil && permissionErr == nil && usageErr == nil && dispatchErr == nil {
+		if err := deferReclaimMutation(m); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	if cleanupErr == nil {
+		cleanupErr = removeMutation(m)
+	}
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
@@ -776,6 +813,10 @@ func swapInstallDir(staging, base string) (func(), error) {
 // directories named after base are touched; the napp's busy claim keeps
 // any other install of it from running meanwhile.
 func removeStaleStaging(base string) error {
+	// A pending intent owns its set-aside directory until reconciliation.
+	if mutationExistsByBase(base) {
+		return nil
+	}
 	parent, name := filepath.Dir(base), filepath.Base(base)
 	entries, err := os.ReadDir(parent)
 	if err != nil {
