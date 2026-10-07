@@ -45,9 +45,9 @@ type Entry struct {
 
 var (
 	// ErrInvalidCLI is returned when the CLI path is not an absolute, clean,
-	// printable path to an executable regular file and there are entries to
-	// write. Nothing is written in that case; stale managed entries are still
-	// removed, since removal needs no CLI.
+	// printable path to an executable regular file. Nothing is written in
+	// that case; stale managed entries are still removed, since removal needs
+	// no CLI.
 	ErrInvalidCLI = errors.New("desktop entry CLI path is not an absolute executable file")
 
 	reconcileMu sync.Mutex
@@ -113,11 +113,12 @@ func Render(cli string, e Entry) ([]byte, error) {
 // removed.
 //
 // The CLI path is needed only to write an entry. When it is refused, nothing
-// is written or rewritten and ErrInvalidCLI is reported if entries is not
-// empty, but managed entries whose address is no longer in entries are still
-// removed, so an uninstall (or nil) cleans up without a valid CLI. Entries
-// still in the set are kept as they are: they may name another installation's
-// working CLI.
+// is written or rewritten and ErrInvalidCLI is always reported (a daemon
+// without a usable CLI is a broken installation even before anything is
+// installed), but managed entries whose address is no longer in entries are
+// still removed, so an uninstall (or nil) cleans up without a valid CLI.
+// Entries still in the set are kept as they are: they may name another
+// installation's working CLI.
 func Reconcile(dir, cli string, entries []Entry) error {
 	reconcileMu.Lock()
 	defer reconcileMu.Unlock()
@@ -127,7 +128,7 @@ func Reconcile(dir, cli string, entries []Entry) error {
 	cliErr := checkCLI(cli)
 
 	var errs []error
-	if cliErr != nil && len(entries) > 0 {
+	if cliErr != nil {
 		errs = append(errs, cliErr)
 	}
 	// keep holds every path that is not stale; desired holds the subset that

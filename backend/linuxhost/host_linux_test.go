@@ -523,8 +523,9 @@ func TestLinuxHostNativeEntry(t *testing.T) {
 	if got := managedEntries(t, apps); len(got) != 1 {
 		t.Fatalf("a refused CLI changed entries: %v", got)
 	}
-	// but an uninstall still removes the managed entry: removal needs no CLI
-	if err := broken.SyncAppShortcuts(nil); err != nil {
+	// but an uninstall still removes the managed entry (removal needs no
+	// CLI), while the refused CLI is still reported
+	if err := broken.SyncAppShortcuts(nil); !errors.Is(err, desktopentry.ErrInvalidCLI) {
 		t.Fatalf("uninstall without a CLI: %v", err)
 	}
 	if got := managedEntries(t, apps); len(got) != 0 {

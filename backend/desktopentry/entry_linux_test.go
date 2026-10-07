@@ -453,9 +453,9 @@ func TestEntryReconcileRemovesStaleWithoutCLI(t *testing.T) {
 			t.Fatalf("%s: kept entry rewritten without a valid CLI", name)
 		}
 
-		// the last uninstall removes every managed entry; nothing needed the
-		// CLI, so nothing is reported
-		if err := Reconcile(dir, bad, nil); err != nil {
+		// the last uninstall removes every managed entry; the refused CLI is
+		// still reported, so a broken installation stays visible
+		if err := Reconcile(dir, bad, nil); !errors.Is(err, ErrInvalidCLI) {
 			t.Fatalf("%s: removing all entries: %v", name, err)
 		}
 		if got := managedFiles(t, dir); len(got) != 0 {
