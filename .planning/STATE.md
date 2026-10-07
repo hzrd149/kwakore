@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 8
 current_phase_name: Runtime and Signer Integration
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-10-07T02:56:51.595Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-10-07T03:17:27.410Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 8 execution started
-state_head: 960363d95e0924b2528b8c544ec945ff8a4c8a42
+state_head: 730cc25429660c3809c46d3c0a8851854784c8c3
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 18
-  completed_plans: 15
+  completed_plans: 16
   percent: 50
 ---
 
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 8 (Runtime and Signer Integration) — EXECUTING
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-**Progress:** 15/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
+**Progress:** 16/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
 Last activity: 2026-10-06 — Phase 8 execution started
 
 ## Performance Metrics
@@ -113,6 +113,7 @@ Last activity: 2026-10-06 — Phase 8 execution started
 | Phase 06 P04 | 8min | 2 tasks | 7 files |
 | Phase 08 P01 | 10min | 3 tasks | 16 files |
 | Phase 08 P02 | 8min | 3 tasks | 10 files |
+| Phase 08 P03 | 20min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,8 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 8]: The Linux child executable and adjacent libwebview.so are resolved beside the daemon and checked before each spawn.
 - [Phase 8]: Permission reads keep manifest domain declarations separate from host permission rules and omit session-only answers.
 - [Phase 8]: A socket dispatch allow requires an existing handler target on that exact saved rule; the socket cannot invent a target.
+- [Phase 8]: Signer mode is selected by explicit override, then file config, with credentials stored separately under the private data directory.
+- [Phase 8]: Captured service keyers are revoked before a signer switch returns, and signer errors are fixed at the public boundary.
 
 ### Pending Todos
 
@@ -184,10 +187,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T02:56:51.564Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-10-07T03:17:27.379Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Phase 8 Plan 02 is complete; continue with 08-03-PLAN.md.
+- Phase 8 Plan 03 is complete; continue with 08-04-PLAN.md.

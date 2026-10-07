@@ -27,9 +27,9 @@
 - [x] **CONF-01**: A user can configure service behavior with documented files under XDG configuration paths and see effective non-secret settings through the socket.
 - [x] **CONF-02**: A user can validate configuration and reload supported changes without losing the last known valid configuration.
 - [x] **CONF-03**: A client can change supported general service settings through the socket, with documented precedence relative to declarative files and atomic persistence.
-- [ ] **SIGN-01**: A user can configure the existing supported Nostr signer modes through files and the socket using a documented, consistent schema.
-- [ ] **SIGN-02**: A client can inspect signer mode and connection state without reading private keys, tokens, or bunker client secrets.
-- [ ] **SIGN-03**: A user can supply signer secrets through a protected local mechanism; they are absent from ordinary config files, socket read responses, and logs.
+- [x] **SIGN-01**: A user can configure the existing supported Nostr signer modes through files and the socket using a documented, consistent schema.
+- [x] **SIGN-02**: A client can inspect signer mode and connection state without reading private keys, tokens, or bunker client secrets.
+- [x] **SIGN-03**: A user can supply signer secrets through a protected local mechanism; they are absent from ordinary config files, socket read responses, and logs.
 
 ### Linux Delivery and Cleanup
 
@@ -73,9 +73,9 @@
 | CONF-01 | 6 | Complete |
 | CONF-02 | 6 | Complete |
 | CONF-03 | 6 | Complete |
-| SIGN-01 | 8 | Pending |
-| SIGN-02 | 8 | Pending |
-| SIGN-03 | 8 | Pending |
+| SIGN-01 | 8 | Complete |
+| SIGN-02 | 8 | Complete |
+| SIGN-03 | 8 | Complete |
 | LNXS-01 | 9 | Pending |
 | LNXS-02 | 9 | Pending |
 | LNXS-03 | 9 | Pending |
