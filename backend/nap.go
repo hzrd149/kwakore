@@ -398,8 +398,9 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 		return nil, nil
 	case "nap.openSettings":
 		// the gear in the host page's chrome, never the napplet: its frame
-		// cannot reach these rpcs
-		return nil, openSettingsFor(ci.napp, "")
+		// cannot reach these rpcs. The bundled settings window is retired
+		// (D-10), so this always fails with the same fixed error.
+		return nil, errSettingsUnavailable
 	}
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }

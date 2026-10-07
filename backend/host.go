@@ -108,12 +108,6 @@ type Host interface {
 	// MediaPlayer is retired: its onState is never called again and its
 	// methods do nothing. Calls are never concurrent.
 	MediaPlay(req MediaRequest, onState func(MediaState)) (MediaPlayer, error)
-
-	// OpenSettings puts a napp's settings window on screen: the launcher's
-	// settings page (webview.SettingsHTML), whose messages go to
-	// HandleSettingsMessage under spec.Window. The platform calls
-	// SettingsClosed once it is gone.
-	OpenSettings(spec SettingsSpec) (Transport, error)
 }
 
 // ContextWindowHost lets a service launch cancel a child that has not become
@@ -123,8 +117,8 @@ type ContextWindowHost interface {
 }
 
 // ErrWindowProgramUnavailable is what a host wraps (with %w) when OpenWindow
-// or OpenSettings fails closed because the program that draws napp windows
-// is missing or failed verification. The backend answers it with the
+// fails closed because the program that draws napp windows is missing or
+// failed verification. The backend answers it with the
 // child-unavailable notice instead of a raw error.
 var ErrWindowProgramUnavailable = errors.New("the napp window program is missing or was modified")
 
@@ -316,7 +310,4 @@ func (noopHost) SendNotification(NotificationRequest) (NotificationHandle, error
 }
 func (noopHost) MediaPlay(MediaRequest, func(MediaState)) (MediaPlayer, error) {
 	return nil, errors.New("no media player")
-}
-func (noopHost) OpenSettings(SettingsSpec) (Transport, error) {
-	return nil, errors.New("this host cannot open windows")
 }

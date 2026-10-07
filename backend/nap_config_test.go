@@ -2,12 +2,12 @@ package backend
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,102 +15,22 @@ import (
 	"verdana/backend/napconfig"
 )
 
-// settingsTestHost opens settings windows as recording transports.
-type settingsTestHost struct {
-	noopHost
-	mu          sync.Mutex
-	opened      []SettingsSpec
-	wins        map[string]*settingsRec
-	autostart   bool
-	gnomeSearch bool
-}
-
-func (h *settingsTestHost) AutostartSupported() bool    { return true }
-func (h *settingsTestHost) AppShortcutsSupported() bool { return true }
-func (h *settingsTestHost) GNOMESearchSupported() bool  { return true }
-func (h *settingsTestHost) AutostartEnabled() bool      { return h.autostart }
-func (h *settingsTestHost) SetAutostart(v bool) error {
-	h.autostart = v
-	return nil
-}
-func (h *settingsTestHost) SetGNOMESearchIntegration(v bool) error {
-	h.gnomeSearch = v
-	return nil
-}
-
-type settingsRec struct {
-	mu      sync.Mutex
-	msgs    []WireMsg
-	focused int
-	notify  chan struct{}
-}
-
-func (r *settingsRec) Send(m WireMsg) {
-	r.mu.Lock()
-	r.msgs = append(r.msgs, m)
-	r.mu.Unlock()
-	select {
-	case r.notify <- struct{}{}:
-	default:
-	}
-}
-func (r *settingsRec) Close() {}
-func (r *settingsRec) Focus() {
-	r.mu.Lock()
-	r.focused++
-	r.mu.Unlock()
-}
-
-// resp waits for the answer to rpc id.
-func (r *settingsRec) resp(t *testing.T, id int) WireMsg {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	for {
-		r.mu.Lock()
-		for _, m := range r.msgs {
-			if m.T == "resp" && m.ID == id {
-				r.mu.Unlock()
-				return m
-			}
-		}
-		r.mu.Unlock()
-		select {
-		case <-r.notify:
-		case <-deadline:
-			t.Fatalf("no answer to rpc %d", id)
-		}
-	}
-}
-
-func (h *settingsTestHost) OpenSettings(spec SettingsSpec) (Transport, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.opened = append(h.opened, spec)
-	r := &settingsRec{notify: make(chan struct{}, 64)}
-	if h.wins == nil {
-		h.wins = map[string]*settingsRec{}
-	}
-	h.wins[spec.Window] = r
-	return r, nil
-}
-
-func (h *settingsTestHost) count() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.opened)
-}
-
-func setupConfigTest(t *testing.T) *settingsTestHost {
+// setupConfigTest is setupNapTest for the NAP-CONFIG tests: a fresh data
+// dir and config store, and a host that opens nothing.
+func setupConfigTest(t *testing.T) {
 	t.Helper()
 	setupNapTest(t)
-	h := &settingsTestHost{}
-	host = h
-	t.Cleanup(func() {
-		settingsMu.Lock()
-		settingsWins = map[settingsKey]*settingsWindow{}
-		settingsMu.Unlock()
-	})
-	return h
+}
+
+// launcherSave writes values for a scope the way the launcher does (it is the
+// only writer NAP-CONFIG allows) and pushes them to the scope's subscribed
+// windows.
+func launcherSave(t *testing.T, scope string, values map[string]any) {
+	t.Helper()
+	if err := napconfig.Save(scope, values); err != nil {
+		t.Fatal(err)
+	}
+	pushConfigValues(scope)
 }
 
 func configFixture(t *testing.T) map[string]any {
@@ -196,8 +116,11 @@ func TestNapConfigGetAndSubscribe(t *testing.T) {
 	rec.wait(t, "config.values", 3)
 }
 
-func TestNapConfigSettingsSavePushes(t *testing.T) {
-	h := setupConfigTest(t)
+// TestNapConfigSavePushes: a value the launcher saves for a scope is pushed
+// to every subscribed window of that scope and never to another napp's, and
+// a window that unsubscribed stops hearing.
+func TestNapConfigSavePushes(t *testing.T) {
+	setupConfigTest(t)
 	a, recA := openNapplet(t, "cfg-push")
 	b, recB := openNapplet(t, "cfg-push") // a second window of the same napp
 	other, recO := openNapplet(t, "cfg-other")
@@ -212,38 +135,8 @@ func TestNapConfigSettingsSavePushes(t *testing.T) {
 		w.rec.wait(t, "config.values", 1)
 	}
 
-	// the gear in a's chrome
-	if _, err := napRPC(a, "nap.openSettings", ""); err != nil {
-		t.Fatal(err)
-	}
-	if h.count() != 1 || h.opened[0].NappID != a.napp.ID {
-		t.Fatalf("opened: %v", h.opened)
-	}
-	win := h.opened[0].Window
-	srec := h.wins[win]
-
-	// a second click focuses the same window
-	if _, err := napRPC(b, "nap.openSettings", ""); err != nil {
-		t.Fatal(err)
-	}
-	if h.count() != 1 || srec.focused != 1 {
-		t.Fatalf("second open: %d windows, %d focuses", h.count(), srec.focused)
-	}
-
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 1, Method: "settings.load"})
-	var load settingsLoad
-	if err := json.Unmarshal(srec.resp(t, 1).Result, &load); err != nil {
-		t.Fatal(err)
-	}
-	if load.Values["theme"] != "dark" || len(load.Schema) == 0 {
-		t.Fatalf("load: %+v", load)
-	}
-
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 2, Method: "settings.save",
-		Params: `{"values":{"theme":"light","apiKey":"sekret"}}`})
-	if r := srec.resp(t, 2); r.Error != "" {
-		t.Fatal(r.Error)
-	}
+	scope := configScopeOf(t, a)
+	launcherSave(t, scope, map[string]any{"theme": "light", "apiKey": "sekret"})
 	for _, rec := range []*recTransport{recA, recB} {
 		v := rec.wait(t, "config.values", 2)["values"].(map[string]any)
 		if v["theme"] != "light" || v["apiKey"] != "sekret" {
@@ -254,36 +147,19 @@ func TestNapConfigSettingsSavePushes(t *testing.T) {
 		t.Fatalf("another napp got pushed: %v", got)
 	}
 
-	// the page never sees the secret, only that it is set
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 3, Method: "settings.load"})
-	load = settingsLoad{}
-	_ = json.Unmarshal(srec.resp(t, 3).Result, &load)
-	if _, leaked := load.Values["apiKey"]; leaked || len(load.Secrets) != 1 || load.Secrets[0] != "apiKey" {
-		t.Fatalf("secret handling: %+v", load)
-	}
-
-	// an invalid save is refused and pushes nothing
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 4, Method: "settings.save", Params: `{"values":{"theme":"blue"}}`})
-	if r := srec.resp(t, 4); r.Error == "" {
-		t.Fatal("invalid value saved")
-	}
-
 	// unsubscribed windows stop hearing
 	post(t, b, map[string]any{"type": "config.unsubscribe"})
 	post(t, b, map[string]any{"type": "config.get", "id": "sync"})
 	recB.wait(t, "config.values", 3)
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 5, Method: "settings.reset"})
-	srec.resp(t, 5)
+	if err := napconfig.Reset(scope); err != nil {
+		t.Fatal(err)
+	}
+	pushConfigValues(scope)
 	if v := recA.wait(t, "config.values", 3)["values"].(map[string]any); v["theme"] != "dark" {
 		t.Fatalf("after reset: %v", v)
 	}
 	if got := recB.find("config.values"); len(got) != 3 {
 		t.Fatalf("unsubscribed window was pushed: %d", len(got))
-	}
-
-	SettingsClosed(win)
-	if IsSettingsWindow(win) {
-		t.Fatal("closed window still known")
 	}
 }
 
@@ -310,45 +186,37 @@ func TestNapConfigReloadDropsSubscription(t *testing.T) {
 	}
 }
 
+// TestNapConfigOpenSettings: the bundled settings window is retired (D-10).
+// config.openSettings is fire-and-forget, so it is declined without any
+// answer, whether it names a declared section, an undeclared one or none,
+// and the gear's nap.openSettings rpc fails with one fixed error.
 func TestNapConfigOpenSettings(t *testing.T) {
-	h := setupConfigTest(t)
+	setupConfigTest(t)
 	advance := freezeNapNow(t)
 	ci, rec := openNapplet(t, "cfg-open")
 	ready(t, ci, rec, 1)
 	post(t, ci, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
 	rec.wait(t, "config.registerSchema.result", 1)
 
-	post(t, ci, map[string]any{"type": "config.openSettings", "section": "notifications"})
-	// rate-limited: the second one is dropped
-	post(t, ci, map[string]any{"type": "config.openSettings", "section": "appearance"})
-	deadline := time.Now().Add(3 * time.Second)
-	for h.count() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	for _, msg := range []map[string]any{
+		{"type": "config.openSettings", "section": "notifications"},
+		{"type": "config.openSettings", "section": "nope"},
+		{"type": "config.openSettings"},
+	} {
+		post(t, ci, msg)
+		napSettledConfig(t, ci, rec)
+		// each one past the window's limiter, so the handler ran in full
+		advance(2 * time.Second)
 	}
-	if h.count() != 1 || h.opened[0].Section != "notifications" {
-		t.Fatalf("opened: %v", h.opened)
-	}
-	time.Sleep(50 * time.Millisecond)
-	if h.count() != 1 || h.wins[h.opened[0].Window].focused != 0 {
-		t.Fatal("openSettings not rate-limited")
-	}
-	// nothing is ever answered
 	for _, typ := range rec.types() {
-		if typ == "config.openSettings.result" {
-			t.Fatal("openSettings answered")
+		if strings.Contains(typ, "openSettings") || strings.Contains(typ, "settingsOpened") || strings.Contains(typ, "error") {
+			t.Fatalf("openSettings was answered: %v", rec.types())
 		}
 	}
 
-	// an undeclared section opens at the top
-	SettingsClosed(h.opened[0].Window)
-	// the window's openSettings bucket refills after 2 s
-	advance(2 * time.Second)
-	post(t, ci, map[string]any{"type": "config.openSettings", "section": "nope"})
-	for h.count() == 1 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if h.count() != 2 || h.opened[1].Section != "" {
-		t.Fatalf("undeclared section: %v", h.opened)
+	_, err := napRPC(ci, "nap.openSettings", "")
+	if !errors.Is(err, errSettingsUnavailable) || err.Error() != "settings are not available" {
+		t.Fatalf("nap.openSettings = %v, want the fixed unavailable error", err)
 	}
 }
 
@@ -452,41 +320,33 @@ func TestNapConfigNeverFallsBackToAddress(t *testing.T) {
 	}
 }
 
-// TestConfigOpenSettingsLimitedAcrossSessions: config.openSettings draws on
-// the window's limiter (every 2 s), so a second call right after the first
-// does nothing even after nap.start, and one 2 s later opens again.
+// TestConfigOpenSettingsLimitedAcrossSessions: config.openSettings still
+// draws on the window's limiter (every 2 s), and nap.start does not refill
+// it, so a napplet cannot make the launcher log the request more often than
+// that.
 func TestConfigOpenSettingsLimitedAcrossSessions(t *testing.T) {
-	h := setupConfigTest(t)
+	setupConfigTest(t)
 	advance := freezeNapNow(t)
 	ci, rec := openNapplet(t, "cfg-open-sessions")
 	ready(t, ci, rec, 1)
 
-	waitOpened := func(n int) {
-		t.Helper()
-		deadline := time.Now().Add(3 * time.Second)
-		for h.count() < n && time.Now().Before(deadline) {
-			time.Sleep(5 * time.Millisecond)
-		}
-		if h.count() != n {
-			t.Fatalf("%d settings windows opened, want %d", h.count(), n)
-		}
-	}
-
-	post(t, ci, map[string]any{"type": "config.openSettings"})
-	waitOpened(1)
-	SettingsClosed(h.opened[0].Window)
-
-	ready(t, ci, rec, 2)
 	post(t, ci, map[string]any{"type": "config.openSettings"})
 	napSettledConfig(t, ci, rec)
-	time.Sleep(50 * time.Millisecond)
-	if h.count() != 1 {
-		t.Fatalf("a restart refilled openSettings: %d windows", h.count())
+	if ci.nap.limits.allow(limitOpenSettings, 1) {
+		t.Fatal("config.openSettings did not draw on the window's limiter")
+	}
+
+	ready(t, ci, rec, 2)
+	if ci.nap.limits.allow(limitOpenSettings, 1) {
+		t.Fatal("a restart refilled openSettings")
 	}
 
 	advance(2 * time.Second)
 	post(t, ci, map[string]any{"type": "config.openSettings"})
-	waitOpened(2)
+	napSettledConfig(t, ci, rec)
+	if ci.nap.limits.allow(limitOpenSettings, 1) {
+		t.Fatal("config.openSettings after the refill did not draw on the limiter")
+	}
 }
 
 // napSettledConfig waits until the worker handled what was posted before:
@@ -509,38 +369,11 @@ func napSettledConfig(t *testing.T, ci *Instance, rec *recTransport) {
 	t.Fatalf("config.get %s never answered: %v", id, rec.types())
 }
 
-// settingsSave saves values through a settings window's page and fails the
-// test on an error.
-func settingsSave(t *testing.T, h *settingsTestHost, win string, id int, values string) {
-	t.Helper()
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: id, Method: "settings.save", Params: `{"values":` + values + `}`})
-	h.mu.Lock()
-	srec := h.wins[win]
-	h.mu.Unlock()
-	if r := srec.resp(t, id); r.Error != "" {
-		t.Fatalf("save in %s: %s", win, r.Error)
-	}
-}
-
-// settingsLoadOf loads what a settings window's page renders.
-func settingsLoadOf(t *testing.T, h *settingsTestHost, win string, id int) settingsLoad {
-	t.Helper()
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: id, Method: "settings.load"})
-	h.mu.Lock()
-	srec := h.wins[win]
-	h.mu.Unlock()
-	var load settingsLoad
-	if err := json.Unmarshal(srec.resp(t, id).Result, &load); err != nil {
-		t.Fatal(err)
-	}
-	return load
-}
-
 // TestNapConfigPushStaysInItsVersion: two windows of one napplet at
 // different artifact hashes share an id but not a scope, so a save for one
 // pushes config.values to that window only (RESEARCH Pitfall 7).
 func TestNapConfigPushStaysInItsVersion(t *testing.T) {
-	h := setupConfigTest(t)
+	setupConfigTest(t)
 	a, recA := openNapplet(t, "cfg-versions")
 	a.napp.ArtifactHash = testArtifactOf("h1")
 	b, recB := openNapplet(t, "cfg-versions")
@@ -556,10 +389,7 @@ func TestNapConfigPushStaysInItsVersion(t *testing.T) {
 		w.rec.wait(t, "config.values", 1)
 	}
 
-	if err := OpenSettingsFor(a.instance); err != nil {
-		t.Fatal(err)
-	}
-	settingsSave(t, h, h.opened[0].Window, 1, `{"theme":"light"}`)
+	launcherSave(t, configScopeOf(t, a), map[string]any{"theme": "light"})
 	if v := recA.wait(t, "config.values", 2)["values"].(map[string]any); v["theme"] != "light" {
 		t.Fatalf("A's push: %v", v)
 	}
@@ -580,90 +410,10 @@ func TestNapConfigPushStaysInItsVersion(t *testing.T) {
 	}
 }
 
-// TestNapConfigSettingsFollowTheWindowVersion: the gear in a window opens
-// that window's scope even when the installed record is at another artifact
-// hash, the store's Settings button opens the installed scope, the two never
-// share one settings window, and each save writes only its own scope.
-func TestNapConfigSettingsFollowTheWindowVersion(t *testing.T) {
-	h := setupConfigTest(t)
-	isolateState(t)
-	old, rec := openNapplet(t, "cfg-settings")
-	old.napp.ArtifactHash = testArtifactOf("h1")
-	installed := old.napp
-	installed.ArtifactHash = testArtifactOf("h2")
-	stateMu.Lock()
-	state.InstalledNapps = map[string]Napp{installed.ID: installed}
-	stateMu.Unlock()
-	scope1 := configScopeOf(t, old)
-	scope2, err := nappletScope(installed)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ready(t, old, rec, 1)
-	post(t, old, map[string]any{"type": "config.registerSchema", "id": "r", "schema": configFixture(t)})
-	rec.wait(t, "config.registerSchema.result", 1)
-	if _, cerr := napconfig.Register(scope2, json.RawMessage(mustJSON(t, configFixture(t))), nil); cerr != nil {
-		t.Fatal(cerr)
-	}
-
-	// the gear in the old window
-	if err := OpenSettingsFor(old.instance); err != nil {
-		t.Fatal(err)
-	}
-	// the store's Settings button, for the installed version
-	if err := OpenSettings(installed.ID); err != nil {
-		t.Fatal(err)
-	}
-	if h.count() != 2 || h.opened[0].Window == h.opened[1].Window {
-		t.Fatalf("two versions share a settings window: %v", h.opened)
-	}
-	oldWin, newWin := h.opened[0].Window, h.opened[1].Window
-
-	settingsSave(t, h, oldWin, 1, `{"theme":"light"}`)
-	settingsSave(t, h, newWin, 2, `{"fontSize":20}`)
-	v1, _ := napconfig.Values(scope1)
-	v2, _ := napconfig.Values(scope2)
-	if v1["theme"] != "light" || v1["fontSize"] != float64(14) {
-		t.Fatalf("old scope: %v", v1)
-	}
-	if v2["theme"] != "dark" || v2["fontSize"] != float64(20) {
-		t.Fatalf("installed scope: %v", v2)
-	}
-	if load := settingsLoadOf(t, h, oldWin, 3); load.Values["theme"] != "light" {
-		t.Fatalf("old window shows %v", load.Values)
-	}
-	if load := settingsLoadOf(t, h, newWin, 4); load.Values["theme"] != "dark" {
-		t.Fatalf("installed window shows %v", load.Values)
-	}
-
-	// a reset in the installed window leaves the old scope alone
-	HandleSettingsMessage(newWin, WireMsg{T: "rpc", ID: 5, Method: "settings.reset"})
-	h.wins[newWin].resp(t, 5)
-	if v, _ := napconfig.Values(scope1); v["theme"] != "light" {
-		t.Fatalf("reset reached the old scope: %v", v)
-	}
-
-	// the gear again brings up the old window rather than a third
-	if _, err := napRPC(old, "nap.openSettings", ""); err != nil {
-		t.Fatal(err)
-	}
-	if h.count() != 2 || h.wins[oldWin].focused != 1 {
-		t.Fatalf("gear: %d windows, %d focuses", h.count(), h.wins[oldWin].focused)
-	}
-
-	got := dirFiles(t, filepath.Join(dataDir, "config"))
-	want := []string{napconfig.FileName(scope1), napconfig.FileName(scope2)}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("config files: %v, want %v", got, want)
-	}
-}
-
 // TestRootAndDRootConfigApart: an author's root napplet and its d=root
 // napplet write two config files and never see each other's values (KEY-03).
 func TestRootAndDRootConfigApart(t *testing.T) {
-	h := setupConfigTest(t)
+	setupConfigTest(t)
 	sk := nostr.Generate()
 	index := testArtifactOf("index")
 	root, ok := nappFromEvent(signedWith(t, sk, KindRootNapplet,
@@ -695,10 +445,7 @@ func TestRootAndDRootConfigApart(t *testing.T) {
 		w.rec.wait(t, "config.values", 1)
 	}
 
-	if err := OpenSettingsFor(ciR.instance); err != nil {
-		t.Fatal(err)
-	}
-	settingsSave(t, h, h.opened[0].Window, 1, `{"theme":"light"}`)
+	launcherSave(t, scopeR, map[string]any{"theme": "light"})
 	if v := recR.wait(t, "config.values", 2)["values"].(map[string]any); v["theme"] != "light" {
 		t.Fatalf("root's push: %v", v)
 	}
@@ -711,31 +458,5 @@ func TestRootAndDRootConfigApart(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("config files: %v, want %v", got, want)
-	}
-}
-
-// TestNappSettingsHaveNoConfigSection: a napp (35130) has no NAP-CONFIG, so
-// its settings window opens with no config scope: no schema on the page,
-// and a save is refused without writing a file.
-func TestNappSettingsHaveNoConfigSection(t *testing.T) {
-	h := setupConfigTest(t)
-	ci, _ := openNapplet(t, "a-napp")
-	ci.napp = Napp{ID: testNappletKey.Public().Hex()[:16] + "~a-napp", D: "a-napp", Name: "A napp",
-		Kind: KindNapp, Author: testNappletKey.Public()}
-	if err := OpenSettingsFor(ci.instance); err != nil {
-		t.Fatal(err)
-	}
-	win := h.opened[0].Window
-	load := settingsLoadOf(t, h, win, 1)
-	// no schema reaches the page: a nil RawMessage marshals as null
-	if !load.Napp || (len(load.Schema) != 0 && string(load.Schema) != "null") || len(load.Values) != 0 {
-		t.Fatalf("napp settings page: %+v", load)
-	}
-	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 2, Method: "settings.save", Params: `{"values":{"theme":"light"}}`})
-	if r := h.wins[win].resp(t, 2); r.Error == "" {
-		t.Fatal("a napp's settings saved NAP-CONFIG values")
-	}
-	if got := dirFiles(t, filepath.Join(dataDir, "config")); len(got) != 0 {
-		t.Fatalf("config/ got files: %v", got)
 	}
 }

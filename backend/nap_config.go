@@ -2,14 +2,14 @@ package backend
 
 import (
 	"encoding/json"
+	"errors"
 
 	"verdana/backend/napconfig"
 )
 
-// NAP-CONFIG: a napplet declares its settings as a JSON Schema, the launcher
-// renders them in the napp's settings window, and the napplet reads what the
-// user chose. The launcher is the only writer; nothing here takes a value
-// from the napplet. Schema and values live in the napconfig package, keyed by
+// NAP-CONFIG: a napplet declares its settings as a JSON Schema and reads
+// what the user chose. The launcher is the only writer; nothing here takes a
+// value from the napplet. Schema and values live in the napconfig package, keyed by
 // nappletScope: the napplet's address and artifact hash, the same scope
 // NAP-STORAGE keys by. An update is a new artifact hash and so a fresh scope,
 // starting from the schema's defaults (NAP-CONFIG keys values on (dTag,
@@ -84,7 +84,6 @@ func napConfigRegisterSchema(c *napCall) {
 		// window's own included, after the result its registerSchema
 		// was waiting for
 		pushConfigValues(scope)
-		settingsChanged(scope)
 	}
 }
 
@@ -132,39 +131,23 @@ func napConfigUnsubscribe(c *napCall) {
 	s.mu.Unlock()
 }
 
+// errSettingsUnavailable is the one answer to a request for a napplet's
+// settings window. The bundled settings page went with the Gio launcher
+// (D-10) and the service draws no launcher windows, so nothing opens; the
+// error is fixed so it says nothing about the napplet or its schema.
+var errSettingsUnavailable = errors.New("settings are not available")
+
+// napConfigOpenSettings declines the request. NAP-CONFIG makes it
+// fire-and-forget and lets the shell decide whether to honor it, so nothing
+// is answered: the napplet learns nothing either way, an undeclared section
+// included. The window's limiter (limitOpenSettings, every 2 s, across
+// reloads too) still bounds how often a napplet can make the launcher log
+// it.
 func napConfigOpenSettings(c *napCall) {
-	var r struct {
-		Section string `json:"section"`
-	}
-	_ = c.decode(&r)
-	// one settings window per 2 s per window (nap_limits.go's
-	// limitOpenSettings), across reloads too, so a napplet cannot keep
-	// throwing its settings window in the user's face. An extra call is
-	// ignored silently: the type is reply-less.
 	if !c.ci.nap.limits.allow(limitOpenSettings, 1) {
 		return
 	}
-
-	section := r.Section
-	if section != "" {
-		// an undeclared section is ignored silently: the window opens
-		// at the top, and the napplet learns nothing either way
-		scope, err := nappletScope(c.ci.napp)
-		if err != nil {
-			section = ""
-		} else if sch, _ := napconfig.Snapshot(scope); sch == nil || !sch.Sections[section] {
-			section = ""
-		}
-	}
-	napp := c.ci.napp
-	// config.openSettings is reply-less: a panic here has nobody to answer.
-	// The window opens on this napplet's own scope, whatever version is
-	// installed.
-	safeGo(nil, "open settings", func() {
-		if err := openSettingsFor(napp, section); err != nil {
-			log.Warn().Err(err).Str("napplet", napp.ID).Msg("could not open napplet settings")
-		}
-	})
+	log.Debug().Err(errSettingsUnavailable).Str("napplet", c.ci.napp.ID).Msg("napplet asked for its settings")
 }
 
 // pushConfigValues gives every subscribed window of a scope its values.

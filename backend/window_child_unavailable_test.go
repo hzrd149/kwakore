@@ -15,10 +15,9 @@ import (
 // host does when its child program does not verify.
 type childUnavailableHost struct {
 	noopHost
-	mu       sync.Mutex
-	err      error
-	windows  int
-	settings int
+	mu      sync.Mutex
+	err     error
+	windows int
 	// changed gets the FetchErr each StateChanged call saw, so a test can
 	// wait for the launch goroutine's last notification to finish
 	changed chan string
@@ -38,13 +37,6 @@ func (h *childUnavailableHost) OpenWindow(WindowSpec) (Transport, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.windows++
-	return nil, h.err
-}
-
-func (h *childUnavailableHost) OpenSettings(SettingsSpec) (Transport, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.settings++
 	return nil, h.err
 }
 
@@ -160,34 +152,12 @@ func TestChildUnavailableNoticeReturnsAfterDismissal(t *testing.T) {
 	}
 }
 
-func TestChildUnavailableOnLauncherSettings(t *testing.T) {
-	setupChildUnavailable(t, childUnavailableErr())
-
-	err := OpenLauncherSettings()
-	if !errors.Is(err, ErrWindowProgramUnavailable) {
-		t.Fatalf("OpenLauncherSettings = %v", err)
-	}
-	if got := noticeIDs(Snapshot().Notices); !slices.Equal(got, []string{"child-unavailable"}) {
-		t.Fatalf("notices = %v, want child-unavailable", got)
-	}
-	// the failed window is forgotten, so the next open tries again
-	settingsMu.Lock()
-	_, stuck := settingsWins[settingsKey{nappID: launcherSettingsID}]
-	settingsMu.Unlock()
-	if stuck {
-		t.Fatal("a failed settings window is still registered")
-	}
-}
-
 func TestChildUnavailableOnlyForItsError(t *testing.T) {
 	n := setupChildUnavailable(t, errors.New("no display"))
 
 	// any other host error reads as fixed copy; its text goes to the log
 	if msg := launchAndWait(t, n); msg != "launch failed: "+windowFallback {
 		t.Fatalf("FetchErr = %q", msg)
-	}
-	if err := OpenLauncherSettings(); err == nil {
-		t.Fatal("OpenLauncherSettings succeeded")
 	}
 	if got := Snapshot().Notices; len(got) != 0 {
 		t.Fatalf("notices for an unrelated error = %v", noticeIDs(got))

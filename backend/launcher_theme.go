@@ -98,5 +98,4 @@ func broadcastTheme() {
 	}
 	log.Debug().Str("theme", name).Int("napps", len(open)).Msg("pushed theme to napps")
 	broadcastNappletTheme()
-	broadcastSettingsTheme(name, vars)
 }

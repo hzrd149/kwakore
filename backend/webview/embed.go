@@ -31,12 +31,6 @@ var nappletHostHTML string
 //go:embed napplet-host.js
 var nappletHostJS string
 
-//go:embed napplet-settings.html
-var settingsHTML string
-
-//go:embed napplet-settings.js
-var settingsJS string
-
 // The @napplet/shim browser prelude (see shim/README.md): what makes
 // window.napplet exist inside a napplet's sandboxed frame. The file is
 // upstream's, unmodified; Verdana-specific behavior lives in Go and in
@@ -83,14 +77,6 @@ func NappletHostHTML() string { return nappletHostHTML }
 // place of bridge.js. It carries NAP envelopes between the napplet's frame
 // and the Go host, and gives the napplet nothing else.
 func NappletHostJS() string { return nappletHostJS }
-
-// SettingsHTML is the page a napp's settings window loads: the form the
-// launcher renders from the napplet's NAP-CONFIG schema, and the permissions
-// the user gave it.
-func SettingsHTML() string { return settingsHTML }
-
-// SettingsJS is the settings page's script, injected at document start.
-func SettingsJS() string { return settingsJS }
 
 // ShimPrelude is the @napplet/shim prelude the launcher inlines into every
 // napplet's srcdoc.
