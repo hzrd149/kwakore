@@ -119,6 +119,10 @@ func ServicePermissionSet(ctx context.Context, address string, perm Permission, 
 	}
 	key := RuleKey{Napp: id, Permission: perm, Subject: subject}.ruleID()
 	previous, hadPrevious := state.Rules[key]
+	if perm == PermDispatch && decision == DecisionAllow && previous.Target == "" {
+		stateMu.Unlock()
+		return ServicePermissionResult{}, ErrServiceInvalidPermission
+	}
 	if hadPrevious && previous.Decision == decision {
 		stateMu.Unlock()
 		return ServicePermissionResult{Address: address, Permission: perm, Subject: subject, Decision: decision}, nil

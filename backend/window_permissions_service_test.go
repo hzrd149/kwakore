@@ -85,6 +85,7 @@ func TestServicePermissionsRejectAndRollback(t *testing.T) {
 		decision Decision
 	}{
 		{"invented", "", DecisionAllow}, {PermDispatch, "", DecisionDeny},
+		{PermDispatch, "view", DecisionAllow},
 		{PermSign, "bad\x00subject", DecisionAllow}, {PermSign, "", DecisionAsk},
 	} {
 		if _, err := ServicePermissionSet(context.Background(), first.Address(), tc.perm, tc.subject, tc.decision); !errors.Is(err, ErrServiceInvalidPermission) {
