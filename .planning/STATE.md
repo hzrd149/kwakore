@@ -35,7 +35,7 @@ Current Plan: 24
 Total Plans in Phase: 24
 Status: Executed and reviewed — human verification deferred (09-UAT.md)
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
-Last activity: 2026-10-07 - Completed quick task 261007-cth: CLI accepts NIP-19 napplet addresses
+Last activity: 2026-10-07 - Completed quick task 261007-ej4: slim CI to Go tests with tag-only release
 
 ## Performance Metrics
 
@@ -244,6 +244,7 @@ None yet.
 | 261007-cth | CLI accepts NIP-19 naddr / nostr:naddr addresses and forwards relay hints on install | 2026-10-07 | 9ddae2c | [261007-cth-the-kwakore-cli-should-accept-all-releva](./quick/261007-cth-the-kwakore-cli-should-accept-all-releva/) |
 | 2 | fix ci-user-manager.sh guard: ActiveState instead of LoadState (UAT gap G-09-3) | 2026-10-07 | d9bbede | — |
 | 3 | ci-user-manager bus/env pin + smoke accepts systemd 255 start-limit wording (UAT gap G-09-3) | 2026-10-07 | 259624f | — |
+| 261007-ej4 | Slim CI to Go tests (backend, child) with tag-only bundle and release; CI user-manager helper removed | 2026-10-07 | 67c2f4f | [261007-ej4-slim-ci-to-go-tests-with-tag-only-releas](./quick/261007-ej4-slim-ci-to-go-tests-with-tag-only-releas/) |
 
 ## Deferred Items
 
