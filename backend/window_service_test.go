@@ -11,8 +11,8 @@ func TestServiceWindowStopConfirmsExactInstance(t *testing.T) {
 	setupNapTest(t)
 	selected, _ := openNapplet(t, "selected")
 	other, _ := openNapplet(t, "other")
-	selected.instance = "987654321"
-	other.instance = "987654322"
+	selected.instance = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	other.instance = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if _, err := ServiceStop(ctx, selected.ID()); !errors.Is(err, ErrServiceTimeout) {

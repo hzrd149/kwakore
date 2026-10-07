@@ -126,6 +126,9 @@ var (
 func loadState() {
 	// the shortcut list is read from the files, not from here
 	reloadShortcuts()
+	// A service can be opened again in the same process (tests and controlled
+	// restarts). Absent JSON fields must not retain the previous data dir's state.
+	state = AppState{}
 	statePath = filepath.Join(dataDir, "state.json")
 	stateLost.Store(false)
 	data, err := os.ReadFile(statePath)

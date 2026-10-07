@@ -5,9 +5,9 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"time"
 
 	"verdana/backend"
@@ -274,8 +274,8 @@ func decodeWindowIDParams(params json.RawMessage) (string, *controlprotocol.Erro
 	if json.Unmarshal(fields["window_id"], &id) != nil || id == "" {
 		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
-	n, err := strconv.ParseUint(id, 10, 64)
-	if err != nil || n == 0 || strconv.FormatUint(n, 10) != id {
+	decoded, err := hex.DecodeString(id)
+	if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != id {
 		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
 	return id, nil

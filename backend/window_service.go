@@ -2,8 +2,8 @@ package backend
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
-	"strconv"
 )
 
 var ErrServiceSessionUnavailable = errors.New("graphical session unavailable")
@@ -40,7 +40,10 @@ func ServiceLaunch(ctx context.Context, address string) (ServiceLaunchResult, er
 	if installed.ID == "" {
 		return ServiceLaunchResult{}, ErrServiceNotFound
 	}
-	ci, err := launch(ctx, installed)
+	// A process-local serial can be reused after a daemon restart. Give
+	// service windows a fresh opaque ID so a stale client cannot stop a
+	// different window opened by the next daemon process.
+	ci, err := launchWithInstance(ctx, installed, randomID())
 	if err != nil {
 		if errors.Is(err, ErrServiceSessionUnavailable) {
 			return ServiceLaunchResult{}, err
@@ -55,8 +58,8 @@ func ServiceLaunch(ctx context.Context, address string) (ServiceLaunchResult, er
 
 // ServiceStop confirms WindowClosed for precisely the instance selected here.
 func ServiceStop(ctx context.Context, windowID string) (ServiceStopResult, error) {
-	id, err := strconv.ParseUint(windowID, 10, 64)
-	if err != nil || id == 0 || strconv.FormatUint(id, 10) != windowID {
+	decoded, err := hex.DecodeString(windowID)
+	if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != windowID {
 		return ServiceStopResult{}, ErrServiceInvalidAddress
 	}
 	if ctx.Err() != nil {

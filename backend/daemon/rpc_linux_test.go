@@ -139,11 +139,12 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 
 func TestRPCWindowStop(t *testing.T) {
 	_, reader, conn, _ := rpcService(t)
-	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"1"}`)
+	validID := strings.Repeat("a", 32)
+	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"`+validID+`"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
 		t.Fatalf("unknown window stop: %+v", rpcErr)
 	}
-	for _, params := range []string{`{}`, `{"window_id":"x"}`, `{"window_id":"01"}`, `{"window_id":null}`, `{"window_id":"1","extra":true}`} {
+	for _, params := range []string{`{}`, `{"window_id":"x"}`, `{"window_id":"01"}`, `{"window_id":null}`, `{"window_id":"` + validID + `","extra":true}`} {
 		_, rpcErr, _ = rpcCall(t, reader, conn, "napplet.stop", params)
 		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
 			t.Fatalf("accepted invalid stop %s: %+v", params, rpcErr)

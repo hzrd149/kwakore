@@ -34,6 +34,10 @@ func DefaultProgramPath() string {
 	if err != nil {
 		return ""
 	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return ""
+	}
 	return filepath.Join(filepath.Dir(exe), "napplet")
 }
 
@@ -115,11 +119,12 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 }
 
 type childTransport struct {
-	cmd   *exec.Cmd
-	stdin io.Closer
-	enc   *json.Encoder
-	mu    sync.Mutex
-	done  chan struct{}
+	cmd       *exec.Cmd
+	stdin     io.Closer
+	enc       *json.Encoder
+	mu        sync.Mutex
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 func (c *childTransport) Send(m backend.WireMsg) {
@@ -128,7 +133,20 @@ func (c *childTransport) Send(m backend.WireMsg) {
 	_ = c.enc.Encode(m)
 }
 func (c *childTransport) Focus() {}
-func (c *childTransport) Close() { c.Send(backend.WireMsg{T: "close"}) }
+func (c *childTransport) Close() {
+	c.closeOnce.Do(func() {
+		// A child can stop reading stdin. Never make a stop RPC wait on a
+		// pipe write, and reap the selected child if it ignores the request.
+		go c.Send(backend.WireMsg{T: "close"})
+		go func() {
+			select {
+			case <-c.done:
+			case <-time.After(2 * time.Second):
+				_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+			}
+		}()
+	})
+}
 func (c *childTransport) killAndWait() {
 	_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	<-c.done

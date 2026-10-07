@@ -99,6 +99,7 @@ func TestCLIContract(t *testing.T) {
 	}
 	defer listener.Close()
 	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	windowID := strings.Repeat("b", 32)
 	for _, tc := range []struct {
 		name           string
 		args           []string
@@ -114,7 +115,7 @@ func TestCLIContract(t *testing.T) {
 		{"installed", []string{"installed", "--offset", "2", "--limit", "3"}, "napplet.installed", `{"offset":2,"limit":3}`},
 		{"install", []string{"install", address}, "napplet.install", `{"address":"` + address + `"}`},
 		{"launch", []string{"launch", address}, "napplet.launch", `{"address":"` + address + `"}`},
-		{"stop", []string{"stop", "42"}, "napplet.stop", `{"window_id":"42"}`},
+		{"stop", []string{"stop", windowID}, "napplet.stop", `{"window_id":"` + windowID + `"}`},
 		{"update", []string{"update", address}, "napplet.update", `{"address":"` + address + `"}`},
 		{"uninstall", []string{"uninstall", "--yes", address}, "napplet.uninstall", `{"address":"` + address + `","confirm":true}`},
 	} {
@@ -265,11 +266,12 @@ func TestCLIContractPeerUIDOverride(t *testing.T) {
 
 func TestCLIContractCatalog(t *testing.T) {
 	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	windowID := strings.Repeat("b", 32)
 	commands := [][]string{
 		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
 		{"discover"}, {"installed"}, {"install", address}, {"update", address},
-		{"uninstall", "--yes", address}, {"launch", address}, {"stop", "42"},
+		{"uninstall", "--yes", address}, {"launch", address}, {"stop", windowID},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {

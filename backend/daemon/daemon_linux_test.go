@@ -4,6 +4,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"fiatjaf.com/nostr"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,39 @@ import (
 	"verdana/backend"
 	"verdana/backend/serviceconfig"
 )
+
+func TestDaemonOpenResetsInstalledAcrossDataDirs(t *testing.T) {
+	first := daemonPaths(t)
+	if err := os.MkdirAll(first.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
+	napp := backend.Napp{ID: "old", Name: "old", Author: key.Public()}
+	data, err := json.Marshal(backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first.DataDir, "state.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(first, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.ServiceInstalled(0, 100).Total; got != 1 {
+		t.Fatalf("first data dir: %d installed", got)
+	}
+	s.Close()
+	second := daemonPaths(t)
+	s, err = Open(second, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got := backend.ServiceInstalled(0, 100).Total; got != 0 {
+		t.Fatalf("missing state file retained %d installed napplets", got)
+	}
+}
 
 func daemonPaths(t *testing.T) serviceconfig.Paths {
 	t.Helper()

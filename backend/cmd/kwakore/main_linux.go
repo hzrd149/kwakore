@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,7 +13,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -292,8 +292,8 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		return "napplet.launch", params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "stop" {
-		n, err := strconv.ParseUint(args[1], 10, 64)
-		if err != nil || n == 0 || strconv.FormatUint(n, 10) != args[1] {
+		decoded, err := hex.DecodeString(args[1])
+		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != args[1] {
 			return "", nil, "", inputFailure("invalid window ID")
 		}
 		params, _ := json.Marshal(struct {

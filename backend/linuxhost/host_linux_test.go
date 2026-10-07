@@ -90,3 +90,36 @@ func TestLinuxHostRejectsUnsafeProgram(t *testing.T) {
 		t.Fatal("accepted symlinked executable")
 	}
 }
+
+func TestLinuxHostStopReapsUnresponsiveChild(t *testing.T) {
+	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(dir, "napplet")
+	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\"}\\n'\nsleep 30\n"
+	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "libwebview.so"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DISPLAY", ":stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	transport, err := New(program).OpenWindowContext(ctx, backend.WindowSpec{Instance: "1", Format: backend.FormatNapplet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := transport.(*childTransport)
+	child.Close()
+	select {
+	case <-child.done:
+	case <-ctx.Done():
+		t.Fatal("unresponsive child survived close")
+	}
+}

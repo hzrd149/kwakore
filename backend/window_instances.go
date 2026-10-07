@@ -59,8 +59,9 @@ type Instance struct {
 
 	// gone is closed when the window is gone, so nothing waits on a dead
 	// window (an action dispatch, say) longer than it has to.
-	gone     chan struct{}
-	goneOnce sync.Once
+	gone       chan struct{}
+	goneOnce   sync.Once
+	closedOnce sync.Once
 
 	// subs maps a feed callbackId to the canceller of its subscription.
 	subs  map[int]context.CancelFunc
@@ -554,44 +555,46 @@ func WindowClosed(instance string) {
 	if ci == nil {
 		return
 	}
+	ci.closedOnce.Do(func() {
 
-	ci.subMu.Lock()
-	for _, cancel := range ci.subs {
-		cancel()
-	}
-	ci.subs = make(map[int]context.CancelFunc)
-	ci.subMu.Unlock()
-
-	ci.napClosed()
-
-	instancesMu.Lock()
-	for i, c := range instances {
-		if c == ci {
-			instances = append(instances[:i], instances[i+1:]...)
-			break
+		ci.subMu.Lock()
+		for _, cancel := range ci.subs {
+			cancel()
 		}
-	}
-	instancesMu.Unlock()
-	ci.goneOnce.Do(func() { close(ci.gone) })
-	failed := ci.failedClosed.Load()
-	if ci.auxiliary || failed {
-		// auxiliary windows are temporary helpers, not session windows,
-		// and a napplet window that failed closed would only fail again:
-		// don't keep either listed for reopening, nor the instance
-		// storage only a reopen could have reached (D-07).
-		forgetWindow(ci)
-	}
-	if ci.trial && !failed {
-		// a trial that never ran is nothing to offer for install: the user
-		// was just told it was closed before it ran
-		go finishNappletTrial(ci)
-	}
-	// an update or uninstall that waited for this window can go now: it
-	// has left the live list, so the last window of its version may be
-	// gone (D-24)
-	runPendingReclaims()
-	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
-	notifyState()
+		ci.subs = make(map[int]context.CancelFunc)
+		ci.subMu.Unlock()
+
+		ci.napClosed()
+
+		instancesMu.Lock()
+		for i, c := range instances {
+			if c == ci {
+				instances = append(instances[:i], instances[i+1:]...)
+				break
+			}
+		}
+		instancesMu.Unlock()
+		ci.goneOnce.Do(func() { close(ci.gone) })
+		failed := ci.failedClosed.Load()
+		if ci.auxiliary || failed {
+			// auxiliary windows are temporary helpers, not session windows,
+			// and a napplet window that failed closed would only fail again:
+			// don't keep either listed for reopening, nor the instance
+			// storage only a reopen could have reached (D-07).
+			forgetWindow(ci)
+		}
+		if ci.trial && !failed {
+			// a trial that never ran is nothing to offer for install: the user
+			// was just told it was closed before it ran
+			go finishNappletTrial(ci)
+		}
+		// an update or uninstall that waited for this window can go now: it
+		// has left the live list, so the last window of its version may be
+		// gone (D-24)
+		runPendingReclaims()
+		log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
+		notifyState()
+	})
 }
 
 // ─── registered actions ──────────────────────────────────────────
@@ -866,7 +869,7 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	// background (D-19): every way it opens (store, shortcut, intent,
 	// reopen) passes here, and none of them waits. A trial or a dev
 	// napplet has no installed version to compare with.
-	if previewDocument == nil && devLookup(id) == nil {
+	if previewDocument == nil && devLookup(id) == nil && serviceConfig == nil {
 		launchUpdateCheck(napp)
 	}
 	return ci, nil
