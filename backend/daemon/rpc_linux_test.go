@@ -332,6 +332,34 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	if current := backend.CurrentPrompt(); current == nil || current.ID != prompt.ID {
 		t.Fatalf("forged prompt answer changed the gated prompt: %+v", current)
 	}
+	// A second real daemon child is an authenticated window transport, but
+	// that identity still cannot answer the first child's prompt. Inject the
+	// outbound wire message at the backend boundary using its actual window ID;
+	// the child token check was exercised independently above.
+	secondResult, rpcErr, raw := rpcCall(t, reader, conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil {
+		t.Fatalf("second real child launch: %s %+v", raw, rpcErr)
+	}
+	var second backend.ServiceLaunchResult
+	if err := json.Unmarshal(secondResult, &second); err != nil || second.WindowID == "" || second.WindowID == opened.WindowID {
+		t.Fatalf("second real child identity: %s %v", secondResult, err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = backend.ServiceStop(ctx, second.WindowID)
+	})
+	backend.HandleMessage(second.WindowID, backend.WireMsg{T: "promptAnswer", ID: prompt.ID, Params: `{"ok":true,"scope":"always"}`})
+	if current := backend.CurrentPrompt(); current == nil || current.ID != prompt.ID || current.Instance != opened.WindowID {
+		t.Fatalf("second real child answered another window's prompt: %+v", current)
+	}
+	secondStopped, rpcErr, raw := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"`+second.WindowID+`"}`)
+	if rpcErr != nil || !strings.Contains(string(secondStopped), `"closed":true`) {
+		t.Fatalf("second real child did not stop: %s %+v", raw, rpcErr)
+	}
+	if current := backend.CurrentPrompt(); current == nil || current.ID != prompt.ID {
+		t.Fatalf("second child stop dismissed owner's prompt: %+v", current)
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
