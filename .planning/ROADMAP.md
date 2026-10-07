@@ -72,11 +72,24 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 08-01-PLAN.md — Daemon-owned Linux child launch, confirmed stop, and headless error
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 08-02-PLAN.md — Canonical-address permission inspection and one-rule edits
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 08-03-PLAN.md — Protected local signer, credentials, and non-secret configuration
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 08-04-PLAN.md — NIP-46 bunker and nostrconnect pairing
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 08-05-PLAN.md — Concurrent identity safety and independent child smoke
 
 **Success criteria:**
