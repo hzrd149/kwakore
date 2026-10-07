@@ -250,11 +250,11 @@ The current repository has already moved foreground service, socket protocol, CL
 | A3 | `Terminal=true` is an acceptable way to expose headless launch errors from desktop entries. | Common Pitfalls | Desktop behavior differs; live desktop test decides exact UX. |
 | A4 | The Nix daemon binary can have a sibling child when wrappers are applied. | Common Pitfalls | Package layout may need a wrapper beside the child. |
 
-## Open Questions
+## Resolved Planning Questions
 
-1. **Nix settings behavior:** Should the module expose one shared non-secret settings value for all configured users, or per-user settings? Recommend one shared settings option plus documented per-user XDG file when no module setting is supplied; verify the output with a NixOS evaluation test. [ASSUMED]
-2. **Graphical environment:** Which desktop manager imports display variables into the user manager on supported distributions? Recommend documenting an explicit import command and testing graphical launch in the installed smoke. [CITED: https://github.com/systemd/systemd/blob/main/man/systemctl.xml] [ASSUMED]
-3. **Entry error surface:** A desktop shell may consume an entry's stderr. Prefer a terminal-visible JSON error or a documented journal location, and use the live smoke to lock the choice. [ASSUMED]
+1. **Nix settings behavior:** Expose one shared, non-secret declarative settings value for configured users. When unset, leave each user's ordinary XDG config path intact. When set, generate a store-backed XDG_CONFIG_HOME/kwakore/config.json tree for the service; keep mutable overrides and credentials in user-owned XDG data. Plan 09-08 evaluates both branches and rejects secret fields. This is a planning choice under D-02 and D-04, with runtime behavior still subject to the named evaluation test. [PLANNING RESOLVED; verification remains in the named test]
+2. **Graphical environment:** Require an explicit systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY step where the desktop has not populated the user manager. Do not assume a particular desktop manager performs it. Plan 09-11 tests a real graphical launch after import and a headless launch after removing display variables. [CITED: https://github.com/systemd/systemd/blob/main/man/systemctl.xml] [PLANNING RESOLVED; verification remains in the named test]
+3. **Entry error surface:** Generate Terminal=true native entries and let the existing CLI write fixed JSON error code 1004 with data.reason session_unavailable to terminal stderr. Plan 09-11 captures that output and requests a real desktop-shell visibility check at phase review; if the selected shell does not show it, execution must adjust the entry and documentation before acceptance. [PLANNING RESOLVED; verification remains in the named test]
 
 ## Environment Availability
 

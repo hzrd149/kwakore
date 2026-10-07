@@ -104,7 +104,7 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
-**Plans:** 11 plans
+**Plans:** 24 plans
 
 Plans:
 
@@ -112,9 +112,22 @@ Plans:
 - [ ] 09-02-PLAN.md — Generic Linux bundle and install helper
 - [ ] 09-03-PLAN.md — Safe native entry token and writer
 - [ ] 09-04-PLAN.md — Service entry reconciliation
-- [ ] 09-05-PLAN.md — Gio and Android retirement with child preservation
-- [ ] 09-06-PLAN.md — Direct public Go module rename checkpoint
-- [ ] 09-07-PLAN.md — Retained runtime identity and bridge rename
+- [ ] 09-05-PLAN.md — Android Kotlin source retirement
+- [ ] 09-21-PLAN.md — Android build and resource retirement
+- [ ] 09-22-PLAN.md — Gomobile, Android CI and installer retirement
+- [ ] 09-12-PLAN.md — Gio root manager/store retirement
+- [ ] 09-13-PLAN.md — Obsolete desktop integration retirement
+- [ ] 09-14-PLAN.md — Bundled child extraction and icon retirement
+- [ ] 09-19-PLAN.md — Manager instance IPC and lock retirement
+- [ ] 09-20-PLAN.md — Secret store, theme and chrome retirement
+- [ ] 09-15-PLAN.md — Bundled settings and non-napplet child retirement
+- [ ] 09-06-PLAN.md — Atomic public Go module rename
+- [ ] 09-07-PLAN.md — Retained child environment identity
+- [ ] 09-16-PLAN.md — Child and host-page bridge identity
+- [ ] 09-17-PLAN.md — Service and signer runtime labels
+- [ ] 09-23-PLAN.md — NAP, registry and discovery labels
+- [ ] 09-18-PLAN.md — Service identity test expectations
+- [ ] 09-24-PLAN.md — NAP and window tests with semantic identity scan
 - [ ] 09-08-PLAN.md — Nix package and per-user module
 - [ ] 09-09-PLAN.md — Linux CI and release bundles
 - [ ] 09-10-PLAN.md — Generic-first setup, protocol and identity docs
