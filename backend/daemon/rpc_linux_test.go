@@ -77,6 +77,25 @@ func TestRPCSignerBunkerFixedFailure(t *testing.T) {
 	}
 }
 
+func TestRPCRealChildCIContract(t *testing.T) {
+	workflow, err := os.ReadFile("../../.github/workflows/desktop.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"KWAKORE_REQUIRE_GRAPHICS: \"1\"",
+		"KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet",
+		"KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so",
+		"sudo apt-get install -y --no-install-recommends xvfb",
+		"xvfb-run -a go test -v ./daemon -run '^TestRPCRealChildGraphical$' -count=1 -timeout 60s",
+		"grep -Fq -- '--- PASS: TestRPCRealChildGraphical'",
+	} {
+		if !strings.Contains(string(workflow), required) {
+			t.Errorf("required graphical CI gate missing %q", required)
+		}
+	}
+}
+
 func TestRPCLinuxHostLaunch(t *testing.T) {
 	paths := daemonPaths(t)
 	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
