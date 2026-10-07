@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -107,11 +108,18 @@ func serviceMutationError(ctx context.Context, err error) error {
 	}
 }
 
-func ServiceInstall(ctx context.Context, address string) (ServiceInstallResult, error) {
-	if _, err := ParseCanonicalServiceAddress(address); err != nil {
+// ServiceInstall installs, or updates, the napplet at a canonical address.
+// relays are optional hints from the address's naddr: only extra places to
+// look for this one install. addressEvents asks just the public ws(s) ones
+// (napExplicitRelay), and nothing stores them, since pickAddress builds the
+// Napp from the event alone.
+func ServiceInstall(ctx context.Context, address string, relays []string) (ServiceInstallResult, error) {
+	ptr, err := ParseCanonicalServiceAddress(address)
+	if err != nil {
 		return ServiceInstallResult{}, err
 	}
-	n, err := ResolveNappAddress(ctx, address)
+	ptr.Relays = slices.Clone(relays)
+	n, err := resolveNappPointer(ctx, ptr)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ServiceInstallResult{}, ErrServiceTimeout

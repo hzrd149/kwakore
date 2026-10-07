@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"kwakore/backend"
 	"kwakore/backend/controlprotocol"
+	"kwakore/backend/napaddr"
 	"kwakore/backend/serviceconfig"
 )
 
@@ -271,7 +273,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		return result, nil
 	case "napplet.install":
-		address, err := decodeAddressParams(params)
+		address, relays, err := decodeInstallParams(params)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +284,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		defer done()
 		workCtx, cancel := s.registryContext(ctx)
 		defer cancel()
-		result, installErr := backend.ServiceInstall(workCtx, address)
+		result, installErr := backend.ServiceInstall(workCtx, address, relays)
 		if installErr != nil {
 			return nil, mutationError(installErr)
 		}
@@ -403,6 +405,49 @@ func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error
 	if json.Unmarshal(params, &fields) != nil {
 		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
+	return addressField(fields)
+}
+
+// decodeInstallParams reads napplet.install's params: the canonical address
+// and optional relay hints, the usable ones an naddr carried. A client may
+// send anything, so the hints are checked again here: at most
+// napaddr.MaxRelayHints distinct ws(s) URLs with a host and no credentials,
+// query or fragment. Whether a hint's host is public is decided when the
+// relays are asked. Absent or empty relays is nil.
+func decodeInstallParams(params json.RawMessage) (string, []string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address", "relays"); err != nil {
+		return "", nil, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return "", nil, err
+	}
+	raw, ok := fields["relays"]
+	if !ok {
+		return address, nil, nil
+	}
+	var relays []string
+	if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &relays) != nil || len(relays) > napaddr.MaxRelayHints {
+		return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	for i, r := range relays {
+		if !napaddr.ValidRelayHint(r) || slices.Contains(relays[:i], r) {
+			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+	}
+	if len(relays) == 0 {
+		relays = nil
+	}
+	return address, relays, nil
+}
+
+// addressField is the canonical address in decoded params, shared by every
+// method that takes one so the checks cannot drift apart.
+func addressField(fields map[string]json.RawMessage) (string, *controlprotocol.Error) {
 	var address string
 	if raw, ok := fields["address"]; !ok || bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &address) != nil {
 		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)

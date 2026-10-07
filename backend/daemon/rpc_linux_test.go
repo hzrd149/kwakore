@@ -946,6 +946,59 @@ func TestRPCInstallValidationAndFixedErrors(t *testing.T) {
 	}
 }
 
+// relays on napplet.install are optional, strictly checked hints; every
+// other address method still refuses the key.
+func TestRPCInstallRelayHints(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	q := `"` + address + `"`
+	var nine []string
+	for i := range 9 {
+		nine = append(nine, fmt.Sprintf(`"wss://r%d.example"`, i))
+	}
+	for _, relays := range []string{
+		`null`, `"wss://x.example"`, `[1]`, `["http://x.example"]`, `["wss://u:p@x.example"]`,
+		`["wss://x.example?q"]`, `["wss://x.example#f"]`, `["relay.damus.io"]`, `[""]`, `[null]`, `{}`,
+		"[" + strings.Join(nine, ",") + "]",
+		`["wss://x.example","wss://x.example"]`,
+		`["wss://` + strings.Repeat("a", 250) + `"]`,
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.install", `{"address":`+q+`,"relays":`+relays+`}`)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted relays %s: %+v", relays, rpcErr)
+		}
+	}
+	for _, params := range []string{
+		`{"address":` + q + `,"relays":[],"extra":1}`,
+		`{"relays":["wss://x.example"]}`,
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.install", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted %s: %+v", params, rpcErr)
+		}
+	}
+	// a valid hint list passes validation; the loopback literal is never
+	// dialed (napExplicitRelay refuses it without DNS) and never echoed
+	for _, relays := range []string{`[]`, `["wss://127.0.0.1"]`, "[" + strings.Join(nine[:8], ",") + "]"} {
+		_, rpcErr, raw := rpcCall(t, reader, conn, "napplet.install", `{"address":`+q+`,"relays":`+relays+`}`)
+		if rpcErr == nil || (rpcErr.Code != controlprotocol.NotFound && rpcErr.Code != controlprotocol.Unavailable) ||
+			strings.Contains(raw, "127.0.0.1") || strings.Contains(raw, "example") {
+			t.Fatalf("relays %s: %s %+v", relays, raw, rpcErr)
+		}
+	}
+	for _, tc := range []struct{ method, params string }{
+		{"napplet.update", `{"address":` + q + `,"relays":["wss://x.example"]}`},
+		{"napplet.launch", `{"address":` + q + `,"relays":["wss://x.example"]}`},
+		{"napplet.uninstall", `{"address":` + q + `,"confirm":true,"relays":["wss://x.example"]}`},
+		{"napplet.permissions.get", `{"address":` + q + `,"relays":[]}`},
+	} {
+		_, rpcErr, _ := rpcCall(t, reader, conn, tc.method, tc.params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("%s accepted relays: %+v", tc.method, rpcErr)
+		}
+	}
+}
+
 func TestRPCUpdateValidationAndNotFound(t *testing.T) {
 	_, reader, conn, _ := rpcService(t)
 	_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.update", `{"address":"bad"}`)

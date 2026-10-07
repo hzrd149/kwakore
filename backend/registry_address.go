@@ -102,6 +102,12 @@ func ResolveNappAddress(ctx context.Context, input string) (Napp, error) {
 	if err != nil {
 		return Napp{}, err
 	}
+	return resolveNappPointer(ctx, ptr)
+}
+
+// resolveNappPointer is ResolveNappAddress for an already parsed address,
+// relay hints included.
+func resolveNappPointer(ctx context.Context, ptr nostr.EntityPointer) (Napp, error) {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 

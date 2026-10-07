@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -198,45 +200,109 @@ func TestServiceInstallCommittedOutcomeAndRollback(t *testing.T) {
 	old := addressEvents
 	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{v1Event}, nil }
 	t.Cleanup(func() { addressEvents = old })
-	first, err := ServiceInstall(t.Context(), address)
+	first, err := ServiceInstall(t.Context(), address, nil)
 	if err != nil || first.Address != address || first.Outcome != "installed" || first.InstalledVersion.EventID != v1Event.ID.Hex() {
 		t.Fatalf("first install: %+v %v", first, err)
 	}
-	again, err := ServiceInstall(t.Context(), address)
+	again, err := ServiceInstall(t.Context(), address, nil)
 	if err != nil || again.Outcome != "reinstalled" || again.InstalledVersion != first.InstalledVersion {
 		t.Fatalf("reinstall: %+v %v", again, err)
 	}
 	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) {
 		return []nostr.Event{v1Event, v2Event}, nil
 	}
-	second, err := ServiceInstall(t.Context(), address)
+	second, err := ServiceInstall(t.Context(), address, nil)
 	if err != nil || second.Outcome != "updated" || second.InstalledVersion.EventID != v2Event.ID.Hex() {
 		t.Fatalf("update via install: %+v %v", second, err)
 	}
 	if !trySetBusy(installedFrom(t, v2Event).ID) {
 		t.Fatal("busy setup")
 	}
-	if _, err := ServiceInstall(t.Context(), address); !errors.Is(err, ErrServiceBusy) {
+	if _, err := ServiceInstall(t.Context(), address, nil); !errors.Is(err, ErrServiceBusy) {
 		t.Errorf("busy: %v", err)
 	}
 	setBusy(installedFrom(t, v2Event).ID, false)
 	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{v1Event}, nil }
-	if _, err := ServiceInstall(t.Context(), address); !errors.Is(err, ErrServiceConflict) {
+	if _, err := ServiceInstall(t.Context(), address, nil); !errors.Is(err, ErrServiceConflict) {
 		t.Errorf("downgrade: %v", err)
 	}
 	broken := invalidNapplet(t, sk, "app", 30)
 	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) {
 		return []nostr.Event{v1Event, broken}, nil
 	}
-	if _, err := ServiceInstall(t.Context(), address); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := ServiceInstall(t.Context(), address, nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("invalid winner: %v", err)
 	}
 	failed := blobs.halfServedNapplet(t, sk, "app", "failed", 40)
 	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{failed}, nil }
-	if _, err := ServiceInstall(t.Context(), address); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := ServiceInstall(t.Context(), address, nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("failed stage: %v", err)
 	}
 	assertInstalledIntact(t, installedFrom(t, v2Event), "v2")
+}
+
+// An naddr's relay hints are only extra places to look for one install:
+// they reach the lookup, and nothing keeps them afterwards.
+func TestServiceInstallCarriesRelayHintsWithoutPersisting(t *testing.T) {
+	newReclaimRig(t)
+	blobs := newBlobRig(t)
+	sk := nostr.Generate()
+	v1Event := blobs.servedNapplet(t, sk, "app", "v1", 10)
+	address := eventAddress(v1Event)
+	var seen []nostr.EntityPointer
+	old := addressEvents
+	addressEvents = func(_ context.Context, ptr nostr.EntityPointer) ([]nostr.Event, error) {
+		seen = append(seen, ptr)
+		return []nostr.Event{v1Event}, nil
+	}
+	t.Cleanup(func() { addressEvents = old })
+
+	hints := []string{"wss://relay.napplet.soy"}
+	result, err := ServiceInstall(t.Context(), address, hints)
+	if err != nil || result.Outcome != "installed" {
+		t.Fatalf("install: %+v %v", result, err)
+	}
+	if len(seen) != 1 || !slices.Equal(seen[0].Relays, hints) || seen[0].PublicKey != sk.Public() ||
+		seen[0].Kind != v1Event.Kind || seen[0].Identifier != "app" {
+		t.Fatalf("lookup pointer: %+v", seen)
+	}
+	// the caller's slice is not shared with the lookup
+	hints[0] = "wss://changed.example"
+	if seen[0].Relays[0] != "wss://relay.napplet.soy" {
+		t.Fatal("hint slice aliased")
+	}
+
+	record, err := json.Marshal(installedFrom(t, v1Event))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateMu.Lock()
+	installed, err := json.Marshal(state.InstalledNapps)
+	path := statePath
+	stateMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string][]byte{"record": record, "installed": installed} {
+		if strings.Contains(string(b), "relay.napplet.soy") {
+			t.Fatalf("%s keeps the hint: %s", name, b)
+		}
+	}
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "relay.napplet.soy") {
+			t.Fatalf("state file keeps the hint: %s", b)
+		}
+	}
+	if slices.Contains(Relays(), "wss://relay.napplet.soy") {
+		t.Fatal("hint became a configured relay")
+	}
+
+	if _, err := ServiceInstall(t.Context(), address, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || len(seen[1].Relays) != 0 {
+		t.Fatalf("second lookup carries relays: %+v", seen[1])
+	}
 }
 
 func TestServiceInstallCanceledKeepsCommittedVersion(t *testing.T) {
@@ -254,7 +320,7 @@ func TestServiceInstallCanceledKeepsCommittedVersion(t *testing.T) {
 	t.Cleanup(func() { addressEvents = old })
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := ServiceInstall(ctx, v1.Address()); !errors.Is(err, ErrServiceTimeout) {
+	if _, err := ServiceInstall(ctx, v1.Address(), nil); !errors.Is(err, ErrServiceTimeout) {
 		t.Fatalf("canceled install: %v", err)
 	}
 	assertInstalledIntact(t, v1, "v1")
