@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 23
+current_plan: 24
 status: executing
-stopped_at: Completed 09-09-PLAN.md
-last_updated: "2026-10-07T08:20:34.284Z"
+stopped_at: Completed 09-10-PLAN.md
+last_updated: "2026-10-07T08:41:40.868Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 1209cdad7d4ccd1b1928743e5acf981509bded7c
+state_head: 6d48c5ecc16f5022bffe76d430706dad7e8e610b
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 40
+  completed_plans: 41
   percent: 75
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 23
+Current Plan: 24
 Total Plans in Phase: 24
 Status: Ready to execute
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
@@ -139,6 +139,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P24 | 11min | 2 tasks | 9 files |
 | Phase 09 P08 | 85min | 2 tasks | 7 files |
 | Phase 09 P09 | 10min | 2 tasks | 6 files |
+| Phase 09 P10 | 24min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-08: linuxhost checkProgram accepts sticky shared directories (/nix/store is 1775)
 - [Phase 09]: 09-09: desktop.yml replaced by linux.yml (backend, child, graphical PASS-or-fail, nix, user-service, per-arch bundle, tag-gated release publishing exactly kwakore-linux-{amd64,arm64}.tar.gz + SHA256SUMS)
 - [Phase 09]: 09-09: CI user manager runs systemd --user from a runtime unit user@kwakore-ci-*.service with owner-only runtime dir and HOME under /run, so journald attributes user units; runner home, lingering and other units untouched
+- [Phase 09]: 09-10: docs/service.md is the single user guide (generic install first, then NixOS); README stays short; docs/control-protocol.md stays the v1 client reference
+- [Phase 09]: 09-10: full identity scan passes (37 reviewed); remaining doc mentions of the old name are exact-pattern historical (audit shim build, P7 marker, no-migration sentences) or font (env.d.ts) entries
+- [Phase 09]: 09-10: 5D-NG-android row and its test requirement removed; DEC-3 kept as a retirement record; 5D-5 stays fixed (Phase 5) but says the requires warning is not shown since Phase 9 (surfacing it is new protocol surface, Rule 4)
 
 ### Pending Todos
 
@@ -255,8 +259,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T08:20:34.158Z
-Stopped at: Completed 09-09-PLAN.md
+Last session: 2026-10-07T08:41:40.777Z
+Stopped at: Completed 09-10-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
