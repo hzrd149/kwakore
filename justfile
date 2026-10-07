@@ -18,6 +18,16 @@ bundle-linux-amd64 *args:
 bundle-linux-arm64 *args:
     bash scripts/build-linux-bundle.sh --arch arm64 {{args}}
 
+# The archive and SHA256SUMS carry the names the release publishes and
+# scripts/install.sh downloads (kwakore-linux-ARCH.tar.gz), so a local bundle
+# installs the same way: scripts/install.sh --archive dist/VERSION/kwakore-linux-ARCH.tar.gz
+# verifies it against the SHA256SUMS beside it before unpacking.
+#
+# build this machine's bundle twice and check it the way CI does: identical
+# bytes, exactly the four files, matching SHA256SUMS, and a child that starts
+bundle-check:
+    bash scripts/smoke-linux-service.sh --bundle-only
+
 # The napplet child loads libwebview.so from the directory it is installed in
 # (WEBVIEW_PATH, set by the daemon). The copies come from the pinned go-webview
 # module and are git-ignored; the bundle and child tests need them. GOOS/GOARCH

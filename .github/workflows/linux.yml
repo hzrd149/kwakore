@@ -229,3 +229,149 @@ jobs:
           want=$(grep -c 'pass "install:' scripts/smoke-linux-service.sh)
           got=$(grep -c '^PASS install:' "$log" || true)
           [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS install lines, got $got"; exit 1; }
+
+  # one native job per architecture; each writes only its own archive name,
+  # so the two never race on an output file
+  bundle:
+    name: bundle (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-24.04
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      # two builds into fresh directories must give the same bytes, exactly
+      # the four files, a matching SHA256SUMS and a child that refuses a bad
+      # WEBVIEW_PATH and resolves WebKitGTK on this host
+      - name: bundle smoke
+        run: |
+          log="$RUNNER_TEMP/kwakore-bundle.log"
+          bash scripts/smoke-linux-service.sh --bundle-only | tee "$log"
+          for marker in bundle child; do
+            want=$(grep -c "pass \"$marker:" scripts/smoke-linux-service.sh)
+            got=$(grep -c "^PASS $marker:" "$log" || true)
+            [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS $marker lines, got $got"; exit 1; }
+          done
+
+      - name: build release bundle
+        env:
+          ARCH: ${{ matrix.arch }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          case "$(uname -m)" in
+          x86_64) host=amd64 ;;
+          aarch64) host=arm64 ;;
+          *) echo "unexpected runner machine $(uname -m)"; exit 1 ;;
+          esac
+          [ "$host" = "$ARCH" ] || { echo "runner is $host, matrix wants $ARCH"; exit 1; }
+          # tags give the release version (stamped into kwakore/backend.Version
+          # and the daemon's version output); other runs a commit version
+          if [ "$REF_TYPE" = tag ]; then
+            version=$REF_NAME
+          else
+            version="0.0.0-$(git rev-parse --short=12 HEAD)"
+          fi
+          bash scripts/build-linux-bundle.sh --arch "$ARCH" --version "$version" --out "$RUNNER_TEMP/dist"
+          release="$RUNNER_TEMP/dist/$version"
+          (cd "$release" && sha256sum --strict -c SHA256SUMS)
+          [ "$("$release/kwakore-$version-linux-$ARCH/kwakore-daemon" version)" = "$version" ] ||
+            { echo "bundled daemon does not report $version"; exit 1; }
+          mkdir "$RUNNER_TEMP/upload"
+          cp "$release/kwakore-linux-$ARCH.tar.gz" "$RUNNER_TEMP/upload/"
+          # this job's own checksum line; the release job joins both
+          cp "$release/SHA256SUMS" "$RUNNER_TEMP/upload/kwakore-linux-$ARCH.sha256"
+          printf '%s\n' "$version" >"$RUNNER_TEMP/upload/kwakore-linux-$ARCH.version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kwakore-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/upload/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [backend, child, graphical, nix, service, bundle]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kwakore-linux-*
+          path: dist
+          merge-multiple: true
+
+      # The published names are what scripts/install.sh downloads:
+      # kwakore-linux-ARCH.tar.gz verified against SHA256SUMS. Anything else,
+      # including an archive of the old product, fails the release.
+      - name: assemble release manifest
+        working-directory: dist
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          archs=(amd64 arm64)
+          for arch in "${archs[@]}"; do
+            [ "$(cat "kwakore-linux-$arch.version")" = "$VERSION" ] ||
+              { echo "kwakore-linux-$arch was built as $(cat "kwakore-linux-$arch.version"), not $VERSION"; exit 1; }
+            [ "$(wc -l <"kwakore-linux-$arch.sha256")" = 1 ] || { echo "kwakore-linux-$arch.sha256 is not one line"; exit 1; }
+            sha256sum --strict -c "kwakore-linux-$arch.sha256"
+            rm "kwakore-linux-$arch.sha256" "kwakore-linux-$arch.version"
+          done
+          sha256sum kwakore-linux-amd64.tar.gz kwakore-linux-arm64.tar.gz >SHA256SUMS
+          sha256sum --strict -c SHA256SUMS
+
+          manifest=$(ls -A | LC_ALL=C sort | tr '\n' ' ')
+          [ "$manifest" = "SHA256SUMS kwakore-linux-amd64.tar.gz kwakore-linux-arm64.tar.gz " ] ||
+            { echo "unexpected release files: $manifest"; exit 1; }
+          old='verd''ana'
+          for arch in "${archs[@]}"; do
+            archive="kwakore-linux-$arch.tar.gz"
+            top="kwakore-$VERSION-linux-$arch"
+            members=$(tar -tzf "$archive" | LC_ALL=C sort | tr '\n' ' ')
+            [ "$members" = "$top/kwakore $top/kwakore-daemon $top/libwebview.so $top/napplet " ] ||
+              { echo "$archive does not hold exactly the four bundle files: $members"; exit 1; }
+            if tar -tvzf "$archive" | grep -v '^-'; then
+              echo "$archive holds a member that is not a regular file"
+              exit 1
+            fi
+            if tar -tzf "$archive" | grep -i "$old"; then
+              echo "$archive names the old product"
+              exit 1
+            fi
+            # the same lookup scripts/install.sh does before it trusts a download
+            expected=$(awk -v name="$archive" '{ f = $2; sub(/^\*/, "", f) } NF == 2 && f == name { print $1 }' SHA256SUMS)
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]] && [ "$(sha256sum "$archive" | cut -d' ' -f1)" = "$expected" ] ||
+              { echo "installer checksum lookup fails for $archive"; exit 1; }
+          done
+          if ls -A | grep -i "$old"; then
+            echo "the release names the old product"
+            exit 1
+          fi
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/kwakore-linux-amd64.tar.gz
+            dist/kwakore-linux-arm64.tar.gz
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
