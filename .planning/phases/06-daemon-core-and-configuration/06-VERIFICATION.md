@@ -49,7 +49,7 @@ covered_files:
   - backend/window_instances.go
   - docs/control-protocol.md
   - docs/service.md
-covered_digest: "v1:sha256:b97c9e9bbb9dee1f9f0d67e30c5bb1d843498952db2f39bb76fa787b50f7be0d"
+covered_digest: "v1:sha256:5652efebbe493ffc90b3cf27e3400681c3de1b543abccc8d7483008f81cb2284"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:

@@ -2,21 +2,21 @@
 gsd_state_version: "1.0"
 milestone: v0.2
 milestone_name: Linux Service Pivot
-current_phase: 07
-current_phase_name: Unix Socket and CLI
-current_plan: 07-05 complete
-status: verification_deferred_human
-stopped_at: Phase 06 verified; Phase 07 live UAT remains deferred
-last_updated: "2026-10-07T01:53:01.621Z"
+current_phase: 8
+current_phase_name: Runtime and Signer Integration
+current_plan: Not started
+status: planning
+stopped_at: Phase 7 complete, ready to plan Phase 8
+last_updated: "2026-10-07T02:02:36.398Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 06 complete, transitioned to Phase 07
-state_head: 3889e5345ff0851a661d7d3c8d7d26135a0d6a72
+last_activity_desc: Phase 7 complete, transitioned to Phase 8
+state_head: c2c5c32a037cc3bb3c39f028d8daec9f028e3bb6
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 13
   completed_plans: 13
-  percent: 25
+  percent: 50
 ---
 
 # Project State
@@ -26,21 +26,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** Phase 07 live UAT
+**Current focus:** Phase 08 planning
 
 ## Current Position
 
-Phase: 07 — Unix Socket and CLI
-Current Plan: 07-05 complete
-Status: Phase 07 automated verification passed; live UAT deferred
-**Progress:** 13/13 v0.2 plans completed; 1/4 phases verified ([███░░░░░░░] 25%)
-Last activity: 2026-10-06 — Phase 06 complete, transitioned to Phase 07
+Phase: 8 — Runtime and Signer Integration
+Current Plan: Not started
+Status: Ready to plan
+**Progress:** 13/13 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
+Last activity: 2026-10-06 — Phase 7 complete, transitioned to Phase 8
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 46
+- Total plans completed: 53
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -54,6 +54,7 @@ Last activity: 2026-10-06 — Phase 06 complete, transitioned to Phase 07
 | 04 | 6 | - | - |
 | 05 | 12 | - | - |
 | 06 | 6 | - | - |
+| 7 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -174,20 +175,12 @@ Items acknowledged and deferred at milestone close, most recent first:
 | deferred_items | 05/deferred-items.md: applyUpdate skips user's Blossom servers when manifest names any | acknowledged | 2026-10-06 | v0.1 |
 | deferred_items | 05/deferred-items.md: NAPPLETS.md pre-Phase-5 text (shell.ready, shim 0.29.2, notify) | acknowledged | 2026-10-06 | v0.1 |
 
-## Deferred Verification
-
-| Phase | State | Resume |
-|-------|-------|--------|
-| 7 | verification_deferred_human | $gsd-verify-work 7 |
-
-Phase 7 automated verification covers 18/18 must-haves. The user deferred the two live external relay/blob checks in `07-UAT.md` on 2026-10-06. Phase 7 remains incomplete until those checks pass.
-
 ## Session Continuity
 
 Last session: 2026-10-06T23:51:30Z
-Stopped at: Phase 06 complete, ready to plan Phase 07
-Resume file: .planning/phases/07-unix-socket-and-cli/07-UAT.md
+Stopped at: Phase 7 complete, ready to plan Phase 8
+Resume file: None
 
 ## Operator Next Steps
 
-- Complete `$gsd-verify-work 7`, then resume `$gsd-autonomous --from 7`.
+- Phase 7 is complete; Phase 8 is ready for discussion and planning.

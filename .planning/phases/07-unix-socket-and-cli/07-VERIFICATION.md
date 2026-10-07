@@ -44,7 +44,7 @@ covered_files:
   - backend/window_storage.go
   - docs/control-protocol.md
   - docs/service.md
-covered_digest: "v1:sha256:c7c8a05b02254da64bfc189f2e218a0cd86b091273257a2c9fc248a5eac41ab7"
+covered_digest: "v1:sha256:5a949b16162e7bd9bc55a9b5ac7c98319bcdeb29b813256025f6058fdff9af9d"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:

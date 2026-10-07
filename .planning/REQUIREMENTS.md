@@ -15,11 +15,11 @@
 
 ### Local Control
 
-- [ ] **SOCK-01**: A client can connect to a documented, versioned Unix socket protocol in the user's runtime directory; other users cannot control the daemon.
-- [ ] **SOCK-02**: A client receives stable machine-readable success and error responses, including for malformed or unauthorized requests.
-- [ ] **SOCK-03**: A user can perform every supported socket operation with a scriptable CLI using machine-readable output.
-- [ ] **SOCK-04**: A client can search/discover napplets and list installed napplets through the socket.
-- [ ] **SOCK-05**: A client can install, update, and uninstall napplets through the socket.
+- [x] **SOCK-01**: A client can connect to a documented, versioned Unix socket protocol in the user's runtime directory; other users cannot control the daemon.
+- [x] **SOCK-02**: A client receives stable machine-readable success and error responses, including for malformed or unauthorized requests.
+- [x] **SOCK-03**: A user can perform every supported socket operation with a scriptable CLI using machine-readable output.
+- [x] **SOCK-04**: A client can search/discover napplets and list installed napplets through the socket.
+- [x] **SOCK-05**: A client can install, update, and uninstall napplets through the socket.
 - [ ] **SOCK-06**: A client can inspect and change per-napplet permissions through the socket without bypassing runtime consent rules.
 
 ### Configuration and Signers
@@ -64,11 +64,11 @@
 | SRVC-03 | 8 | Pending |
 | SRVC-04 | 8 | Pending |
 | SRVC-05 | 6 | Complete |
-| SOCK-01 | 7 | Pending |
-| SOCK-02 | 7 | Pending |
-| SOCK-03 | 7 | Pending |
-| SOCK-04 | 7 | Pending |
-| SOCK-05 | 7 | Pending |
+| SOCK-01 | 7 | Complete |
+| SOCK-02 | 7 | Complete |
+| SOCK-03 | 7 | Complete |
+| SOCK-04 | 7 | Complete |
+| SOCK-05 | 7 | Complete |
 | SOCK-06 | 8 | Pending |
 | CONF-01 | 6 | Complete |
 | CONF-02 | 6 | Complete |
