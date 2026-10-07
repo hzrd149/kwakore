@@ -24,6 +24,7 @@ type ServiceSigner struct {
 	// BunkerConnect overrides the network handshake when a service embeds a
 	// connector (for example, a socket integration test).
 	BunkerConnect func(context.Context, context.Context, nostr.SecretKey, string, bool) (nostr.Keyer, error)
+	PairWait      func(context.Context, nostr.SecretKey, string, string) (nostr.PubKey, error)
 	generation    uint64
 	status        SignerStatus
 	keyer         *revocableKeyer

@@ -266,6 +266,10 @@ func (s *Service) StartSignerPair(secret string) (backend.ServicePairStart, erro
 	s.signer.PreemptPending()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := recoverSignerTransition(s.credentials, s.manager); err != nil {
+		done()
+		return backend.ServicePairStart{}, errCredential
+	}
 	rec, err := s.credentials.read()
 	if err != nil {
 		done()
@@ -290,10 +294,9 @@ func (s *Service) StartSignerPair(secret string) (backend.ServicePairStart, erro
 			return backend.SignerStatus{}, errCredential
 		}
 		return s.signer.SwitchBunkerPair(ctx, url, key, expected, func(url, clientKey string) error {
-			if err := s.credentials.writeBunker(url, clientKey); err != nil {
-				return err
-			}
-			return s.manager.SetSignerOverride(serviceconfig.Signer{Mode: "bunker", Relay: relay})
+			return s.commitSignerTransition(serviceconfig.Signer{Mode: "bunker", Relay: relay}, func() error {
+				return s.credentials.writeBunker(url, clientKey)
+			})
 		})
 	}, done)
 	if err != nil {

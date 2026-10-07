@@ -148,7 +148,11 @@ func (s *ServiceSigner) StartPair(parent context.Context, secret string, clientK
 	go func() {
 		defer leaseDone()
 		defer cancel()
-		pk, err := servicePairWait(ctx, clientKey, relay, secret)
+		wait := s.PairWait
+		if wait == nil {
+			wait = servicePairWait
+		}
+		pk, err := wait(ctx, clientKey, relay, secret)
 		if err != nil {
 			s.finishPair(p, SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}, context.DeadlineExceeded)
 			return

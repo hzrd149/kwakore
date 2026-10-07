@@ -8,9 +8,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
 	"verdana/backend/serviceconfig"
 )
@@ -224,6 +227,64 @@ func TestDaemonInterruptedSignerTransitionRestoresPrevious(t *testing.T) {
 	}
 	if pending, err := second.credentials.readTransition(); err != nil || pending != nil {
 		t.Fatalf("transition journal was not cleared: %v", err)
+	}
+}
+
+func TestDaemonFailedPairOverrideRestoresPreviousSigner(t *testing.T) {
+	for _, afterWrite := range []bool{false, true} {
+		name := "before-write"
+		if afterWrite {
+			name = "after-write"
+		}
+		t.Run(name, func(t *testing.T) {
+			p := daemonPaths(t)
+			s, err := Open(p, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldSecret := nip19.EncodeNsec(nostr.Generate())
+			old, err := s.SwitchSigner(context.Background(), "nsec", oldSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote := nostr.Generate()
+			s.signer.PairWait = func(context.Context, nostr.SecretKey, string, string) (nostr.PubKey, error) {
+				return remote.Public(), nil
+			}
+			s.signer.BunkerConnect = func(context.Context, context.Context, nostr.SecretKey, string, bool) (nostr.Keyer, error) {
+				return keyer.New(context.Background(), nil, nip19.EncodeNsec(remote), &keyer.SignerOptions{})
+			}
+			s.setSignerOverride = func(signer serviceconfig.Signer) error {
+				if afterWrite {
+					if err := s.manager.SetSignerOverride(signer); err != nil {
+						return err
+					}
+				}
+				return errors.New("simulated override failure")
+			}
+			if _, err := s.StartSignerPair(strings.Repeat("a", 32)); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err = s.WaitSignerPair(ctx)
+			cancel()
+			if err == nil {
+				t.Fatal("failed pairing reported success")
+			}
+			rec, err := s.credentials.read()
+			if err != nil || rec.Mode != "nsec" || rec.Secret != oldSecret || s.manager.Effective().Signer.Mode != "nsec" {
+				t.Fatalf("failed pair changed durable signer: mode=%q config=%q err=%v", rec.Mode, s.manager.Effective().Signer.Mode, err)
+			}
+			s.Close()
+			restarted, err := Open(p, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			if got := restarted.signer.Status(); got.ConnectionState != "connected" || got.PublicKey != old.PublicKey {
+				t.Fatalf("failed pair changed restored signer: %+v", got)
+			}
+		})
 	}
 }
 
