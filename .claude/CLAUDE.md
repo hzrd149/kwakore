@@ -2,18 +2,19 @@
 
 ## Project
 
-**Verdana**
+**Kwakore**
 
-Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, installs, and runs **napps** (kind `35130` file trees in a webview) and **napplets** (kinds `35129`/`15129` single-file HTML in a sandboxed iframe that reaches the launcher only through NAP messages). This milestone hardens Verdana and brings its napplet runtime into strict conformance with the NIP-5D and NAP specs so it can be released publicly to users who will run untrusted napplets.
+Kwakore is a per-user Linux service that discovers, installs and runs Nostr **napplets** (kinds `35129`/`15129` single-file HTML in a sandboxed iframe that reaches the launcher only through NAP messages). It has no window of its own: a systemd user socket starts `kwakore-daemon` on demand, clients control it through a user-only Unix socket (JSON-RPC protocol version 1, the `kwakore` CLI) and configuration files, and each installed napplet gets a native desktop entry. Milestone v0.2 (Linux Service Pivot) retired the Gio manager/store and the Android app and renamed every supported identifier to `kwakore`.
 
-**Core Value:** A user can run an untrusted napplet and it gets exactly what the specs allow and nothing more: every NAP message behaves as specified, and no napplet or local process can escape the sandbox, forge launcher calls, or read the user's secrets.
+**Core Value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving the napplet or another local process access to capabilities or secrets beyond those explicitly allowed.
 
 ### Constraints
 
-- **Tech stack:** Go backend and desktop, plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
-- **Compatibility:** Android must keep building and working with shared backend changes (`just apk`), even though Android hardening is deferred
-- **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Verdana deviates on purpose today
-- **Testing:** Changes to parsing, permissions, storage, networking, or napplet lifecycle include focused regression tests (`CLAUDE.md`); backend and desktop test commands pass before each merge
+- **Tech stack:** Go backend and window program, plain JS/CSS in `backend/webview/` with no JS toolchain — the shim is vendored byte-identical to upstream
+- **Platform:** Linux only, under a systemd user manager, on generic distributions and NixOS. There are no Android, Windows or macOS builds
+- **Naming:** Supported binaries, modules, units, paths, environment keys and docs use `kwakore`, with no compatibility aliases or migration (D-08); `scripts/check-product-identity.sh` gates it
+- **Spec fidelity:** Conform strictly to MUSTs and SHOULDs, even where Kwakore deviates on purpose today
+- **Testing:** Changes to parsing, permissions, storage, networking, the control protocol or napplet lifecycle include focused regression tests (`CLAUDE.md`); backend and desktop test commands pass before each merge
 
 <!-- GSD:project-end -->
 
@@ -23,62 +24,58 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 
 ## Languages
 
-- Go 1.26.2: `backend/` (module `verdana/backend`, `backend/go.mod`) and `desktop/` (module `fiatjaf.com/verdana/desktop`, `desktop/go.mod`)
-- Kotlin: Android app at `android/app/src/main/java/com/verdana/app/` (Jetpack Compose UI)
-- Plain JavaScript, HTML and CSS: embedded web UI and napplet bridge in `backend/webview/` (`bridge.js`, `napp-ui.js`, `napplet-host.js`, `napplet-settings.js`, `napp-ui.css`, `shim/`). There is no JS toolchain or bundler. Keep it that way.
+- Go 1.26.2: `backend/` (module `kwakore/backend`, `backend/go.mod`) and `desktop/` (module `kwakore/desktop`, `desktop/go.mod`)
+- Plain JavaScript, HTML and CSS: the napplet host page, vendored shim and UI kit in `backend/webview/` (`napplet-host.html`, `napplet-host.js`, `bridge.js`, `napp-ui.js`, `napp-ui.css`, `shim/`). There is no JS toolchain or bundler. Keep it that way.
+- Nix: `flake.nix`, `nix/package.nix`, `nix/module.nix`, `nix/module-test.nix`
+- Bash: `scripts/*.sh` (bundle builder, install helper, smoke tests, identity check)
 
 ## Runtime
 
-- Native Go binaries. Desktop builds use cgo on Linux, macOS and Windows amd64. Windows arm64 builds without cgo.
-- Desktop uses a Gio launcher (`desktop/`) and separate webview window processes. Build `desktop/child/napplet` for napplets and `desktop/child/napp` for legacy napps and settings; both are embedded into the launcher.
-- Android: minSdk 26, compile/targetSdk 35, Java/JVM target 11 (`android/app/build.gradle.kts`). The Go backend ships as an AAR built with `gomobile bind` from `backend/mobile/`.
-- Go modules. `go.sum` lockfiles live in `backend/` and `desktop/`. `desktop/go.mod` uses `replace verdana/backend => ../backend`.
-- Gradle with the Kotlin DSL and wrapper (`android/gradlew`).
+- Native Go binaries for linux amd64 and arm64, built with cgo (WebKitGTK for the window program, the LMDB event store on amd64).
+- A release is four files side by side: `kwakore-daemon`, `kwakore` (CLI), `napplet` (the window program from `desktop/child`) and `libwebview.so`. The daemon resolves `napplet` beside its own executable and hands it `WEBVIEW_PATH` (`backend/linuxhost`).
+- systemd user units `packaging/systemd/user/kwakore.socket` and `kwakore.service`. The socket owns `%t/kwakore/daemon.sock` (directory `0700`, socket `0600`); only the socket is enabled, and the first connection starts the service.
+- Go modules. `go.sum` lockfiles live in `backend/` and `desktop/`. `desktop/go.mod` uses `replace kwakore/backend => ../backend`.
 - `just` task runner (`justfile` in the repo root).
 
 ## Frameworks
 
-- `fiatjaf.com/nostr` (pseudo-version 20260919): Nostr protocol, `sdk.System`, relay pool, eventstore, and the NIP-46/NIP-55 signer types (`backend/nostr_system.go`).
-- `gioui.org` v0.10.0: immediate-mode GUI for the desktop launcher (`desktop/main.go`, `desktop/layout.go`, `desktop/store_layout.go`).
-- `github.com/abemedia/go-webview`: native webview in the child host (`desktop/child/main.go`, `desktop/child/napplet.go`, `desktop/child/settings.go`).
-- Jetpack Compose (BOM 2024.12.01), Material3, and `androidx.webkit` 1.12.1 on Android.
+- `fiatjaf.com/nostr` (pseudo-version 20260919): Nostr protocol, `sdk.System`, relay pool, eventstore, and the NIP-46 signer types (`backend/nostr_system.go`).
+- `github.com/abemedia/go-webview`: native webview in the window program (`desktop/child/main.go`, `desktop/child/napplet.go`), loading the pinned `libwebview.so` generated by `desktop/internal/webviewlib`.
 - Go standard `testing` package. Tests sit beside the code in `*_test.go`, with fixtures in `backend/testdata/`.
-- `just run`: dev build (tags `dev,novulkan`, with `WEBVIEW_DEBUG=true` and `VERDANA_SEARCH_DEBUG=1`)
-- `just prod`, `just go-install`: production desktop build (tag `novulkan`)
-- `just aar`, `just apk`, `just install`: gomobile AAR plus Gradle APK
+- `just bundle` (`bundle-linux-amd64`, `bundle-linux-arm64`): the four-file bundle plus `kwakore-linux-ARCH.tar.gz` and `SHA256SUMS` under `dist/VERSION/` (`scripts/build-linux-bundle.sh`)
+- `just bundle-check`: builds the bundle twice and checks it as CI does (`scripts/smoke-linux-service.sh --bundle-only`)
+- `just webview-libs`: generates the git-ignored `libwebview.so` copies; needed before building or testing `desktop/`
 - `just fonts`: `woff2_compress` regenerates `backend/webview/fonts/*.woff2` from `desktop/assets/*.ttf`
 
 ## Key Dependencies
 
 - `fiatjaf.com/nostr`: all relay, event and signing work
-- `fiatjaf.com/nostr/eventstore/lmdb`: the event store on linux amd64/386 (`backend/eventdb/lmdb.go`). It uses the `github.com/fiatjaf/lmdb-go` fork through a replace directive.
-- The bbolt eventstore is the fallback on all other platforms (`backend/eventdb/boltdb.go`). The KV store is `fiatjaf.com/nostr/sdk/kvstore/bbolt`.
-- `github.com/wizenheimer/blaze`: in-memory inverted index for search (`backend/search.go`). Replaced by the `github.com/fiatjaf/blaze` fork in both modules.
-- `golang.org/x/mobile`: gomobile bindings (`backend/mobile/mobile.go`)
+- `fiatjaf.com/nostr/eventstore/lmdb`: the event store on linux amd64/386 with cgo (`backend/eventdb/lmdb.go`). It uses the `github.com/fiatjaf/lmdb-go` fork through a replace directive.
+- The bbolt eventstore is the fallback elsewhere (`backend/eventdb/boltdb.go`). The KV store is `fiatjaf.com/nostr/sdk/kvstore/bbolt`.
+- `github.com/wizenheimer/blaze`: in-memory inverted index for search (`backend/search.go`). Replaced by the `github.com/fiatjaf/blaze` fork.
 - `github.com/rs/zerolog` v1.35.1: structured logging
-- `github.com/dgraph-io/ristretto/v2` v2.3.0: in-memory caches (`backend/cache.go`, `desktop/image_cache.go`)
-- `github.com/puzpuzpuz/xsync/v3` v3.5.1: concurrent maps (for example `amberWaiters` in `backend/auth_amber.go`)
+- `github.com/dgraph-io/ristretto/v2` v2.3.0: in-memory caches (`backend/cache.go`)
+- `github.com/puzpuzpuz/xsync/v3` v3.5.1: concurrent maps
 - `github.com/btcsuite/btcd/btcutil` v1.1.5: bech32 and other encoding helpers
 - `golang.org/x/image` v0.46.0: image decoding
-- Desktop OS integration:
+- Runtime tools found on `PATH`: `xdg-open`, `wl-copy`/`xclip`, `notify-send`, `mpv` or `vlc`
 
 ## Configuration
 
-- No `.env` files. Configuration is persisted in `state.json` in the data directory (`backend/launcher_state.go`, `backend/backend.go` `Options.DataDir`). The desktop data directory comes from Gio `app.DataDir()` (`desktop/main.go`).
-- Dev and debug variables: `WEBVIEW_DEBUG`, `VERDANA_SEARCH_DEBUG`
-- Parent-to-child process variables: `VERDANA_INSTANCE_ID`, `VERDANA_NAPP_ID`, `VERDANA_NAPP_URL`, `VERDANA_NAPP_DIR`, `VERDANA_NAPP_NAME`, `VERDANA_NAPP_DESC`, `VERDANA_NAPP_FORMAT`, `VERDANA_NAPP_REQUIRES`, `VERDANA_NAPP_STORAGE_FILE`, `VERDANA_THEME`, `VERDANA_THEME_VARS`, `VERDANA_WINDOW_KIND`
-- OS variables read: `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_DATA_DIRS`, `XDG_CURRENT_DESKTOP`, `XDG_DOWNLOAD_DIR`
-- `backend/go.mod`, `desktop/go.mod`, `justfile`
-- Build tags: `dev` and `novulkan`. Platform suffix files follow the `*_linux.go` and `*_windows.go` pattern.
-- `android/app/build.gradle.kts`
+- No `.env` files. The declarative config is `$XDG_CONFIG_HOME/kwakore/config.json` (never written by the service); mutable overrides are `$XDG_DATA_HOME/kwakore/settings-overrides.json`; the data directory `$XDG_DATA_HOME/kwakore` (owner-only) holds `state.json`, the kv and event stores, `signer-credentials.json` and `daemon.lock` (`backend/serviceconfig/`, `backend/daemon/`). The socket is `$XDG_RUNTIME_DIR/kwakore/daemon.sock`. User and client docs: `docs/service.md`, `docs/control-protocol.md`.
+- Debug variable: `WEBVIEW_DEBUG` (window program)
+- Daemon-to-window-program variables: `KWAKORE_INSTANCE_ID`, `KWAKORE_NAPP_ID`, `KWAKORE_NAPP_NAME`, `KWAKORE_NAPP_FORMAT` (always `napplet`), `KWAKORE_WINDOW_WIDTH`, `KWAKORE_WINDOW_HEIGHT`, `KWAKORE_THEME`, `KWAKORE_THEME_VARS`, plus `WEBVIEW_PATH`. The host still writes `KWAKORE_NAPP_DIR`, `_URL`, `_DESC`, `_REQUIRES` and `_STORAGE_FILE`, which the napplet-only program does not read.
+- Test and CI gates: `KWAKORE_REQUIRE_NODE`, `KWAKORE_WEBKIT_SMOKE`, `KWAKORE_REQUIRE_GRAPHICS`, `KWAKORE_WINDOW_BIN`, `KWAKORE_WEBVIEW_LIB`
+- OS variables read: `XDG_RUNTIME_DIR`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_DOWNLOAD_DIR`, `HOME`, `DISPLAY`, `WAYLAND_DISPLAY`, and the socket-activation `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`
+- `backend/go.mod`, `desktop/go.mod`, `justfile`, `flake.nix`
+- No build tags are needed. Platform code uses suffix files and `//go:build linux`; the daemon, CLI and service packages are Linux-only.
 
 ## Platform Requirements
 
-- Go 1.26.2 with a C toolchain for cgo. Linux build dependencies (webview and GTK) are installed by `.github/actions/linux-build-deps`.
-- For Android: the Android SDK at `/opt/android-sdk`, plus `gomobile` and JDK
+- Go 1.26.2 with a C toolchain for cgo, `pkg-config`, and the GTK 3 and WebKitGTK 4.1 development packages (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`). CI installs them with `.github/actions/linux-build-deps`.
+- A systemd user manager for the service and its smoke tests; Nix for the package and module checks
 - `woff2_compress`, only needed for `just fonts`
-- Desktop binaries for linux amd64/arm64, windows amd64/arm64 and darwin amd64/arm64 (CI matrix in `.github/workflows/desktop.yml`)
-- Android APK (`.github/workflows/android.yml`), published through GitHub Releases
+- Release: `kwakore-linux-amd64.tar.gz`, `kwakore-linux-arm64.tar.gz` and one `SHA256SUMS`, published by `.github/workflows/linux.yml` on `v*` tags and installed by `scripts/install.sh`
 
 <!-- GSD:stack-end -->
 
@@ -88,32 +85,32 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 
 ## Naming Patterns
 
-- Go root package `backend/` groups tightly coupled code by prefix: `nap_*.go` (NAP message handlers, e.g. `backend/nap_outbox.go`, `backend/nap_media.go`), `auth_*.go` (`backend/auth_nostrconnect.go`, `backend/auth_amber.go`), `registry_*.go`, `launcher_*.go`, `window_*.go`, `bridge_*.go`, `nostr_*.go`. Put a new file under the matching prefix instead of creating a subpackage.
-- Self-contained pieces go in short lowercase subpackages: `backend/napconfig`, `backend/bunker`, `backend/eventdb`, `backend/netguard`, `backend/qrcode`, `backend/mobile`; desktop OS pieces in `desktop/internal/<name>` (`osintegration`, `media`, `themesystem`, `instancelock`, `windowchrome`, `icon`).
-- Platform code uses OS suffix files: `desktop/internal/osintegration/autostart_linux.go`, `desktop/internal/instancelock/lock_unix.go`.
+- Go root package `backend/` groups tightly coupled code by prefix: `nap_*.go` (NAP message handlers, e.g. `backend/nap_outbox.go`, `backend/nap_media.go`), `auth_*.go` (`backend/auth_service.go`, `backend/auth_nostrconnect.go`), `registry_*.go`, `launcher_*.go`, `window_*.go`, `bridge_*.go`, `nostr_*.go`. Put a new file under the matching prefix instead of creating a subpackage.
+- Self-contained pieces go in short lowercase subpackages: service pieces `backend/daemon`, `backend/controlprotocol`, `backend/serviceconfig`, `backend/linuxhost`, `backend/desktopentry`, commands in `backend/cmd/kwakore` and `backend/cmd/kwakore-daemon`, and helpers `backend/napconfig`, `backend/bunker`, `backend/eventdb`, `backend/netguard`, `backend/qrcode`, `backend/media`, `backend/fileutil`. Window-program helpers live in `desktop/internal/<name>` (`webviewlib`, `wireline`).
+- Platform code uses OS suffix files: `backend/linuxhost/host_linux.go`, `desktop/child/harden_linux.go`.
 - Tests sit beside code as `<file>_test.go` (`backend/nap_outbox_test.go`).
 - Webview assets are kebab-case plain JS/CSS/HTML: `backend/webview/napplet-host.js`, `backend/webview/napp-ui.css`.
-- Kotlin files are PascalCase per main type: `android/app/src/main/java/com/verdana/app/NappWebView.kt`.
-- Go `MixedCaps`; unexported lowerCamel for almost everything internal (`mergeFollowTags`, `reactionTemplate`, `nappletFromEvent`). Exported only when a GUI module (desktop/android via `backend/mobile`) needs it.
+- Go `MixedCaps`; unexported lowerCamel for almost everything internal (`mergeFollowTags`, `reactionTemplate`, `nappletFromEvent`). Exported only when another package (`daemon`, `linuxhost`, `cmd/*`) needs it.
 - Methods on `*Instance` use short receiver `ci`; NAP call receiver `c *napCall`.
 - Short, lowercase, Go-idiomatic (`evt`, `tmpl`, `ctx`, `cerr`). Package-level singletons declared in a `var (...)` block (`backend/backend.go`: `sys`, `log`, `host`, `dataDir`).
-- `MixedCaps` structs/interfaces (`Options`, `Host`, `Instance`, `WireMsg`, `reportTarget`). Interfaces describe platform capability (`Host` is implemented by desktop and Android).
+- `MixedCaps` structs/interfaces (`Options`, `Host`, `Instance`, `WireMsg`, `reportTarget`). Interfaces describe platform capability (`Host` is implemented by `backend/linuxhost`).
+- Product names, paths and identifiers are `kwakore`/`Kwakore`. The old product name may appear only as a reviewed font, fixture or historical exception in `scripts/check-product-identity.sh`.
 
 ## Code Style
 
 - `gofmt` (tabs). No custom formatter config.
-- Kotlin: four-space indentation, `PascalCase` types, `camelCase` members.
 - JS in `backend/webview/`: plain ES, no semicolons, two-space indent, wrapped in IIFE `;(() => { ... })()`, no build toolchain. Do not add one.
-- No golangci-lint / eslint config present. CI (`.github/workflows/desktop.yml`) runs `go test` and `bash -n scripts/install.sh` only. Keep `go vet` clean.
+- No golangci-lint / eslint config present. CI (`.github/workflows/linux.yml`) runs `go vet` and `go test` for both modules, `bash -n` on `scripts/*.sh`, the identity scan, the real-WebKit graphical tests, the Nix module eval and package build, the user-service smokes and the bundle check. Keep `go vet` clean.
 
 ## Import Organization
 
-- Module paths `verdana/backend/...` and `verdana/desktop/...`. No aliases in normal use.
+- Module paths `kwakore/backend/...` and `kwakore/desktop/...`. No aliases in normal use.
 
 ## Error Handling
 
 - Return `error` values; wrap with `fmt.Errorf("...: %w", err)`, create with `errors.New`. Messages are lowercase, human-readable and often user-facing (`"signer did not answer (is your bunker online?)"`, `"only http(s) links can be opened"`).
 - NAP handlers return machine-readable string codes alongside values, empty string means ok: `func reportTarget(...) (reportTarget, string)` returning `"invalid-target"` (`backend/nap_common.go`). Replies are `map[string]any{"ok": false, "error": "..."}`.
+- Control protocol errors are fixed: a code and message from `controlprotocol.FixedError`, with `data` only for partial cleanup and `session_unavailable`. Never put paths, relay URLs, keys or raw errors on the wire.
 - Goroutines and handlers recover panics and still reply (`backend/nap.go` `napCall.async`: `recover()` -> `log.Error()...` -> `c.fail()`; also `backend/nap_identity.go`). Any new async handler must use `c.async(...)` rather than a bare `go`.
 - Contexts: async work runs on the session context so window reload/close cancels it.
 
@@ -121,6 +118,7 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 
 - Structured chaining: `log.Warn().Str("relay", url).Err(err).Msg("dev napp publish failed")`.
 - Messages lowercase, no trailing punctuation. `Warn` for recoverable failures, `Error` for panics/bugs, `Info` for notable lifecycle events, `Debug` for chatter.
+- The daemon logs to stderr, which systemd sends to the user journal.
 - Tests pass `zerolog.Nop()`.
 
 ## Comments
@@ -143,67 +141,76 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 ## System Overview
 
 ```text
-
+kwakore CLI / desktop entry / third-party client
+        │  JSON-RPC v1 over $XDG_RUNTIME_DIR/kwakore/daemon.sock (kwakore.socket)
+        ▼
+kwakore-daemon (backend/daemon) ── backend core (registry, NAP runtime, permissions, storage)
+        │  backend.Host = backend/linuxhost
+        ▼
+napplet window program (desktop/child), one process per window, WireMsg lines on stdin/stdout
 ```
 
 ## Component Responsibilities
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
-| Backend entry | Opens stores, loads state, starts login resume and update rounds | `backend/backend.go` (`Start(Options)`) |
-| Host contract | Everything platform-shaped the backend needs (windows, prompts, clipboard, files, notifications, media, shortcuts, autostart) | `backend/host.go` (`Host`, `Transport`, `WindowSpec`, `noopHost`) |
-| Wire protocol | One JSON message shape both directions between backend and napp shell | `backend/wire.go` (`WireMsg`, `ParseWireMsg`) |
-| Window instances | Launch, track, route messages for, and close napp windows; action routing | `backend/window_instances.go` |
-| Prompts / permissions | Permission prompts and stored grants per napp | `backend/window_prompt.go`, `backend/window_permissions.go` |
-| Napp bridge | Host side of `window.nostr`/`window.nostrdb`/`window.napp` (contract: `env.d.ts`) | `backend/bridge.go`, `bridge_feeds.go`, `bridge_files.go`, `bridge_lists.go` |
+| Daemon command | Foreground service, `version`/`validate`/`status`/`diagnostics` file commands, SIGHUP reload, shutdown deadline | `backend/cmd/kwakore-daemon/main_linux.go` |
+| Service | Opens the backend, data lock and signer credentials; adopts the activated socket or binds it; RPC router; health and diagnostics | `backend/daemon/` (`daemon_linux.go`, `socket_linux.go`, `rpc_linux.go`, `health_linux.go`, `credentials_linux.go`) |
+| Control protocol | Framing, limits, fixed errors, method catalog | `backend/controlprotocol/protocol.go` (contract: `docs/control-protocol.md`) |
+| CLI | Command line to RPC mapping, secret input, `launch-token`, JSON output | `backend/cmd/kwakore/main_linux.go` |
+| Service config | XDG paths, strict config and override parsing, precedence | `backend/serviceconfig/` |
+| Backend entry | Opens stores, loads state, recovers interrupted registry mutations, publishes desktop entries | `backend/backend.go` (`Start(Options)`) |
+| Host contract | Everything platform-shaped the backend needs (windows, prompts, clipboard, files, notifications, media, shortcuts) | `backend/host.go` (`Host`, `Transport`, `WindowSpec`, `noopHost`) |
+| Linux host | Starts and checks the window program, links, clipboard, notifications, desktop entries | `backend/linuxhost/host_linux.go` |
+| Desktop entries | One `kwakore-napplet-<hash>.desktop` per installed napplet, inert launch tokens | `backend/desktopentry/` |
+| Wire protocol | One JSON message shape both directions between backend and window program | `backend/wire.go` (`WireMsg`, `ParseWireMsg`) |
+| Window instances | Launch, track, route messages for, and close napplet windows | `backend/window_instances.go`, `backend/window_service.go` |
+| Prompts / permissions | Permission prompts and stored grants per napplet | `backend/window_prompt.go`, `backend/window_permissions.go`, `backend/window_permissions_service.go` |
 | Napplet runtime | NAP envelope handling (`nap.msg` rpc), one file per NAP domain | `backend/nap.go`, `backend/nap_*.go` |
-| Registry | Discovery, install, uninstall, updates, napp detail | `backend/registry_*.go`, `backend/napp.go`, `backend/napplet*.go` |
-| Launcher state | Persisted state, settings, theme, usage, UI snapshot | `backend/launcher_*.go` (`Snapshot()` in `launcher_ui.go`) |
-| Auth | nsec / NIP-46 nostrconnect / Amber login | `backend/auth_*.go`, `backend/bunker/` |
-| Desktop launcher | Gio manager window, store window, tray, single instance | `desktop/main.go`, `layout.go`, `store.go`, `store_layout.go`, `detail.go`, `tray.go` |
-| Desktop host | `gioHost` implementing `backend.Host` | `desktop/host.go` |
-| Child transport | Spawns child webview, pipes JSON lines | `desktop/childproc.go` |
-| Child webview | Webview shell running a napp/napplet page and bridge JS | `desktop/child/main.go`, `napplet.go`, `settings.go` |
-| Mobile binding | gomobile-facing API and `mobileHost` adapter | `backend/mobile/mobile.go` |
-| Android UI | Activities, Compose screens, WebView hosting | `android/app/src/main/java/com/verdana/app/*.kt` |
+| Registry | Discovery, install, uninstall, updates | `backend/registry_*.go`, `backend/napp.go`, `backend/napplet*.go` |
+| Launcher state | Persisted state, settings, notices | `backend/launcher_*.go` |
+| Auth | Service signer (nsec, NIP-46 bunker and nostrconnect pairing) | `backend/auth_service.go`, `backend/auth_*.go`, `backend/bunker/` |
+| Window program | Webview shell running the napplet host page; per-window binding token; engine hardening; loopback host page | `desktop/child/` (`main.go`, `napplet.go`, `harden*.go`, `loopback.go`, `libcheck.go`) |
+| Webview library | Pinned `libwebview.so` copies | `desktop/internal/webviewlib/` |
+| Packaging | User units, bundle, install helper, Nix package and module | `packaging/systemd/user/`, `scripts/`, `nix/`, `flake.nix` |
 
 ## Pattern Overview
 
-- `backend` knows nothing about drawing or what a "window" is; platforms implement `backend.Host` and `backend.Transport`.
-- Desktop runs every napp window as a separate OS process (`desktop/child`) speaking line-delimited `WireMsg` JSON on stdin/stdout; Android runs WebViews in-process and forwards strings through `mobile.UI.SendToWindow`.
-- GUIs are pull-based: they render `backend.Snapshot()` and get nudged by `Host.StateChanged()` / `Host.PromptsChanged()`.
-- Backend core uses package-level globals (`sys`, `host`, `log`, `dataDir` in `backend/backend.go`) rather than an injected struct.
+- `backend` knows nothing about drawing or what a "window" is; `backend/linuxhost` implements `backend.Host` and `backend.Transport`.
+- Every napplet window is a separate `napplet` process speaking line-delimited `WireMsg` JSON on stdin/stdout (`desktop/internal/wireline`).
+- Clients pull state through the socket; nothing renders `backend.Snapshot()` since the launcher UI was retired.
+- Backend core uses package-level globals (`sys`, `host`, `log`, `dataDir`, `serviceConfig` in `backend/backend.go`) rather than an injected struct.
 
 ## Layers
 
-- Purpose: Draw launcher, handle OS integration
-- Location: `desktop/` (root `main` package), `android/app/src/main/java/com/verdana/app/`
-- Contains: Gio layouts, tray, Kotlin Activities/Compose
-- Depends on: `verdana/backend` (desktop), `mobile` AAR (Android), `desktop/internal/*`
-- Used by: end user
+- Purpose: Accept control requests and run the service
+- Location: `backend/cmd/`, `backend/daemon/`, `backend/controlprotocol/`, `backend/serviceconfig/`
+- Depends on: backend core, `backend/linuxhost`
+- Used by: the CLI, desktop entries and third-party clients over the socket
 - Purpose: OS-facing helpers without UI
-- Location: `desktop/internal/{osintegration,media,themesystem,instancelock,windowchrome,icon}`
-- Depends on: OS APIs only; used by `desktop/host.go`, `desktop/main.go`
-- Purpose: Run napp HTML in a webview and relay bridge calls
-- Location: `desktop/child/`, `backend/webview/` (bridge.js, napplet-host.js/html, napplet-settings.*, napp-ui.css/js, shim/)
-- Depends on: `verdana/backend/webview` embedded assets
+- Location: `backend/linuxhost/`, `backend/desktopentry/`, `backend/media/`
+- Depends on: OS APIs and tools on `PATH`
+- Purpose: Run the napplet host page in a webview and relay NAP calls
+- Location: `desktop/child/`, `backend/webview/` (napplet-host.html/js, shim/, napp-ui.css/js)
+- Depends on: `kwakore/backend/webview` embedded assets, `libwebview.so`
 - Purpose: All non-drawing logic
 - Location: `backend/*.go`
 - Depends on: subpackages, `fiatjaf.com/nostr`
-- Used by: `desktop`, `backend/mobile`
-- Location: `backend/eventdb`, `backend/napconfig`, `backend/bunker`, `backend/netguard`, `backend/qrcode`, `backend/webview`
-- Used by: backend core only (plus `webview` by `desktop/child`)
+- Used by: `backend/daemon`
+- Location: `backend/eventdb`, `backend/napconfig`, `backend/bunker`, `backend/netguard`, `backend/qrcode`, `backend/fileutil`, `backend/webview`
+- Used by: backend core (plus `webview` by `desktop/child`)
 
 ## Data Flow
 
-### Napp RPC (desktop)
+### Control request
+
+- Client connects to `kwakore.socket`; systemd starts the daemon on first use. The daemon checks the peer UID, decodes one JSON-RPC frame per line and dispatches it in `backend/daemon/rpc_linux.go`; mutations are serialized.
 
 ### Napplet NAP envelopes
 
-### Android
+- Host page (`backend/webview/napplet-host.js`) forwards frame envelopes as `nap.msg` over the token-checked binding; the backend handles them sequentially per window and replies through `window.__nap_push`.
 
 - Backend owns state in package globals; persisted to `state.json`, kvstore and eventstore under the data dir (`backend/launcher_state.go`, `backend/eventdb/`)
-- Desktop keeps only per-window UI state in `gioState` (`desktop/main.go`)
 
 ## Key Abstractions
 
@@ -211,10 +218,10 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 
 ## Architectural Constraints
 
-- **Threading:** RPCs handled in goroutines per message; NAP envelopes serialized per session. Gio clipboard writes only from a frame, so they are parked in `ui.clipboard` (`desktop/main.go`).
-- **Global state:** `backend/backend.go` (`sys`, `host`, `log`, `dataDir`); `desktop/main.go` (`ui`, `bundleChecks`); `desktop/childproc.go` (`children`); `desktop/child/main.go` (`meta`, `pending`).
-- **Build tags:** `dev` (dev panel, child on disk) vs default; `novulkan` required for desktop builds; `darwin` split for tray.
-- **Window binaries must be built first:** `desktop/child/napplet` and `desktop/child/napp` are embedded at compile time.
+- **Threading:** socket connections are served per goroutine; registry mutations and launches are serialized by the service's operation lock; NAP envelopes are serialized per session.
+- **Global state:** `backend/backend.go` (`sys`, `host`, `log`, `dataDir`, `serviceConfig`); `desktop/child/main.go` (`meta`, `pending`).
+- **Build tags:** none required; Linux-only packages carry `//go:build linux`.
+- **Window program beside the daemon:** the daemon only runs a `napplet` and `libwebview.so` in its own directory, on a path no group or other user can write. Run `just webview-libs` before building or testing `desktop/`.
 - **Circular imports:** None; backend never imports desktop.
 
 ## Anti-Patterns
@@ -225,7 +232,8 @@ Verdana is a Nostr app launcher for desktop (Gio) and Android. It discovers, ins
 
 ## Error Handling
 
-- Fatal only at startup in `desktop/main.go` (`log.Fatal()`)
+- Startup errors in `kwakore-daemon` print one line on stderr and exit 1; a missed shutdown deadline exits 124
+- CLI failures print one fixed JSON error on stderr and exit 1
 - Unknown/garbled wire messages are logged and dropped (`backend/window_instances.go`)
 
 ## Cross-Cutting Concerns

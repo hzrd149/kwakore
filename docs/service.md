@@ -524,9 +524,10 @@ kwakore signer switch none   # forget the signer
 
 A secret the daemon cannot use, or a signer that does not answer, returns the
 fixed error `{"error":{"code":1004,"message":"Unavailable"}}`, and
-`signer status` then reports `disconnected` until a later switch succeeds. A file with the wrong mode, a symlink, a relative
-path, a secret given as an argument or two sources at once are refused before
-anything is sent, with `{"error":{"code":-32602,"message":"Invalid params"}}`.
+`signer status` then reports `disconnected` until a later switch succeeds. A
+file with the wrong mode, a symlink, a relative path, a secret given as an
+argument or two sources at once are refused before anything is sent, with
+`{"error":{"code":-32602,"message":"Invalid params"}}`.
 If a switch times out, run `kwakore signer status` before trying again.
 
 ## Status, errors and logs

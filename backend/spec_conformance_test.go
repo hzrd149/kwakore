@@ -377,11 +377,16 @@ func TestConformanceChecklistSkeleton(t *testing.T) {
 	// every engine's residual risk sits under NIP-5D Non-Guarantees
 	// (SBOX-04): Level Non-Guarantee, Status N/A, and a Reason recording what
 	// was measured on that engine and what was not; one of them quotes the
-	// Non-Guarantees sentence itself
+	// Non-Guarantees sentence itself. The Android WebView row went with the
+	// Android app in Phase 9 (D-09); the WebView2 and WKWebView rows stay
+	// because the window program still carries their engine setup
 	if tb, ok := tableIn(pinSection["NIP-5D"]); ok {
 		rows := rowsByID(tb)
+		if _, ok := rows["5D-NG-android"]; ok {
+			t.Error("section NIP-5D: row 5D-NG-android describes the retired Android app")
+		}
 		quoted := false
-		for _, id := range []string{"5D-NG-webkitgtk", "5D-NG-webview2", "5D-NG-wkwebview", "5D-NG-android"} {
+		for _, id := range []string{"5D-NG-webkitgtk", "5D-NG-webview2", "5D-NG-wkwebview"} {
 			row, ok := rows[id]
 			if !ok {
 				t.Errorf("section NIP-5D: row %s is missing", id)

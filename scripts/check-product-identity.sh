@@ -12,16 +12,17 @@
 #               old name is also a font family, and that font stays)
 #   fixture     test napplet content under backend/testdata, and the ids the
 #               dev fixture tests read back from it
-#   historical  notes on dropped vendored patches, and regression tests that
+#   historical  notes on dropped vendored patches, regression tests that
 #               assert the old identity is refused, never written and never
-#               migrated
+#               migrated, and user docs stating that nothing is migrated
 #
 # --runtime-only scans the tracked runtime sources: backend/, desktop/,
 # scripts/, packaging/ and the justfile. Without it the scan covers every
 # tracked file outside .planning/ (archived planning history is never
-# scanned or rewritten). The full scan also covers Nix, CI and docs. Plans
-# 09-08, 09-09 and 09-10 rewrite those, and 09-10 adds their reviewed
-# exceptions, so the full scan is expected to fail until they land.
+# scanned or rewritten): the runtime sources plus Nix, CI, the user and
+# contributor docs and the spec audit. Both modes must pass. The full list of
+# reviewed matches and renamed paths is recorded in
+# .planning/phases/09-linux-packaging-rename-and-cleanup/09-RENAME-INVENTORY.md.
 #
 # Each match is checked case-insensitively, in file contents and in tracked
 # path names. A line passes only when its file has an allowlist entry whose
@@ -88,6 +89,7 @@ allow=(
 	'backend/webview/napp-ui.css|font|font-family: [V]erdana, "DejaVu Sans"|the kit font stack'
 	'backend/webview/napp-ui.css|font|Type: [V]erdana runs large|comment on the typeface metrics'
 	'justfile|font|# [V]erdana, in three faces\) as woff2|comment on the fonts recipe sources'
+	'env.d.ts|font|own face — [V]erdana, in three faces, inlined|ui kit contract comment naming the embedded typeface'
 	'desktop/assets/v.TTF|font|BINARY|the typeface file, regular; its name table carries the family name'
 	'desktop/assets/vb.ttf|font|BINARY|the typeface file, bold; its name table carries the family name'
 	'desktop/assets/vi.ttf|font|BINARY|the typeface file, italic; its name table carries the family name'
@@ -112,6 +114,10 @@ allow=(
 	'backend/linuxhost/host_linux_test.go|historical|[V]ERDANA_|asserts the host writes no old child environment key (no aliases)'
 	'backend/desktopentry/entry_linux_test.go|historical|"com\.[v]erdana\.napp\.0123456789abcdef\.desktop"|asserts an old product desktop entry is left alone (no migration)'
 	'backend/netguard/link_test.go|historical|"[v]erdana://x"|asserts the old launcher scheme stays rejected'
+	'spec/CONFORMANCE.md|historical|patched shim build \(`0\.30\.0\+[v]erdana\.2`\)|audit evidence: the version string of the dropped patched shim build'
+	'spec/CONFORMANCE.md|historical|marked `// [v]erdana:` in the old build|audit evidence: the comment marker the dropped patch carried'
+	'docs/service.md|historical|anything from older [V]erdana installations|user doc: removal never touches the old product (no migration, D-08)'
+	'docs/service.md|historical|Nothing is migrated from [V]erdana:|user doc: no compatibility names or migration (D-08)'
 )
 # ────────────────────────────────────────────────────────────────
 

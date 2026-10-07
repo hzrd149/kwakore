@@ -1,7 +1,7 @@
 # Pinned spec snapshots
 
 These are the exact spec texts the conformance audit (`spec/CONFORMANCE.md`)
-measures Verdana against. The pins themselves, and the decisions behind them,
+measures Kwakore against. The pins themselves, and the decisions behind them,
 are recorded in `.planning/research/SPEC-PINS.md`. Most NAP domains exist only
 as open draft pull requests that can be force-pushed or closed, so each pinned
 text is committed here at its commit SHA and the audit quotes these files, not
