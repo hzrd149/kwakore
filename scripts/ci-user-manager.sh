@@ -153,6 +153,9 @@ started=1
 sudo -n systemctl start "$unit" || fail "could not start the isolated user manager $unit"
 
 export XDG_RUNTIME_DIR="$runtime"
+# systemctl --user falls back to $DBUS_SESSION_BUS_ADDRESS when it cannot use
+# the private socket; never let that reach a manager other than ours.
+unset DBUS_SESSION_BUS_ADDRESS
 for _ in $(seq 1 100); do
 	[ -S "$runtime/systemd/private" ] && break
 	sleep 0.1
@@ -164,11 +167,27 @@ running | degraded) ;;
 *) fail "the isolated user manager is not running (state: ${state:-unreachable})" ;;
 esac
 
-# The manager hands its environment to the units it starts; check that it
-# really runs on the private directories, not on the runner's.
+# Every systemctl --user call below must reach this manager and no other.
+cgroup=$(systemctl --user show -p ControlGroup --value 2>/dev/null || true)
+case "$cgroup" in
+*/"$unit") ;;
+*) fail "systemctl --user reached the manager in ${cgroup:-an unknown cgroup}, not $unit" ;;
+esac
+
+# The manager hands its environment to the units it starts. Without a login
+# session nothing imports these, so set them the way a session would, then
+# check that the manager really runs on the private directories.
+systemctl --user set-environment "XDG_RUNTIME_DIR=$runtime" "HOME=$home" \
+	"XDG_CONFIG_HOME=$home/.config" "XDG_DATA_HOME=$home/.local/share" \
+	"XDG_STATE_HOME=$home/.local/state" "XDG_CACHE_HOME=$home/.cache" ||
+	fail "could not set the isolated manager's environment"
 env_block=$(systemctl --user show-environment)
 for want in "XDG_RUNTIME_DIR=$runtime" "HOME=$home" "XDG_CONFIG_HOME=$home/.config" "XDG_DATA_HOME=$home/.local/share"; do
-	printf '%s\n' "$env_block" | grep -qxF -- "$want" || fail "the isolated manager lacks $want"
+	if ! printf '%s\n' "$env_block" | grep -qxF -- "$want"; then
+		note "manager environment (XDG_* and HOME only):"
+		printf '%s\n' "$env_block" | grep -E '^(XDG_[A-Z_]+|HOME)=' >&2 || true
+		fail "the isolated manager lacks $want"
+	fi
 done
 if [ "$(stat -c '%a %u' -- "$runtime")" != "700 $uid" ]; then
 	fail "$runtime changed mode or owner after the manager started"
