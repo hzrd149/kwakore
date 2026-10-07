@@ -7,10 +7,10 @@ current_phase_name: Linux Packaging, Rename and Cleanup
 current_plan: 24
 status: verification_deferred_human
 stopped_at: Phase 9 verified human_needed (60/64); human verification deferred
-last_updated: "2026-10-07T09:01:46.321Z"
+last_updated: "2026-10-07T14:45:38.694Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 4009a9ae67fa3ac5799b531f42add93fb03b4b1a
+state_head: d9bbedeb3477b723f3e1f1d13e1bd6a291518eb0
 progress:
   total_phases: 4
   completed_phases: 3
@@ -242,6 +242,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261007-cth | CLI accepts NIP-19 naddr / nostr:naddr addresses and forwards relay hints on install | 2026-10-07 | 9ddae2c | [261007-cth-the-kwakore-cli-should-accept-all-releva](./quick/261007-cth-the-kwakore-cli-should-accept-all-releva/) |
+| 2 | fix ci-user-manager.sh guard: ActiveState instead of LoadState (UAT gap G-09-3) | 2026-10-07 | d9bbede | — |
 
 ## Deferred Items
 
