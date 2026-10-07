@@ -48,10 +48,11 @@ var (
 
 // currentUser is the signed-in pubkey, if there is one.
 func currentUser() (nostr.PubKey, bool) {
-	if userKeyer == nil || userPubkey == nostr.ZeroPK {
+	k, pk := identitySnapshot()
+	if k == nil || pk == nostr.ZeroPK {
 		return nostr.ZeroPK, false
 	}
-	return userPubkey, true
+	return pk, true
 }
 
 func napIdentityGetPublicKey(c *napCall) {

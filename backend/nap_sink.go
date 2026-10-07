@@ -233,7 +233,7 @@ func (c *napCall) encrypt(ctx context.Context, scheme, plaintext string, to nost
 	if !c.sinkAllowed("encrypt") {
 		return "", errSinkRefused
 	}
-	k := userKeyer
+	k, _ := identitySnapshot()
 	if k == nil {
 		return "", errors.New("not-signed-in")
 	}
@@ -251,7 +251,7 @@ func (c *napCall) sign(ctx context.Context, evt *nostr.Event) error {
 	if !c.sinkAllowed("sign") {
 		return errSinkRefused
 	}
-	k := userKeyer
+	k, _ := identitySnapshot()
 	if k == nil {
 		return errors.New("not-signed-in")
 	}

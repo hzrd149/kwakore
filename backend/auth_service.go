@@ -172,10 +172,8 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 		cancel()
 		return s.status, failed
 	}
-	sessionCancel = cancel
 	s.keyer = &revocableKeyer{active: true, inner: k}
-	userKeyer = s.keyer
-	userPubkey = pk
+	publishIdentity(s.keyer, pk, cancel)
 	s.status = SignerStatus{Mode: "nsec", PublicKey: pk.Hex(), ConnectionState: "connected"}
 	pushIdentityChanged()
 	return s.status, nil
@@ -247,10 +245,8 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 		return s.status, failed
 	}
 	s.pendingCancel = nil
-	sessionCancel = cancel
 	s.keyer = &revocableKeyer{active: true, inner: k}
-	userKeyer = s.keyer
-	userPubkey = pk
+	publishIdentity(s.keyer, pk, cancel)
 	s.status = SignerStatus{Mode: "bunker", PublicKey: pk.Hex(), ConnectionState: "connected"}
 	pushIdentityChanged()
 	if expected != 0 && s.pair != nil && s.pair.generation == expected && !s.pair.finished {
@@ -278,16 +274,11 @@ func (s *ServiceSigner) Close() {
 
 func (s *ServiceSigner) stopLocked(ctx context.Context) bool {
 	stopNostrConnect()
-	if sessionCancel != nil {
-		sessionCancel()
-		sessionCancel = nil
-	}
+	clearIdentity()
 	if s.keyer != nil {
 		s.keyer.revoke()
 		s.keyer = nil
 	}
-	userKeyer = nil
-	userPubkey = nostr.ZeroPK
 	pushIdentityChanged()
 	stopUserRelays()
 	setProfile("", "", "")

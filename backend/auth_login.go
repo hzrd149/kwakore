@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -14,8 +15,10 @@ import (
 )
 
 var (
-	userKeyer  nostr.Keyer
-	userPubkey nostr.PubKey
+	identityMu         sync.RWMutex
+	identityGeneration uint64
+	userKeyer          nostr.Keyer
+	userPubkey         nostr.PubKey
 
 	// sessionCancel ends the current login session. A bunker signer's
 	// response subscription is bound to the ctx the keyer was created
@@ -24,6 +27,58 @@ var (
 	// sign/encrypt fail with "context canceled".
 	sessionCancel context.CancelFunc
 )
+
+// identitySnapshot copies one published keyer/public-key pair. Never hold the
+// lock across signer calls, network operations, or UI notifications.
+func identitySnapshot() (nostr.Keyer, nostr.PubKey) {
+	identityMu.RLock()
+	defer identityMu.RUnlock()
+	return userKeyer, userPubkey
+}
+
+func clearIdentity() uint64 {
+	identityMu.Lock()
+	defer identityMu.Unlock()
+	identityGeneration++
+	if sessionCancel != nil {
+		sessionCancel()
+	}
+	sessionCancel = nil
+	userKeyer = nil
+	userPubkey = nostr.ZeroPK
+	return identityGeneration
+}
+
+func publishIdentity(k nostr.Keyer, pk nostr.PubKey, cancel context.CancelFunc) {
+	identityMu.Lock()
+	defer identityMu.Unlock()
+	identityGeneration++
+	userKeyer, userPubkey, sessionCancel = k, pk, cancel
+}
+
+func publishIdentityIfCurrent(gen uint64, k nostr.Keyer, pk nostr.PubKey, cancel context.CancelFunc) bool {
+	identityMu.Lock()
+	defer identityMu.Unlock()
+	if identityGeneration != gen {
+		return false
+	}
+	userKeyer, userPubkey, sessionCancel = k, pk, cancel
+	return true
+}
+
+func clearIdentityIfCurrent(gen uint64) {
+	identityMu.Lock()
+	defer identityMu.Unlock()
+	if identityGeneration == gen {
+		identityGeneration++
+		if sessionCancel != nil {
+			sessionCancel()
+		}
+		sessionCancel = nil
+		userKeyer = nil
+		userPubkey = nostr.ZeroPK
+	}
+}
 
 // loginAmber finishes logging in through a NIP-55 signer app: the Android
 // side already got the key's pubkey and the signer's package from the app
@@ -42,9 +97,8 @@ func loginAmber(input string) {
 
 	// no handshake to wait on: the signer app is the session, and it holds
 	// the key whether we are online or not
-	userKeyer = AmberSigner{PubKey: pk, Package: pkg}
-	userPubkey = pk
-	sessionCancel = nil
+	clearIdentity()
+	publishIdentity(AmberSigner{PubKey: pk, Package: pkg}, pk, nil)
 	go pushIdentityChanged()
 
 	if err := setStoredLogin(input); err != nil {
@@ -115,15 +169,12 @@ func login(input string, opts loginOpts) {
 	setPhase(PhaseLoading)
 
 	// A new login ends any previous session first.
-	if sessionCancel != nil {
-		sessionCancel()
-		sessionCancel = nil
-	}
-	if userKeyer != nil {
+	old, _ := identitySnapshot()
+	gen := clearIdentity()
+	if old != nil {
 		// the old identity is gone even if this login fails, so napplets
 		// hear "" now rather than keep a key we no longer hold. Synchronous,
 		// so it can't land after the new key's push.
-		userKeyer = nil
 		pushIdentityChanged()
 	}
 
@@ -131,7 +182,10 @@ func login(input string, opts loginOpts) {
 	// responses on a subscription tied to this ctx, so it stays open
 	// until logout or the next login.
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
-	sessionCancel = cancelSession
+	if !publishIdentityIfCurrent(gen, nil, nostr.ZeroPK, cancelSession) {
+		cancelSession()
+		return
+	}
 
 	// only a bunker or NIP-05 login needs the NIP-46 client key. A resume
 	// uses the saved one and never makes a new one: that would silently
@@ -142,7 +196,7 @@ func login(input string, opts loginOpts) {
 		ck, err = loginClientKey(opts)
 		if err != nil {
 			cancelSession()
-			sessionCancel = nil
+			clearIdentityIfCurrent(gen)
 			log.Error().Err(err).Msg("login failed")
 			setLoginErr(err.Error())
 			return
@@ -178,7 +232,7 @@ func login(input string, opts loginOpts) {
 	case res := <-keyerDone:
 		if res.err != nil {
 			cancelSession()
-			sessionCancel = nil
+			clearIdentityIfCurrent(gen)
 			log.Error().Err(res.err).Msg("login failed")
 			setLoginErr(res.err.Error())
 			return
@@ -186,7 +240,7 @@ func login(input string, opts loginOpts) {
 		k = res.k
 	case <-time.After(20 * time.Second):
 		cancelSession()
-		sessionCancel = nil
+		clearIdentityIfCurrent(gen)
 		log.Error().Msg("login timed out")
 		setLoginErr("login timed out")
 		return
@@ -198,14 +252,16 @@ func login(input string, opts loginOpts) {
 	pk, err := k.GetPublicKey(ctx)
 	if err != nil {
 		cancelSession()
-		sessionCancel = nil
+		clearIdentityIfCurrent(gen)
 		log.Error().Err(err).Msg("get public key failed")
 		setLoginErr(err.Error())
 		return
 	}
 
-	userKeyer = k
-	userPubkey = pk
+	if !publishIdentityIfCurrent(gen, k, pk, cancelSession) {
+		cancelSession()
+		return
+	}
 	go pushIdentityChanged()
 
 	// saved before setProfileFromUser, so PhaseMain follows the save (the
@@ -282,12 +338,7 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 func Logout() {
 	CloseAllWindows()
 
-	if sessionCancel != nil {
-		sessionCancel()
-		sessionCancel = nil
-	}
-	userKeyer = nil
-	userPubkey = nostr.PubKey{}
+	clearIdentity()
 	pushIdentityChanged()
 	stopUserRelays()
 
@@ -309,12 +360,13 @@ func keyerErr(err error) error {
 }
 
 // LoggedIn says whether there is a signer to sign with.
-func LoggedIn() bool { return userKeyer != nil }
+func LoggedIn() bool { k, _ := identitySnapshot(); return k != nil }
 
 // UserPubkey is the logged-in user's pubkey in hex, or "".
 func UserPubkey() string {
-	if userPubkey == nostr.ZeroPK {
+	_, pk := identitySnapshot()
+	if pk == nostr.ZeroPK {
 		return ""
 	}
-	return userPubkey.Hex()
+	return pk.Hex()
 }
