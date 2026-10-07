@@ -55,7 +55,7 @@ None — discussion stayed within Phase 8 scope.
 
 ## Summary
 
-The daemon already has a private socket, versioned JSON-RPC dispatcher, canonical address parser, operation leases, and CLI. Its `Open` calls `backend.Start` with `ServiceConfig` but no `Host` or `Secrets`; the service branch of `backend.Start` returns before `loadSecrets`. Thus its window count is presently inert and it cannot resume a signer. [VERIFIED: backend/daemon/daemon_linux.go:45-95; backend/backend.go:75-79,109-132; backend/host.go:263-268] The existing desktop child is a separate process with a per-window bridge and hardened napplet host page; preserve that code and move its Linux host/child mechanism to a package the daemon can call. [VERIFIED: desktop/childproc.go:26-28,46-85; desktop/child/napplet.go:17-25,29-73]
+The daemon already has a private socket, versioned JSON-RPC dispatcher, canonical address parser, operation leases, and CLI. Its `Open` calls `backend.Start` with `ServiceConfig` but no `Host` or `Secrets`; the service branch of `backend.Start` returns before `loadSecrets`. Thus its window count is presently inert and it cannot resume a signer. [VERIFIED: backend/daemon/daemon_linux.go:45-95; backend/backend.go:75-79,109-132; backend/host.go:263-268] The existing desktop child is a separate process with a per-window bridge and hardened napplet host page. Phase 8 plans a daemon-callable Linux host for that independently built child, leaving source and build migration for Phase 9 before desktop removal; this is a planning decision, not implemented code. [VERIFIED: desktop/childproc.go:26-28,46-85; desktop/child/napplet.go:17-25,29-73] [ASSUMED]
 
 The permission rule engine already combines installed, session, and saved rules before prompting, and NAP requests can ask only for the permission declared by their route. Expose narrow per-address rule operations through that engine, with allow/deny still subordinate to route declarations and window prompt ownership. [VERIFIED: backend/window_permissions.go:193-225; backend/nap_sink.go:68-96,122-169] Signer changes need a service-owned sequential lifecycle. The current login path cancels a previous session but uses mutable identity globals, logs some raw signer errors, and writes secrets to legacy state when no keyring is supplied; these are unsafe to expose directly as daemon RPC. [VERIFIED: backend/auth_login.go:102-134,176-217; backend/launcher_secrets.go:197-238]
 
@@ -109,9 +109,9 @@ The socket's user check, protocol processing, and backend dispatch already form 
 
 - `backend/daemon/`: keep service orchestration, RPC adapters, fixed errors, and shutdown leases. [VERIFIED: backend/daemon/daemon_linux.go:24-43,137-145; backend/daemon/rpc_linux.go:20-33]
 - `backend/`: add synchronous service launch/stop/permission and signer lifecycle entry points adjacent to existing runtime code. [ASSUMED]
-- `backend/linuxhost/` (proposed): Linux implementation of `backend.Host`, child transport, and graphical preflight; extract tested child handling from desktop code rather than rebuilding the wire protocol. [ASSUMED]
+- `backend/linuxhost/` (planned for Phase 8): daemon-callable Linux implementation of `backend.Host`, child transport, and graphical preflight using a trusted path to the independently built existing desktop child. [ASSUMED]
 - `backend/serviceconfig/`: add only non-secret signer fields and validation; credential bytes go to a separate private data file. [ASSUMED]
-- `desktop/child/` may be used during this phase, but the packaging plan must make the Linux window executable independent of the old Gio manager before Phase 9 removes desktop. [VERIFIED: desktop/childproc.go:46-85; desktop/embed_prod.go:12-25] [ASSUMED]
+- `desktop/child/` remains the Phase 8 child source; build its window executable independently of the Gio manager. Phase 9 must migrate the child source/build and library packaging before removing desktop. [VERIFIED: desktop/childproc.go:46-85; desktop/embed_prod.go:12-25] [ASSUMED]
 
 ### Pattern 1: Synchronous service launch
 
@@ -123,7 +123,7 @@ Look up the exact active instance, request `Close`, and wait on its `gone` chann
 
 ### Pattern 3: Narrow permissions
 
-Use canonical address lookup to derive the installed napplet's internal ID; do not accept an internal ID from the client. Read declared capabilities from the installed manifest/route model and stored decisions for that ID, preserving subjects such as dispatch action names. Existing `PermissionRules` includes both saved and session answers; a new DTO must distinguish those if the API promises stored decisions. [VERIFIED: backend/napp.go:69-98; backend/window_permissions.go:265-320,349-391; backend/nap_route.go:12-31] A set/clear operation should update one named rule through backend methods that validate the permission and scope, then read back effective state. Avoid using `AnswerPrompt` from the socket: it is an interactive prompt answer path. [VERIFIED: backend/window_prompt.go:281-305] [ASSUMED]
+Use canonical address lookup to derive the installed napplet's internal ID; do not accept an internal ID from the client. Return manifest `RequiredDomains` and `OptionalDomains` as separate declared-domain lists, plus a stable sorted list of saved host-rule rows with `permission`, `subject`, and `decision`. Existing `PermissionRules` includes both saved and session answers, so the service read must snapshot saved `state.Rules` separately and omit session-only entries. [VERIFIED: backend/napp.go:86-98; backend/window_permissions.go:265-320] [ASSUMED] A set/clear operation should update one exact named rule through backend methods that validate the permission and subject, then read back saved state. Avoid using `AnswerPrompt` from the socket: it is an interactive prompt answer path. [VERIFIED: backend/window_prompt.go:281-305] [ASSUMED]
 
 ### Pattern 4: One signer transition owner
 
@@ -143,13 +143,14 @@ The existing v1 catalog contains exact entries `"napplet.discover"`, `"napplet.i
 |---|---|---|
 | `napplet.launch` / `launch ADDRESS` | `address` | `address`, `window_id`, `outcome: "opened"`; new fixed error code carrying `reason: "session_unavailable"`. [ASSUMED] |
 | `napplet.stop` / `stop WINDOW_ID` | `window_id` | `window_id`, `closed: true`, only after `WindowClosed`. [ASSUMED] |
-| `napplet.permissions.get` / `permissions get ADDRESS` | `address` | Manifest declaration plus saved decisions, each decision retaining `permission`, `subject`, and `decision`. [ASSUMED] |
+| `napplet.permissions.get` / `permissions get ADDRESS` | `address` | Separate required/optional manifest domain lists and saved host-rule rows, each with `permission`, `subject`, and `decision`; omit session-only rules. [ASSUMED] |
 | `napplet.permissions.set` / `permissions set ADDRESS PERMISSION allow|deny` | `address`, `permission`, `decision`, optional `subject` | One decision changed; return updated entry. [ASSUMED] |
 | `napplet.permissions.clear` / `permissions clear ADDRESS PERMISSION` | `address`, `permission`, optional `subject` | One named permission cleared; return updated view. [ASSUMED] |
 | `signer.status` / `signer status` | none | `mode`, user `public_key`, `connection_state` only. [ASSUMED] |
 | `signer.switch` / `signer switch MODE --secret-stdin|--secret-file PATH` | public mode/config plus a secret write field only where needed | Final connection outcome; no echo of submitted material. [ASSUMED] |
-| `signer.pair` / `signer pair` | client-generated one-time secret sent as write, public relay | Public client key and relay only; CLI constructs the URI locally. [ASSUMED] |
-| `signer.cancel` / `signer cancel` | none | Pairing listener stopped; no secret-bearing read. [ASSUMED] |
+| `signer.pair.start` / `signer pair start` | client-generated one-time secret sent as write | Public client key and relay only; CLI constructs the URI locally. [ASSUMED] |
+| `signer.pair.wait` / `signer pair wait` | none | Final public connection state after validated response or fixed failure. [ASSUMED] |
+| `signer.pair.cancel` / `signer pair cancel` | none | Pairing listener stopped; no secret-bearing read. [ASSUMED] |
 
 Add an allow-listed `session_unavailable` error to the existing numeric/fixed JSON-RPC error scheme rather than exposing host errors. The current response processor otherwise strips custom error data except `PartialCleanupData`, so support for a fixed reason field needs an explicit protocol change and tests. [VERIFIED: backend/controlprotocol/protocol.go:26-43,151-160] [ASSUMED]
 
@@ -234,24 +235,25 @@ Skipped because `workflow.nyquist_validation` is explicitly `false` in `.plannin
 
 ## Phase Boundaries
 
-Phase 8 owns runtime wiring, security preservation, signer operations, and protocol/CLI parity for these operations. Phase 9 owns systemd/NixOS packaging, native desktop entries, comprehensive docs, final rename, and deletion of Gio/Android surfaces. [VERIFIED: .planning/ROADMAP.md:71-99; .planning/phases/08-runtime-and-signer-integration/08-CONTEXT.md:7-10]
+Phase 8 owns runtime wiring, security preservation, signer operations, and protocol/CLI parity for these operations. It uses the existing independently built desktop child through the new daemon-callable Linux host. Phase 9 owns migration of that child source/build into supported packaging before desktop removal, plus systemd/NixOS units, native desktop entries, comprehensive docs, final rename, and deletion of Gio/Android surfaces. These are planned boundaries, not completed implementation. [VERIFIED: .planning/ROADMAP.md:70-90; .planning/phases/08-runtime-and-signer-integration/08-CONTEXT.md:7-10] [ASSUMED]
 
 ## Assumptions Log
 
-| # | Claim needing confirmation in planning | Risk if wrong |
+The three design questions below are settled by the five Phase 8 plans. The remaining [ASSUMED] entries describe implementation outcomes to verify during execution, not pending user choices. [ASSUMED]
+
+| # | Planned behavior requiring execution verification | Risk if wrong |
 |---|---|---|
-| A1 | Proposed Linux Host package and child readiness signal are the smallest viable boundary. [ASSUMED] | Build/packaging tasks may need a different split. |
-| A2 | Permission reads should distinguish manifest-declared domains from route-granted permissions and report saved decisions separately from session decisions. [ASSUMED] | DTO may misstate what is declared or stored. |
-| A3 | A versioned owner-only credential file, rather than OS Secret Service, fulfills the locked protected mechanism. [ASSUMED] | Security policy may require keyring or encryption at rest. |
-| A4 | A missing DISPLAY/WAYLAND session can be classified before spawning; stale sessions require child handshake. [ASSUMED] | Different compositors may need a stronger probe. |
-| A5 | Stopping signer closes all identity-bound windows, matching existing Logout behavior. [ASSUMED] | User may expect windows to remain open but lose identity. |
-| A6 | The proposed RPC names, DTO field names, and CLI verbs above are the additive v1 contract. [ASSUMED] | Third-party clients could be built against a different naming scheme. |
+| A1 | The planned host can execute the existing child from a trusted checked path and observe its ready signal without the Gio manager. [ASSUMED] | Launch cannot report a final result; Phase 9 migration cannot safely remove desktop. |
+| A2 | The planned permission service can persist one exact saved rule while leaving session rules and NAP gates intact. [ASSUMED] | A socket mutation could broaden consent or misreport persistence. |
+| A3 | The planned versioned owner-only credential file protects retained signer material without the legacy state-file fallback. [ASSUMED] | Signer material could leak or fail to resume. |
+| A4 | Graphical preflight and a bounded child handshake classify missing versus stale sessions correctly. [ASSUMED] | Headless launch could hang or return a misleading outcome. |
+| A5 | The planned signer controller cancels old identity work and closes identity-bound windows before publishing replacement identity. [ASSUMED] | A stale keyer or window could remain active. |
 
 ## Open Questions
 
-1. **Permission declaration shape:** `Napp.RequiredDomains`/`OptionalDomains` describe napplet manifest domains, while `Permission` is the host operation vocabulary. Define the DTO relationship explicitly and preserve subjects such as dispatch action names. [VERIFIED: backend/napp.go:86-98; backend/window_permissions.go:20-77]
-2. **Signer file schema:** choose exact non-secret mode and relay fields, and reject a bunker URL containing `secret` in ordinary config. Use the client-constructed `nostrconnect` URI above so the daemon never returns its offer secret. [CITED: https://github.com/nostr-protocol/nips/blob/master/46.md] [ASSUMED]
-3. **Build boundary:** move the child and its verified library extraction into a daemon-callable module before Phase 9 removes desktop; pin whether Phase 8 performs that move or leaves a temporary build adapter with a Phase 9 dependency. [VERIFIED: desktop/childproc.go:240-307; desktop/embed_prod.go:12-25] [ASSUMED]
+1. **RESOLVED — Permission declaration shape.** The Phase 8 read DTO has separate required and optional manifest domain lists sourced from `Napp.RequiredDomains` and `Napp.OptionalDomains`. A different, stable sorted saved-rule list contains each host decision's `permission`, `subject`, and `decision` (`allow` or `deny`); it excludes session-only rules. Address lookup derives the internal napplet ID, and set/clear changes one exact saved `RuleKey`. This is the decision in 08-02, not a claim that the API already exists. [VERIFIED: backend/napp.go:86-98; backend/window_permissions.go:56-77,265-320] [ASSUMED] (Plan: `08-02-PLAN.md:69-95`.)
+2. **RESOLVED — Non-secret signer schema.** Phase 8 uses an ordinary `signer` object with exactly the public fields `mode` and `relay`: `mode` is `none`, `nsec`, or `bunker`; `relay`, when configured, is a canonical public `wss://` pairing relay. No `nsec`, bunker URL, client key, token, or pairing secret belongs in this object. Declarative and override files share this schema, and `signer.switch` owns the explicit socket override rather than ordinary `settings.set`. `signer.status` reads only mode, user public key, and connection state. This fixes the planned schema; implementation and validation remain 08-03/08-04 work. [ASSUMED] (Plans: `08-03-PLAN.md:91-130`, `08-04-PLAN.md:72-97`.)
+3. **RESOLVED — Linux child build boundary.** Phase 8 creates a daemon-callable `backend/linuxhost` using an explicit trusted absolute executable path and checked adjacent `libwebview.so`; it starts an independently built existing `desktop/child/napplet` executable without starting Gio. Phase 8 proves this with fake-child and real-child smoke tests. Phase 9 migrates the child source/build and native library packaging into the supported Linux delivery before removing desktop code. These are plan responsibilities, not an assertion that the host or migration already exists. [ASSUMED] (Plans: `08-01-PLAN.md:72-83`, `08-05-PLAN.md:99-110`; boundary: `.planning/ROADMAP.md:79-90`.)
 
 ## Sources
 
