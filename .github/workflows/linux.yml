@@ -471,7 +471,9 @@ jobs:
           fi
           cat SHA256SUMS
 
-      - uses: softprops/action-gh-release@v2
+      # The only step with a write token: pinned to a commit so a moved tag
+      # cannot swap the archives and SHA256SUMS together.
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist/kwakore-linux-amd64.tar.gz
