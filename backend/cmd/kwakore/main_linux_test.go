@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 	"kwakore/backend/controlprotocol"
 	"kwakore/backend/desktopentry"
 )
@@ -908,4 +910,214 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// ─── address forms ───────────────────────────────────────────────────────
+
+const addressErrorJSON = `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":%q,"accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` + "\n"
+
+func testNaddr(t *testing.T, kind nostr.Kind, d string, relays []string) (canonical, naddr string) {
+	t.Helper()
+	pk := nostr.MustPubKeyFromHex(strings.Repeat("a", 64))
+	return fmt.Sprintf("%d:%s:%s", kind, pk.Hex(), d), nip19.EncodeNaddr(pk, kind, d, relays)
+}
+
+// addressCommands are every ADDRESS-taking command with X in place of the
+// address, and the params each must send for the canonical address.
+func addressCommands(canonical string) []struct {
+	args   []string
+	method string
+	params string
+} {
+	q := mustJSONString(canonical)
+	return []struct {
+		args   []string
+		method string
+		params string
+	}{
+		{[]string{"install", "X"}, "napplet.install", `{"address":` + q + `}`},
+		{[]string{"update", "X"}, "napplet.update", `{"address":` + q + `}`},
+		{[]string{"launch", "X"}, "napplet.launch", `{"address":` + q + `}`},
+		{[]string{"uninstall", "--yes", "X"}, "napplet.uninstall", `{"address":` + q + `,"confirm":true}`},
+		{[]string{"permissions", "get", "X"}, "napplet.permissions.get", `{"address":` + q + `}`},
+		{[]string{"permissions", "set", "X", "sign", "allow"}, "napplet.permissions.set", `{"address":` + q + `,"permission":"sign","decision":"allow"}`},
+		{[]string{"permissions", "clear", "X", "sign"}, "napplet.permissions.clear", `{"address":` + q + `,"permission":"sign"}`},
+	}
+}
+
+func withAddress(args []string, address string) []string {
+	out := slices.Clone(args)
+	out[slices.Index(out, "X")] = address
+	return out
+}
+
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestCLIAddressForms(t *testing.T) {
+	canonical, naddr := testNaddr(t, 35129, "n-143146b0d6f", nil)
+	root, rootNaddr := testNaddr(t, 15129, "", nil)
+	for _, pair := range [][2]string{{canonical, naddr}, {root, rootNaddr}} {
+		forms := []string{pair[0], pair[1], "nostr:" + pair[1], "NOSTR:" + pair[1], strings.ToUpper(pair[1]), "nostr:" + strings.ToUpper(pair[1])}
+		for _, tc := range addressCommands(pair[0]) {
+			for _, form := range forms {
+				method, params, _, err := command(withAddress(tc.args, form))
+				if err != nil || method != tc.method || string(params) != tc.params {
+					t.Fatalf("%v with %q: %s %s %v", tc.args, form, method, params, err)
+				}
+			}
+		}
+	}
+}
+
+func TestCLIAddressErrors(t *testing.T) {
+	canonical, naddr := testNaddr(t, 35129, "notes", nil)
+	var id nostr.ID
+	id[0] = 7
+	pk := nostr.MustPubKeyFromHex(strings.Repeat("a", 64))
+	_, tabNaddr := testNaddr(t, 35129, "a\tb", nil)
+	rloCanonical, _ := testNaddr(t, 35129, "a\u202eb", nil)
+	cases := map[string]struct{ input, reason string }{
+		"empty":       {"", "invalid_address"},
+		"garbage":     {"hello", "invalid_address"},
+		"oversized":   {strings.Repeat("a", 4097), "invalid_address"},
+		"mixed case":  {"N" + naddr[1:], "invalid_address"},
+		"web link":    {"https://njump.me/" + naddr, "invalid_address"},
+		"padded":      {" " + canonical, "invalid_address"},
+		"wrong kind":  {strings.Replace(canonical, "35129", "30023", 1), "invalid_address"},
+		"npub":        {nip19.EncodeNpub(pk), "unsupported_nip19"},
+		"nprofile":    {nip19.EncodeNprofile(pk, nil), "unsupported_nip19"},
+		"note":        {"note1" + strings.Repeat("q", 58), "unsupported_nip19"},
+		"nevent":      {nip19.EncodeNevent(id, nil, pk), "unsupported_nip19"},
+		"nsec":        {nip19.EncodeNsec(nostr.KeyOne), "unsupported_nip19"},
+		"nostr nsec":  {"nostr:" + strings.ToUpper(nip19.EncodeNsec(nostr.KeyOne)), "unsupported_nip19"},
+		"tab d":       {tabNaddr, "unsafe_identifier"},
+		"rlo d":       {rloCanonical, "unsafe_identifier"},
+		"nostr tab d": {"nostr:" + tabNaddr, "unsafe_identifier"},
+	}
+	for name, tc := range cases {
+		for _, cmd := range addressCommands(canonical) {
+			args := withAddress(cmd.args, tc.input)
+			_, _, _, err := command(args)
+			want := tc.reason
+			if want == "unsafe_identifier" && cmd.method == "napplet.uninstall" {
+				continue
+			}
+			var stderr bytes.Buffer
+			writeCLIError(&stderr, err)
+			if err == nil || stderr.String() != fmt.Sprintf(addressErrorJSON, want) {
+				t.Fatalf("%s %v: err=%v stderr=%q", name, cmd.args, err, stderr.String())
+			}
+			if tc.input != "" && strings.Contains(stderr.String(), tc.input) {
+				t.Fatalf("%s: stderr echoes the input", name)
+			}
+		}
+	}
+	// uninstall still removes a record whose d tag holds anything
+	for _, input := range []string{tabNaddr, rloCanonical} {
+		addr, err := commandAddress(input, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		method, params, _, err := command([]string{"uninstall", "--yes", input})
+		if err != nil || method != "napplet.uninstall" || string(params) != `{"address":`+mustJSONString(addr.Canonical)+`,"confirm":true}` {
+			t.Fatalf("uninstall %q: %s %s %v", input, method, params, err)
+		}
+	}
+	// a bad address on a well-formed permission command is an address error
+	_, _, _, err := command([]string{"permissions", "set", "hello", "nonsense", "allow"})
+	var stderr bytes.Buffer
+	writeCLIError(&stderr, err)
+	if stderr.String() != fmt.Sprintf(addressErrorJSON, "invalid_address") {
+		t.Fatalf("permissions: %q", stderr.String())
+	}
+}
+
+func TestCLIAddressExec(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var accepted atomic.Int32
+	requests := make(chan string, 4)
+	go func() {
+		for {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			go func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				requests <- string(line)
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
+			}()
+		}
+	}()
+	runCLI := func(args ...string) (string, string, error) {
+		cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, args...)...)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		return stdout.String(), stderr.String(), err
+	}
+
+	canonical, naddr := testNaddr(t, 35129, "n-143146b0d6f", nil)
+	stdout, stderr, err := runCLI("install", "nostr:"+strings.ToUpper(naddr))
+	if err != nil || stderr != "" || stdout != "{}\n" {
+		t.Fatalf("install: %q %q %v", stdout, stderr, err)
+	}
+	want, _ := json.Marshal(controlprotocol.Request{
+		JSONRPC: "2.0", Method: "napplet.install",
+		Params: json.RawMessage(`{"address":` + mustJSONString(canonical) + `}`), ID: json.RawMessage("1"),
+	})
+	if got := <-requests; got != string(want)+"\n" {
+		t.Fatalf("request %q, want %q", got, want)
+	}
+
+	before := accepted.Load()
+	nsec := nip19.EncodeNsec(nostr.KeyOne)
+	for _, tc := range []struct{ input, reason string }{
+		{nsec, "unsupported_nip19"},
+		{nip19.EncodeNpub(nostr.KeyOne.Public()), "unsupported_nip19"},
+		{"hello", "invalid_address"},
+		{strings.Repeat("a", 4097), "invalid_address"},
+	} {
+		stdout, stderr, err := runCLI("install", tc.input)
+		if err == nil || stdout != "" || stderr != fmt.Sprintf(addressErrorJSON, tc.reason) || strings.Contains(stderr, tc.input) {
+			t.Fatalf("%q: stdout=%q stderr=%q err=%v", tc.input[:min(len(tc.input), 12)], stdout, stderr, err)
+		}
+	}
+	if n := accepted.Load() - before; n != 0 {
+		t.Fatalf("refused addresses dialed %d times", n)
+	}
+}
+
+// The CLI stays small: address parsing must not drag in the backend root
+// or the nostr library.
+func TestCLIDoesNotLinkBackendOrNostr(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", ".").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "kwakore/backend" || strings.HasPrefix(line, "fiatjaf.com/nostr") {
+			t.Fatalf("CLI links %s", line)
+		}
+	}
+	if !strings.Contains(string(out), "kwakore/backend/napaddr\n") {
+		t.Fatal("CLI does not use napaddr")
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/unix"
 	"kwakore/backend/controlprotocol"
 	"kwakore/backend/desktopentry"
+	"kwakore/backend/napaddr"
 )
 
 func run(args []string) error {
@@ -269,6 +270,37 @@ type inputFailure string
 
 func (e inputFailure) Error() string { return string(e) }
 
+// addressFailure is a refused ADDRESS argument. It holds one fixed reason
+// (invalid_address, unsupported_nip19 or unsafe_identifier) and never the
+// argument itself, which may be a secret key pasted by mistake.
+type addressFailure string
+
+func (e addressFailure) Error() string { return "invalid address: " + string(e) }
+
+// addressErrorData is the data object of a refused ADDRESS argument.
+type addressErrorData struct {
+	Reason   string   `json:"reason"`
+	Accepted []string `json:"accepted"`
+}
+
+// commandAddress normalizes an ADDRESS argument to the canonical coordinate
+// the control protocol requires. A d tag with control, format or separator
+// characters is refused unless allowUnsafeIdentifier is set, which only
+// uninstall does so such a record can always be removed.
+func commandAddress(arg string, allowUnsafeIdentifier bool) (napaddr.Address, error) {
+	addr, err := napaddr.Parse(arg)
+	if errors.Is(err, napaddr.ErrUnsupported) {
+		return napaddr.Address{}, addressFailure("unsupported_nip19")
+	}
+	if err != nil {
+		return napaddr.Address{}, addressFailure("invalid_address")
+	}
+	if !allowUnsafeIdentifier && !napaddr.SafeIdentifier(addr.Identifier) {
+		return napaddr.Address{}, addressFailure("unsafe_identifier")
+	}
+	return addr, nil
+}
+
 func command(args []string) (string, json.RawMessage, string, error) {
 	socketPath := ""
 	if len(args) >= 2 && args[0] == "--socket" {
@@ -384,21 +416,23 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		return "napplet.discover", params, socketPath, nil
 	}
 	if len(args) == 2 && (args[0] == "install" || args[0] == "update") {
-		if len(args[1]) == 0 || len(args[1]) > 4096 {
-			return "", nil, "", inputFailure("invalid address")
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
 		}
 		params, _ := json.Marshal(struct {
 			Address string `json:"address"`
-		}{args[1]})
+		}{addr.Canonical})
 		return "napplet." + args[0], params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "launch" {
-		if len(args[1]) == 0 || len(args[1]) > 4096 {
-			return "", nil, "", inputFailure("invalid address")
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
 		}
 		params, _ := json.Marshal(struct {
 			Address string `json:"address"`
-		}{args[1]})
+		}{addr.Canonical})
 		return "napplet.launch", params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "launch-token" {
@@ -426,15 +460,23 @@ func command(args []string) (string, json.RawMessage, string, error) {
 	}
 	if len(args) >= 2 && args[0] == "permissions" {
 		verb := args[1]
-		if verb == "get" && len(args) == 3 && validCommandAddress(args[2]) {
+		if verb == "get" && len(args) == 3 {
+			addr, err := commandAddress(args[2], false)
+			if err != nil {
+				return "", nil, "", err
+			}
 			params, _ := json.Marshal(struct {
 				Address string `json:"address"`
-			}{args[2]})
+			}{addr.Canonical})
 			return "napplet.permissions.get", params, socketPath, nil
 		}
 		if (verb == "set" && (len(args) == 5 || len(args) == 7)) ||
 			(verb == "clear" && (len(args) == 4 || len(args) == 6)) {
-			if !validCommandAddress(args[2]) || !permissionField(args[3]) {
+			addr, err := commandAddress(args[2], false)
+			if err != nil {
+				return "", nil, "", err
+			}
+			if !permissionField(args[3]) {
 				return "", nil, "", inputFailure("invalid permission command")
 			}
 			var subject string
@@ -460,14 +502,14 @@ func command(args []string) (string, json.RawMessage, string, error) {
 					Permission string `json:"permission"`
 					Decision   string `json:"decision"`
 					Subject    string `json:"subject,omitempty"`
-				}{args[2], args[3], args[4], subject})
+				}{addr.Canonical, args[3], args[4], subject})
 				return "napplet.permissions.set", params, socketPath, nil
 			}
 			params, _ := json.Marshal(struct {
 				Address    string `json:"address"`
 				Permission string `json:"permission"`
 				Subject    string `json:"subject,omitempty"`
-			}{args[2], args[3], subject})
+			}{addr.Canonical, args[3], subject})
 			return "napplet.permissions.clear", params, socketPath, nil
 		}
 		return "", nil, "", inputFailure("invalid permission command")
@@ -476,16 +518,22 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		yes := flags.Bool("yes", false, "confirm removal")
-		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 1 || len(flags.Args()[0]) == 0 || len(flags.Args()[0]) > 4096 {
+		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 1 {
 			return "", nil, "", inputFailure("usage: uninstall --yes ADDRESS")
 		}
 		if !*yes {
 			return "", nil, "", inputFailure("uninstall requires --yes")
 		}
+		// A d tag another socket client installed may hold any character;
+		// removing it must still work, so the identifier check is skipped.
+		addr, err := commandAddress(flags.Args()[0], true)
+		if err != nil {
+			return "", nil, "", err
+		}
 		params, _ := json.Marshal(struct {
 			Address string `json:"address"`
 			Confirm bool   `json:"confirm"`
-		}{flags.Args()[0], true})
+		}{addr.Canonical, true})
 		return "napplet.uninstall", params, socketPath, nil
 	}
 	if len(args) >= 2 && args[0] == "settings" {
@@ -646,8 +694,6 @@ func validSignerResponse(result json.RawMessage) bool {
 	return len(decoded) == 32 && err == nil && hex.EncodeToString(decoded) == pubkey
 }
 
-func validCommandAddress(address string) bool { return address != "" && len(address) <= 4096 }
-
 func permissionField(field string) bool {
 	switch field {
 	case "sign", "encrypt", "decrypt", "publish", "open_link", "save_file", "copy_text", "upload", "fetch", "notify", "media", "dispatch":
@@ -768,6 +814,7 @@ func writeCLIError(w io.Writer, err error) {
 	rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
 	var remote rpcFailure
 	var input inputFailure
+	var address addressFailure
 	var timeout timeoutFailure
 	if errors.As(err, &timeout) {
 		rpcErr = &controlprotocol.Error{Code: controlprotocol.Timeout, Message: timeout.Error()}
@@ -783,6 +830,9 @@ func writeCLIError(w io.Writer, err error) {
 				rpcErr.Data = data
 			}
 		}
+	} else if errors.As(err, &address) {
+		rpcErr = controlprotocol.FixedError(controlprotocol.InvalidParams)
+		rpcErr.Data = addressErrorData{Reason: string(address), Accepted: napaddr.AcceptedForms}
 	} else if errors.As(err, &input) {
 		rpcErr = controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
