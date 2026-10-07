@@ -27,14 +27,20 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.install` | `{address:string}` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled",installed_version:Version}` |
 | `napplet.update` | `{address:string}` required | `{address:string,outcome:"updated",previous_version:Version,installed_version:Version}` |
 | `napplet.uninstall` | `{address:string,confirm:true}` required | `{address:string,outcome:"removed",previous_version:Version,cleanup_complete:true}` |
+| `napplet.launch` | `{address:string}` required | `{address:string,window_id:string,outcome:"opened"}` after the checked child reports host-page `nap.start` |
+| `napplet.stop` | `{window_id:string}` required | `{window_id:string,closed:true}` after that exact window has completed `WindowClosed` |
 
 `Health` is `{ready:boolean,version:string,uptime_seconds:number,config_status:"valid",storage_status:"open"\|"unhealthy"\|"closed",active_windows:integer}`. Readiness means initialized stores, valid active configuration, and acceptance of work; it does not imply a signer login or healthy relays. `Settings` is `{relays:string[],blossom_servers:string[],discover_on_user_relays:boolean}`. The only accepted setting fields are those three names. Relay values must be canonical `wss://` URLs; Blossom values must be canonical `http://` or `https://` URLs. URL hosts must be lowercase, and duplicates, credentials, query strings, fragments, and explicit JSON `null` are invalid. Empty arrays and `false` are valid values. Clearing reveals the declarative or built-in value. `DiagnosticError` is `{category:string,time:RFC3339 timestamp,detail:string}`; at most 32 fixed, sanitized summaries are retained. The optional warning is also sanitized.
 
 Discovery searches the cached catalog case insensitively after trimming the query. `refresh:false` reads that cache without network access; `refresh:true` waits for a refresh, bounded internally to 25 seconds. `fetched_at:null` and `complete:false` mean no completed refresh has populated the cache. Install, update, and uninstall wait for a final committed outcome. `napplet.uninstall` requires explicit `confirm:true` even for a notification; omitting it or sending `false` yields `Confirmation required` for a request with an ID. A partial file cleanup after removing the record yields error 1011 with only safe `data:{address,record_removed:true,cleanup_complete:false}`. Check `napplet.installed` after uncertain mutation outcomes.
 
+`napplet.launch` accepts only a full canonical address already installed as a napplet. The response is a final opened outcome, not merely a spawned process. A child failure before its host page sends `nap.start` returns a fixed error and removes the window. With both `DISPLAY` and `WAYLAND_DISPLAY` empty, error 1004 carries exactly `data:{"reason":"session_unavailable"}` before any child starts. A stale display or unresponsive child is bounded by a 10-second host readiness wait and a 12-second daemon operation deadline. `napplet.stop` accepts a canonical positive decimal window ID, does not accept an internal napplet ID, and returns `Not found` for an unknown or already closed ID. The daemon confirms closure from the selected instance's `WindowClosed` signal; a timeout does not prove the window closed.
+
+For Linux installation, place the existing hardened `napplet` child executable beside `kwakore-daemon`, with an adjacent `libwebview.so`. Both must be regular files under real path components owned by root or the current user and not writable by group or others; the executable must have an execute bit. The daemon resolves this sibling path from its own executable, never from the working directory or `PATH`. It sets `WEBVIEW_PATH` to the checked directory. Phase 9 owns packaging these existing child assets.
+
 ## Errors
 
-Errors use `{code:integer,message:string}` and, only for the partial-cleanup case above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
+Errors use `{code:integer,message:string}` and, only for partial cleanup or headless launch as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
 
 | Code | Message | Meaning |
 | ---: | --- | --- |
@@ -46,7 +52,7 @@ Errors use `{code:integer,message:string}` and, only for the partial-cleanup cas
 | 1001 | Unauthorized | Peer UID denied |
 | 1002 | Not found | Address or record missing |
 | 1003 | Busy | Mutation conflicts with current work |
-| 1004 | Unavailable | Daemon, discovery, storage, or network work unavailable |
+| 1004 | Unavailable | Daemon, discovery, storage, network, or window child unavailable; headless launch alone may carry `data:{"reason":"session_unavailable"}` |
 | 1005 | No update | No newer version to install |
 | 1006 | Invalid configuration | Reload or setting validation failed |
 | 1007 | Closing | Shutdown has started |
@@ -84,7 +90,9 @@ Build with `cd backend && go build -o /tmp/kwakore ./cmd/kwakore`. Syntax: `kwak
 | `install ADDRESS` | `napplet.install` |
 | `update ADDRESS` | `napplet.update` |
 | `uninstall --yes ADDRESS` | `napplet.uninstall` |
+| `launch ADDRESS` | `napplet.launch` |
+| `stop WINDOW_ID` | `napplet.stop` |
 
-Default client wait is 30 seconds for reads and setting operations, and 180 seconds for install, update, and uninstall. A successful command writes exactly the JSON `result` value followed by one newline to stdout, writes nothing to stderr, and exits zero. Any parse, setup, dial, peer, wire, RPC, or timeout failure writes one JSON object `{"error":{"code":NUMBER,"message":"TEXT"}}` and newline to stderr, writes nothing to stdout, and exits nonzero. Remote messages are mapped to fixed code text. A **client-side** timeout uses code 1008 and says the operation outcome is unknown: disconnecting does not prove server cancellation. Recheck `status` and `installed` before retrying a mutation. `--timeout` does not change the daemon's own operation deadlines.
+Default client wait is 30 seconds for reads, settings, launch, and stop, and 180 seconds for install, update, and uninstall. A successful command writes exactly the JSON `result` value followed by one newline to stdout, writes nothing to stderr, and exits zero. Any parse, setup, dial, peer, wire, RPC, or timeout failure writes one JSON object `{"error":{"code":NUMBER,"message":"TEXT"}}` and newline to stderr, writes nothing to stdout, and exits nonzero. Remote messages are mapped to fixed code text; the CLI revalidates the headless launch reason before printing it. A **client-side** timeout uses code 1008 and says the operation outcome is unknown: disconnecting does not prove server cancellation. Recheck `status` and `installed` before retrying a mutation. `--timeout` does not change the daemon's own operation deadlines.
 
-Napplet launch, permission, signer, and packaging operations are outside this protocol version's Phase 7 scope.
+Permission and signer operations are specified by later Phase 8 plans. Phase 9 owns packaging.

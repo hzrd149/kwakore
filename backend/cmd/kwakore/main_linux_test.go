@@ -175,6 +175,32 @@ func TestCLIContract(t *testing.T) {
 			}
 		})
 	}
+	for _, tc := range []struct {
+		name, response string
+		wantReason     bool
+	}{
+		{"headless", `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"session_unavailable"}}}`, true},
+		{"host leak", `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"session_unavailable","path":"secret"}}}`, false},
+		{"bad reason", `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"secret"}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			go func() {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				_, _ = bufio.NewReader(conn).ReadBytes('\n')
+				_, _ = conn.Write([]byte(tc.response + "\n"))
+			}()
+			cmd := exec.Command(cli, "--socket", listener.Addr().String(), "launch", address)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err == nil || stdout.Len() != 0 || bytes.Contains(stderr.Bytes(), []byte("secret")) || bytes.Contains(stderr.Bytes(), []byte("private")) || bytes.Contains(stderr.Bytes(), []byte(`"reason":"session_unavailable"`)) != tc.wantReason {
+				t.Fatalf("unsafe launch error: %q %v", stderr.String(), err)
+			}
+		})
+	}
 	for _, args := range [][]string{{"--timeout", "0s", "status"}, {"--timeout", "garbage", "status"}, {"status"}} {
 		cmd := exec.Command(cli, args...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")

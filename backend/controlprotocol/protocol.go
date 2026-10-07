@@ -19,7 +19,7 @@ func MethodNames() []string {
 	return []string{
 		"service.status", "service.diagnostics",
 		"settings.get", "settings.reload", "settings.set", "settings.clear",
-		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall",
+		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.stop",
 	}
 }
 

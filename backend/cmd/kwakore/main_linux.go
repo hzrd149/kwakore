@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -117,6 +118,19 @@ func run(args []string) error {
 			}
 			fixed.Data = data
 		}
+		if remote.Code == controlprotocol.Unavailable {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rpcError, &fields) != nil {
+				return errors.New("invalid daemon response")
+			}
+			if raw, ok := fields["data"]; ok {
+				data, valid := parseSessionUnavailableData(raw)
+				if method != "napplet.launch" || !valid {
+					return errors.New("invalid daemon response")
+				}
+				fixed.Data = data
+			}
+		}
 		return rpcFailure{RPC: *fixed}
 	}
 	if len(result) == 0 {
@@ -194,6 +208,19 @@ func parsePartialCleanupData(raw, params json.RawMessage) (controlprotocol.Parti
 	return data, true
 }
 
+func parseSessionUnavailableData(raw json.RawMessage) (controlprotocol.SessionUnavailableData, bool) {
+	var data controlprotocol.SessionUnavailableData
+	if len(raw) == 0 || raw[0] != '{' || controlprotocol.ValidateNamedParams(raw, "reason") != nil {
+		return data, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || len(fields) != 1 || !bytes.Equal(fields["reason"], []byte(`"session_unavailable"`)) {
+		return data, false
+	}
+	data.Reason = "session_unavailable"
+	return data, true
+}
+
 type inputFailure string
 
 func (e inputFailure) Error() string { return string(e) }
@@ -255,6 +282,25 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{args[1]})
 		return "napplet." + args[0], params, socketPath, nil
 	}
+	if len(args) == 2 && args[0] == "launch" {
+		if len(args[1]) == 0 || len(args[1]) > 4096 {
+			return "", nil, "", inputFailure("invalid address")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{args[1]})
+		return "napplet.launch", params, socketPath, nil
+	}
+	if len(args) == 2 && args[0] == "stop" {
+		n, err := strconv.ParseUint(args[1], 10, 64)
+		if err != nil || n == 0 || strconv.FormatUint(n, 10) != args[1] {
+			return "", nil, "", inputFailure("invalid window ID")
+		}
+		params, _ := json.Marshal(struct {
+			WindowID string `json:"window_id"`
+		}{args[1]})
+		return "napplet.stop", params, socketPath, nil
+	}
 	if len(args) >= 1 && args[0] == "uninstall" {
 		flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
@@ -302,7 +348,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
+	return "", nil, "", inputFailure("usage: kwakore [--socket PATH] [--timeout DURATION] status|diagnostics|installed [--offset N --limit N]|discover [--query TEXT --refresh --offset N --limit N]|install ADDRESS|update ADDRESS|uninstall --yes ADDRESS|launch ADDRESS|stop WINDOW_ID|settings get|reload|set FIELD JSON_VALUE|clear FIELD")
 }
 
 func settingField(field string) bool {
@@ -358,6 +404,11 @@ func writeCLIError(w io.Writer, err error) {
 		rpcErr = controlprotocol.FixedError(remote.RPC.Code)
 		if rpcErr.Code == controlprotocol.PartialCleanup {
 			if data, ok := remote.RPC.Data.(controlprotocol.PartialCleanupData); ok && data.Address != "" && data.RecordRemoved && !data.CleanupComplete {
+				rpcErr.Data = data
+			}
+		}
+		if rpcErr.Code == controlprotocol.Unavailable {
+			if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == "session_unavailable" {
 				rpcErr.Data = data
 			}
 		}
