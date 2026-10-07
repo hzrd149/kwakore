@@ -1,0 +1,231 @@
+name: linux
+
+# Kwakore is a per-user Linux service: kwakore-daemon, the kwakore CLI, the
+# napplet child and libwebview.so, shipped side by side. Every lane here builds
+# and tests only those paths; there is no Windows, macOS, Android or Gio
+# launcher build any more (D-09, D-10).
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # bash -eo pipefail, so a failing test in front of a tee fails the step
+    shell: bash
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # the napplet frame-scope and host-page tests run in node; the runner
+      # image ships it, and this fails fast if it ever stops doing so
+      - name: check node
+        run: node --version
+
+      - name: vet backend
+        working-directory: backend
+        run: go vet ./...
+
+      - name: test backend
+        working-directory: backend
+        # node-backed tests must not skip silently in CI
+        env:
+          KWAKORE_REQUIRE_NODE: "1"
+        run: go test ./...
+
+      - name: check shell scripts
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+
+      # the runtime sources carry only reviewed uses of the old product name;
+      # the full scan joins once the docs rewrite (09-10) lands
+      - name: product identity (runtime)
+        run: bash scripts/check-product-identity.sh --runtime-only
+
+  child:
+    name: child
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+
+      # the child loads libwebview.so from beside itself; the copies come from
+      # the pinned go-webview module and are never committed
+      - name: generate libwebview copies
+        working-directory: desktop
+        run: go generate ./internal/webviewlib
+
+      - name: build napplet child
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o child/napplet ./child
+
+      - name: vet desktop
+        working-directory: desktop
+        run: go vet ./...
+
+      - name: test desktop
+        working-directory: desktop
+        run: go test ./...
+
+  # the real napplet child on a real WebKitGTK under xvfb. Both steps fail on a
+  # missing prerequisite instead of skipping, and both require PASS lines, so
+  # a skipped graphical test can never let this job pass.
+  graphical:
+    name: graphical
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: generate libwebview copies
+        working-directory: desktop
+        run: go generate ./internal/webviewlib
+
+      - name: build napplet child
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o child/napplet ./child
+
+      - name: install graphical test display
+        run: sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: test real daemon child
+        working-directory: backend
+        env:
+          KWAKORE_REQUIRE_GRAPHICS: "1"
+          KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet
+          KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so
+          NO_AT_BRIDGE: "1"
+        run: |
+          set -euo pipefail
+          xvfb-run -a go test -v ./daemon -run '^TestRPCRealChildGraphical$' -count=1 -timeout 60s | tee "$RUNNER_TEMP/kwakore-real-child.log"
+          grep -Fq -- '--- PASS: TestRPCRealChildGraphical' "$RUNNER_TEMP/kwakore-real-child.log"
+
+      # the child under WebKitGTK with a fake launcher on the wire protocol:
+      # the adversarial napplet's escapes, the rebuild order, the reload cap
+      # and the forged bindings. KWAKORE_WEBKIT_SMOKE=1 turns a missing display
+      # or engine into a failure; every TestWebKit* must also print PASS.
+      - name: webkit smoke
+        working-directory: desktop
+        env:
+          KWAKORE_WEBKIT_SMOKE: "1"
+          NO_AT_BRIDGE: "1"
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/kwakore-webkit.log"
+          go test ./child -list '^TestWebKit' | grep '^TestWebKit' >"$RUNNER_TEMP/kwakore-webkit.tests"
+          [ -s "$RUNNER_TEMP/kwakore-webkit.tests" ] || { echo "no TestWebKit tests found"; exit 1; }
+          xvfb-run -a go test ./child -run '^TestWebKit' -count=1 -v -timeout 10m | tee "$log"
+          if grep -E -- '--- SKIP' "$log"; then
+            echo "a real-engine test skipped; KWAKORE_WEBKIT_SMOKE is not reaching it"
+            exit 1
+          fi
+          while read -r name; do
+            grep -Eq -- "^--- PASS: $name \\(" "$log" || { echo "missing PASS for $name"; exit 1; }
+          done <"$RUNNER_TEMP/kwakore-webkit.tests"
+
+  nix:
+    name: nix
+    runs-on: ubuntu-24.04
+    steps:
+      # full history: Nix refuses shallow git trees as flake sources
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: evaluate NixOS module
+        run: |
+          result=$(nix eval --impure --json --file nix/module-test.nix)
+          [ "$result" = true ] || { echo "nix/module-test.nix printed $result, not true"; exit 1; }
+
+      # the Go module vendor trees are fixed-output fetches from the module
+      # proxy, which occasionally fail on a resolver hiccup; retry those only
+      - name: build package
+        run: |
+          for attempt in 1 2 3; do
+            if nix build -L --no-link .#packages.x86_64-linux.kwakore; then
+              exit 0
+            fi
+            echo "nix build attempt $attempt failed"
+            sleep 15
+          done
+          exit 1
+
+      - name: flake check
+        run: |
+          nix flake check -L
+          nix flake check --all-systems --no-build
+
+  # an isolated per-user systemd manager (scripts/ci-user-manager.sh) runs the
+  # socket activation and installer smokes against real user units
+  service:
+    name: user service
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: activation smoke
+        run: |
+          log="$RUNNER_TEMP/kwakore-activation.log"
+          bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --activation-only | tee "$log"
+          for marker in activation control; do
+            want=$(grep -c "pass \"$marker:" scripts/smoke-linux-service.sh)
+            got=$(grep -c "^PASS $marker:" "$log" || true)
+            [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS $marker lines, got $got"; exit 1; }
+          done
+
+      - name: install smoke
+        run: |
+          log="$RUNNER_TEMP/kwakore-install.log"
+          bash scripts/ci-user-manager.sh bash scripts/smoke-linux-service.sh --install-only | tee "$log"
+          want=$(grep -c 'pass "install:' scripts/smoke-linux-service.sh)
+          got=$(grep -c '^PASS install:' "$log" || true)
+          [ "$want" -gt 0 ] && [ "$got" = "$want" ] || { echo "expected $want PASS install lines, got $got"; exit 1; }

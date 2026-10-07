@@ -103,12 +103,20 @@ func TestRPCSignerBunkerValidSwitch(t *testing.T) {
 	}
 }
 
+// TestRPCRealChildCIContract pins the CI gates that keep the graphical and
+// node-backed tests from skipping silently: each test reads a KWAKORE_* gate,
+// and a workflow that sets another name (or drops the PASS checks) would let
+// the job pass with the tests skipped.
 func TestRPCRealChildCIContract(t *testing.T) {
-	workflow, err := os.ReadFile("../../.github/workflows/desktop.yml")
+	workflow, err := os.ReadFile("../../.github/workflows/linux.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
+		"KWAKORE_REQUIRE_NODE: \"1\"",
+		"KWAKORE_WEBKIT_SMOKE: \"1\"",
+		"if grep -E -- '--- SKIP' \"$log\"; then",
+		"grep -Eq -- \"^--- PASS: $name \\\\(\" \"$log\"",
 		"KWAKORE_REQUIRE_GRAPHICS: \"1\"",
 		"KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet",
 		"KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so",
