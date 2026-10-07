@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,7 +155,15 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 	s.signer.PreemptPending()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
-	if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: mode}); err != nil {
+	signerConfig := serviceconfig.Signer{Mode: mode}
+	if mode == "bunker" {
+		parsed, parseErr := url.Parse(secret)
+		if parseErr != nil || parsed.Scheme != "bunker" || parsed.Query().Get("relay") == "" {
+			return backend.SignerStatus{}, errCredential
+		}
+		signerConfig.Relay = parsed.Query().Get("relay")
+	}
+	if err := s.manager.SetSignerOverride(signerConfig); err != nil {
 		return backend.SignerStatus{}, errCredential
 	}
 	if mode == "bunker" {

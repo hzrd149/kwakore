@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
 	"verdana/backend"
 	"verdana/backend/controlprotocol"
@@ -75,6 +76,28 @@ func TestRPCSignerBunkerFixedFailure(t *testing.T) {
 	_, rpcErr, raw := rpcCall(t, reader, conn, "signer.switch", `{"mode":"bunker","secret":"`+secret+`"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || strings.Contains(raw, secret) {
 		t.Fatalf("bunker failure leaked: %s %+v", raw, rpcErr)
+	}
+}
+
+func TestRPCSignerBunkerValidSwitch(t *testing.T) {
+	s, reader, conn, _ := rpcService(t)
+	remote := nostr.Generate()
+	url := "bunker://" + remote.Public().Hex() + "?relay=wss%3A%2F%2Fexample.com"
+	s.signer.BunkerConnect = func(_ context.Context, _ context.Context, _ nostr.SecretKey, input string, _ bool) (nostr.Keyer, error) {
+		if input != url {
+			t.Errorf("unexpected bunker URL")
+		}
+		return keyer.New(context.Background(), nil, nip19.EncodeNsec(remote), &keyer.SignerOptions{})
+	}
+	result, rpcErr, raw := rpcCall(t, reader, conn, "signer.switch", `{"mode":"bunker","secret":"`+url+`"}`)
+	if rpcErr != nil || strings.Contains(raw, url) || !strings.Contains(string(result), `"connection_state":"connected"`) {
+		t.Fatalf("valid bunker switch: %s %+v", raw, rpcErr)
+	}
+	if got := s.manager.Effective().Signer; got.Mode != "bunker" || got.Relay != "wss://example.com" {
+		t.Fatalf("persisted signer mode/relay: %+v", got)
+	}
+	if rec, err := s.credentials.read(); err != nil || rec.Mode != "bunker" || rec.Secret != url {
+		t.Fatalf("persisted bunker credential: mode=%q err=%v", rec.Mode, err)
 	}
 }
 

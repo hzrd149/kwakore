@@ -20,7 +20,10 @@ type SignerStatus struct {
 }
 
 type ServiceSigner struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// BunkerConnect overrides the network handshake when a service embeds a
+	// connector (for example, a socket integration test).
+	BunkerConnect func(context.Context, context.Context, nostr.SecretKey, string, bool) (nostr.Keyer, error)
 	generation    uint64
 	status        SignerStatus
 	keyer         *revocableKeyer
@@ -229,7 +232,11 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 	defer timeoutCancel()
 	stopHandshake := context.AfterFunc(sessionCtx, timeoutCancel)
 	defer stopHandshake()
-	k, err := serviceBunkerConnect(sessionCtx, handshakeCtx, clientKey, input, skipConnect)
+	connect := s.BunkerConnect
+	if connect == nil {
+		connect = serviceBunkerConnect
+	}
+	k, err := connect(sessionCtx, handshakeCtx, clientKey, input, skipConnect)
 	var pk nostr.PubKey
 	if err == nil && handshakeCtx.Err() == nil {
 		pk, err = k.GetPublicKey(handshakeCtx)
