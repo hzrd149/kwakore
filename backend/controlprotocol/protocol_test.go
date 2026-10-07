@@ -67,6 +67,13 @@ func TestProtocolDocsMethods(t *testing.T) {
 	}
 }
 
+func TestProtocolDocsMethodsPairing(t *testing.T) {
+	methods := MethodNames()
+	for _, want := range []string{"signer.pair.start", "signer.pair.wait", "signer.pair.cancel"} {
+		if !slices.Contains(methods, want) { t.Fatalf("pairing method %s missing from v1 catalog", want) }
+	}
+}
+
 func TestJSONRPCBatchAndNotifications(t *testing.T) {
 	calls := 0
 	dispatch := func(method string, params json.RawMessage) (any, *Error) {
