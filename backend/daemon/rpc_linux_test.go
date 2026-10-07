@@ -1131,9 +1131,13 @@ func TestRPCInstallRelayHints(t *testing.T) {
 		`["wss://x.example","wss://x.example"]`,
 		`["wss://` + strings.Repeat("a", 250) + `"]`,
 	} {
-		_, rpcErr, _ := rpcCall(t, reader, conn, "napplet.install", `{"address":`+q+`,"relays":`+relays+`}`)
+		_, rpcErr, raw := rpcCall(t, reader, conn, "napplet.install", `{"address":`+q+`,"relays":`+relays+`}`)
 		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
 			t.Fatalf("accepted relays %s: %+v", relays, rpcErr)
+		}
+		// a refused hint is never echoed back to the client
+		if strings.Contains(raw, "example") || strings.Contains(raw, "damus") {
+			t.Fatalf("relays %s echoed: %s", relays, raw)
 		}
 	}
 	for _, params := range []string{
@@ -1145,13 +1149,16 @@ func TestRPCInstallRelayHints(t *testing.T) {
 			t.Fatalf("accepted %s: %+v", params, rpcErr)
 		}
 	}
-	// a valid hint list passes validation; the loopback literal is never
-	// dialed (napExplicitRelay refuses it without DNS) and never echoed
-	for _, relays := range []string{`[]`, `["wss://127.0.0.1"]`, "[" + strings.Join(nine[:8], ",") + "]"} {
-		_, rpcErr, raw := rpcCall(t, reader, conn, "napplet.install", `{"address":`+q+`,"relays":`+relays+`}`)
-		if rpcErr == nil || (rpcErr.Code != controlprotocol.NotFound && rpcErr.Code != controlprotocol.Unavailable) ||
-			strings.Contains(raw, "127.0.0.1") || strings.Contains(raw, "example") {
-			t.Fatalf("relays %s: %s %+v", relays, raw, rpcErr)
+	// a valid hint list passes validation. Checked at the decoder: a full
+	// install of a valid request goes to the network, which a unit test must
+	// not depend on.
+	for _, tc := range []struct {
+		relays string
+		want   int
+	}{{`[]`, 0}, {`["wss://127.0.0.1"]`, 1}, {"[" + strings.Join(nine[:8], ",") + "]", 8}} {
+		got, relays, perr := decodeInstallParams(json.RawMessage(`{"address":` + q + `,"relays":` + tc.relays + `}`))
+		if perr != nil || got != address || len(relays) != tc.want {
+			t.Fatalf("relays %s: address %q, %d relays, %+v", tc.relays, got, len(relays), perr)
 		}
 	}
 	for _, tc := range []struct{ method, params string }{
