@@ -13,7 +13,7 @@ First extract a daemon-owned core and configuration from the Gio launcher. Next 
 
 - [x] **Phase 6: Daemon Core and Configuration** — Foreground per-user daemon, XDG data/config paths, validated configuration and diagnostics. (verified 27/27 after shutdown gap closure; completed 2026-10-06)
 - [x] **Phase 7: Unix Socket and CLI** — Versioned, user-only control protocol and scriptable client covering service and napplet management. (completed 2026-10-06)
-- [ ] **Phase 8: Runtime and Signer Integration** — Launch and stop napplets through the daemon; permission and signer controls preserve existing security boundaries.
+- [x] **Phase 8: Runtime and Signer Integration** — Launch and stop napplets through the daemon; permission and signer controls preserve existing security boundaries. (completed 2026-10-07)
 - [ ] **Phase 9: Linux Packaging, Rename and Cleanup** — Generic systemd units, NixOS module, native desktop entries, consistent `kwakore` identity, documentation, and removal of Gio/Android surfaces.
 
 ## Phase Details
@@ -69,7 +69,7 @@ Plans:
 **Goal:** The daemon controls napplet windows, permissions, and signer options while retaining v0.1 security boundaries.
 **Depends on:** Phase 7.
 **Requirements:** SRVC-03, SRVC-04, SOCK-06, SIGN-01, SIGN-02, SIGN-03.
-**Plans:** 5/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 **Wave 1**

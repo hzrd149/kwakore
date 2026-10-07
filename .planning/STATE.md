@@ -1,22 +1,22 @@
 ---
-gsd_state_version: "1.0"
+gsd_state_version: 1.0
 milestone: v0.2
 milestone_name: Linux Service Pivot
-current_phase: 8
-current_phase_name: Runtime and Signer Integration
-current_plan: 5
-status: verifying
-stopped_at: Phase 9 context gathered
-last_updated: "2026-10-07T04:27:01.242Z"
-last_activity: 2026-10-06
-last_activity_desc: Phase 8 execution started
-state_head: cd98f339137dc7cc10c412a83cce496af0d59535
+current_phase: 09
+current_phase_name: Linux Packaging, Rename and Cleanup
+current_plan: 1
+status: ready_to_execute
+stopped_at: Phase 8 complete, Phase 9 planned (24 plans)
+last_updated: "2026-10-07T05:03:00.151Z"
+last_activity: 2026-10-07
+last_activity_desc: Phase 8 complete, transitioned to Phase 09
+state_head: a86d0cd7821ea6c18ffdb3967895f6129bbcb8f6
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 18
+  completed_phases: 3
+  total_plans: 42
   completed_plans: 18
-  percent: 25
+  percent: 43
 ---
 
 # Project State
@@ -26,22 +26,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A Linux user can run an untrusted napplet through a simple, controllable local service without giving it or another local process unauthorized access to capabilities or secrets.
-**Current focus:** Phase 8 — Runtime and Signer Integration
+**Current focus:** Phase 9 — Linux Packaging, Rename and Cleanup
 
 ## Current Position
 
-Phase: 8 (Runtime and Signer Integration) — READY FOR VERIFICATION
-Current Plan: 5
-Total Plans in Phase: 5
-Status: Phase complete — ready for verification
-**Progress:** 18/18 v0.2 plans completed; 2/4 phases verified ([███░░░░░░░] 25%)
-Last activity: 2026-10-06 — Phase 8 execution started
+Phase: 09 — Linux Packaging, Rename and Cleanup
+Current Plan: 1
+Total Plans in Phase: 24
+Status: Ready to execute
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████░░░░░░] 43%)
+Last activity: 2026-10-07 — Phase 8 complete, transitioned to Phase 09
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 53
+- Total plans completed: 58
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -56,6 +56,7 @@ Last activity: 2026-10-06 — Phase 8 execution started
 | 05 | 12 | - | - |
 | 06 | 6 | - | - |
 | 7 | 7 | - | - |
+| 8 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -195,10 +196,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T04:27:01.205Z
-Stopped at: Phase 9 context gathered
+Last session: 2026-10-07T05:05:00Z
+Stopped at: Phase 8 complete, Phase 9 planned (24 plans), ready to execute
 Resume file: .planning/phases/09-linux-packaging-rename-and-cleanup/09-CONTEXT.md
 
 ## Operator Next Steps
 
-- Phase 8 Plan 05 is complete; verify Phase 8.
+- Phase 8 is verified and complete; execute Phase 9 with `/gsd-execute-phase 9`.
