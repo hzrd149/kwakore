@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 14
+current_plan: 15
 status: executing
-stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-10-07T06:54:52.636Z"
+stopped_at: Completed 09-06-PLAN.md
+last_updated: "2026-10-07T07:00:58.982Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: dc35a8a6074cc9df159e180773ddc83dacce244c
+state_head: 3568f39c18ef3d4c20df787ca8b839d1f06883e1
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 31
-  percent: 72
+  completed_plans: 32
+  percent: 74
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 14
+Current Plan: 15
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 72%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([███████░░░] 74%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -130,6 +130,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P19 | 2 min | 1 tasks | 12 files |
 | Phase 09 P20 | 2 min | 1 tasks | 13 files |
 | Phase 09 P15 | 8 min | 2 tasks | 25 files |
+| Phase 09 P06 | 10min | 1 tasks | 65 files |
 
 ## Accumulated Context
 
@@ -180,6 +181,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-15: config.openSettings is declined with no answer (NAP-CONFIG fire-and-forget) and still charges the 2 s limiter; nap.openSettings returns the fixed error "settings are not available"
 - [Phase 09]: 09-15: the child is napplet-only and refuses the napp format and settings kind before a webview exists; the napp build tag is now a no-op until 09-08/09-09 drop it
 - [Phase 09]: 09-15: NAP-CONFIG isolation tests now write through napconfig.Save plus pushConfigValues; nothing outside tests writes NAP-CONFIG values after the settings page retirement
+- [Phase 09]: 09-06: Go modules are kwakore/backend and kwakore/desktop (replace kwakore/backend => ../backend) with no alias for the verdana paths; go mod tidy ran in both, dropping 64 Gio-era requirements from desktop
 
 ### Pending Todos
 
@@ -232,8 +234,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:54:52.522Z
-Stopped at: Completed 09-15-PLAN.md
+Last session: 2026-10-07T07:00:58.871Z
+Stopped at: Completed 09-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

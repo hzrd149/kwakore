@@ -104,7 +104,7 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
-**Plans:** 13/24 plans executed
+**Plans:** 14/24 plans executed
 
 Plans:
 
@@ -121,7 +121,7 @@ Plans:
 - [x] 09-19-PLAN.md — Manager instance IPC and lock retirement
 - [x] 09-20-PLAN.md — Secret store, theme and chrome retirement
 - [x] 09-15-PLAN.md — Bundled settings and non-napplet child retirement
-- [ ] 09-06-PLAN.md — Atomic public Go module rename
+- [x] 09-06-PLAN.md — Atomic public Go module rename
 - [ ] 09-07-PLAN.md — Retained child environment identity
 - [ ] 09-16-PLAN.md — Child and host-page bridge identity
 - [ ] 09-17-PLAN.md — Service and signer runtime labels
