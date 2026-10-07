@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-10-07T05:20:32.165Z"
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-10-07T05:39:56.662Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: f621e0874c6bbae3057e6f8f07fa4da700f63f8e
+state_head: b27e29a7541cfea989d343d8a121bc58904d9fc7
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 19
-  percent: 44
+  completed_plans: 20
+  percent: 47
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████░░░░░░] 44%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([█████░░░░░] 47%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -118,6 +118,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 08 P04 | 11min | 3 tasks | 16 files |
 | Phase 08 P05 | 15min | 3 tasks | 14 files |
 | Phase 09 P01 | 9min | 3 tasks | 6 files |
+| Phase 09 P02 | 16min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-01: D-08 acknowledged by user 2026-10-07; units use kwakore only, no aliases or migration
 - [Phase 09]: 09-01: any LISTEN_* present selects activation; malformed PID/count/descriptor is an error with no direct-bind fallback; LISTEN_* always unset so napplet children never inherit it
 - [Phase 09]: 09-01: kwakore.socket uses RemoveOnStop=yes and the daemon never unlinks an inherited socket; kwakore.service pins StartLimitIntervalSec=10s/StartLimitBurst=5 so a sixth rapid start fails both units deterministically until reset-failed
+- [Phase 09]: 09-02: release asset is kwakore-linux-ARCH.tar.gz (version in dist dir, archive top dir and stamped binaries); archive holds exactly the four runtime files and install.sh embeds the unit templates, drift-checked by smoke
+- [Phase 09]: 09-02: installed layout is ~/.local/lib/kwakore/releases/<sha256> behind an atomically renamed current symlink; ExecStart=<prefix>/lib/kwakore/current/kwakore-daemon; only kwakore.socket enabled
+- [Phase 09]: 09-02: install helper enforces linuxhost checkProgram path policy (umask 022, refuses group/world-writable or foreign-owned ancestors) so napplet launches cannot silently fail
 
 ### Pending Todos
 
@@ -200,8 +204,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T05:20:32.064Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-10-07T05:39:56.587Z
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
