@@ -1,0 +1,19 @@
+# Kwakore control socket for the per-user systemd manager.
+#
+# Enable only this unit (systemctl --user enable --now kwakore.socket). The
+# first client connection starts kwakore.service, which adopts this listener.
+# The path, 0700 directory and 0600 inode must match what kwakore-daemon
+# validates before serving an inherited socket.
+[Unit]
+Description=Kwakore control socket
+Documentation=https://github.com/hzrd149/kwakore/blob/master/docs/service.md
+
+[Socket]
+ListenStream=%t/kwakore/daemon.sock
+SocketMode=0600
+DirectoryMode=0700
+Accept=no
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

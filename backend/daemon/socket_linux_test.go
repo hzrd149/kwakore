@@ -10,11 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"verdana/backend/controlprotocol"
 )
 
@@ -293,4 +296,137 @@ func TestSocketAccessReplacesOwnedStaleSocket(t *testing.T) {
 		t.Fatalf("owned stale socket was not replaced: %v", err)
 	}
 	defer listener.Close()
+}
+
+// ─── socket activation rig ──────────────────────────────────────────────────
+
+// activationRuntime creates a private runtime directory with the 0700 kwakore
+// child a socket unit's DirectoryMode=0700 would create, and points
+// XDG_RUNTIME_DIR at it.
+func activationRuntime(t *testing.T) string {
+	t.Helper()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.MkdirAll(filepath.Join(runtimeDir, "kwakore"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	return filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+}
+
+// inheritedFD stands in for the user manager: it binds a 0600 listener at path
+// and returns a raw duplicate descriptor, as systemd would pass at fd 3, plus
+// its socket inode so closure can be checked without trusting fd reuse.
+func inheritedFD(t *testing.T, network, path string) (int, uint64) {
+	t.Helper()
+	var fd int
+	switch network {
+	case "unix":
+		l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.SetUnlinkOnClose(false)
+		fd = dupConnFD(t, l)
+		_ = l.Close()
+	case "unixgram":
+		c, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fd = dupConnFD(t, c)
+		_ = c.Close()
+	default:
+		t.Fatalf("network %s", network)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ino := fdInode(t, fd)
+	t.Cleanup(func() {
+		if !fdClosed(fd, ino) {
+			_ = unix.Close(fd)
+		}
+	})
+	return fd, ino
+}
+
+func dupConnFD(t *testing.T, c interface {
+	SyscallConn() (syscall.RawConn, error)
+}) int {
+	t.Helper()
+	raw, err := c.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd := -1
+	var dupErr error
+	if err := raw.Control(func(s uintptr) { fd, dupErr = unix.Dup(int(s)) }); err != nil || dupErr != nil {
+		t.Fatal(err, dupErr)
+	}
+	return fd
+}
+
+func fdInode(t *testing.T, fd int) uint64 {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		t.Fatal(err)
+	}
+	return st.Ino
+}
+
+// fdClosed reports whether fd no longer refers to the socket inode ino. A
+// reused descriptor number pointing elsewhere counts as closed.
+func fdClosed(fd int, ino uint64) bool {
+	var st unix.Stat_t
+	return unix.Fstat(fd, &st) != nil || st.Ino != ino
+}
+
+func setActivation(t *testing.T, fd int, pid, fds string) {
+	t.Helper()
+	previous := activationFD
+	activationFD = fd
+	t.Cleanup(func() { activationFD = previous })
+	t.Setenv("LISTEN_PID", pid)
+	t.Setenv("LISTEN_FDS", fds)
+	t.Setenv("LISTEN_FDNAMES", "kwakore.socket")
+}
+
+func TestActivatedSocketServesInheritedListener(t *testing.T) {
+	path := activationRuntime(t)
+	fd, ino := inheritedFD(t, "unix", path)
+	setActivation(t, fd, strconv.Itoa(os.Getpid()), "1")
+	listener, err := (&Service{}).Listen()
+	if err != nil {
+		t.Fatalf("valid inherited listener refused: %v", err)
+	}
+	for _, name := range []string{"LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"} {
+		if _, ok := os.LookupEnv(name); ok {
+			t.Fatalf("%s left in the environment for napplet children", name)
+		}
+	}
+	if !fdClosed(fd, ino) {
+		t.Fatal("inherited descriptor number left open after adoption")
+	}
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	// a parse error answers through the peer-checked handler without dispatch
+	if _, err := conn.Write([]byte("{\"jsonrpc\":\n")); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil || !bytes.Contains(line, []byte(`"code":-32700`)) {
+		t.Fatalf("inherited listener did not serve: %s, %v", line, err)
+	}
+	conn.Close()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// the user manager keeps listening, so the daemon must not unlink its inode
+	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("manager-owned socket removed on close: %v", err)
+	}
 }

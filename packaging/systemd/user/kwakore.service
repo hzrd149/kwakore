@@ -1,0 +1,18 @@
+# Kwakore daemon for the per-user systemd manager.
+#
+# Started on demand by kwakore.socket. Installers render @BINDIR@ to the
+# absolute directory holding kwakore-daemon, the napplet child and
+# libwebview.so; the daemon resolves its child beside its own executable.
+[Unit]
+Description=Kwakore napplet daemon
+Documentation=https://github.com/hzrd149/kwakore/blob/master/docs/service.md
+Requires=kwakore.socket
+After=kwakore.socket
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/kwakore-daemon
+ExecReload=kill -HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=15s
+UMask=0077
