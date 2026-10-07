@@ -1,7 +1,7 @@
 ---
 phase: 07-unix-socket-and-cli
-verified: 2026-10-06T22:34:09Z
-status: human_needed
+verified: 2026-10-07T02:01:19Z
+status: passed
 score: 18/18 must-haves verified
 covered_files:
   - .planning/REQUIREMENTS.md
@@ -44,7 +44,7 @@ covered_files:
   - backend/window_storage.go
   - docs/control-protocol.md
   - docs/service.md
-covered_digest: "v1:sha256:dfd4482af8c11f708f4bbe9f39118147af551567611f20df2c70facb6110534d"
+covered_digest: "v1:sha256:c7c8a05b02254da64bfc189f2e218a0cd86b091273257a2c9fc248a5eac41ab7"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
@@ -70,7 +70,7 @@ human_verification:
 # Phase 7: Unix Socket and CLI Verification Report
 
 **Phase goal:** Local clients can perform all basic service and napplet management through a stable, user-only interface.
-**Status:** Human verification needed. Re-verification after plan 07-07 closed the prior automated blocker; no override applies.
+**Status:** Passed. Automated checks covered 18/18 must-haves; the user confirmed both live relay/blob UAT checks on 2026-10-06 local. The later Phase 6 shutdown changes in covered daemon files passed focused package tests on 2026-10-07 UTC.
 
 ## Goal achievement
 
@@ -97,7 +97,7 @@ The three roadmap success criteria are represented below: the private/versioned 
 | 17 | Version, schemas, framing, errors, security and timeouts are documented for independent clients | VERIFIED | `docs/control-protocol.md` covers endpoint, 11 methods, DTOs, limits, codes and CLI syntax; `docs/service.md` links it. The documented 1011 data shape now matches the wire test. |
 | 18 | Real-daemon and fake-peer tests prove ID correlation and peer checks | VERIFIED | `TestSocketStatusCLIEndToEnd`, `TestForegroundClientParity`, `TestCLIContract` and `TestCLIContractPeerUIDOverride` pass. |
 
-**Score:** 18/18 verified; 0 present-but-behavior-unverified. No override applies. Live external relay/blob flows still need human verification.
+**Score:** 18/18 verified; 0 present-but-behavior-unverified. No override applies. The user confirmed both live external relay/blob UAT flows on 2026-10-06 local.
 
 ## Required artifacts and key links
 
@@ -145,7 +145,7 @@ The GSD decision-coverage query returned: “No trackable decisions in CONTEXT.m
 
 ## Anti-patterns and human verification
 
-No unreferenced `TBD`, `FIXME` or `XXX` debt marker or user-visible stub was found in the phase implementation files, including the six files changed by plan 07-07. No new blocker or regression appeared. The two external-service checks below remain because the focused tests use controlled relay/blob fixtures; this user-facing CLI phase therefore ends in `human_needed` despite the clean 18/18 automated score.
+No unreferenced `TBD`, `FIXME` or `XXX` debt marker or user-visible stub was found in the phase implementation files, including the six files changed by plan 07-07. No new blocker or regression appeared. The two external-service checks below were confirmed by the user on 2026-10-06 local; the phase now passes.
 
 ### 1. Live relay discovery
 
@@ -161,9 +161,9 @@ No unreferenced `TBD`, `FIXME` or `XXX` debt marker or user-visible stub was fou
 
 ## Gap summary
 
-The previous 1011 gap is closed. Automated verification found no remaining blocker. Human observation of external relay and blob workflows is still needed before a `passed` verdict.
+The previous 1011 gap is closed. Automated verification found no remaining blocker. The user confirmed the external relay and blob workflows; this supports the `passed` verdict.
 
 ---
 
-_Verified: 2026-10-06T22:34:09Z_
+_Verified: 2026-10-07T02:01:19Z_
 _Verifier: gsd-verifier agent_
