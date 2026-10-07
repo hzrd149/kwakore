@@ -100,6 +100,15 @@ func TestIsNostrConnectAnswer(t *testing.T) {
 	}
 }
 
+func TestServiceNostrConnectPairRejectsForgedAnswer(t *testing.T) {
+	client, signer := nostr.Generate(), nostr.Generate()
+	evt := connectAnswer(t, signer, client.Public(), "private-sentinel", false)
+	evt.CreatedAt++
+	if isNostrConnectAnswer(client, evt, "private-sentinel") {
+		t.Fatal("accepted an event whose signature no longer matches the response")
+	}
+}
+
 func TestWaitNostrConnectFindsSigner(t *testing.T) {
 	srv := httptest.NewServer(khatru.NewRelay())
 	defer srv.Close()
