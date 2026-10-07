@@ -4,19 +4,19 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 5
+current_plan: 6
 status: executing
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-10-07T06:09:21.620Z"
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-10-07T06:18:34.596Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: ad8cdd5040b9a1b773413b28fc00cb3c0f47938f
+state_head: fa261662188c6ff62bce60b3fe275c7f584a934d
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 22
-  percent: 51
+  completed_plans: 23
+  percent: 53
 ---
 
 # Project State
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 5
+Current Plan: 6
 Total Plans in Phase: 24
 Status: Ready to execute
-**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([█████░░░░░] 51%)
+**Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([█████░░░░░] 53%)
 Last activity: 2026-10-07 — Phase 09 execution started
 
 ## Performance Metrics
@@ -121,6 +121,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P02 | 16min | 2 tasks | 5 files |
 | Phase 09 P03 | 12min | 2 tasks | 8 files |
 | Phase 09 P04 | 16min | 2 tasks | 11 files |
+| Phase 09 P05 | 10min | 1 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-03: a CLI path containing % is refused for desktop entries because GLib resolves the Exec program before expanding %%
 - [Phase 09]: 09-04: service native entries come only from committed canonical napplet records; reconciled at startup before readiness and synchronously after every committed mutation, with ticket-coalesced passes reading the registry under the pass lock
 - [Phase 09]: 09-04: entry Exec uses the kwakore CLI beside the daemon, keeping the stable lib/kwakore/current link when the daemon was started through it; reconcile failures surface as the fixed native_entries diagnostic
+- [Phase 09]: 09-05: only the ten Kotlin sources were retired; android/ build shell stays for 09-21, gomobile/backend/mobile for 09-22
 
 ### Pending Todos
 
@@ -211,8 +213,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:09:21.544Z
-Stopped at: Completed 09-04-PLAN.md
+Last session: 2026-10-07T06:18:34.517Z
+Stopped at: Completed 09-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
