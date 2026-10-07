@@ -56,6 +56,7 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
 	defer cancel()
 	cmd := exec.Command(h.Program)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(),
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_DIR="+spec.Dir,
@@ -129,7 +130,7 @@ func (c *childTransport) Send(m backend.WireMsg) {
 func (c *childTransport) Focus() {}
 func (c *childTransport) Close() { c.Send(backend.WireMsg{T: "close"}) }
 func (c *childTransport) killAndWait() {
-	_ = c.cmd.Process.Kill()
+	_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	<-c.done
 }
 
@@ -163,7 +164,7 @@ func readChild(c *childTransport, instance string, stdout io.ReadCloser, ready, 
 		backend.HandleMessage(instance, msg)
 	}
 	if scanner.Err() != nil {
-		_ = c.cmd.Process.Kill()
+		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	}
 	_ = stdout.Close()
 	_ = c.stdin.Close()

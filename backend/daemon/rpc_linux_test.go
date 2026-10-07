@@ -54,7 +54,7 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	program := filepath.Join(programDir, "napplet")
-	script := "#!/bin/sh\nsleep 0.2\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\"}\\n'\nwhile IFS= read -r line; do case \"$line\" in *'\"t\":\"close\"'*) exit 0;; esac; done\n"
+	script := "#!/bin/sh\nsleep 0.2\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\"}\\n'\nwhile IFS= read -r line; do case \"$line\" in *'\"t\":\"close\"'*) sleep 0.2; exit 0;; esac; done\n"
 	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -105,11 +105,20 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 	if time.Since(start) < 150*time.Millisecond {
 		t.Fatal("launch returned before host-page nap.start")
 	}
+	start = time.Now()
+	stopped, rpcErr, _ := rpcCall(t, bufio.NewReader(conn), conn, "napplet.stop", `{"window_id":"`+opened.WindowID+`"}`)
+	if rpcErr != nil || !strings.Contains(string(stopped), `"closed":true`) || time.Since(start) < 150*time.Millisecond {
+		t.Fatalf("stop returned before child closed: %s %+v", stopped, rpcErr)
+	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.stop", `{"window_id":"`+opened.WindowID+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
+		t.Fatalf("second stop: %+v", rpcErr)
+	}
 	if err := os.WriteFile(program, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
-	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || len(backend.OpenWindows()) != 1 {
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || len(backend.OpenWindows()) != 0 {
 		t.Fatalf("failed child left a window or returned success: %+v, windows=%v", rpcErr, backend.OpenWindows())
 	}
 	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"bad"}`)

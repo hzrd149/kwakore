@@ -564,8 +564,6 @@ func WindowClosed(instance string) {
 
 	ci.napClosed()
 
-	ci.goneOnce.Do(func() { close(ci.gone) })
-
 	instancesMu.Lock()
 	for i, c := range instances {
 		if c == ci {
@@ -574,6 +572,7 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
+	ci.goneOnce.Do(func() { close(ci.gone) })
 	failed := ci.failedClosed.Load()
 	if ci.auxiliary || failed {
 		// auxiliary windows are temporary helpers, not session windows,

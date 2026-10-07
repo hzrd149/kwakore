@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"verdana/backend"
@@ -119,6 +120,25 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		result, launchErr := backend.ServiceLaunch(workCtx, address)
 		if launchErr != nil {
 			return nil, mutationError(launchErr)
+		}
+		return result, nil
+	case "napplet.stop":
+		windowID, err := decodeWindowIDParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancelWork := s.registryContext(ctx)
+		defer cancelWork()
+		workCtx, cancelDeadline := context.WithTimeout(workCtx, 12*time.Second)
+		defer cancelDeadline()
+		result, stopErr := backend.ServiceStop(workCtx, windowID)
+		if stopErr != nil {
+			return nil, mutationError(stopErr)
 		}
 		return result, nil
 	case "napplet.discover":
@@ -240,6 +260,25 @@ func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error
 		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
 	return address, nil
+}
+
+func decodeWindowIDParams(params json.RawMessage) (string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "window_id"); err != nil {
+		return "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	var id string
+	if json.Unmarshal(fields["window_id"], &id) != nil || id == "" {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil || n == 0 || strconv.FormatUint(n, 10) != id {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	return id, nil
 }
 
 func mutationError(err error) *controlprotocol.Error {
