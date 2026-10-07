@@ -224,6 +224,19 @@ existing kwakore launch ADDRESS -> existing napplet.launch {address: ADDRESS}
 
 This adapter is a recommendation, not an existing command. The current RPC expects exactly `"napplet.launch"` and `"address"`, and `ParseCanonicalServiceAddress` checks canonical spelling. [ASSUMED] [VERIFIED: backend/daemon/rpc_linux.go:209-225; backend/registry_service.go:15-23]
 
+## Documentation and Smoke Plan
+
+| Artifact | Required content | Source contract |
+|----------|------------------|-----------------|
+| `README.md` | Start with generic systemd helper and manual setup, then NixOS module; name supported Linux targets only. | Current README still leads with old Verdana GUI install and Android. [VERIFIED: README.md:1-35; README.md:116-159] |
+| `docs/service.md` | Effective XDG config/data/runtime paths, service and socket commands, NixOS options and settings precedence, graphical session import, journal diagnostics. | Current guide describes foreground use and paths; quote current path values: `"kwakore", "config.json"`, `"kwakore"`, `"settings-overrides.json"`, `"daemon.sock"`. [VERIFIED: backend/serviceconfig/config.go:25-42; backend/daemon/socket_linux.go:23-46; docs/service.md:1-21] |
+| `docs/control-protocol.md` | Preserve version 1 JSON-RPC methods/framing/errors and link from setup; add installed package/activation and entry error notes without changing RPC method shapes. | Existing reference says `"protocol_version: 1"` and `"napplet.launch"` takes `{address:string}`. [VERIFIED: docs/control-protocol.md:1-7; docs/control-protocol.md:35-53] |
+| Signer examples | Show protected stdin/file switch, `signer status`, public `status`, fixed error JSON and `journalctl --user-unit`. | Existing CLI accepts `"--secret-file"` and `"--secret-stdin"`; CLI errors are JSON on stderr. [VERIFIED: backend/cmd/kwakore/main_linux.go:305-344; backend/cmd/kwakore/main_linux.go:748-772] [CITED: https://wiki.nixos.org/wiki/Systemd/User_Services/en] |
+
+The installed-artifact smoke should: (1) install the release layout and user units into an isolated user home; (2) enable/start only the socket, assert the daemon is inactive and the socket is owner-only; (3) run CLI `status` so systemd activates the daemon; (4) use `systemctl --user` to inspect/restart/stop the service and check `journalctl --user-unit`; (5) seed or install one deterministic napplet fixture, assert exactly one generated entry, launch through its `Exec` token on a display, then uninstall and assert removal; (6) repeat launch with no display and capture the documented CLI-style error surface. This is a recommended validation sequence, not an existing test. [ASSUMED] [VERIFIED: backend/cmd/kwakore/main_linux.go:389-396; backend/linuxhost/host_linux.go:54-56; desktop/internal/osintegration/appshortcut_linux.go:21-47] [CITED: https://wiki.nixos.org/wiki/Systemd/User_Services/en]
+
+Use the existing real-child test as a runtime regression anchor; it is already wired in CI under Xvfb, with the exact test name `"TestRPCRealChildGraphical"`. The new installed-artifact smoke must additionally cover systemd activation and the generated entry. [VERIFIED: .github/workflows/desktop.yml:59-83]
+
 ## State of the Art
 
 The current repository has already moved foreground service, socket protocol, CLI and signer work into Phases 6–8, while Nix/release installer still target the old launcher. Plan Phase 9 as integration and retirement, not a new protocol. [VERIFIED: .planning/ROADMAP.md:23-116; flake.nix:18-35; nix/package.nix:39-65]
