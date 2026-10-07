@@ -20,6 +20,7 @@ Run commands from the repository root unless noted:
 - `cd backend && go vet ./... && go test ./...` runs the backend checks.
 - `cd desktop && go generate ./internal/webviewlib && go build -o child/napplet ./child && go vet ./... && go test ./...` reproduces the desktop CI lane.
 - `bash scripts/smoke-linux-service.sh --activation-only` and `--install-only` exercise the user units under your own systemd user manager with temporary runtime units; they refuse to run if Kwakore units already exist.
+- `bash scripts/smoke-linux-service.sh --full` is the release acceptance run: it installs a bundle (or `--archive FILE --sha256sums FILE`) the same way and checks activation, control, the native entry opening a real napplet window (needs `DISPLAY`), the headless `session_unavailable` error and uninstall. CI runs it on the uploaded amd64 archive.
 - `bash scripts/check-product-identity.sh` fails on any unreviewed use of the old product name (`--runtime-only` limits it to the runtime sources).
 - `just fonts` regenerates embedded WOFF2 files after changing `desktop/assets/*.ttf`.
 

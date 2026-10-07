@@ -154,12 +154,18 @@ To run the tests:
 (cd desktop && go generate ./internal/webviewlib && go build -o child/napplet ./child && go vet ./... && go test ./...)
 ```
 
-`scripts/smoke-linux-service.sh` has three stages. `--activation-only` and
+`scripts/smoke-linux-service.sh` has four stages. `--activation-only` and
 `--install-only` run against your user manager with temporary runtime units,
 private data directories and an offline configuration, and refuse to run when
 Kwakore units already exist; `--bundle-only` (what `just bundle-check` runs)
-needs no user manager. CI runs all of these in
-[`.github/workflows/linux.yml`](.github/workflows/linux.yml).
+needs no user manager. `--full` is the release acceptance run: it installs a
+release archive (a fresh bundle, or `--archive FILE --sha256sums FILE`) the
+same isolated way, then checks socket activation, `systemctl --user` control,
+the native desktop entry of an offline-seeded napplet opening a real window
+(it needs `DISPLAY`, and a window opens briefly), the headless
+`session_unavailable` error and uninstall. CI runs all of these in
+[`.github/workflows/linux.yml`](.github/workflows/linux.yml), `--full` on the
+amd64 archive the release publishes.
 
 ## Making napplets
 
