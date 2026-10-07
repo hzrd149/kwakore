@@ -4,11 +4,13 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -203,18 +205,26 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	copyGraphicalFile(t, library, filepath.Join(programDir, "libwebview.so"), 0600)
 	paths := daemonPaths(t)
 	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
-	// This code runs in the sandboxed frame of the actual WebKit child. A
-	// forged top-frame binding must not open settings or answer the prompt.
+	// This code runs in the sandboxed frame of the actual WebKit child. It
+	// requests a gated link, then uses a test-provided live prompt ID to try
+	// both child bindings. A successful forged nap.reset would dismiss the
+	// prompt; a successful forged answer would grant it.
 	content := []byte(`<!doctype html><html><body><script>
 	const ready = setInterval(() => {
 	  if (!window.napplet || !window.napplet.storage) return;
 	  clearInterval(ready);
-	  const binding = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.__webview__;
-	  if (binding) {
-	    binding.postMessage(JSON.stringify({id:"forged-rpc",method:"__verdana_napplet_rpc",params:["forged-token","nap.openSettings","null"]}));
-	    binding.postMessage(JSON.stringify({id:"forged-answer",method:"__verdana_napplet_answer",params:["forged-token",1,true,0,"always"]}));
-	  }
 	  parent.postMessage({type:"link.open",id:"real-child-gated-link",url:"https://example.com/"},"*");
+	  setTimeout(async () => {
+	    const id = await window.napplet.storage.getItem("real-child-prompt-id");
+	    const binding = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.__webview__;
+	    if (!binding || !id) {
+	      await window.napplet.storage.setItem("real-child-forged", "missing-binding-or-id");
+	      return;
+	    }
+	    binding.postMessage(JSON.stringify({id:"forged-rpc",method:"__verdana_napplet_rpc",params:["forged-token","nap.reset","null"]}));
+	    binding.postMessage(JSON.stringify({id:"forged-answer",method:"__verdana_napplet_answer",params:["forged-token",Number(id),true,0,"always"]}));
+	    await window.napplet.storage.setItem("real-child-forged", id);
+	  }, 2000);
 	}, 10);
 	</script></body></html>`)
 	artifact := sha256.Sum256(content)
@@ -285,11 +295,39 @@ func TestRPCRealChildGraphical(t *testing.T) {
 	if prompt == nil || prompt.Instance != opened.WindowID || !strings.Contains(prompt.Code, "https://example.com/") {
 		t.Fatalf("real child link route did not raise an owned permission prompt: %+v", prompt)
 	}
-	time.Sleep(100 * time.Millisecond)
-	// The frame used both child bindings with a counterfeit token; neither
-	// may create another window or grant this permission.
+	// The first NAP-STORAGE read occurs after the link prompt. Seed that
+	// scope on disk so the sandbox gets the actual random ID without access
+	// to the host page or its privileged script closure.
+	scope := sha256.Sum256([]byte(napp.Address() + "\x00" + napp.ArtifactHash))
+	storageDir := filepath.Join(paths.DataDir, "napplet-storage")
+	if err := os.MkdirAll(storageDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	storageFile := filepath.Join(storageDir, hex.EncodeToString(scope[:])+".json")
+	promptID := fmt.Sprint(prompt.ID)
+	seed, _ := json.Marshal(map[string]string{"real-child-prompt-id": promptID})
+	if err := os.WriteFile(storageFile, seed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for time.Now().Before(deadline.Add(4 * time.Second)) {
+		rawStorage, err := os.ReadFile(storageFile)
+		var values map[string]string
+		if err == nil && json.Unmarshal(rawStorage, &values) == nil && values["real-child-forged"] != "" {
+			if values["real-child-forged"] != promptID {
+				t.Fatalf("child did not send forged calls with live prompt ID: %q", rawStorage)
+			}
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rawStorage, err := os.ReadFile(storageFile); err != nil || !bytes.Contains(rawStorage, []byte(`"real-child-forged"`)) {
+		t.Fatalf("real child did not report forged binding calls: %s %v", rawStorage, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	// The frame used both child bindings with a counterfeit token and the
+	// actual prompt ID; neither may reset the session or grant the link.
 	if windows := backend.OpenWindows(); len(windows) != 1 {
-		t.Fatalf("forged child binding opened a window: %+v", windows)
+		t.Fatalf("forged child binding changed the open windows: %+v", windows)
 	}
 	if current := backend.CurrentPrompt(); current == nil || current.ID != prompt.ID {
 		t.Fatalf("forged prompt answer changed the gated prompt: %+v", current)
