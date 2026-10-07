@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -103,30 +104,195 @@ func TestRPCSignerBunkerValidSwitch(t *testing.T) {
 	}
 }
 
-// TestRPCRealChildCIContract pins the CI gates that keep the graphical and
-// node-backed tests from skipping silently: each test reads a KWAKORE_* gate,
-// and a workflow that sets another name (or drops the PASS checks) would let
-// the job pass with the tests skipped.
-func TestRPCRealChildCIContract(t *testing.T) {
-	workflow, err := os.ReadFile("../../.github/workflows/linux.yml")
+// The CI contract. Since quick task 261007-ej4, .github/workflows/linux.yml
+// runs only the Go lanes (backend, child) on every push and pull request, and
+// builds the per-arch bundles and publishes the release only on v* tags. The
+// real-engine tests, the user-service smokes and the Nix checks run locally.
+// ciWorkflowViolations keeps that shape from drifting into something weaker:
+//   - the backend job sets KWAKORE_REQUIRE_NODE, so the node-backed host-page
+//     and frame-scope tests fail instead of silently skipping;
+//   - the release needs backend, child and bundle and runs only on a v* tag,
+//     so a tag cannot publish ahead of a failing Go lane or bundle;
+//   - the only write-token step stays pinned to a commit SHA;
+//   - no real-engine gate, display, sudo, systemd or Nix lane comes back in a
+//     half-wired form (the old graphical job needed PASS-line checks to stop
+//     silent skips), and the child job keeps the notice saying those tests
+//     were not run.
+//
+// Comment lines are ignored, so comments may document the local gates.
+const (
+	ciTagCondition  = "    if: startsWith(github.ref, 'refs/tags/v')"
+	ciReleaseNeeds  = "    needs: [backend, child, bundle]"
+	ciPublishAction = "softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"
+)
+
+var (
+	ciJobHeader = regexp.MustCompile(`^  ([A-Za-z0-9_-]+):\s*$`)
+	// the bundle job counts the smoke's PASS markers by reading the script as
+	// data; that line names the script without running it
+	ciSmokeMarkerRead = regexp.MustCompile(`^\s*[A-Za-z_]+=\$\(grep -c [^;&|]+ scripts/smoke-linux-service\.sh\)\s*$`)
+)
+
+func ciWorkflowViolations(workflow string) []string {
+	var lines []string
+	for _, line := range strings.Split(workflow, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	text := strings.Join(lines, "\n")
+
+	jobs := map[string][]string{}
+	current, inJobs := "", false
+	for _, line := range lines {
+		switch {
+		case line == "jobs:":
+			inJobs, current = true, ""
+		case !inJobs:
+		case line != "" && line[0] != ' ':
+			// a top-level key ends the jobs section
+			inJobs, current = false, ""
+		case ciJobHeader.MatchString(line):
+			current = ciJobHeader.FindStringSubmatch(line)[1]
+			jobs[current] = nil
+		case current != "":
+			jobs[current] = append(jobs[current], line)
+		}
+	}
+
+	var violations []string
+	add := func(format string, args ...any) {
+		violations = append(violations, fmt.Sprintf(format, args...))
+	}
+	hasLine := func(job, want string) bool {
+		for _, line := range jobs[job] {
+			if line == want {
+				return true
+			}
+		}
+		return false
+	}
+	required := map[string][]string{
+		"backend": {"go vet ./...", "go test ./...", `KWAKORE_REQUIRE_NODE: "1"`, "bash scripts/check-product-identity.sh", "bash -n"},
+		"child":   {"go generate ./internal/webviewlib", "go build -o child/napplet ./child", "go vet ./...", "go test ./...", "go mod tidy -diff", "::notice"},
+		"bundle":  nil,
+		"release": nil,
+	}
+	for _, job := range []string{"backend", "child", "bundle", "release"} {
+		body, ok := jobs[job]
+		if !ok {
+			add("job %s is missing", job)
+			continue
+		}
+		joined := strings.Join(body, "\n")
+		for _, want := range required[job] {
+			if !strings.Contains(joined, want) {
+				add("job %s lacks %q", job, want)
+			}
+		}
+	}
+	for _, job := range []string{"backend", "child"} {
+		for _, line := range jobs[job] {
+			if strings.HasPrefix(line, "    if:") {
+				add("job %s must run on every push and pull request, but has %q", job, strings.TrimSpace(line))
+			}
+		}
+	}
+	for _, job := range []string{"bundle", "release"} {
+		if _, ok := jobs[job]; ok && !hasLine(job, ciTagCondition) {
+			add("job %s lacks the tag condition %q", job, strings.TrimSpace(ciTagCondition))
+		}
+	}
+	if _, ok := jobs["release"]; ok {
+		if !hasLine("release", ciReleaseNeeds) {
+			add("release lacks %q", strings.TrimSpace(ciReleaseNeeds))
+		}
+		if !strings.Contains(strings.Join(jobs["release"], "\n"), ciPublishAction) {
+			add("release lacks the pinned publish action %s", ciPublishAction)
+		}
+	}
+	for _, want := range []string{"pull_request:", `tags: ["v*"]`} {
+		if !strings.Contains(text, want) {
+			add("workflow triggers lack %q", want)
+		}
+	}
+	forbidden := []string{
+		"KWAKORE_WEBKIT_SMOKE", "KWAKORE_REQUIRE_GRAPHICS", "KWAKORE_WINDOW_BIN", "KWAKORE_WEBVIEW_LIB",
+		"xvfb", "sudo", "install-nix-action", "systemctl",
+	}
+	for _, line := range lines {
+		for _, token := range forbidden {
+			if strings.Contains(line, token) {
+				add("CI runs no real-engine, display, sudo, systemd or Nix lane, but a line names %q: %s", token, strings.TrimSpace(line))
+			}
+		}
+		if strings.Contains(line, "smoke-linux-service.sh") && !strings.Contains(line, "--bundle-only") && !ciSmokeMarkerRead.MatchString(line) {
+			add("CI runs only the --bundle-only smoke stage: %s", strings.TrimSpace(line))
+		}
+	}
+	return violations
+}
+
+// TestCIWorkflowContract checks the real workflow, then proves the checker
+// catches each regression it exists for on mutated copies of it.
+func TestCIWorkflowContract(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/linux.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{
-		"KWAKORE_REQUIRE_NODE: \"1\"",
-		"KWAKORE_WEBKIT_SMOKE: \"1\"",
-		"if grep -E -- '--- SKIP' \"$log\"; then",
-		"grep -Eq -- \"^--- PASS: $name \\\\(\" \"$log\"",
-		"KWAKORE_REQUIRE_GRAPHICS: \"1\"",
-		"KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet",
-		"KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so",
-		"sudo apt-get install -y --no-install-recommends xvfb",
-		"xvfb-run -a go test -v ./daemon -run '^TestRPCRealChildGraphical$' -count=1 -timeout 60s",
-		"grep -Fq -- '--- PASS: TestRPCRealChildGraphical'",
-	} {
-		if !strings.Contains(string(workflow), required) {
-			t.Errorf("required graphical CI gate missing %q", required)
+	workflow := string(raw)
+	if violations := ciWorkflowViolations(workflow); len(violations) != 0 {
+		t.Fatalf("linux.yml breaks the CI contract:\n%s", strings.Join(violations, "\n"))
+	}
+
+	replace := func(old, new string) func(string) string {
+		return func(s string) string { return strings.ReplaceAll(s, old, new) }
+	}
+	appendText := func(extra string) func(string) string {
+		return func(s string) string { return strings.TrimRight(s, "\n") + "\n" + extra }
+	}
+	dropLinesContaining := func(token string) func(string) string {
+		return func(s string) string {
+			var kept []string
+			for _, line := range strings.Split(s, "\n") {
+				if !strings.Contains(line, token) {
+					kept = append(kept, line)
+				}
+			}
+			return strings.Join(kept, "\n")
 		}
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(string) string
+		clean  bool
+	}{
+		{"webkit gate job", appendText("\n  graphical:\n    runs-on: ubuntu-24.04\n    env:\n      KWAKORE_WEBKIT_SMOKE: \"1\"\n    steps:\n      - run: go test ./child\n"), false},
+		{"xvfb job", appendText("\n  graphical:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: xvfb-run -a go test ./daemon\n"), false},
+		{"full smoke job", appendText("\n  installed:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: bash scripts/smoke-linux-service.sh --full\n"), false},
+		{"node gate removed", replace("          KWAKORE_REQUIRE_NODE: \"1\"\n", ""), false},
+		{"release needs only bundle", replace(ciReleaseNeeds+"\n", "    needs: [bundle]\n"), false},
+		{"tag conditions removed", replace(ciTagCondition+"\n", ""), false},
+		{"backend gated", replace("\n  backend:\n", "\n  backend:\n    if: github.event_name == 'push'\n"), false},
+		{"child notice removed", dropLinesContaining("::notice"), false},
+		{"publish action unpinned", replace("@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65", "@v2"), false},
+		{"comment names a gate", appendText("# KWAKORE_WEBKIT_SMOKE=1 runs locally\n      # xvfb-run -a sudo systemctl --user\n"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := tc.mutate(workflow)
+			if mutated == workflow {
+				t.Fatal("the mutation did not change the workflow")
+			}
+			violations := ciWorkflowViolations(mutated)
+			if tc.clean && len(violations) != 0 {
+				t.Fatalf("comment lines must not count, got:\n%s", strings.Join(violations, "\n"))
+			}
+			if !tc.clean && len(violations) == 0 {
+				t.Fatal("the checker accepted the regression")
+			}
+			t.Logf("violations: %q", violations)
+		})
 	}
 }
 
