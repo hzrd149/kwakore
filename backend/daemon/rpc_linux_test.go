@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,6 +94,199 @@ func TestRPCRealChildCIContract(t *testing.T) {
 		if !strings.Contains(string(workflow), required) {
 			t.Errorf("required graphical CI gate missing %q", required)
 		}
+	}
+}
+
+func TestRPCHermeticGateAndSecretSentinels(t *testing.T) {
+	paths := daemonPaths(t)
+	napp := backend.Napp{D: "gate", Author: nostr.Generate().Public(), Format: backend.FormatNapplet}
+	napp.ID = napp.Address()
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, err := json.Marshal(backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DataDir, "state.json"), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+	_, rpcErr, raw := rpcCall(t, reader, conn, "napplet.permissions.set", `{"address":"`+napp.Address()+`","permission":"sign","decision":"allow"}`)
+	if rpcErr != nil {
+		t.Fatalf("saved allow: %s", raw)
+	}
+	// A local socket client cannot impersonate a child NAP binding even when
+	// that napplet has a saved allow for the declared sign route.
+	_, rpcErr, raw = rpcCall(t, reader, conn, "nap.msg", `{"type":"event.sign","id":"forged"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.MethodNotFound {
+		t.Fatalf("forged NAP socket call accepted: %s", raw)
+	}
+	_, rpcErr, raw = rpcCall(t, reader, conn, "signer.switch", `{"mode":"nsec","secret":"private-sentinel"}`)
+	if rpcErr == nil || strings.Contains(raw, "private-sentinel") {
+		t.Fatalf("signer failure leaked: %s", raw)
+	}
+	for _, method := range []string{"signer.status", "service.status", "service.diagnostics"} {
+		_, rpcErr, raw = rpcCall(t, reader, conn, method, `{}`)
+		if rpcErr != nil || strings.Contains(raw, "private-sentinel") {
+			t.Fatalf("%s leaked secret: %s %+v", method, raw, rpcErr)
+		}
+	}
+}
+
+// TestRPCRealChildGraphical is a separate required CI gate. The ordinary
+// backend suite remains headless; the CI flag turns every missing prerequisite
+// into a failure rather than a skip.
+func TestRPCRealChildGraphical(t *testing.T) {
+	if os.Getenv("KWAKORE_REQUIRE_GRAPHICS") != "1" {
+		t.Skip("real child requires the explicit graphical CI gate")
+	}
+	if os.Getenv("DISPLAY") == "" {
+		t.Fatal("required DISPLAY is absent")
+	}
+	child := requiredGraphicalFile(t, "KWAKORE_WINDOW_BIN", true)
+	library := requiredGraphicalFile(t, "KWAKORE_WEBVIEW_LIB", false)
+	programDir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-real-child-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(programDir) })
+	if err := os.Chmod(programDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(programDir, "napplet")
+	copyGraphicalFile(t, child, program, 0700)
+	copyGraphicalFile(t, library, filepath.Join(programDir, "libwebview.so"), 0600)
+	paths := daemonPaths(t)
+	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
+	content := []byte("<!doctype html><html><body><p>real child</p></body></html>")
+	artifact := sha256.Sum256(content)
+	napp := backend.Napp{D: "real-child", Name: "Real child", Format: backend.FormatNapplet,
+		Kind: backend.KindNapplet, Author: key.Public(), ArtifactHash: hex.EncodeToString(artifact[:]),
+		Paths: []backend.NappPath{{Path: "/index.html", Sha256: hex.EncodeToString(artifact[:])}}}
+	napp.ID = napp.Address()
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, err := json.Marshal(backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DataDir, "state.json"), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(napp.ID))
+	nappDir := filepath.Join(paths.DataDir, "napps", hex.EncodeToString(sum[:]))
+	if err := os.MkdirAll(nappDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nappDir, "index.html"), content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldProgram := windowProgramPath
+	windowProgramPath = func() string { return program }
+	t.Cleanup(func() { windowProgramPath = oldProgram })
+	s, err := Open(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	listener, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: filepath.Join(runtimeDir, "kwakore", "daemon.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(25 * time.Second))
+	reader := bufio.NewReader(conn)
+	result, rpcErr, raw := rpcCall(t, reader, conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr != nil || !strings.Contains(string(result), `"outcome":"opened"`) {
+		t.Fatalf("real child did not report host-page nap.start: %s %+v", raw, rpcErr)
+	}
+	var opened backend.ServiceLaunchResult
+	if err := json.Unmarshal(result, &opened); err != nil || opened.WindowID == "" {
+		t.Fatalf("real child launch result: %s %v", result, err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = backend.ServiceStop(ctx, opened.WindowID)
+	})
+	stopped, rpcErr, raw := rpcCall(t, reader, conn, "napplet.stop", `{"window_id":"`+opened.WindowID+`"}`)
+	if rpcErr != nil || !strings.Contains(string(stopped), `"closed":true`) || len(backend.OpenWindows()) != 0 {
+		t.Fatalf("real child did not close before stop returned: %s %+v", raw, rpcErr)
+	}
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	_, rpcErr, raw = rpcCall(t, reader, conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || !strings.Contains(raw, `"reason":"session_unavailable"`) || len(backend.OpenWindows()) != 0 {
+		t.Fatalf("headless real-child preflight: %s %+v", raw, rpcErr)
+	}
+}
+
+func requiredGraphicalFile(t *testing.T, env string, executable bool) string {
+	t.Helper()
+	path := os.Getenv(env)
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		t.Fatalf("%s must name an absolute clean path", env)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%s must name a regular file: %v", env, err)
+	}
+	if executable && info.Mode().Perm()&0111 == 0 {
+		t.Fatalf("%s is not executable", env)
+	}
+	return path
+}
+
+func copyGraphicalFile(t *testing.T, source, target string, mode os.FileMode) {
+	t.Helper()
+	in, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

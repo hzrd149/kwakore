@@ -283,6 +283,16 @@ func (ci *Instance) attach(t Transport) {
 	}
 }
 
+// AttachServiceWindowTransport lets the daemon child answer its host page's
+// nap.boot before OpenWindowContext waits for nap.start. The instance was
+// registered by launchWindow before the host was called; the final attach in
+// launchWindow is harmless when this transport is already bound.
+func AttachServiceWindowTransport(instance string, transport Transport) {
+	if ci := lookupInstance(instance); ci != nil {
+		ci.attach(transport)
+	}
+}
+
 func (ci *Instance) eval(code string) {
 	ci.send(WireMsg{T: "eval", Code: code})
 }

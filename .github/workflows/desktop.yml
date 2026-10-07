@@ -56,6 +56,21 @@ jobs:
         working-directory: desktop
         run: go test -tags novulkan ./...
 
+      - name: install graphical test display
+        run: sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: test real daemon child
+        working-directory: backend
+        env:
+          KWAKORE_REQUIRE_GRAPHICS: "1"
+          KWAKORE_WINDOW_BIN: ${{ github.workspace }}/desktop/child/napplet
+          KWAKORE_WEBVIEW_LIB: ${{ github.workspace }}/desktop/internal/webviewlib/lib/linux_amd64/libwebview.so
+          NO_AT_BRIDGE: "1"
+        run: |
+          set -euo pipefail
+          xvfb-run -a go test -v ./daemon -run '^TestRPCRealChildGraphical$' -count=1 -timeout 60s | tee "$RUNNER_TEMP/kwakore-real-child.log"
+          grep -Fq -- '--- PASS: TestRPCRealChildGraphical' "$RUNNER_TEMP/kwakore-real-child.log"
+
       # the real child under WebKitGTK with a fake launcher on the wire
       # protocol (D-14): the adversarial napplet's escapes, the rebuild order,
       # the reload cap and the forged bindings, on a real engine under xvfb.

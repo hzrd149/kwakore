@@ -96,6 +96,7 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 	ready := make(chan struct{}, 1)
 	failed := make(chan struct{}, 1)
 	go readChild(transport, spec.Instance, stdout, ready, failed)
+	backend.AttachServiceWindowTransport(spec.Instance, transport)
 	select {
 	case <-failed:
 		transport.killAndWait()
@@ -169,7 +170,7 @@ func readChild(c *childTransport, instance string, stdout io.ReadCloser, ready, 
 			}
 			break
 		}
-		if msg.T == "rpc" && msg.Method == "nap.start" && msg.ID > 0 && msg.Params == "" {
+		if msg.T == "rpc" && msg.Method == "nap.start" && msg.ID > 0 && (msg.Params == "" || msg.Params == "null") {
 			// This frame comes from the checked child executable. The child
 			// token binding restricts nap.start to its own host page.
 			backend.HandleMessage(instance, msg)

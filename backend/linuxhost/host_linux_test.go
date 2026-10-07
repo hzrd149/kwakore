@@ -101,7 +101,7 @@ func TestLinuxHostStopReapsUnresponsiveChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	program := filepath.Join(dir, "napplet")
-	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\"}\\n'\nsleep 30\n"
+	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"null\"}\\n'\nsleep 30\n"
 	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -121,5 +121,31 @@ func TestLinuxHostStopReapsUnresponsiveChild(t *testing.T) {
 	case <-child.done:
 	case <-ctx.Done():
 		t.Fatal("unresponsive child survived close")
+	}
+}
+
+func TestLinuxHostRejectsForgedReadyAndReaps(t *testing.T) {
+	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(dir, "napplet")
+	// A non-empty params field is not the host page's nap.start handshake.
+	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"forged\"}\\n'\nsleep 30\n"
+	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "libwebview.so"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DISPLAY", ":stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := New(program).OpenWindowContext(ctx, backend.WindowSpec{Instance: "forged", Format: backend.FormatNapplet}); !errors.Is(err, backend.ErrServiceTimeout) {
+		t.Fatalf("forged ready frame opened child: %v", err)
 	}
 }
