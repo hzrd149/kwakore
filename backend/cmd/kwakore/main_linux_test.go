@@ -86,6 +86,16 @@ func TestCLISettingsCommands(t *testing.T) {
 	}
 }
 
+func TestCLISecretInputFileAndArgvBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(path, []byte("nsec-private-sentinel\n"), 0600); err != nil { t.Fatal(err) }
+	method, params, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", path})
+	if err != nil || method != "signer.switch" || !strings.Contains(string(params), "nsec-private-sentinel") { t.Fatalf("file input: %s %s %v", method, params, err) }
+	if _, _, _, err := command([]string{"signer", "switch", "nsec", "nsec-private-sentinel"}); err == nil || strings.Contains(err.Error(), "nsec-private-sentinel") { t.Fatalf("argv accepted/leaked: %v", err) }
+	if err := os.Chmod(path, 0644); err != nil { t.Fatal(err) }
+	if _, _, _, err := command([]string{"signer", "switch", "nsec", "--secret-file", path}); err == nil { t.Fatal("public file accepted") }
+}
+
 func TestCLIContract(t *testing.T) {
 	root := t.TempDir()
 	cli := filepath.Join(root, "kwakore")
