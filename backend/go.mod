@@ -11,7 +11,6 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839
 	golang.org/x/image v0.46.0
-	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
 	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.16.0
 	rsc.io/qr v0.2.0
@@ -59,11 +58,9 @@ require (
 	go.etcd.io/bbolt v1.4.2 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/tools v0.50.0 // indirect
 )
 
 replace github.com/PowerDNS/lmdb-go => github.com/fiatjaf/lmdb-go v0.0.0-20241216175215-ce7e8c333ddb
