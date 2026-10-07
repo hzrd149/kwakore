@@ -121,7 +121,9 @@ mkdir -p -- "$home/.config" "$home/.local/share" "$home/.local/state" "$home/.ca
 unit="user@kwakore-ci-${base##*.}.service"
 unit_file="/run/systemd/system/$unit"
 [ ! -e "$unit_file" ] || fail "$unit_file already exists"
-[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null)" != loaded ] || fail "$unit is already loaded"
+# The name is an instance of the packaged user@.service template, so systemd
+# always reports it loaded; only an active instance means the name is taken.
+[ "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null)" = inactive ] || fail "$unit is already active"
 
 # basic.target brings up the manager's sockets (and its session bus where
 # the distribution enables one) without starting desktop session services.
