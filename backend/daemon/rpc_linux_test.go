@@ -46,6 +46,37 @@ func TestRPCSignerPublicStatusAndSwitch(t *testing.T) {
 	}
 }
 
+func TestRPCSignerPairPublicAndCancel(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	secret := strings.Repeat("a", 32)
+	result, rpcErr, raw := rpcCall(t, reader, conn, "signer.pair.start", `{"secret":"`+secret+`"}`)
+	var fields map[string]json.RawMessage
+	if rpcErr != nil || strings.Contains(raw, secret) || json.Unmarshal(result, &fields) != nil || len(fields) != 2 || fields["client_public_key"] == nil || fields["relay"] == nil {
+		t.Fatalf("start leaked or malformed: %s %+v", raw, rpcErr)
+	}
+	result, rpcErr, raw = rpcCall(t, reader, conn, "signer.pair.cancel", `{}`)
+	if rpcErr != nil || string(result) != `{"cancelled":true}` || strings.Contains(raw, secret) {
+		t.Fatalf("cancel: %s %+v", raw, rpcErr)
+	}
+	result, rpcErr, raw = rpcCall(t, reader, conn, "signer.pair.wait", `{}`)
+	if rpcErr != nil || strings.Contains(raw, secret) || !strings.Contains(string(result), `"connection_state":"disconnected"`) {
+		t.Fatalf("wait: %s %+v", raw, rpcErr)
+	}
+	_, rpcErr, _ = rpcCall(t, reader, conn, "signer.pair.start", `{"secret":"wrong"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("invalid secret accepted: %+v", rpcErr)
+	}
+}
+
+func TestRPCSignerBunkerFixedFailure(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	secret := "bunker://private-sentinel"
+	_, rpcErr, raw := rpcCall(t, reader, conn, "signer.switch", `{"mode":"bunker","secret":"`+secret+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || strings.Contains(raw, secret) {
+		t.Fatalf("bunker failure leaked: %s %+v", raw, rpcErr)
+	}
+}
+
 func TestRPCLinuxHostLaunch(t *testing.T) {
 	paths := daemonPaths(t)
 	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")

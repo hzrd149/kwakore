@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip04"
@@ -58,7 +59,17 @@ func buildNostrConnectURI(clientPub nostr.PubKey, relays []string, secret string
 // isNostrConnectAnswer says whether evt is a signer accepting our
 // nostrconnect uri: a response to clientKey carrying the uri's secret.
 func isNostrConnectAnswer(clientKey nostr.SecretKey, evt nostr.Event, secret string) bool {
-	if evt.Kind != nostr.KindNostrConnect || evt.PubKey == clientKey.Public() {
+	if evt.Kind != nostr.KindNostrConnect || evt.PubKey == clientKey.Public() || !evt.CheckID() || !evt.VerifySignature() {
+		return false
+	}
+	addressed := false
+	for _, tag := range evt.Tags {
+		if len(tag) >= 2 && tag[0] == "p" && tag[1] == clientKey.Public().Hex() {
+			addressed = true
+			break
+		}
+	}
+	if !addressed {
 		return false
 	}
 	// as with bunker.Signer, some signers still answer in NIP-04
@@ -84,6 +95,116 @@ func isNostrConnectAnswer(clientKey nostr.SecretKey, evt nostr.Event, secret str
 	}
 	return resp.Error == "" && resp.Result == secret
 }
+
+type ServicePairStart struct {
+	ClientPublicKey string `json:"client_public_key"`
+	Relay           string `json:"relay"`
+}
+
+type servicePair struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	generation uint64
+	secret     string
+	status     SignerStatus
+	err        error
+	finished   bool
+}
+
+var servicePairWait = func(ctx context.Context, clientKey nostr.SecretKey, relay, secret string) (nostr.PubKey, error) {
+	return waitNostrConnect(ctx, sys.Pool, clientKey, []string{relay}, secret)
+}
+
+func (s *ServiceSigner) cancelPairLocked() bool {
+	if s.pair == nil || s.pair.finished {
+		return false
+	}
+	s.pair.cancel()
+	s.pair.secret = ""
+	s.pair.status = SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}
+	s.pair.err = nil
+	s.pair.finished = true
+	close(s.pair.done)
+	return true
+}
+
+func (s *ServiceSigner) StartPair(parent context.Context, secret string, clientKey nostr.SecretKey, relay string, complete func(context.Context, string, nostr.SecretKey, uint64) (SignerStatus, error), leaseDone func()) (ServicePairStart, error) {
+	decoded, err := hex.DecodeString(secret)
+	if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != secret || relay == "" {
+		return ServicePairStart{}, errServiceSignerUnavailable
+	}
+	s.mu.Lock()
+	s.cancelPairLocked()
+	s.generation++
+	if s.pendingCancel != nil {
+		s.pendingCancel()
+		s.pendingCancel = nil
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	p := &servicePair{ctx: ctx, cancel: cancel, done: make(chan struct{}), generation: s.generation, secret: secret}
+	s.pair = p
+	s.mu.Unlock()
+	go func() {
+		defer leaseDone()
+		defer cancel()
+		pk, err := servicePairWait(ctx, clientKey, relay, secret)
+		if err != nil {
+			s.finishPair(p, SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}, context.DeadlineExceeded)
+			return
+		}
+		s.mu.Lock()
+		current := s.pair == p && !p.finished && s.generation == p.generation && ctx.Err() == nil
+		s.mu.Unlock()
+		if !current {
+			return
+		}
+		url := nostrConnectBunkerURL(pk, []string{relay})
+		status, switchErr := complete(ctx, url, clientKey, p.generation)
+		s.finishPair(p, status, switchErr)
+	}()
+	return ServicePairStart{ClientPublicKey: clientKey.Public().Hex(), Relay: relay}, nil
+}
+
+func (s *ServiceSigner) finishPair(p *servicePair, status SignerStatus, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pair != p || p.finished {
+		return
+	}
+	p.status, p.err, p.finished, p.secret = status, err, true, ""
+	close(p.done)
+}
+
+func (s *ServiceSigner) WaitPair(ctx context.Context) (SignerStatus, error) {
+	s.mu.Lock()
+	p := s.pair
+	s.mu.Unlock()
+	if p == nil {
+		return SignerStatus{}, errServiceSignerUnavailable
+	}
+	select {
+	case <-p.done:
+		s.mu.Lock()
+		status, err := p.status, p.err
+		s.mu.Unlock()
+		return status, err
+	case <-ctx.Done():
+		return SignerStatus{}, context.DeadlineExceeded
+	}
+}
+
+func (s *ServiceSigner) CancelPair() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cancelled := s.cancelPairLocked()
+	if cancelled {
+		s.generation++
+	}
+	return cancelled
+}
+
+func ServiceDefaultPairRelay() string { return defaultNostrConnectRelay }
 
 // waitNostrConnect listens on relays until a signer answers the
 // nostrconnect uri with secret, and returns that signer's pubkey.

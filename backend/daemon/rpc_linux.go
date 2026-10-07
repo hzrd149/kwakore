@@ -57,6 +57,43 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, controlprotocol.FixedError(controlprotocol.Unavailable)
 		}
 		return status, nil
+	case "signer.pair.start":
+		secret, err := decodePairStart(params)
+		if err != nil {
+			return nil, err
+		}
+		start, startErr := s.StartSignerPair(secret)
+		if startErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Unavailable)
+		}
+		return start, nil
+	case "signer.pair.wait":
+		if err := controlprotocol.ValidateNamedParams(params); err != nil {
+			return nil, err
+		}
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, timeoutCancel := context.WithTimeout(workCtx, 125*time.Second)
+		defer timeoutCancel()
+		status, waitErr := s.WaitSignerPair(workCtx)
+		if waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) {
+				return nil, controlprotocol.FixedError(controlprotocol.Timeout)
+			}
+			return nil, controlprotocol.FixedError(controlprotocol.Unavailable)
+		}
+		return status, nil
+	case "signer.pair.cancel":
+		if err := controlprotocol.ValidateNamedParams(params); err != nil {
+			return nil, err
+		}
+		cancelled, cancelErr := s.CancelSignerPair()
+		if cancelErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		return struct {
+			Cancelled bool `json:"cancelled"`
+		}{cancelled}, nil
 	case "service.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -295,6 +332,26 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 	default:
 		return nil, controlprotocol.FixedError(controlprotocol.MethodNotFound)
 	}
+}
+
+func decodePairStart(params json.RawMessage) (string, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	if err := controlprotocol.ValidateNamedParams(params, "secret"); err != nil {
+		return "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil || len(fields) != 1 || len(fields["secret"]) > 80 {
+		return "", invalid
+	}
+	var secret string
+	if json.Unmarshal(fields["secret"], &secret) != nil || len(secret) != 32 {
+		return "", invalid
+	}
+	b, err := hex.DecodeString(secret)
+	if err != nil || len(b) != 16 || hex.EncodeToString(b) != secret {
+		return "", invalid
+	}
+	return secret, nil
 }
 
 func decodeSignerSwitch(params json.RawMessage) (string, string, *controlprotocol.Error) {

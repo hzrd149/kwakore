@@ -25,6 +25,7 @@ type ServiceSigner struct {
 	status        SignerStatus
 	keyer         *revocableKeyer
 	pendingCancel context.CancelFunc
+	pair          *servicePair
 }
 
 // revocableKeyer keeps a captured old service signer from signing after a
@@ -109,10 +110,23 @@ func (k *revocableKeyer) Nip04Decrypt(ctx context.Context, ciphertext string, se
 
 func (s *ServiceSigner) Generation() uint64   { s.mu.Lock(); defer s.mu.Unlock(); return s.generation }
 func (s *ServiceSigner) Status() SignerStatus { s.mu.Lock(); defer s.mu.Unlock(); return s.status }
+func (s *ServiceSigner) PreemptPending() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingCancel != nil {
+		s.pendingCancel()
+		s.pendingCancel = nil
+		s.generation++
+	}
+	if s.cancelPairLocked() {
+		s.generation++
+	}
+}
 func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist func(string, string) error) (SignerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.generation++
+	s.cancelPairLocked()
 	if s.pendingCancel != nil {
 		s.pendingCancel()
 		s.pendingCancel = nil
@@ -174,8 +188,24 @@ var serviceBunkerConnect = func(sessionCtx, handshakeCtx context.Context, client
 // SwitchBunker retires the old session before connecting. The network handshake
 // runs outside the state lock so a later switch can cancel and fence its result.
 func (s *ServiceSigner) SwitchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, clear func(string, string) error, persist func(string, string) error) (SignerStatus, error) {
+	return s.switchBunker(ctx, input, clientKey, skipConnect, clear, persist, 0)
+}
+
+func (s *ServiceSigner) SwitchBunkerPair(ctx context.Context, input string, clientKey nostr.SecretKey, expectedGeneration uint64, persist func(string, string) error) (SignerStatus, error) {
+	return s.switchBunker(ctx, input, clientKey, true, nil, persist, expectedGeneration)
+}
+
+func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKey nostr.SecretKey, skipConnect bool, clear func(string, string) error, persist func(string, string) error, expected uint64) (SignerStatus, error) {
 	failed := errServiceSignerUnavailable
 	s.mu.Lock()
+	if expected != 0 && s.generation != expected {
+		status := s.status
+		s.mu.Unlock()
+		return status, failed
+	}
+	if expected == 0 {
+		s.cancelPairLocked()
+	}
 	s.generation++
 	generation := s.generation
 	if s.pendingCancel != nil {
@@ -231,6 +261,7 @@ func (s *ServiceSigner) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.generation++
+	s.cancelPairLocked()
 	if s.pendingCancel != nil {
 		s.pendingCancel()
 		s.pendingCancel = nil

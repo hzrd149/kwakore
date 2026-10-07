@@ -92,6 +92,97 @@ func TestServiceSignerBunkerFixedRemoteError(t *testing.T) {
 	}
 }
 
+func TestServiceNostrConnectPairFinalOutcome(t *testing.T) {
+	s := &ServiceSigner{}
+	client, remote, user := nostr.Generate(), nostr.Generate(), nostr.Generate()
+	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(user), &keyer.SignerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldWait, oldConnect := servicePairWait, serviceBunkerConnect
+	servicePairWait = func(_ context.Context, got nostr.SecretKey, relay, secret string) (nostr.PubKey, error) {
+		if got != client || relay != "wss://example.com" || secret != strings.Repeat("a", 32) {
+			t.Error("wrong pairing offer")
+		}
+		return remote.Public(), nil
+	}
+	serviceBunkerConnect = func(_, _ context.Context, _ nostr.SecretKey, url string, skip bool) (nostr.Keyer, error) {
+		if !skip || strings.Contains(url, strings.Repeat("a", 32)) {
+			t.Error("one-time secret reused in bunker URL")
+		}
+		return inner, nil
+	}
+	t.Cleanup(func() { servicePairWait, serviceBunkerConnect = oldWait, oldConnect; s.Close() })
+	persisted := ""
+	start, err := s.StartPair(context.Background(), strings.Repeat("a", 32), client, "wss://example.com", func(ctx context.Context, url string, key nostr.SecretKey, gen uint64) (SignerStatus, error) {
+		return s.SwitchBunkerPair(ctx, url, key, gen, func(u, k string) error {
+			persisted = u
+			if k != client.Hex() {
+				t.Error("client key changed")
+			}
+			return nil
+		})
+	}, func() {})
+	if err != nil || start.ClientPublicKey != client.Public().Hex() || start.Relay != "wss://example.com" {
+		t.Fatalf("start: %+v %v", start, err)
+	}
+	status, err := s.WaitPair(context.Background())
+	if err != nil || status.ConnectionState != "connected" || status.PublicKey != user.Public().Hex() || persisted == "" {
+		t.Fatalf("wait before final outcome: %+v %v", status, err)
+	}
+}
+
+func TestServiceNostrConnectPairCancelAndStale(t *testing.T) {
+	s := &ServiceSigner{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	old := servicePairWait
+	servicePairWait = func(_ context.Context, _ nostr.SecretKey, _, _ string) (nostr.PubKey, error) {
+		close(entered)
+		<-release
+		return nostr.Generate().Public(), nil
+	}
+	t.Cleanup(func() { servicePairWait = old; s.Close() })
+	_, err := s.StartPair(context.Background(), strings.Repeat("b", 32), nostr.Generate(), "wss://example.com", func(context.Context, string, nostr.SecretKey, uint64) (SignerStatus, error) {
+		t.Error("stale answer connected")
+		return SignerStatus{}, nil
+	}, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	if !s.CancelPair() {
+		t.Fatal("pair did not cancel")
+	}
+	status, err := s.WaitPair(context.Background())
+	if err != nil || status.ConnectionState != "disconnected" {
+		t.Fatalf("cancel outcome: %+v %v", status, err)
+	}
+	close(release)
+}
+
+func TestServiceNostrConnectPairTimeout(t *testing.T) {
+	s := &ServiceSigner{}
+	old := servicePairWait
+	servicePairWait = func(ctx context.Context, _ nostr.SecretKey, _, _ string) (nostr.PubKey, error) {
+		<-ctx.Done()
+		return nostr.ZeroPK, ctx.Err()
+	}
+	t.Cleanup(func() { servicePairWait = old; s.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := s.StartPair(ctx, strings.Repeat("c", 32), nostr.Generate(), "wss://example.com", func(context.Context, string, nostr.SecretKey, uint64) (SignerStatus, error) {
+		t.Error("timed out pair connected")
+		return SignerStatus{}, nil
+	}, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if _, err := s.WaitPair(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout result: %v", err)
+	}
+}
+
 func TestServiceSignerNsecTransition(t *testing.T) {
 	signer := &ServiceSigner{}
 	first := nostr.Generate()

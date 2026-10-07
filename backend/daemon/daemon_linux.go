@@ -151,6 +151,7 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 		return backend.SignerStatus{}, err
 	}
 	defer done()
+	s.signer.PreemptPending()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: mode}); err != nil {
@@ -171,6 +172,66 @@ func (s *Service) SwitchSigner(ctx context.Context, mode, secret string) (backen
 		return s.signer.SwitchBunker(ctx, secret, key, false, s.credentials.write, s.credentials.writeBunker)
 	}
 	return s.signer.Switch(ctx, mode, secret, s.credentials.write)
+}
+
+func (s *Service) StartSignerPair(secret string) (backend.ServicePairStart, error) {
+	done, err := s.Begin()
+	if err != nil {
+		return backend.ServicePairStart{}, err
+	}
+	s.signer.PreemptPending()
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	rec, err := s.credentials.read()
+	if err != nil {
+		done()
+		return backend.ServicePairStart{}, errCredential
+	}
+	key := nostr.Generate()
+	if rec.ClientKey != "" {
+		key, err = nostr.SecretKeyFromHex(rec.ClientKey)
+		if err != nil {
+			done()
+			return backend.ServicePairStart{}, errCredential
+		}
+	}
+	relay := s.manager.Effective().Signer.Relay
+	if relay == "" {
+		relay = backend.ServiceDefaultPairRelay()
+	}
+	start, err := s.signer.StartPair(s.workContext, secret, key, relay, func(ctx context.Context, url string, key nostr.SecretKey, expected uint64) (backend.SignerStatus, error) {
+		s.operationMu.Lock()
+		defer s.operationMu.Unlock()
+		if s.signer.Generation() != expected || ctx.Err() != nil {
+			return backend.SignerStatus{}, errCredential
+		}
+		if err := s.manager.SetSignerOverride(serviceconfig.Signer{Mode: "bunker", Relay: relay}); err != nil {
+			return backend.SignerStatus{}, errCredential
+		}
+		return s.signer.SwitchBunkerPair(ctx, url, key, expected, s.credentials.writeBunker)
+	}, done)
+	if err != nil {
+		done()
+	}
+	return start, err
+}
+
+func (s *Service) WaitSignerPair(ctx context.Context) (backend.SignerStatus, error) {
+	done, err := s.Begin()
+	if err != nil {
+		return backend.SignerStatus{}, err
+	}
+	defer done()
+	return s.signer.WaitPair(ctx)
+}
+
+func (s *Service) CancelSignerPair() (bool, error) {
+	done, err := s.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	return s.signer.CancelPair(), nil
 }
 
 func checkNoSymlinkComponents(path string) error {
