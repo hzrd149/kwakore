@@ -2,28 +2,39 @@
   lib,
   stdenv,
   buildGoModule,
-  pkg-config,
+  makeWrapper,
   patchelf,
-  wrapGAppsHook3,
-  makeDesktopItem,
-  copyDesktopItems,
-  wayland,
-  libxkbcommon,
-  libx11,
-  libxcb,
-  libxcursor,
-  libxfixes,
-  libGL,
   gtk3,
   webkitgtk_4_1,
   glib,
-  glib-networking,
   gsettings-desktop-schemas,
-  xdg-utils,
   version ? "unstable",
 }:
 
+# The Kwakore Linux service: the same four runtime pieces as the generic
+# release bundle (scripts/build-linux-bundle.sh), side by side in $out/bin:
+#
+#   kwakore-daemon   foreground daemon, the user service's ExecStart
+#   kwakore          control CLI, also what native napplet entries run
+#   napplet          hardened napplet child (desktop/child)
+#   libwebview.so    the pinned go-webview library the child loads
+#
+# The daemon finds the child as the sibling "napplet" of its own resolved
+# executable and passes that directory to it as WEBVIEW_PATH, and native
+# entries name the "kwakore" found beside it. All four are real files in one
+# directory, never symlinks into other store paths, so both lookups land
+# here. The user units come from packaging/systemd/user through nix/module.nix.
 let
+  # Only the two Go modules: changes to docs, packaging or .planning/ never
+  # trigger a rebuild. desktop/go.mod replaces kwakore/backend with ../backend.
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../backend
+      ../desktop
+    ];
+  };
+
   # Every NEEDED of go-webview's libwebview.so (libc comes with the
   # interpreter). The child's dlopen of gtk and webkit by soname uses it too.
   webviewLibPath = lib.makeLibraryPath [
@@ -34,200 +45,256 @@ let
   ];
   webviewLibDir = "linux_" + stdenv.hostPlatform.go.GOARCH;
   ldd = "${lib.getBin stdenv.cc.libc}/bin/ldd";
-in
-buildGoModule {
-  pname = "verdana";
-  inherit version;
 
-  # desktop/go.mod replaces verdana/backend with ../backend, so both trees are
-  # needed; android/ and .planning/ stay out so they never trigger rebuilds.
-  src = lib.fileset.toSource {
-    root = ../.;
-    fileset = lib.fileset.unions [
-      ../backend
-      ../desktop
-    ];
-  };
-
-  modRoot = "desktop";
-
-  # The webviewlib generator copies libwebview out of go-webview's embedded/
-  # directory, which no package of the build imports, so a plain vendor/ tree
-  # lacks it. A module proxy keeps whole modules and serves them offline.
-  proxyVendor = true;
-  vendorHash = "sha256-t0wHOhyqFdRansahIXGQzu18E1Z9yseIpBYgFjrNR2w=";
-
-  subPackages = [ "." ];
-  tags = [ "novulkan" ];
-  ldflags = [
-    "-s"
-    "-w"
-  ];
-
-  nativeBuildInputs = [
-    pkg-config
-    patchelf
-    wrapGAppsHook3
-    copyDesktopItems
-  ];
-  buildInputs = [
-    wayland
-    libxkbcommon
-    libx11
-    libxcb
-    libxcursor
-    libxfixes
-    libGL
+  # GTK aborts when a widget such as the file chooser needs a schema that is
+  # missing, and a user manager on a minimal session may have no schema
+  # directories on XDG_DATA_DIRS. GSETTINGS_SCHEMA_DIR adds these without
+  # touching XDG_DATA_DIRS, which programs the daemon starts (xdg-open,
+  # players) read for their own lookups.
+  schemaDirs = lib.concatMapStringsSep ":" glib.getSchemaPath [
     gtk3
-    webkitgtk_4_1
-    glib
-    glib-networking
     gsettings-desktop-schemas
   ];
 
-  # Mirrors `just prod`. Flakes only see tracked files, so the git-ignored
-  # libwebview copies are always regenerated here, and the child must exist
-  # before the launcher compiles because embed_prod.go embeds it. GOFLAGS is
-  # left alone: its -trimpath keeps Go store paths out of the embedded child.
-  #
-  # The child and libwebview.so are //go:embed'ed and written out at runtime
-  # by childbin.Ensure, so fixupPhase never sees them: they are patched here,
-  # before the launcher compiles, and the patched bytes are the ones Ensure
-  # hashes and verifies. The child is built by Go's internal linker with the
-  # FHS interpreter, which NixOS's stub loader refuses, and libwebview.so ships
-  # with an empty RUNPATH.
-  preBuild = ''
-    go generate ./internal/webviewlib
-    webviewlib=internal/webviewlib/lib/${webviewLibDir}/libwebview.so
-    chmod u+wx "$webviewlib"
-    patchelf --set-rpath "${webviewLibPath}" "$webviewlib"
+  # The daemon and the CLI: backend/cmd/kwakore-daemon and backend/cmd/kwakore.
+  # The daemon uses cgo on amd64 (the LMDB event store).
+  service = buildGoModule {
+    pname = "kwakore-service";
+    inherit version src;
 
-    go build -ldflags "-s -w" -o child/napplet ./child
-    go build -tags napp -ldflags "-s -w" -o child/napp ./child
-    for program in child/napplet child/napp; do
-      patchelf \
-        --set-interpreter "$(cat "$NIX_CC/nix-support/dynamic-linker")" \
-        --set-rpath "${webviewLibPath}" \
-        "$program"
+    modRoot = "backend";
+    vendorHash = "sha256-VU9WT75TONAeNPACPxjwzcwKMwVAcNsDQHyapUDCL4A=";
+
+    subPackages = [
+      "cmd/kwakore-daemon"
+      "cmd/kwakore"
+    ];
+    # matches scripts/build-linux-bundle.sh; the CLI has no main.version and
+    # the linker ignores -X for a symbol a program lacks
+    ldflags = [
+      "-s"
+      "-w"
+      "-X kwakore/backend.Version=${version}"
+      "-X main.version=${version}"
+    ];
+
+    # The Go suites run in CI and through `go test` in the repo; several
+    # need relays, node or a display that the sandbox does not have.
+    doCheck = false;
+  };
+
+  # The napplet child plus the pinned libwebview.so, as built and generated
+  # from the desktop module.
+  napplet = buildGoModule {
+    pname = "kwakore-napplet";
+    inherit version src;
+
+    modRoot = "desktop";
+
+    # The webviewlib generator copies libwebview out of go-webview's embedded/
+    # directory, which no package of the build imports, so a plain vendor/ tree
+    # lacks it. A module proxy keeps whole modules and serves them offline.
+    proxyVendor = true;
+    vendorHash = "sha256-fOcQABl8t30v8jevN9bQRSK1qiX2MpWB5wwXrnoBeiA=";
+
+    subPackages = [ "child" ];
+    ldflags = [
+      "-s"
+      "-w"
+    ];
+
+    # Flakes only see tracked files, so the git-ignored libwebview copies are
+    # always regenerated from the pinned module here.
+    preBuild = ''
+      go generate ./internal/webviewlib
+    '';
+
+    postInstall = ''
+      mv "$out/bin/child" "$out/bin/napplet"
+      install -Dm444 "internal/webviewlib/lib/${webviewLibDir}/libwebview.so" "$out/bin/libwebview.so"
+    '';
+
+    # Patched once, in the final package below.
+    dontPatchELF = true;
+
+    # internal/webviewlib/sync_test.go compares the copies with the module
+    # cache, and the child tests need a display; both run in CI.
+    doCheck = false;
+  };
+in
+stdenv.mkDerivation {
+  pname = "kwakore";
+  inherit version;
+
+  dontUnpack = true;
+  dontConfigure = true;
+  dontBuild = true;
+
+  nativeBuildInputs = [
+    patchelf
+    makeWrapper
+  ];
+
+  # The child is built by Go's internal linker with the FHS interpreter,
+  # which NixOS's stub loader refuses, and libwebview.so ships with an empty
+  # RUNPATH. The child dlopens libwebview.so, which dlopens gtk and webkit by
+  # soname, so neither has NEEDED entries for these directories and the
+  # default fixup would shrink them away again: patchELF stays off.
+  dontPatchELF = true;
+  # all Go programs are already linked with -s -w
+  dontStrip = true;
+
+  installPhase = ''
+    runHook preInstall
+
+    install -Dm555 ${service}/bin/kwakore-daemon "$out/bin/kwakore-daemon"
+    install -Dm555 ${service}/bin/kwakore "$out/bin/kwakore"
+    install -Dm555 ${napplet}/bin/napplet "$out/bin/napplet"
+    install -Dm444 ${napplet}/bin/libwebview.so "$out/bin/libwebview.so"
+
+    chmod u+w "$out/bin/napplet" "$out/bin/libwebview.so"
+    patchelf --set-rpath "${webviewLibPath}" "$out/bin/libwebview.so"
+    patchelf \
+      --set-interpreter "$(cat "$NIX_CC/nix-support/dynamic-linker")" \
+      --set-rpath "${webviewLibPath}" \
+      "$out/bin/napplet"
+    chmod a-w "$out/bin/napplet" "$out/bin/libwebview.so"
+
+    # The child inherits the daemon's environment. makeWrapper execs the
+    # real daemon from this same directory (.kwakore-daemon-wrapped) with
+    # argv[0] kept, so os.Executable still names this bin directory, the
+    # sibling napplet, libwebview.so and kwakore resolve here, and systemd's
+    # LISTEN_PID still matches. It deliberately sets no LD_LIBRARY_PATH:
+    # that would leak into every program the daemon starts and override
+    # their own RUNPATHs, which is why library lookup is baked into
+    # RUNPATHs instead.
+    wrapProgram "$out/bin/kwakore-daemon" \
+      --suffix GSETTINGS_SCHEMA_DIR : "${schemaDirs}"
+
+    runHook postInstall
+  '';
+
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+
+    bin="$out/bin"
+
+    # exactly the four pieces (plus the daemon behind its wrapper), as real
+    # files in one directory, and nothing else in the package
+    expected=".kwakore-daemon-wrapped kwakore kwakore-daemon libwebview.so napplet"
+    actual="$(cd "$bin" && LC_ALL=C ls -A | tr '\n' ' ' | sed 's/ $//')"
+    if [ "$actual" != "$expected" ]; then
+      echo "unexpected $bin contents: $actual" >&2
+      exit 1
+    fi
+    if [ "$(cd "$out" && ls -A)" != bin ]; then
+      echo "the package must contain only bin/" >&2
+      exit 1
+    fi
+    for f in "$bin"/* "$bin"/.kwakore-daemon-wrapped; do
+      if [ -L "$f" ] || [ ! -f "$f" ]; then
+        echo "$f is not a regular file" >&2
+        exit 1
+      fi
     done
+
+    # the wrapper runs the sibling daemon and sets no library path
+    grep -qF "\"$bin/.kwakore-daemon-wrapped\"" "$bin/kwakore-daemon"
+    grep -qF GSETTINGS_SCHEMA_DIR "$bin/kwakore-daemon"
+    IFS=: read -ra schemas <<< "${schemaDirs}"
+    for dir in "''${schemas[@]}"; do
+      test -f "$dir/gschemas.compiled"
+    done
+    if grep -qF LD_LIBRARY_PATH "$bin/kwakore-daemon"; then
+      echo "the wrapper must not set LD_LIBRARY_PATH" >&2
+      exit 1
+    fi
 
     # ldd on the child lists only libc, so the positive check that the
     # RUNPATH reaches WebKit is made on the library
-    for elf in "$webviewlib" child/napplet child/napp; do
-      ${ldd} "$elf" > ldd.log
+    for elf in "$bin/libwebview.so" "$bin/napplet" "$bin/.kwakore-daemon-wrapped" "$bin/kwakore"; do
+      ${ldd} "$elf" > ldd.log 2>&1 || true
       if grep -F "not found" ldd.log; then
         cat ldd.log >&2
         echo "$elf has unresolved libraries" >&2
         exit 1
       fi
     done
-    ${ldd} "$webviewlib" | grep -q "libwebkit2gtk-4.1.so.0 => /nix/store/"
+    ${ldd} "$bin/libwebview.so" 2>/dev/null | grep -q "libwebkit2gtk-4.1.so.0 => /nix/store/"
     rm ldd.log
-    for program in child/napplet child/napp; do
-      case "$(patchelf --print-interpreter "$program")" in
-        /nix/store/*) ;;
-        *)
-          echo "$program does not use a /nix/store interpreter" >&2
-          exit 1
-          ;;
-      esac
-    done
+    case "$(patchelf --print-interpreter "$bin/napplet")" in
+      /nix/store/*) ;;
+      *)
+        echo "napplet does not use a /nix/store interpreter" >&2
+        exit 1
+        ;;
+    esac
+    case ":$(patchelf --print-rpath "$bin/napplet"):" in
+      *:${webkitgtk_4_1}/lib:*) ;;
+      *)
+        echo "napplet's RUNPATH does not reach WebKit" >&2
+        exit 1
+        ;;
+    esac
+
     # the child refuses to start without WEBVIEW_PATH (child/libcheck.go);
     # reaching that refusal proves the patched interpreter runs it
-    for program in child/napplet child/napp; do
-      status=0
-      format=""
-      if [ "$program" = child/napplet ]; then format=napplet; fi
-      env -u WEBVIEW_PATH VERDANA_NAPP_FORMAT="$format" "$program" </dev/null >/dev/null 2>child-check.log || status=$?
-      if [ "$status" -ne 1 ] || ! grep -qF "WEBVIEW_PATH is not set" child-check.log; then
-        cat child-check.log >&2
-        echo "$program did not run under the patched interpreter (status $status)" >&2
-        exit 1
-      fi
-    done
+    status=0
+    env -u WEBVIEW_PATH KWAKORE_NAPP_FORMAT=napplet "$bin/napplet" </dev/null >/dev/null 2>child-check.log || status=$?
+    if [ "$status" -ne 1 ] || ! grep -qF "WEBVIEW_PATH is not set" child-check.log; then
+      cat child-check.log >&2
+      echo "napplet did not run under the patched interpreter (status $status)" >&2
+      exit 1
+    fi
     rm child-check.log
-  '';
 
-  desktopItems = [
-    (makeDesktopItem {
-      # matches the DesktopId of osintegration's GNOME search provider
-      name = "com.verdana.Verdana";
-      desktopName = "Verdana";
-      # no field codes: startupArgs treats every argument as a bundle token
-      exec = "verdana";
-      icon = "com.verdana.Verdana";
-      comment = "Discover and run Nostr applications";
-      categories = [ "Network" ];
-      keywords = [
-        "Nostr"
-        "Napp"
-        "Napplet"
-      ];
-    })
-  ];
-
-  # The main package's binary is named after the module's last path element.
-  postInstall = ''
-    mv "$out/bin/desktop" "$out/bin/verdana"
-    install -Dm444 ${./verdana.svg} "$out/share/icons/hicolor/scalable/apps/com.verdana.Verdana.svg"
-  '';
-
-  # Gio dlopens libGLESv2.so.2 by soname, so the launcher's RUNPATH must reach
-  # libglvnd. The wrapper supplies GIO_EXTRA_MODULES (glib-networking, which
-  # WebKit's network process needs for TLS) and the GSettings schemas; napp
-  # windows inherit them through the child's os.Environ(). It deliberately sets
-  # no LD_LIBRARY_PATH: that would leak into every program the launcher spawns
-  # (xdg-open, browsers, media players) and override their own RUNPATHs, which
-  # is why library lookup is baked into RUNPATHs instead. xdg-utils is a
-  # suffix so the system's own xdg-open wins. VERDANA_EXECUTABLE points the
-  # Exec lines of entries Verdana writes at this wrapper rather than at
-  # .verdana-wrapped, which /proc/self/exe names; a session value (the NixOS
-  # module's stable path) wins over it.
-  dontWrapGApps = true;
-  postFixup = ''
-    patchelf --add-rpath "${lib.makeLibraryPath [ libGL ]}" "$out/bin/verdana"
-    wrapGApp "$out/bin/verdana" \
-      --suffix PATH : "${lib.makeBinPath [ xdg-utils ]}" \
-      --set-default VERDANA_EXECUTABLE "$out/bin/verdana"
-  '';
-
-  # The Go suites run in CI and through `go test` in the repo. The sandbox has
-  # no session bus or writable home, and the embedded ELF copies are patched
-  # for Nix, which internal/webviewlib/sync_test.go would rightly flag as
-  # differing from the go-webview module.
-  doCheck = false;
-
-  doInstallCheck = true;
-  installCheckPhase = ''
-    runHook preInstallCheck
-
-    found=
-    IFS=: read -ra rpath <<< "$(patchelf --print-rpath "$out/bin/.verdana-wrapped")"
-    for dir in "''${rpath[@]}"; do
-      if [ -e "$dir/libGLESv2.so.2" ]; then
-        found=1
-      fi
+    # Start the installed daemon through its wrapper in the foreground and
+    # ask it over its socket with the installed CLI. A daemon that could not
+    # find the kwakore CLI beside its resolved executable records a
+    # native_entries error at startup.
+    check="$(mktemp -d)"
+    mkdir -m 0700 "$check/run"
+    export HOME="$check/home" XDG_RUNTIME_DIR="$check/run" \
+      XDG_CONFIG_HOME="$check/config" XDG_DATA_HOME="$check/data"
+    mkdir -p "$HOME"
+    unset DISPLAY WAYLAND_DISPLAY
+    test "$("$bin/kwakore-daemon" version)" = "${version}"
+    "$bin/kwakore-daemon" >"$check/daemon.log" 2>&1 &
+    daemon=$!
+    for _ in $(seq 100); do
+      [ -S "$XDG_RUNTIME_DIR/kwakore/daemon.sock" ] && break
+      sleep 0.1
     done
-    if [ -z "$found" ]; then
-      echo "the launcher's RUNPATH does not reach libGLESv2.so.2" >&2
+    status=0
+    "$bin/kwakore" status >"$check/status.json" 2>&1 || status=$?
+    "$bin/kwakore" diagnostics >"$check/diagnostics.json" 2>&1 || status=$?
+    kill "$daemon"
+    wait "$daemon" || true
+    if [ "$status" -ne 0 ]; then
+      cat "$check/daemon.log" "$check/status.json" "$check/diagnostics.json" >&2
+      echo "the installed CLI could not reach the installed daemon" >&2
       exit 1
     fi
-    grep -qF GIO_EXTRA_MODULES "$out/bin/verdana"
-    grep -qF VERDANA_EXECUTABLE "$out/bin/verdana"
-    if grep -qF LD_LIBRARY_PATH "$out/bin/verdana"; then
-      echo "the wrapper must not set LD_LIBRARY_PATH" >&2
+    grep -qF '"${version}"' "$check/status.json"
+    if grep -qF native_entries "$check/diagnostics.json"; then
+      cat "$check/diagnostics.json" >&2
+      echo "the daemon did not find the kwakore CLI beside it" >&2
       exit 1
     fi
-    test -f "$out/share/applications/com.verdana.Verdana.desktop"
-    test -f "$out/share/icons/hicolor/scalable/apps/com.verdana.Verdana.svg"
+    rm -rf "$check"
 
     runHook postInstallCheck
   '';
 
+  passthru = {
+    inherit service napplet;
+  };
+
   meta = {
-    description = "Nostr app launcher for napps and napplets";
-    homepage = "https://github.com/hzrd149/verdana";
-    mainProgram = "verdana";
+    description = "Linux service that runs Nostr napplets in a sandboxed webview";
+    homepage = "https://github.com/hzrd149/kwakore";
+    mainProgram = "kwakore";
     platforms = [
       "x86_64-linux"
       "aarch64-linux"

@@ -1,5 +1,5 @@
 {
-  description = "Verdana, a Nostr app launcher for napps and napplets";
+  description = "Kwakore, a per-user Linux service that runs Nostr napplets";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
@@ -17,30 +17,39 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        verdana = pkgs.callPackage ./nix/package.nix { inherit version; };
-        default = verdana;
+        kwakore = pkgs.callPackage ./nix/package.nix { inherit version; };
+        default = kwakore;
       });
 
       overlays.default = final: prev: {
-        verdana = final.callPackage ./nix/package.nix { };
+        kwakore = final.callPackage ./nix/package.nix { };
       };
 
       nixosModules = rec {
         default = import ./nix/module.nix;
-        verdana = default;
+        kwakore = default;
       };
 
       checks = forAllSystems (pkgs: {
-        verdana = self.packages.${pkgs.stdenv.hostPlatform.system}.verdana;
+        kwakore = self.packages.${pkgs.stdenv.hostPlatform.system}.kwakore;
       });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.verdana ];
-          packages = [ pkgs.just ];
-        };
-      });
+      devShells = forAllSystems (
+        pkgs:
+        let
+          kwakore = self.packages.${pkgs.stdenv.hostPlatform.system}.kwakore;
+        in
+        {
+          default = pkgs.mkShell {
+            inputsFrom = [
+              kwakore.service
+              kwakore.napplet
+            ];
+            packages = [ pkgs.just ];
+          };
+        }
+      );
     };
 }
