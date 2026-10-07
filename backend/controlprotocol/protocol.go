@@ -54,6 +54,10 @@ type PartialCleanupData struct {
 	RecordRemoved   bool   `json:"record_removed"`
 	CleanupComplete bool   `json:"cleanup_complete"`
 }
+
+type SessionUnavailableData struct {
+	Reason string `json:"reason"`
+}
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
@@ -153,6 +157,11 @@ func processRequest(frame []byte, dispatch Dispatch) []byte {
 		fixed := FixedError(rpcErr.Code)
 		if fixed.Code == PartialCleanup && rpcErr.Code == PartialCleanup {
 			if data, ok := rpcErr.Data.(PartialCleanupData); ok && data.Address != "" && data.RecordRemoved && !data.CleanupComplete {
+				fixed.Data = data
+			}
+		}
+		if fixed.Code == Unavailable && rpcErr.Code == Unavailable {
+			if data, ok := rpcErr.Data.(SessionUnavailableData); ok && data.Reason == "session_unavailable" {
 				fixed.Data = data
 			}
 		}

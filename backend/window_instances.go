@@ -822,7 +822,7 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	log.Info().Str("napp", id).Str("name", napp.Name).Str("instance", ci.instance).
 		Msg("launch napp")
 
-	transport, err := host.OpenWindow(WindowSpec{
+	spec := WindowSpec{
 		Instance:    ci.instance,
 		Number:      ci.number,
 		NappID:      napp.ID,
@@ -837,7 +837,13 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		Width:       winW,
 		Height:      winH,
 		StorageJSON: storageSeed(napp),
-	})
+	}
+	var transport Transport
+	if contextual, ok := host.(ContextWindowHost); ok {
+		transport, err = contextual.OpenWindowContext(ctx, spec)
+	} else {
+		transport, err = host.OpenWindow(spec)
+	}
 	if err != nil {
 		WindowClosed(ci.instance)
 		if errors.Is(err, ErrWindowProgramUnavailable) {

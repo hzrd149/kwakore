@@ -93,8 +93,33 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 	if rpcErr != nil || !strings.Contains(string(result), `"outcome":"opened"`) || !strings.Contains(string(result), `"window_id":`) {
 		t.Fatalf("launch response: %s %+v", result, rpcErr)
 	}
+	var opened backend.ServiceLaunchResult
+	if err := json.Unmarshal(result, &opened); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = backend.ServiceStop(ctx, opened.WindowID)
+	})
 	if time.Since(start) < 150*time.Millisecond {
 		t.Fatal("launch returned before host-page nap.start")
+	}
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || len(backend.OpenWindows()) != 1 {
+		t.Fatalf("failed child left a window or returned success: %+v, windows=%v", rpcErr, backend.OpenWindows())
+	}
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"bad"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+		t.Fatalf("accepted bad address: %+v", rpcErr)
+	}
+	other := "35129:" + strings.Repeat("a", 64) + ":missing"
+	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+other+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
+		t.Fatalf("accepted uninstalled address: %+v", rpcErr)
 	}
 }
 

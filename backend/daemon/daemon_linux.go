@@ -16,13 +16,14 @@ import (
 	"time"
 
 	"verdana/backend"
+	"verdana/backend/linuxhost"
 	"verdana/backend/serviceconfig"
 )
 
 var ErrClosing = errors.New("service is shutting down")
 
 // windowProgramPath is replaceable by the socket integration test.
-var windowProgramPath = func() string { return "" }
+var windowProgramPath = linuxhost.DefaultProgramPath
 
 type Service struct {
 	mu           sync.Mutex
@@ -89,7 +90,7 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return nil, fmt.Errorf("daemon already running for this user; inspect status or stop the existing instance: %w", err)
 	}
-	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m})
+	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: linuxhost.New(windowProgramPath())})
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,9 @@
 package backend
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // Host is the platform side of the launcher: everything the backend needs
 // done that depends on where it is running. The Gio desktop app implements it
@@ -109,6 +112,12 @@ type Host interface {
 	// HandleSettingsMessage under spec.Window. The platform calls
 	// SettingsClosed once it is gone.
 	OpenSettings(spec SettingsSpec) (Transport, error)
+}
+
+// ContextWindowHost lets a service launch cancel a child that has not become
+// ready. Hosts with asynchronous UI startup can keep using OpenWindow.
+type ContextWindowHost interface {
+	OpenWindowContext(context.Context, WindowSpec) (Transport, error)
 }
 
 // ErrWindowProgramUnavailable is what a host wraps (with %w) when OpenWindow

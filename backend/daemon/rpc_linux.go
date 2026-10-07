@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"verdana/backend"
 	"verdana/backend/controlprotocol"
@@ -101,6 +102,25 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		defer done()
 		return backend.ServiceInstalled(offset, limit), nil
+	case "napplet.launch":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancelWork := s.registryContext(ctx)
+		defer cancelWork()
+		workCtx, cancelDeadline := context.WithTimeout(workCtx, 12*time.Second)
+		defer cancelDeadline()
+		result, launchErr := backend.ServiceLaunch(workCtx, address)
+		if launchErr != nil {
+			return nil, mutationError(launchErr)
+		}
+		return result, nil
 	case "napplet.discover":
 		query, refresh, offset, limit, err := decodeDiscoveryParams(params)
 		if err != nil {
@@ -224,6 +244,10 @@ func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error
 
 func mutationError(err error) *controlprotocol.Error {
 	switch {
+	case errors.Is(err, backend.ErrServiceSessionUnavailable):
+		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: "session_unavailable"}
+		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceNotFound):
