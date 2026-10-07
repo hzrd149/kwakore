@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,68 @@ import (
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
 )
+
+func TestServiceSignerIdentityRace(t *testing.T) {
+	s := &ServiceSigner{}
+	t.Cleanup(s.Close)
+	secret := nip19.EncodeNsec(nostr.Generate())
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_, _ = currentUser()
+				_ = LoggedIn()
+				_ = UserPubkey()
+				c := &napCall{}
+				c.approved.Store(true)
+				_ = c.sign(context.Background(), &nostr.Event{Kind: 1, CreatedAt: nostr.Now()})
+			}
+		}()
+	}
+	for i := 0; i < 30; i++ {
+		if _, err := s.Switch(context.Background(), "nsec", secret, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Switch(context.Background(), "none", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wg.Wait()
+	if LoggedIn() || UserPubkey() != "" {
+		t.Fatal("identity survived sign-out")
+	}
+}
+
+func TestServiceSignerStaleResult(t *testing.T) {
+	client, remote, user := nostr.Generate(), nostr.Generate(), nostr.Generate()
+	inner, err := keyer.New(context.Background(), nil, nip19.EncodeNsec(user), &keyer.SignerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	old := serviceBunkerConnect
+	serviceBunkerConnect = func(_, _ context.Context, _ nostr.SecretKey, _ string, _ bool) (nostr.Keyer, error) {
+		close(entered)
+		<-release
+		return inner, nil
+	}
+	t.Cleanup(func() { serviceBunkerConnect = old })
+	s := &ServiceSigner{}
+	t.Cleanup(s.Close)
+	url := "bunker://" + remote.Public().Hex() + "?relay=wss%3A%2F%2Fexample.com"
+	done := make(chan error, 1)
+	go func() { _, err := s.SwitchBunker(context.Background(), url, client, false, nil, nil); done <- err }()
+	<-entered
+	if _, err := s.Switch(context.Background(), "none", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; err == nil || LoggedIn() || UserPubkey() != "" {
+		t.Fatalf("stale signer revived: %v %+v", err, s.Status())
+	}
+}
 
 func TestServiceSignerBunkerLiveHandshakeAndSigning(t *testing.T) {
 	srv := httptest.NewServer(khatru.NewRelay())
