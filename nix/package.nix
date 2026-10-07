@@ -268,8 +268,8 @@ stdenv.mkDerivation {
       sleep 0.1
     done
     status=0
-    "$bin/kwakore" status >"$check/status.json" 2>&1 || status=$?
-    "$bin/kwakore" diagnostics >"$check/diagnostics.json" 2>&1 || status=$?
+    "$bin/kwakore" --json status >"$check/status.json" 2>&1 || status=$?
+    "$bin/kwakore" --json diagnostics >"$check/diagnostics.json" 2>&1 || status=$?
     kill "$daemon"
     wait "$daemon" || true
     if [ "$status" -ne 0 ]; then
