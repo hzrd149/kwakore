@@ -35,7 +35,7 @@ Current Plan: 24
 Total Plans in Phase: 24
 Status: Executed and reviewed — human verification deferred (09-UAT.md)
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
-Last activity: 2026-10-07 — Phase 09 execution started
+Last activity: 2026-10-07 - Completed quick task 261007-cth: CLI accepts NIP-19 napplet addresses
 
 ## Performance Metrics
 
@@ -241,6 +241,7 @@ None yet.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 261007-cth | CLI accepts NIP-19 naddr / nostr:naddr addresses and forwards relay hints on install | 2026-10-07 | 9ddae2c | [261007-cth-the-kwakore-cli-should-accept-all-releva](./quick/261007-cth-the-kwakore-cli-should-accept-all-releva/) |
 
 ## Deferred Items
 
