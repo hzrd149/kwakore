@@ -104,6 +104,22 @@ Plans:
 **Goal:** A Linux user can install, configure, and run Kwakore as a per-user service without the old UI or Android app.
 **Depends on:** Phase 8.
 **Requirements:** SRVC-01, LNXS-01, LNXS-02, LNXS-03, CLNP-01, CLNP-02, NAME-01.
+**Plans:** 11 plans
+
+Plans:
+
+- [ ] 09-01-PLAN.md — User socket activation tracer and manager lifecycle
+- [ ] 09-02-PLAN.md — Generic Linux bundle and install helper
+- [ ] 09-03-PLAN.md — Safe native entry token and writer
+- [ ] 09-04-PLAN.md — Service entry reconciliation
+- [ ] 09-05-PLAN.md — Gio and Android retirement with child preservation
+- [ ] 09-06-PLAN.md — Direct public Go module rename checkpoint
+- [ ] 09-07-PLAN.md — Retained runtime identity and bridge rename
+- [ ] 09-08-PLAN.md — Nix package and per-user module
+- [ ] 09-09-PLAN.md — Linux CI and release bundles
+- [ ] 09-10-PLAN.md — Generic-first setup, protocol and identity docs
+- [ ] 09-11-PLAN.md — Installed-artifact smoke and CI gate
+
 **Success criteria:**
 
 1. Generic systemd user service/socket units start the daemon and permit status, restart, and shutdown through the user's service manager on a standard systemd Linux installation.
