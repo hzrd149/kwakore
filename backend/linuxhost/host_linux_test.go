@@ -7,11 +7,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
+
 	"verdana/backend"
+	"verdana/backend/desktopentry"
 )
 
 func TestLinuxHostSession(t *testing.T) {
@@ -283,5 +287,202 @@ func TestLinuxHostSettingsChild(t *testing.T) {
 	case <-child.done:
 	case <-time.After(4 * time.Second):
 		t.Fatal("settings child survived close")
+	}
+}
+
+// ─── native desktop entries ──────────────────────────────────────
+
+// testAddress is a canonical napplet address for d under a fresh key.
+func testAddress(t *testing.T, kind int, d string) string {
+	t.Helper()
+	return strconv.Itoa(kind) + ":" + nostr.Generate().Public().Hex() + ":" + d
+}
+
+// managedEntries lists the managed entry files in dir with their contents.
+func managedEntries(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), "kwakore-napplet-") {
+			data, err := os.ReadFile(filepath.Join(dir, f.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got[f.Name()] = string(data)
+		}
+	}
+	return got
+}
+
+func TestLinuxHostNativeEntry(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+	apps := filepath.Join(data, "applications")
+	cli := filepath.Join(t.TempDir(), "kwakore")
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	host := &Host{CLI: cli}
+	if !host.AppShortcutsSupported() {
+		t.Fatal("the Linux host does not publish native entries")
+	}
+	if err := os.MkdirAll(apps, 0700); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := filepath.Join(apps, "org.example.Editor.desktop")
+	if err := os.WriteFile(unrelated, []byte("[Desktop Entry]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	named := testAddress(t, 35129, "notes\nExec=evil")
+	root := testAddress(t, 15129, "")
+	shortcuts := []backend.AppShortcut{
+		{Address: named, Name: "Notes\nTerminal=false", Description: "A notes napplet"},
+		{Address: root, Name: "Root"},
+		// a repeated address keeps its first entry
+		{Address: named, Name: "Duplicate"},
+	}
+	if err := host.SyncAppShortcuts(shortcuts); err != nil {
+		t.Fatal(err)
+	}
+	first := managedEntries(t, apps)
+	if len(first) != 2 {
+		t.Fatalf("entries = %d, want one per address: %v", len(first), first)
+	}
+	for address, title := range map[string]string{named: "Name=Notes Terminal=false\n", root: "Name=Root\n"} {
+		body, ok := first[desktopentry.FileName(address)]
+		if !ok {
+			t.Fatalf("no entry for %q", address)
+		}
+		token, err := desktopentry.EncodeToken(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body, title) || strings.Count(body, "\nExec=") != 1 ||
+			!strings.Contains(body, "\nExec=\""+cli+"\" launch-token "+token+"\n") {
+			t.Fatalf("entry for %q:\n%s", address, body)
+		}
+		if strings.Contains(body, address) || strings.Contains(body, "Duplicate") {
+			t.Fatalf("entry carries the raw address or a later duplicate:\n%s", body)
+		}
+	}
+	stats := map[string]os.FileInfo{}
+	for name := range first {
+		info, err := os.Stat(filepath.Join(apps, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stats[name] = info
+	}
+
+	// a retry with the same set leaves the very same files
+	if err := host.SyncAppShortcuts(shortcuts); err != nil {
+		t.Fatal(err)
+	}
+	if again := managedEntries(t, apps); len(again) != 2 {
+		t.Fatalf("retry duplicated entries: %v", again)
+	}
+	for name, before := range stats {
+		after, err := os.Stat(filepath.Join(apps, name))
+		if err != nil || !os.SameFile(before, after) || !after.ModTime().Equal(before.ModTime()) {
+			t.Fatalf("retry rewrote %s: %v", name, err)
+		}
+	}
+
+	// internal launcher fields never reach a file: an ID/Token-only
+	// shortcut is reported, and the valid entry beside it stays
+	legacy := backend.AppShortcut{ID: named, Token: backend.LaunchToken(named), Name: "Legacy"}
+	if err := host.SyncAppShortcuts([]backend.AppShortcut{legacy, shortcuts[1]}); err == nil {
+		t.Fatal("a shortcut without a canonical address was accepted")
+	}
+	if got := managedEntries(t, apps); len(got) != 1 || got[desktopentry.FileName(root)] == "" {
+		t.Fatalf("after the legacy shortcut: %v", got)
+	}
+
+	// nil removes every managed entry and nothing else
+	if err := host.SyncAppShortcuts(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := managedEntries(t, apps); len(got) != 0 {
+		t.Fatalf("nil left entries: %v", got)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated desktop file removed: %v", err)
+	}
+
+	// without an installed CLI nothing is written or removed
+	if err := host.SyncAppShortcuts(shortcuts[:1]); err != nil {
+		t.Fatal(err)
+	}
+	broken := &Host{CLI: ""}
+	if err := broken.SyncAppShortcuts(nil); !errors.Is(err, desktopentry.ErrInvalidCLI) {
+		t.Fatalf("missing CLI: %v", err)
+	}
+	if got := managedEntries(t, apps); len(got) != 1 {
+		t.Fatalf("a refused CLI changed entries: %v", got)
+	}
+}
+
+func TestLinuxHostNativeEntryCLIPath(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "releases", "abc")
+	if err := os.MkdirAll(release, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"kwakore-daemon", "kwakore"} {
+		if err := os.WriteFile(filepath.Join(release, name), []byte("#!/bin/sh\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := filepath.Join(root, "current")
+	if err := os.Symlink(filepath.Join("releases", "abc"), current); err != nil {
+		t.Fatal(err)
+	}
+	daemon := filepath.Join(release, "kwakore-daemon")
+
+	// started through the stable link: the entry keeps the link
+	if got, want := cliBeside(filepath.Join(current, "kwakore-daemon"), daemon), filepath.Join(current, "kwakore"); got != want {
+		t.Fatalf("through current: %q, want %q", got, want)
+	}
+	// a relative or foreign argv[0] falls back to the real bundle
+	if got, want := cliBeside("kwakore-daemon", daemon), filepath.Join(release, "kwakore"); got != want {
+		t.Fatalf("relative argv[0]: %q, want %q", got, want)
+	}
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "kwakore"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cliBeside(filepath.Join(other, "kwakore-daemon"), daemon), filepath.Join(release, "kwakore"); got != want {
+		t.Fatalf("foreign argv[0]: %q, want %q", got, want)
+	}
+
+	// a CLI that resolves outside the bundle, or is not executable, is no CLI
+	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "kwakore"), filepath.Join(release, "kwakore")); err != nil {
+		t.Fatal(err)
+	}
+	if got := cliBeside(daemon, daemon); got != "" {
+		t.Fatalf("CLI outside the bundle accepted: %q", got)
+	}
+	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(release, "kwakore"), []byte("#!/bin/sh\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := cliBeside(daemon, daemon); got != "" {
+		t.Fatalf("non-executable CLI accepted: %q", got)
+	}
+	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+		t.Fatal(err)
+	}
+	if got := cliBeside(daemon, daemon); got != "" {
+		t.Fatalf("missing CLI accepted: %q", got)
 	}
 }

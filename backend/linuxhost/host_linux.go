@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"verdana/backend"
+	"verdana/backend/desktopentry"
 	"verdana/backend/fileutil"
 	"verdana/backend/media"
 	"verdana/backend/netguard"
@@ -27,9 +28,67 @@ import (
 
 const readyTimeout = 10 * time.Second
 
-type Host struct{ Program string }
+// Host is the service's Linux platform. Program is the napplet child; CLI is
+// the control CLI that native desktop entries run (empty when none is
+// installed beside the daemon, which makes entry reconciliation fail
+// visibly instead of writing entries that cannot start).
+type Host struct {
+	Program string
+	CLI     string
+}
 
-func New(program string) *Host { return &Host{Program: program} }
+func New(program string) *Host { return &Host{Program: program, CLI: DefaultCLIPath()} }
+
+// cliName is the control CLI's file name inside the installed bundle.
+const cliName = "kwakore"
+
+// DefaultCLIPath is the kwakore CLI shipped beside the running daemon, or ""
+// when there is none. See cliBeside.
+func DefaultCLIPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return cliBeside(os.Args[0], exe)
+}
+
+// cliBeside picks the CLI path native entries carry. The daemon's real
+// executable decides which bundle counts: the CLI must be a regular
+// executable file in that same directory once symlinks are resolved, so an
+// entry never names some other installation's binary. When the daemon was
+// started through an absolute, clean path whose directory resolves to that
+// same bundle (systemd starts it as .../lib/kwakore/current/kwakore-daemon),
+// the entry keeps that unresolved directory: the `current` link survives an
+// upgrade, while a release directory is pruned two upgrades later.
+func cliBeside(arg0, exe string) string {
+	real, err := filepath.EvalSymlinks(exe)
+	if err != nil || !filepath.IsAbs(real) {
+		return ""
+	}
+	bundle := filepath.Dir(real)
+	if filepath.IsAbs(arg0) && filepath.Clean(arg0) == arg0 {
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(arg0)); err == nil && dir == bundle {
+			if candidate := filepath.Join(filepath.Dir(arg0), cliName); cliInBundle(candidate, bundle) {
+				return candidate
+			}
+		}
+	}
+	if candidate := filepath.Join(bundle, cliName); cliInBundle(candidate, bundle) {
+		return candidate
+	}
+	return ""
+}
+
+// cliInBundle reports whether path resolves to an executable regular file
+// directly inside bundle.
+func cliInBundle(path, bundle string) bool {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil || filepath.Dir(real) != bundle {
+		return false
+	}
+	info, err := os.Stat(real)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0
+}
 
 // DefaultProgramPath is relative to the daemon executable, not cwd or PATH.
 // Phase 9 packages this sibling and its adjacent libwebview.so together.
@@ -374,14 +433,34 @@ func (*Host) OpenLink(raw string) error {
 func (*Host) CreateShortcutFile(string, string) (string, error) {
 	return "", backend.ErrServiceUnavailable
 }
-func (*Host) DeleteShortcutFile(string) error                                  { return nil }
-func (*Host) ListShortcutFiles() []backend.ShortcutFile                        { return nil }
-func (*Host) AutostartSupported() bool                                         { return false }
-func (*Host) AutostartEnabled() bool                                           { return false }
-func (*Host) SetAutostart(bool) error                                          { return backend.ErrServiceUnavailable }
-func (*Host) AppShortcutsSupported() bool                                      { return false }
-func (*Host) SyncAppShortcuts([]backend.AppShortcut) error                     { return nil }
-func (*Host) SyncSearchNapplets([]backend.AppShortcut) error                   { return nil }
+func (*Host) DeleteShortcutFile(string) error                { return nil }
+func (*Host) ListShortcutFiles() []backend.ShortcutFile      { return nil }
+func (*Host) AutostartSupported() bool                       { return false }
+func (*Host) AutostartEnabled() bool                         { return false }
+func (*Host) SetAutostart(bool) error                        { return backend.ErrServiceUnavailable }
+func (*Host) SyncSearchNapplets([]backend.AppShortcut) error { return nil }
+
+// AppShortcutsSupported is true: the service publishes one native desktop
+// entry per installed napplet (D-07).
+func (*Host) AppShortcutsSupported() bool { return true }
+
+// SyncAppShortcuts makes the user's applications directory hold exactly one
+// kwakore-napplet-<hash>.desktop per shortcut address and no other managed
+// entry. Only the canonical Address and the display text reach the writer:
+// ID and Token are internal launcher fields and are ignored, so a shortcut
+// without an address is reported as invalid rather than written. Errors from
+// individual entries are joined; the valid entries beside them are written.
+func (h *Host) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
+	dir, err := desktopentry.ApplicationsDir()
+	if err != nil {
+		return err
+	}
+	entries := make([]desktopentry.Entry, 0, len(shortcuts))
+	for _, s := range shortcuts {
+		entries = append(entries, desktopentry.Entry{Address: s.Address, Title: s.Name, Description: s.Description})
+	}
+	return desktopentry.Reconcile(dir, h.CLI, entries)
+}
 func (*Host) GNOMESearchSupported() bool                                       { return false }
 func (*Host) SetGNOMESearchIntegration(bool) error                             { return backend.ErrServiceUnavailable }
 func (*Host) AmberRequest(string, string, string, string, string, string) bool { return false }

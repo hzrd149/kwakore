@@ -68,7 +68,9 @@ type Host interface {
 	SetAutostart(bool) error
 
 	// SyncAppShortcuts reconciles Verdana-owned system launcher entries with
-	// the complete desired set. Passing nil removes every managed entry.
+	// the complete desired set. Passing nil removes every managed entry. The
+	// service calls it with one Address-only shortcut per installed napplet,
+	// in address order, at startup and after every committed mutation.
 	AppShortcutsSupported() bool
 	SyncAppShortcuts([]AppShortcut) error
 
@@ -202,9 +204,16 @@ type ShortcutFile struct {
 // LaunchToken(ID). Writers put Token, never ID, into shortcut files and
 // command lines: ID carries an author-controlled d tag that may hold
 // newlines, quotes or whitespace.
+//
+// Address is set only by the service: it is the installed napplet's full
+// canonical address (ParseCanonicalServiceAddress accepts it byte for byte),
+// and ID and Token are then empty. The Linux service host turns it into the
+// inert launch-token of a native desktop entry; it never uses LaunchToken,
+// whose input is an internal id.
 type AppShortcut struct {
 	ID          string
 	Token       string
+	Address     string
 	Name        string
 	Description string
 	Icon        []byte
