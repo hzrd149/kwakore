@@ -38,6 +38,19 @@ func TestCredentialStorePrivateAndRestore(t *testing.T) {
 	}
 }
 
+func TestBunkerCredentialStableClientKey(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil { t.Fatal(err) }
+	s, err := openCredentialStore(dir)
+	if err != nil { t.Fatal(err) }
+	url := "bunker://" + nostr.Generate().Public().Hex() + "?relay=wss%3A%2F%2Fexample.com&secret=private-sentinel"
+	if err := s.write("bunker", url); err != nil { t.Fatal(err) }
+	again, err := openCredentialStore(dir)
+	if err != nil { t.Fatal(err) }
+	rec, err := again.read()
+	if err != nil || rec.Mode != "bunker" || rec.Secret != url { t.Fatalf("restore: %+v %v", rec, err) }
+}
+
 func TestCredentialStoreRejectsUnsafeFile(t *testing.T) {
 	for _, kind := range []string{"symlink", "mode", "directory"} {
 		t.Run(kind, func(t *testing.T) {
