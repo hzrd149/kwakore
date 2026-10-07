@@ -4,18 +4,18 @@ milestone: v0.2
 milestone_name: Linux Service Pivot
 current_phase: 09
 current_phase_name: Linux Packaging, Rename and Cleanup
-current_plan: 19
+current_plan: 20
 status: executing
-stopped_at: Completed 09-23-PLAN.md
-last_updated: "2026-10-07T07:21:40.982Z"
+stopped_at: Completed 09-18-PLAN.md
+last_updated: "2026-10-07T07:25:18.437Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 09 execution started
-state_head: 3cca695b30c430521684f60dde2ca70e840ec40f
+state_head: 791533f3b87abb0d80ec470f5747371e3def9bdf
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 43
-  completed_plans: 36
+  completed_plans: 37
   percent: 75
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 09 (Linux Packaging, Rename and Cleanup) — EXECUTING
-Current Plan: 19
+Current Plan: 20
 Total Plans in Phase: 24
 Status: Ready to execute
 **Progress:** 18/42 v0.2 plans completed; 3/4 phases verified ([████████░░] 75%)
@@ -135,6 +135,7 @@ Last activity: 2026-10-07 — Phase 09 execution started
 | Phase 09 P16 | 20min | 1 tasks | 9 files |
 | Phase 09 P17 | 10min | 1 tasks | 18 files |
 | Phase 09 P23 | 6min | 1 tasks | 11 files |
+| Phase 09 P18 | 8min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -190,6 +191,7 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 09]: 09-16: napplet bridge globals, bindings and the document marker use the __kwakore prefix on both ends with no alias; the Android __kwakoreHost port branch is renamed, not removed
 - [Phase 09]: 09-17: Display text says 'Kwakore' and identifiers use lowercase 'kwakore-'. The ten exact-string test assertions owned by 09-18/09-24 were updated with the renamed copy (Rule 3).
 - [Phase 09]: 09-23: SourceURL moved to https://github.com/hzrd149/kwakore after checking it resolves (old verdana URL redirects there); relay labels, User-Agent and temp prefix use kwakore-, the launcher prompt name uses Kwakore
+- [Phase 09]: 09-18: dev~verdana-probe/adversarial assertions kept; ids come from testdata fixtures that 09-24 allowlists or renames together with the assertions
 
 ### Pending Todos
 
@@ -242,8 +244,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T07:21:40.879Z
-Stopped at: Completed 09-23-PLAN.md
+Last session: 2026-10-07T07:25:18.352Z
+Stopped at: Completed 09-18-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
