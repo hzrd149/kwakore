@@ -5,17 +5,17 @@ milestone_name: Linux Service Pivot
 current_phase: 8
 current_phase_name: Runtime and Signer Integration
 current_plan: 5
-status: executing
-stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-10-07T03:31:05.324Z"
+status: verifying
+stopped_at: Completed 08-05-PLAN.md
+last_updated: "2026-10-07T03:47:33.610Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 8 execution started
-state_head: e6aa0897e7d417fe24103c1af2db9296c59c9f91
+state_head: 373f97b1fbd0bc93d5ec869530175ee4fe758a6e
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 18
-  completed_plans: 17
+  completed_plans: 18
   percent: 50
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Phase: 8 (Runtime and Signer Integration) — EXECUTING
+Phase: 8 (Runtime and Signer Integration) — READY FOR VERIFICATION
 Current Plan: 5
 Total Plans in Phase: 5
-Status: Ready to execute
-**Progress:** 17/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
+Status: Phase complete — ready for verification
+**Progress:** 18/18 v0.2 plans completed; 2/4 phases verified ([█████░░░░░] 50%)
 Last activity: 2026-10-06 — Phase 8 execution started
 
 ## Performance Metrics
@@ -115,6 +115,7 @@ Last activity: 2026-10-06 — Phase 8 execution started
 | Phase 08 P02 | 8min | 3 tasks | 10 files |
 | Phase 08 P03 | 20min | 3 tasks | 15 files |
 | Phase 08 P04 | 11min | 3 tasks | 16 files |
+| Phase 08 P05 | 15min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,9 @@ Cleared at v0.1 close. The full log is in PROJECT.md Key Decisions; per-phase de
 - [Phase 8]: Preserve the private NIP-46 client key across signer mode changes and restart.
 - [Phase 8]: Construct the nostrconnect private URI in the CLI; socket reads expose only public pairing fields.
 - [Phase 8]: Commit paired credentials and override before publishing final signer identity and pair outcome.
+- [Phase 8]: Signer keyer and public key are copied under one short lock; signer and network work run after release.
+- [Phase 8]: The daemon binds a checked child transport before waiting for nap.start so nap.boot can complete.
+- [Phase 8]: The Linux host accepts the host page exact null nap.start params; graphical CI requires a named PASS under xvfb.
 
 ### Pending Todos
 
@@ -191,10 +195,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T03:31:05.293Z
-Stopped at: Completed 08-04-PLAN.md
+Last session: 2026-10-07T03:47:33.579Z
+Stopped at: Completed 08-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Phase 8 Plan 04 is complete; continue with 08-05-PLAN.md.
+- Phase 8 Plan 05 is complete; verify Phase 8.

@@ -69,7 +69,7 @@ Plans:
 **Goal:** The daemon controls napplet windows, permissions, and signer options while retaining v0.1 security boundaries.
 **Depends on:** Phase 7.
 **Requirements:** SRVC-03, SRVC-04, SOCK-06, SIGN-01, SIGN-02, SIGN-03.
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -90,7 +90,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 08-05-PLAN.md — Concurrent identity safety and independent child smoke
+- [x] 08-05-PLAN.md — Concurrent identity safety and independent child smoke
 
 **Success criteria:**
 
