@@ -33,6 +33,7 @@ re-pin deliberately and record the change here.
 | NAP-LINK | `refs/pull/53/head` | draft PR #53 | `e25143355f6d416bfce73b12ec814f1c795ec16a` |
 | NAP-COMMON | `refs/pull/67/head` | draft PR #67 | `de603e205a9b498f252be9a5e8e6825c4648df39` |
 | NAP-RESOURCE | `refs/pull/80/head` | draft PR #80 | `fa6bcc6935aa19e7b70ab2a2c721dafca77c78e1` |
+| NAP-CATALOG | `refs/pull/95/head` | draft PR #95 | `7573383ffe33b9ef7c57248ec84736cc93d8d184` |
 
 ## Reference implementation (napplet/web)
 
@@ -47,7 +48,7 @@ Repo: https://github.com/napplet/web, branch `main`.
 ## Decisions (2026-10-02)
 
 - **Upstream `napplet/web` is canonical.** The vendored shim is byte-identical npm `@napplet/shim` 0.30.0 with no Verdana patches.
-- **NAP-SHELL:** the upstream shim follows NIP-5D presence-based capability detection (`window.napplet` holds only domain objects; napplet/web #96) and installs no `window.napplet.shell` / `shell.ready` handshake. Verdana follows the shim. The conflict with merged NAP-SHELL's "every runtime MUST implement" is recorded in the checklist.
+- **NAP-SHELL:** the upstream shim follows NIP-5D presence-based capability detection (`window.napplet` holds only domain objects; napplet/web #96) and installs no `shell.ready` handshake. Kwakore adds `shell.supports` for NAP-CATALOG but keeps the shim byte-identical. The conflict with merged NAP-SHELL's "every runtime MUST implement" is recorded in the checklist.
 - **NAP-INTENT:** pinned to naps master, like the upstream shim (which deliberately omits draft PR #91 delivery hooks). PR #91 is no longer pinned.
 - **NAP-RESOURCE:** pinned to PR #80 head `fa6bcc6` (the live replacement for #13, which was merged by accident and reverted in `a9ad2cf`). The host also accepts the shim 0.30.0 server-hint shape (`requests:[{url,servers}]`, from branch `nap-resource` @ `9511232f69313aa7953d110e35d32cc28d506f66`) as a recorded tolerance, so the canonical shim works.
 - **Napplet ciphertext:** NIP-5D Security #7 ("Shells MUST NOT sign or broadcast events containing ciphertext received from a napplet") is applied as written.

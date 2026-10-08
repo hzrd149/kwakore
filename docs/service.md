@@ -23,6 +23,7 @@ enabled; the service starts on demand.
 - [Install on NixOS](#install-on-nixos)
 - [Run and control the service](#run-and-control-the-service)
 - [Graphical session](#graphical-session)
+- [Napplet catalog](#napplet-catalog)
 - [Native desktop entries](#native-desktop-entries)
 - [Paths and files](#paths-and-files)
 - [Configuration](#configuration)
@@ -317,6 +318,24 @@ on stdout and logs to stderr. A second daemon for the same data directory
 fails with `daemon already running for this user; inspect status or stop the
 existing instance`. A source build without the window program beside it
 cannot open napplet windows; use `just bundle` for a complete set.
+
+## Napplet catalog
+
+Napplets can call `await window.napplet.catalog.get()` to discover installed,
+verified napplets. `window.napplet.shell.supports("catalog")` reports whether
+the binding is available. The result follows the pinned draft
+[NAP-CATALOG contract](../spec/pinned/NAP-CATALOG@7573383f.md): it contains
+napplet identities, display metadata, required NAP domains, archetypes,
+queryless accepted conventions, and a `currentHandler` for each archetype.
+The handler is an implicit dispatch target, not a running window.
+
+The catalog is visible to every running napplet and excludes development
+napplets because they lack a verified manifest. Query parameter descriptors
+are empty: existing manifest records do not establish whether named parameters
+are required. Napplet code should use the explicit convention payload contract
+for structured values. The current `@napplet/shim` 0.30.0 lacks this draft
+binding, so Kwakore installs it in its trusted preamble without changing the
+vendored shim.
 
 ## Graphical session
 

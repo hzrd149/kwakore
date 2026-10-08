@@ -41,7 +41,7 @@ import (
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox", "media",
-	"config", "notify",
+	"config", "notify", "catalog",
 }
 
 // napSession is what one napplet window has going: the subscriptions and

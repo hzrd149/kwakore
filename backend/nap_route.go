@@ -361,6 +361,7 @@ var napRouteSpecs = map[string]napRoute{
 	}), limit: limitIntent},
 	"intent.available": {gate: napGateIntentFind, fail: failShape(failErr)},
 	"intent.handlers":  {gate: napGateIntentFind, fail: failShape(failErr)},
+	"catalog.get":      {gate: openGate("read installed napplet metadata; catalog discovery"), fail: failShape(failErr)},
 
 	"inc.emit":              {gate: openGate("INC broadcast; consent INTN-03 Phase 6"), fail: failShape(failNone), limit: limitIncEmit},
 	"inc.subscribe":         {gate: openGate("INC topic subscription; INTN-03 Phase 6"), fail: failShape(failErr)},

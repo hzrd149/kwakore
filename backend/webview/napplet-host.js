@@ -305,6 +305,7 @@
     "inc.unsubscribe": { "kind": "none" },
     "intent.available": { "kind": "err" },
     "intent.handlers": { "kind": "err" },
+    "catalog.get": { "kind": "err" },
     "intent.invoke": { "codes": { "internal-error": "invoke failed", "user-denied": "user cancelled" }, "kind": "intent" },
     "link.open": { "kind": "link" },
     "media.capabilities": { "kind": "none" },

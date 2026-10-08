@@ -42,6 +42,7 @@ var pinnedSnapshots = []pinnedSnapshot{
 	// the shim 0.30.0 server-hint shape the host also accepts; a tolerance,
 	// kept as its own file and never merged with the PR #80 pin above
 	{"NAP-RESOURCE@9511232f.md", "NAP-RESOURCE", "9511232f69313aa7953d110e35d32cc28d506f66", "tolerance"},
+	{"NAP-CATALOG@7573383f.md", "NAP-CATALOG", "7573383ffe33b9ef7c57248ec84736cc93d8d184", "pin"},
 }
 
 const pinnedSpecDir = "../spec/pinned"

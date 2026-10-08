@@ -135,7 +135,7 @@ func TestSrcdocLeavesOnlyWindowNapplet(t *testing.T) {
 	if got.Wrapped.Prelude != "undefined" {
 		t.Errorf("typeof NappletShimPrelude = %q in the frame, want undefined", got.Wrapped.Prelude)
 	}
-	want := slices.Clone(napDomains)
+	want := append(slices.Clone(napDomains), "shell")
 	slices.Sort(want)
 	have := slices.Clone(got.Wrapped.Domains)
 	slices.Sort(have)

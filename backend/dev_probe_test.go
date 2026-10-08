@@ -123,7 +123,7 @@ func TestProbeNappletFolderLoads(t *testing.T) {
 	got := string(out)
 	for _, want := range []string{
 		"PASS NappletShimPrelude is undefined",
-		"PASS domains (14): ",
+		"PASS domains (16): ",
 		"probe loaded",
 	} {
 		if !strings.Contains(got, want) {

@@ -83,6 +83,10 @@ var bidirectionalOut = map[string]string{
 	"media.command": "NAP-MEDIA @2b2d29e9: for shell-owned sessions media.command is napplet -> shell; the fixture lists it only as shell -> napplet",
 }
 
+// catalog.get is sent by Kwakore's trusted preamble until the upstream shim
+// publishes the NAP-CATALOG binding.
+var localPreludeOut = map[string]bool{"catalog.get": true}
+
 // naTypes is explicit type-level N/A: a request type in an offered domain that
 // the launcher deliberately leaves unhandled. Every entry needs a reason, and
 // none may also have a handler. Empty today.
@@ -217,7 +221,7 @@ func conformanceProblems(fx conformanceFixture, handlers map[string]*napRoute, d
 		}
 	}
 	for _, typ := range slices.Sorted(maps.Keys(handlers)) {
-		if !out[typ] && bidirectionalOut[typ] == "" {
+		if !out[typ] && bidirectionalOut[typ] == "" && !localPreludeOut[typ] {
 			dishonest = append(dishonest, fmt.Sprintf("handler %s answers a type the shim never sends", typ))
 		}
 	}

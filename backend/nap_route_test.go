@@ -32,7 +32,8 @@ func withTestRoute(t *testing.T, typ string, r napRoute) {
 // napGoldenRoutes is every NAP request type with its gate and failure kind.
 // Adding, removing or regating a type has to be done here too, on purpose.
 var napGoldenRoutes = map[string]string{
-	"theme.get": "gate=open fail=default",
+	"catalog.get": "gate=open fail=err",
+	"theme.get":   "gate=open fail=default",
 
 	"storage.get":    "gate=open fail=err",
 	"storage.set":    "gate=open fail=err",
@@ -118,8 +119,8 @@ var napGoldenRoutes = map[string]string{
 // TestNapRouteTableGolden pins the route table. It compares sorted, so the
 // order the nap_*.go inits run in does not matter.
 func TestNapRouteTableGolden(t *testing.T) {
-	if len(napGoldenRoutes) != 68 {
-		t.Fatalf("the golden table has %d types, want 68", len(napGoldenRoutes))
+	if len(napGoldenRoutes) != 69 {
+		t.Fatalf("the golden table has %d types, want 69", len(napGoldenRoutes))
 	}
 	if len(napRoutes) == 0 {
 		t.Fatal("no NAP routes are registered")

@@ -33,6 +33,7 @@ Listed in SPEC-PINS order, which `spec/CONFORMANCE.md` sections also follow.
 | [NAP-COMMON@de603e20.md](NAP-COMMON@de603e20.md) | NAP-COMMON | pin | napplet/naps | `refs/pull/67/head` | `de603e205a9b498f252be9a5e8e6825c4648df39` | `0e65f63eaf74483fcacb069117c5239063db0af1073ce92b27fd5076be706e75` |
 | [NAP-RESOURCE@fa6bcc69.md](NAP-RESOURCE@fa6bcc69.md) | NAP-RESOURCE | pin | napplet/naps | `refs/pull/80/head` | `fa6bcc6935aa19e7b70ab2a2c721dafca77c78e1` | `109f7f9107b6c1548a50faf0b7c4ad59dedee53d05249a574d5636017b7f446d` |
 | [NAP-RESOURCE@9511232f.md](NAP-RESOURCE@9511232f.md) | NAP-RESOURCE | tolerance | napplet/naps | `nap-resource` | `9511232f69313aa7953d110e35d32cc28d506f66` | `acac746006fe29d3bdd4e214a5aa0069a99624c5c1f9402cd905d220e4cb50bd` |
+| [NAP-CATALOG@7573383f.md](NAP-CATALOG@7573383f.md) | NAP-CATALOG | pin | napplet/naps | `refs/pull/95/head` | `7573383ffe33b9ef7c57248ec84736cc93d8d184` | `2b36bcdce31c970af00fab937895f7d7597db2f3bc8623a48aa1de85220badf3` |
 
 Repo URLs: nostr-protocol/nips is `https://github.com/nostr-protocol/nips`,
 hzrd149/naps is `https://github.com/hzrd149/naps` and napplet/naps is

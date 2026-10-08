@@ -3,6 +3,7 @@ package webview
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -113,11 +114,16 @@ func NappletSrcdoc(html []byte, domains []string) (string, error) {
 	// "</script" cannot appear inside an inline script; the prelude has none
 	// today, and this keeps a future one from ending the element early
 	prelude := strings.ReplaceAll(ShimPrelude(), "</script", `<\/script`)
+	catalog := ""
+	if slices.Contains(domains, "catalog") {
+		catalog = catalogPrelude
+	}
 
 	return "<!doctype html><html><head>" +
 		`<meta http-equiv="Content-Security-Policy" content="` + nappletCSP + `">` +
 		"<script>(function(){" + prelude +
 		"\n;NappletShimPrelude.install(" + string(domainsJSON) + ")" +
+		catalog +
 		"\n;parent.postMessage({type:" + strconv.Quote(DocumentMarker) + `},"*")` +
 		"\n})()</script>" +
 		"</head>" + doc, nil
