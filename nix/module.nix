@@ -16,7 +16,7 @@ let
   #             bin/, which has no kill, so the bare name would not resolve.
   #
   # Everything else, including ListenStream=%t/kwakore/daemon.sock and the
-  # 0700/0600 modes that kwakore-daemon checks on the inherited listener, is
+  # 0700/0600 modes that kwakore checks on the inherited listener, is
   # passed through unchanged. nix/module-test.nix compares the rendered units
   # with the templates line by line.
   templateDir = ../packaging/systemd/user;
@@ -203,7 +203,7 @@ let
         install -Dm444 "$configPath" "$out/kwakore/config.json"
         mkdir -m 0700 "$TMPDIR/home"
         HOME="$TMPDIR/home" XDG_CONFIG_HOME="$out" XDG_DATA_HOME="$TMPDIR/home/data" \
-          ${cfg.package}/bin/kwakore-daemon validate
+          ${cfg.package}/bin/kwakore validate
       '';
 
   freeform = (pkgs.formats.json { }).type;
@@ -217,7 +217,7 @@ in
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The Kwakore package: kwakore-daemon, the kwakore CLI, the napplet child
+        The Kwakore package: kwakore, the kwakore CLI, the napplet child
         and libwebview.so in one bin directory. Built against the system's
         nixpkgs by default.
       '';
@@ -258,7 +258,7 @@ in
 
         Set: the user service runs with KWAKORE_CONFIG_FILE pointing at a
         config.json in the store built from these values, and the file under
-        the user's home is ignored by the service. A kwakore-daemon validate
+        the user's home is ignored by the service. A kwakore validate
         run from a login shell still reads the home file.
 
         Either way, overrides made through the socket (`kwakore settings set`)
@@ -385,7 +385,7 @@ in
         # would start it. The package is in environment.systemPackages, so
         # this path follows every rebuild; the daemon uses it only while it
         # resolves to its own CLI (backend/linuxhost, stableCLI).
-        KWAKORE_ENTRY_CLI = "/run/current-system/sw/bin/kwakore";
+        KWAKORE_ENTRY_CLI = "/run/current-system/sw/bin/kwak";
       }
       // lib.optionalAttrs hasSettings {
         KWAKORE_CONFIG_FILE = "${configHome}/kwakore/config.json";

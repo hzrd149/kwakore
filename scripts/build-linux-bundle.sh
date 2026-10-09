@@ -6,9 +6,9 @@
 # Produces, under DIR/VERSION (DIR defaults to dist/ in the repository):
 #
 #   kwakore-VERSION-linux-ARCH/   the four runtime files in one directory:
-#       kwakore-daemon            foreground daemon (systemd ExecStart target)
-#       kwakore                   control CLI
-#       napplet                   hardened napplet child (desktop/child)
+#       kwakore            foreground daemon (systemd ExecStart target)
+#       kwak                      control CLI
+#       kwaklet                  hardened napplet child (desktop/child)
 #       libwebview.so             the pinned go-webview library the child loads
 #   kwakore-linux-ARCH.tar.gz     exactly those four files under that directory
 #   SHA256SUMS                    sha256 of every kwakore-linux-*.tar.gz there
@@ -107,19 +107,19 @@ ldflags="-s -w -buildid= -X kwakore/backend.Version=$version"
 build() {
 	go build -trimpath -buildvcs=false "$@"
 }
-(cd "$repo_root/backend" && build -ldflags "$ldflags -X main.version=$version" -o "$bundle/kwakore-daemon" ./cmd/kwakore-daemon) ||
-	fail "could not build kwakore-daemon"
-(cd "$repo_root/backend" && build -ldflags "$ldflags" -o "$bundle/kwakore" ./cmd/kwakore) ||
+(cd "$repo_root/backend" && build -ldflags "$ldflags -X main.version=$version" -o "$bundle/kwakore" ./cmd/kwakore-daemon) ||
 	fail "could not build kwakore"
+(cd "$repo_root/backend" && build -ldflags "$ldflags" -o "$bundle/kwak" ./cmd/kwakore) ||
+	fail "could not build kwak"
 # D-10: the child program is the napplet window host, the only window kind.
-(cd "$repo_root/desktop" && build -ldflags "-s -w -buildid=" -o "$bundle/napplet" ./child) ||
+(cd "$repo_root/desktop" && build -ldflags "-s -w -buildid=" -o "$bundle/kwaklet" ./child) ||
 	fail "could not build the napplet child"
 cp -- "$lib" "$bundle/libwebview.so"
-chmod 0755 "$bundle/kwakore-daemon" "$bundle/kwakore" "$bundle/napplet"
+chmod 0755 "$bundle/kwakore" "$bundle/kwak" "$bundle/kwaklet"
 chmod 0644 "$bundle/libwebview.so"
 chmod 0755 "$bundle"
 
-members=("$name/kwakore-daemon" "$name/kwakore" "$name/napplet" "$name/libwebview.so")
+members=("$name/kwakore" "$name/kwak" "$name/kwaklet" "$name/libwebview.so")
 tar --sort=name --format=gnu --owner=0 --group=0 --numeric-owner \
 	--mtime="@$epoch" -C "$stage" -cf - "${members[@]}" | gzip -n -9 >"$stage/$archive"
 

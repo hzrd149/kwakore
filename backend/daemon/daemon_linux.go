@@ -580,7 +580,7 @@ func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready f
 		return err
 	}
 	s.StartDesktopSearch()
-	ready(fmt.Sprintf("kwakore-daemon %s ready (config: %s)", version, paths.ConfigFile))
+	ready(fmt.Sprintf("kwakore %s ready (config: %s)", version, paths.ConfigFile))
 	<-ctx.Done()
 	s.BeginShutdown()
 	_ = listener.Close()

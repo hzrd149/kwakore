@@ -37,7 +37,7 @@ func run(args []string) error {
 	}
 	if topic, requested := helpTopic(args); requested {
 		if topic == "" {
-			return inputFailure("unknown help topic; run 'kwakore help' for commands")
+			return inputFailure("unknown help topic; run 'kwak help' for commands")
 		}
 		_, err := io.WriteString(os.Stdout, topic)
 		return err
@@ -605,7 +605,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			}
 		}
 	}
-	return "", nil, "", inputFailure("unknown or incomplete command; run 'kwakore help' for usage")
+	return "", nil, "", inputFailure("unknown or incomplete command; run 'kwak help' for usage")
 }
 
 func readSignerSecret(r io.Reader, limit int) (string, error) {

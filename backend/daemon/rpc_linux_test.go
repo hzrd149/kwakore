@@ -202,7 +202,7 @@ func ciWorkflowViolations(workflow string) []string {
 	}
 	required := map[string][]string{
 		"backend": {"go vet ./...", "go test ./...", `KWAKORE_REQUIRE_NODE: "1"`, "bash scripts/check-product-identity.sh", "bash -n"},
-		"child":   {"go generate ./internal/webviewlib", "go build -o child/napplet ./child", "go vet ./...", "go test ./...", "go mod tidy -diff", "::notice"},
+		"child":   {"go generate ./internal/webviewlib", "go build -o child/kwaklet ./child", "go vet ./...", "go test ./...", "go mod tidy -diff", "::notice"},
 		"bundle":  nil,
 		"release": nil,
 	}

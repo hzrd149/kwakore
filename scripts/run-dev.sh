@@ -20,12 +20,12 @@ if [ -L "$dev_dir" ]; then
 fi
 
 (cd "$repo_root/desktop" && env -u GOOS -u GOARCH go generate ./internal/webviewlib)
-(cd "$repo_root/backend" && go build -o "$dev_dir/kwakore-daemon" ./cmd/kwakore-daemon)
-(cd "$repo_root/backend" && go build -o "$dev_dir/kwakore" ./cmd/kwakore)
-(cd "$repo_root/desktop" && go build -o "$dev_dir/napplet" ./child)
+(cd "$repo_root/backend" && go build -o "$dev_dir/kwakore" ./cmd/kwakore-daemon)
+(cd "$repo_root/backend" && go build -o "$dev_dir/kwak" ./cmd/kwakore)
+(cd "$repo_root/desktop" && go build -o "$dev_dir/kwaklet" ./child)
 cp -- "$repo_root/desktop/internal/webviewlib/lib/linux_$arch/libwebview.so" "$dev_dir/libwebview.so"
-chmod 0755 "$dev_dir/kwakore-daemon" "$dev_dir/kwakore" "$dev_dir/napplet"
+chmod 0755 "$dev_dir/kwakore" "$dev_dir/kwak" "$dev_dir/kwaklet"
 chmod 0644 "$dev_dir/libwebview.so"
 
-echo "Development CLI: $dev_dir/kwakore" >&2
-exec "$dev_dir/kwakore-daemon"
+echo "Development CLI: $dev_dir/kwak" >&2
+exec "$dev_dir/kwakore"

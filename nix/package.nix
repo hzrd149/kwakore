@@ -14,14 +14,14 @@
 # The Kwakore Linux service: the same four runtime pieces as the generic
 # release bundle (scripts/build-linux-bundle.sh), side by side in $out/bin:
 #
-#   kwakore-daemon   foreground daemon, the user service's ExecStart
-#   kwakore          control CLI, also what native napplet entries run
-#   napplet          hardened napplet child (desktop/child)
+#   kwakore   foreground daemon, the user service's ExecStart
+#   kwak             control CLI, also what native napplet entries run
+#   kwaklet          hardened napplet child (desktop/child)
 #   libwebview.so    the pinned go-webview library the child loads
 #
-# The daemon finds the child as the sibling "napplet" of its own resolved
+# The daemon finds the child as the sibling "kwaklet" of its own resolved
 # executable and passes that directory to it as WEBVIEW_PATH, and native
-# entries name the "kwakore" found beside it (through the system profile's
+# entries name the "kwak" found beside it (through the system profile's
 # link to it under nix/module.nix, KWAKORE_ENTRY_CLI). All four are real files in one
 # directory, never symlinks into other store paths, so both lookups land
 # here. The user units come from packaging/systemd/user through nix/module.nix.
@@ -111,7 +111,7 @@ let
     '';
 
     postInstall = ''
-      mv "$out/bin/child" "$out/bin/napplet"
+      mv "$out/bin/child" "$out/bin/kwaklet"
       install -Dm444 "internal/webviewlib/lib/${webviewLibDir}/libwebview.so" "$out/bin/libwebview.so"
     '';
 
@@ -148,9 +148,9 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm555 ${service}/bin/kwakore-daemon "$out/bin/kwakore-daemon"
-    install -Dm555 ${service}/bin/kwakore "$out/bin/kwakore"
-    install -Dm555 ${napplet}/bin/napplet "$out/bin/napplet"
+    install -Dm555 ${service}/bin/kwakore-daemon "$out/bin/kwakore"
+    install -Dm555 ${service}/bin/kwakore "$out/bin/kwak"
+    install -Dm555 ${napplet}/bin/kwaklet "$out/bin/kwaklet"
     install -Dm444 ${napplet}/bin/libwebview.so "$out/bin/libwebview.so"
 
     install -Dm444 /dev/stdin "$out/share/gnome-shell/search-providers/org.kwakore.Search.search-provider.ini" <<'EOF'
@@ -165,33 +165,33 @@ EOF
 Type=Application
 Name=Kwakore
 Comment=Discover Nostr napplets
-Exec=kwakore discover
+Exec=kwak discover
 Terminal=true
 Categories=Network;
 EOF
     install -Dm444 /dev/stdin "$out/share/dbus-1/services/org.kwakore.SearchProvider.service" <<'EOF'
 [D-BUS Service]
 Name=org.kwakore.SearchProvider
-Exec=/run/current-system/sw/bin/kwakore status
+Exec=/run/current-system/sw/bin/kwak status
 EOF
 
-    chmod u+w "$out/bin/napplet" "$out/bin/libwebview.so"
+    chmod u+w "$out/bin/kwaklet" "$out/bin/libwebview.so"
     patchelf --set-rpath "${webviewLibPath}" "$out/bin/libwebview.so"
     patchelf \
       --set-interpreter "$(cat "$NIX_CC/nix-support/dynamic-linker")" \
       --set-rpath "${webviewLibPath}" \
-      "$out/bin/napplet"
-    chmod a-w "$out/bin/napplet" "$out/bin/libwebview.so"
+      "$out/bin/kwaklet"
+    chmod a-w "$out/bin/kwaklet" "$out/bin/libwebview.so"
 
     # The child inherits the daemon's environment. makeWrapper execs the
-    # real daemon from this same directory (.kwakore-daemon-wrapped) with
+    # real daemon from this same directory (.kwakore-wrapped) with
     # argv[0] kept, so os.Executable still names this bin directory, the
     # sibling napplet, libwebview.so and kwakore resolve here, and systemd's
     # LISTEN_PID still matches. It deliberately sets no LD_LIBRARY_PATH:
     # that would leak into every program the daemon starts and override
     # their own RUNPATHs, which is why library lookup is baked into
     # RUNPATHs instead.
-    wrapProgram "$out/bin/kwakore-daemon" \
+    wrapProgram "$out/bin/kwakore" \
       --suffix GSETTINGS_SCHEMA_DIR : "${schemaDirs}"
 
     runHook postInstall
@@ -205,7 +205,7 @@ EOF
 
     # exactly the four pieces (plus the daemon behind its wrapper), as real
     # files in one directory, plus GNOME provider metadata under share/
-    expected=".kwakore-daemon-wrapped kwakore kwakore-daemon libwebview.so napplet"
+    expected=".kwakore-wrapped kwak kwaklet kwakore libwebview.so"
     actual="$(cd "$bin" && LC_ALL=C ls -A | tr '\n' ' ' | sed 's/ $//')"
     if [ "$actual" != "$expected" ]; then
       echo "unexpected $bin contents: $actual" >&2
@@ -217,7 +217,7 @@ EOF
     fi
     grep -qx 'BusName=org.kwakore.SearchProvider' "$out/share/gnome-shell/search-providers/org.kwakore.Search.search-provider.ini"
     grep -qx 'Name=org.kwakore.SearchProvider' "$out/share/dbus-1/services/org.kwakore.SearchProvider.service"
-    for f in "$bin"/* "$bin"/.kwakore-daemon-wrapped; do
+    for f in "$bin"/* "$bin"/.kwakore-wrapped; do
       if [ -L "$f" ] || [ ! -f "$f" ]; then
         echo "$f is not a regular file" >&2
         exit 1
@@ -225,20 +225,20 @@ EOF
     done
 
     # the wrapper runs the sibling daemon and sets no library path
-    grep -qF "\"$bin/.kwakore-daemon-wrapped\"" "$bin/kwakore-daemon"
-    grep -qF GSETTINGS_SCHEMA_DIR "$bin/kwakore-daemon"
+    grep -qF "\"$bin/.kwakore-wrapped\"" "$bin/kwakore"
+    grep -qF GSETTINGS_SCHEMA_DIR "$bin/kwakore"
     IFS=: read -ra schemas <<< "${schemaDirs}"
     for dir in "''${schemas[@]}"; do
       test -f "$dir/gschemas.compiled"
     done
-    if grep -qF LD_LIBRARY_PATH "$bin/kwakore-daemon"; then
+    if grep -qF LD_LIBRARY_PATH "$bin/kwakore"; then
       echo "the wrapper must not set LD_LIBRARY_PATH" >&2
       exit 1
     fi
 
     # ldd on the child lists only libc, so the positive check that the
     # RUNPATH reaches WebKit is made on the library
-    for elf in "$bin/libwebview.so" "$bin/napplet" "$bin/.kwakore-daemon-wrapped" "$bin/kwakore"; do
+    for elf in "$bin/libwebview.so" "$bin/kwaklet" "$bin/.kwakore-wrapped" "$bin/kwak"; do
       ${ldd} "$elf" > ldd.log 2>&1 || true
       if grep -F "not found" ldd.log; then
         cat ldd.log >&2
@@ -248,14 +248,14 @@ EOF
     done
     ${ldd} "$bin/libwebview.so" 2>/dev/null | grep -q "libwebkit2gtk-4.1.so.0 => /nix/store/"
     rm ldd.log
-    case "$(patchelf --print-interpreter "$bin/napplet")" in
+    case "$(patchelf --print-interpreter "$bin/kwaklet")" in
       /nix/store/*) ;;
       *)
         echo "napplet does not use a /nix/store interpreter" >&2
         exit 1
         ;;
     esac
-    case ":$(patchelf --print-rpath "$bin/napplet"):" in
+    case ":$(patchelf --print-rpath "$bin/kwaklet"):" in
       *:${webkitgtk_4_1}/lib:*) ;;
       *)
         echo "napplet's RUNPATH does not reach WebKit" >&2
@@ -266,7 +266,7 @@ EOF
     # the child refuses to start without WEBVIEW_PATH (child/libcheck.go);
     # reaching that refusal proves the patched interpreter runs it
     status=0
-    env -u WEBVIEW_PATH KWAKORE_NAPP_FORMAT=napplet "$bin/napplet" </dev/null >/dev/null 2>child-check.log || status=$?
+    env -u WEBVIEW_PATH KWAKORE_NAPP_FORMAT=napplet "$bin/kwaklet" </dev/null >/dev/null 2>child-check.log || status=$?
     if [ "$status" -ne 1 ] || ! grep -qF "WEBVIEW_PATH is not set" child-check.log; then
       cat child-check.log >&2
       echo "napplet did not run under the patched interpreter (status $status)" >&2
@@ -284,16 +284,16 @@ EOF
       XDG_CONFIG_HOME="$check/config" XDG_DATA_HOME="$check/data"
     mkdir -p "$HOME"
     unset DISPLAY WAYLAND_DISPLAY
-    test "$("$bin/kwakore-daemon" version)" = "${version}"
-    "$bin/kwakore-daemon" >"$check/daemon.log" 2>&1 &
+    test "$("$bin/kwakore" version)" = "${version}"
+    "$bin/kwakore" >"$check/daemon.log" 2>&1 &
     daemon=$!
     for _ in $(seq 100); do
       [ -S "$XDG_RUNTIME_DIR/kwakore/daemon.sock" ] && break
       sleep 0.1
     done
     status=0
-    "$bin/kwakore" --json status >"$check/status.json" 2>&1 || status=$?
-    "$bin/kwakore" --json diagnostics >"$check/diagnostics.json" 2>&1 || status=$?
+    "$bin/kwak" --json status >"$check/status.json" 2>&1 || status=$?
+    "$bin/kwak" --json diagnostics >"$check/diagnostics.json" 2>&1 || status=$?
     kill "$daemon"
     wait "$daemon" || true
     if [ "$status" -ne 0 ]; then
@@ -319,7 +319,7 @@ EOF
   meta = {
     description = "Linux service that runs Nostr napplets in a sandboxed webview";
     homepage = "https://github.com/hzrd149/kwakore";
-    mainProgram = "kwakore";
+    mainProgram = "kwak";
     platforms = [
       "x86_64-linux"
       "aarch64-linux"

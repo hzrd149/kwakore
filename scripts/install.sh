@@ -6,14 +6,14 @@
 #
 # The helper verifies kwakore-linux-ARCH.tar.gz against SHA256SUMS before it
 # reads anything inside it, accepts only an archive holding exactly
-# kwakore-daemon, kwakore, napplet and libwebview.so as regular files in one
+# kwakore, kwak, kwaklet and libwebview.so as regular files in one
 # directory, and installs them side by side:
 #
 #   PREFIX/lib/kwakore/releases/SHA256/   the four files, one directory per archive
 #   PREFIX/lib/kwakore/current            symlink to the installed release
-#   PREFIX/bin/kwakore                    symlink to current/kwakore
+#   PREFIX/bin/kwak                       symlink to current/kwak
 #   UNITDIR/kwakore.socket                packaging/systemd/user/kwakore.socket
-#   UNITDIR/kwakore.service               ExecStart=PREFIX/lib/kwakore/current/kwakore-daemon
+#   UNITDIR/kwakore.service               ExecStart=PREFIX/lib/kwakore/current/kwakore
 #
 # PREFIX defaults to ~/.local and UNITDIR to ${XDG_CONFIG_HOME:-~/.config}/systemd/user.
 # It then reloads the user manager and enables and starts only kwakore.socket;
@@ -78,7 +78,7 @@ socket_template() {
 #
 # Enable only this unit (systemctl --user enable --now kwakore.socket). The
 # first client connection starts kwakore.service, which adopts this listener.
-# The path, 0700 directory and 0600 inode must match what kwakore-daemon
+# The path, 0700 directory and 0600 inode must match what kwakore
 # validates before serving an inherited socket.
 [Unit]
 Description=Kwakore control socket
@@ -101,7 +101,7 @@ service_template() {
 # Kwakore daemon for the per-user systemd manager.
 #
 # Started on demand by kwakore.socket. Installers render @BINDIR@ to the
-# absolute directory holding kwakore-daemon, the napplet child and
+# absolute directory holding kwakore, the napplet child and
 # libwebview.so; the daemon resolves its child beside its own executable.
 [Unit]
 Description=Kwakore napplet daemon
@@ -119,7 +119,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=@BINDIR@/kwakore-daemon
+ExecStart=@BINDIR@/kwakore
 ExecReload=kill -HUP $MAINPID
 KillMode=mixed
 TimeoutStopSec=15s
@@ -310,7 +310,7 @@ actual=$(sha256sum -- "$stage/$asset" | cut -d' ' -f1)
 
 # ─── inspect and unpack ──────────────────────────────────────────────────────
 
-files=(kwakore-daemon kwakore napplet libwebview.so)
+files=(kwakore kwak kwaklet libwebview.so)
 tar -tzf "$stage/$asset" >"$stage/members" 2>"$stage/tar.log" || fail "$asset is not a readable archive"
 top=$(head -n1 "$stage/members")
 top=${top%%/*}
@@ -338,7 +338,7 @@ for f in "${files[@]}"; do
 		fail "$f in $asset is not a regular file"
 	[ "$(od -An -tx1 -N4 -- "$payload/$f" | tr -d ' \n')" = 7f454c46 ] || fail "$f in $asset is not an ELF file"
 done
-chmod 0755 -- "$payload" "$payload/kwakore-daemon" "$payload/kwakore" "$payload/napplet"
+chmod 0755 -- "$payload" "$payload/kwakore" "$payload/kwak" "$payload/kwaklet"
 chmod 0644 -- "$payload/libwebview.so"
 installed_version=${top#kwakore-}
 installed_version=${installed_version%-linux-"$arch"}
@@ -405,12 +405,12 @@ systemd_path() {
 	printf '"%s"' "$p"
 }
 
-daemon_path="$current/kwakore-daemon"
+daemon_path="$current/kwakore"
 exec_line="ExecStart=$(systemd_path "$daemon_path")"
 render_service() {
 	local line
 	while IFS= read -r line; do
-		if [ "$line" = 'ExecStart=@BINDIR@/kwakore-daemon' ]; then
+		if [ "$line" = 'ExecStart=@BINDIR@/kwakore' ]; then
 			printf '%s\n' "$exec_line"
 		else
 			printf '%s\n' "${line//@BINDIR@/"$current"}"
@@ -457,17 +457,29 @@ fi
 # ─── CLI link ────────────────────────────────────────────────────────────────
 
 mkdir -p -- "$bin_dir"
-cli_target="$current/kwakore"
-cli_link="$bin_dir/kwakore"
+cli_target="$current/kwak"
+cli_link="$bin_dir/kwak"
+old_cli_link="$bin_dir/kwakore"
+removed_old_cli=false
+if [ -L "$old_cli_link" ] && [ "$(readlink -- "$old_cli_link")" = "$current/kwakore" ]; then
+	rm -- "$old_cli_link"
+	removed_old_cli=true
+fi
 if [ -L "$cli_link" ] && [ "$(readlink -- "$cli_link")" = "$cli_target" ]; then
 	:
 elif [ -L "$cli_link" ] || [ ! -e "$cli_link" ]; then
-	link_tmp="$bin_dir/.kwakore.$$"
+	link_tmp="$bin_dir/.kwak.$$"
 	ln -sfn -- "$cli_target" "$link_tmp"
 	mv -T -- "$link_tmp" "$cli_link"
 	link_tmp=""
 else
 	note "left $cli_link alone because it is not a symlink; remove it to use $cli_target"
+fi
+
+if $removed_old_cli && [ -L "$cli_link" ] && [ "$(readlink -- "$cli_link")" = "$cli_target" ]; then
+	# Activate an upgraded idle service so it rewrites existing desktop entries
+	# with the new CLI path after removing the old command.
+	"$cli_link" --json status >/dev/null || note "could not refresh desktop entries; run: $cli_link status"
 fi
 
 # ─── prune ───────────────────────────────────────────────────────────────────
@@ -502,6 +514,6 @@ echo "  units    $unit_dir/kwakore.socket, kwakore.service"
 echo "  enabled  kwakore.socket (the first client starts kwakore.service)"
 case ":${PATH:-}:" in
 *":$bin_dir:"*) ;;
-*) echo "Add $bin_dir to PATH to run kwakore from a terminal." ;;
+*) echo "Add $bin_dir to PATH to run kwak from a terminal." ;;
 esac
-echo "Try: kwakore status"
+echo "Try: kwak status"

@@ -82,7 +82,7 @@ func TestForegroundStartReadyAndStop(t *testing.T) {
 	}()
 	select {
 	case got := <-line:
-		if got != "kwakore-daemon development ready (config: "+configPath+")" {
+		if got != "kwakore development ready (config: "+configPath+")" {
 			t.Fatalf("ready line: %q", got)
 		}
 	case <-time.After(10 * time.Second):

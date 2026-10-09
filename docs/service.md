@@ -2,7 +2,7 @@
 
 Kwakore runs as a per-user Linux service. One user's systemd manager owns a
 private control socket, and the first client that connects to it starts the
-daemon. Everything is controlled through that socket: the bundled `kwakore`
+daemon. Everything is controlled through that socket: the bundled `kwak`
 CLI, the native desktop entry of each installed napplet, and any third-party
 client that speaks the [version 1 control protocol](control-protocol.md).
 
@@ -10,9 +10,9 @@ A release is four files that must stay side by side:
 
 | File | Role |
 | --- | --- |
-| `kwakore-daemon` | the service (`ExecStart` of `kwakore.service`) |
-| `kwakore` | the control CLI, also what native desktop entries run |
-| `napplet` | the hardened window program, one process per napplet window |
+| `kwakore` | the service (`ExecStart` of `kwakore.service`) |
+| `kwak` | the control CLI, also what native desktop entries run |
+| `kwaklet` | the hardened window program, one process per napplet window |
 | `libwebview.so` | the WebKitGTK webview library the window program loads |
 
 and two user units, `kwakore.socket` and `kwakore.service`
@@ -61,10 +61,10 @@ four files above as regular files in one directory. It then:
 
 1. puts the files in `~/.local/lib/kwakore/releases/<archive sha256>/` and
    points the `~/.local/lib/kwakore/current` symlink at them;
-2. links `~/.local/bin/kwakore` to `current/kwakore`;
+2. links `~/.local/bin/kwak` to `current/kwak`;
 3. writes `kwakore.socket` and `kwakore.service` to
    `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`, with
-   `ExecStart=~/.local/lib/kwakore/current/kwakore-daemon` (as an absolute
+   `ExecStart=~/.local/lib/kwakore/current/kwakore` (as an absolute
    path);
 4. runs `systemctl --user daemon-reload` and
    `systemctl --user enable --now kwakore.socket`.
@@ -72,10 +72,10 @@ four files above as regular files in one directory. It then:
 Then try it:
 
 ```sh
-kwakore status
+kwak status
 ```
 
-Run the same command again to upgrade. A new release becomes live through one
+Run the same command again to upgrade. When upgrading from a release with the old CLI name, the helper removes only its own `~/.local/bin/kwakore` symlink and starts the service once to rewrite installed napplet entries for `kwak`. A different file at that path is left alone. A new release becomes live through one
 rename of the `current` symlink, a running daemon is restarted on it, the
 previous release is kept, and older ones are pruned. Running it again with the
 same release changes nothing. Kwakore data and configuration are never touched.
@@ -126,7 +126,7 @@ mkdir -p "$lib" "$units" "$HOME/.local/bin"
 top=$(tar -tzf "kwakore-linux-$arch.tar.gz" | head -n1 | cut -d/ -f1)
 tar -xzf "kwakore-linux-$arch.tar.gz" -C "$lib"
 ln -sfn "$top" "$lib/current"
-ln -sfn "$lib/current/kwakore" "$HOME/.local/bin/kwakore"
+ln -sfn "$lib/current/kwak" "$HOME/.local/bin/kwak"
 ```
 
 `umask 022` keeps the unpacked files from being group-writable, which the
@@ -144,7 +144,7 @@ curl -fsSL "$src/kwakore.socket" -o "$units/kwakore.socket"
 curl -fsSL "$src/kwakore.service" | sed "s|@BINDIR@|$lib/current|" >"$units/kwakore.service"
 systemctl --user daemon-reload
 systemctl --user enable --now kwakore.socket
-kwakore status
+kwak status
 ```
 
 This simple `sed` is only right when the path has no spaces, `%`, `$`, quotes
@@ -161,18 +161,18 @@ The helper has no uninstall command. To remove an installation it made with
 the defaults:
 
 ```sh
-kwakore installed                 # optional: list napplets, then
-kwakore uninstall --yes ADDRESS   # remove each one and its desktop entry (canonical or naddr1…)
+kwak installed                 # optional: list napplets, then
+kwak uninstall --yes ADDRESS   # remove each one and its desktop entry (canonical or naddr1…)
 systemctl --user stop kwakore.socket kwakore.service
 systemctl --user disable kwakore.socket
 rm "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/kwakore.socket" \
    "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/kwakore.service"
 systemctl --user daemon-reload
-rm "$HOME/.local/bin/kwakore"
+rm "$HOME/.local/bin/kwak"
 rm -r "$HOME/.local/lib/kwakore"
 ```
 
-With `--prefix DIR`, remove `DIR/bin/kwakore` and `DIR/lib/kwakore` instead.
+With `--prefix DIR`, remove `DIR/bin/kwak` and `DIR/lib/kwakore` instead.
 With `--runtime-units`, the units are in `$XDG_RUNTIME_DIR/systemd/user` and
 are disabled with `systemctl --user disable --runtime kwakore.socket`.
 
@@ -242,16 +242,16 @@ your choice.
 service reads the user's own `~/.config/kwakore/config.json` like any other
 installation. With `settings` set, the service runs with `KWAKORE_CONFIG_FILE`
 naming a `config.json` in the store, built from those values and checked by
-`kwakore-daemon validate` at build time. Then:
+`kwakore validate` at build time. Then:
 
 - the file under the user's home is ignored by the service, while
-  `kwakore-daemon validate` run from a login shell still reads the home file;
-- overrides made with `kwakore settings set` still go to
+  `kwakore validate` run from a login shell still reads the home file;
+- overrides made with `kwak settings set` still go to
   `~/.local/share/kwakore/settings-overrides.json` and win field by field.
 
 The daemon names the file it reads in its ready line:
 `journalctl --user -u kwakore.service | grep ready` shows, for example,
-`kwakore-daemon unstable-1a2b3c4 ready (config: /nix/store/…-kwakore-config/kwakore/config.json)`.
+`kwakore unstable-1a2b3c4 ready (config: /nix/store/…-kwakore-config/kwakore/config.json)`.
 
 Secret-like settings fields are rejected at evaluation. Never put a signer
 secret in Nix: the store is world-readable. Use the
@@ -267,7 +267,7 @@ secret in Nix: the store is world-readable. Use the
   module turns that off, so the daemon finds `xdg-open`, the clipboard tools,
   `notify-send` and media players on the user manager's `PATH`, as on other
   distributions.
-- Native desktop entries run `/run/current-system/sw/bin/kwakore`, not the
+- Native desktop entries run `/run/current-system/sw/bin/kwak`, not the
   store path of the CLI: the module sets `KWAKORE_ENTRY_CLI` to that path,
   which follows every `nixos-rebuild switch` and survives garbage collection,
   including `nix.gc.automatic`. The daemon checks that path when it starts
@@ -282,7 +282,7 @@ secret in Nix: the store is world-readable. Use the
 | Command | What happens |
 | --- | --- |
 | `systemctl --user enable --now kwakore.socket` | listen at login and now; the daemon is not started yet |
-| `kwakore status` | the first connection starts `kwakore.service` |
+| `kwak status` | the first connection starts `kwakore.service` |
 | `systemctl --user status kwakore.socket kwakore.service` | inspect both units |
 | `systemctl --user restart kwakore.service` | restart the daemon; the socket keeps its place |
 | `systemctl --user reload kwakore.service` | send `SIGHUP`: re-read `config.json` only |
@@ -314,13 +314,13 @@ just run
 
 `just run` builds the daemon, control CLI, napplet window program and pinned
 webview library under `~/.cache/kwakore/dev/`. In another terminal, use
-`~/.cache/kwakore/dev/kwakore status` (or another CLI command). The development
+`~/.cache/kwakore/dev/kwak status` (or another CLI command). The development
 service uses your normal configuration, data and control socket, so an
 installed service cannot run alongside it. Press Ctrl-C to stop it; start
 `kwakore.socket` again when you want the installed service back.
 
 The daemon binds `$XDG_RUNTIME_DIR/kwakore/daemon.sock` itself, prints one line such
-as `kwakore-daemon development ready (config: /home/alice/.config/kwakore/config.json)`
+as `kwakore development ready (config: /home/alice/.config/kwakore/config.json)`
 on stdout and logs to stderr. A second daemon for the same data directory
 fails with `daemon already running for this user; inspect status or stop the
 existing instance`.
@@ -368,7 +368,7 @@ needed whenever these change. With both variables empty, a launch fails before
 any window program starts:
 
 ```console
-$ kwakore launch 35129:<author hex public key>:<identifier>
+$ kwak launch 35129:<author hex public key>:<identifier>
 {"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}
 ```
 
@@ -385,10 +385,10 @@ An entry runs `"/path/to/kwakore" launch-token TOKEN`. The token is the
 napplet's address in unpadded base64url; no title, description or other
 author text reaches the command line. The CLI decodes and checks it, connects
 to the standard user socket (so systemd starts the daemon if needed) and asks
-for `napplet.launch`. The CLI path is the `kwakore` beside the running daemon,
-which for the helper is `~/.local/lib/kwakore/current/kwakore`, so entries
+for `napplet.launch`. The CLI path is the `kwak` beside the running daemon,
+which for the helper is `~/.local/lib/kwakore/current/kwak`, so entries
 keep working across upgrades. With the NixOS module it is
-`/run/current-system/sw/bin/kwakore` (see the NixOS notes).
+`/run/current-system/sw/bin/kwak` (see the NixOS notes).
 
 Entries set `Terminal=true`. Your desktop opens a terminal for the launch; on
 success the CLI prints the opened window and exits, and on failure the fixed
@@ -396,10 +396,10 @@ readable error is printed in that terminal, such as the
 `session_unavailable` error above (`Error: Unavailable` followed by a graphical-session hint). Many terminals close as soon as the
 command exits, so the message may only flash. To read it, run the same
 command from a terminal: copy the `Exec=` line from the entry, or use
-`kwakore launch ADDRESS` with the address from `kwakore installed`.
+`kwak launch ADDRESS` with the address from `kwak installed`.
 
 `desktop_entries` defaults to `true`. Set it to `false` in `config.json` or
-run `kwakore settings set desktop_entries false` to remove installed napplet
+run `kwak settings set desktop_entries false` to remove installed napplet
 entries. Restoring `true` restores them. The daemon reconciles entries after
 each setting change or reload.
 
@@ -411,7 +411,7 @@ catalog in the background. Selecting a discovered result opens its temporary
 trial; selecting an installed result launches it.
 
 Set `gnome_search` to `false` in `config.json`, or run
-`kwakore settings set gnome_search false`, to remove per-user registration and
+`kwak settings set gnome_search false`, to remove per-user registration and
 return no search results. Restoring `true` enables search again. For a bundle
 installation, the user manager needs an `XDG_DATA_DIRS` containing a
 user-writable directory that GNOME Shell also scans (usually the Flatpak user
@@ -419,10 +419,10 @@ export directory). Restart the service and GNOME session after changing that
 environment so Shell rescans providers. The Nix package installs metadata in
 its system data directory.
 
-If entries are missing, `kwakore diagnostics` shows a `native_entries` item
+If entries are missing, `kwak diagnostics` shows a `native_entries` item
 in `recent_errors`, and the journal has the details
 (`native desktop entries not fully reconciled`). The daemon writes no entries
-when no `kwakore` CLI sits beside it, or when the CLI path contains `%`:
+when no `kwak` CLI sits beside it, or when the CLI path contains `%`:
 GLib-based desktops ignore such entries, so they are refused instead. It still
 removes the entry of every napplet that is no longer installed, and leaves the
 entries of installed napplets as they are.
@@ -442,7 +442,7 @@ shell's. `systemctl --user show-environment` shows it.
 | Control socket | `/run/user/UID/kwakore/daemon.sock` | `$XDG_RUNTIME_DIR/kwakore/daemon.sock`; directory `0700`, socket `0600` |
 | Desktop entries | `~/.local/share/applications/kwakore-napplet-<hash>.desktop` | `$XDG_DATA_HOME/applications/` |
 | User units (helper) | `~/.config/systemd/user/kwakore.{socket,service}` | `$XDG_CONFIG_HOME/systemd/user/`, or `$XDG_RUNTIME_DIR/systemd/user/` with `--runtime-units` |
-| Program files (helper) | `~/.local/lib/kwakore/current/` and `~/.local/bin/kwakore` | `--prefix DIR` |
+| Program files (helper) | `~/.local/lib/kwakore/current/` and `~/.local/bin/kwak` | `--prefix DIR` |
 
 An unset or empty XDG variable uses its default. A nonempty `XDG_CONFIG_HOME`
 or `XDG_DATA_HOME` must be absolute; a relative value is an error.
@@ -494,8 +494,8 @@ hide a file value for `blossom_servers`. Clearing one override reveals that
 field's file value, or its default when the file omits it. Empty arrays and
 `false` are real override values.
 
-**Changing settings while running.** `kwakore settings set FIELD JSON_VALUE`
-and `kwakore settings clear FIELD` change one of `relays`, `blossom_servers`,
+**Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
+and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
 `discover_on_user_relays`, `desktop_entries`, or `gnome_search`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
@@ -504,15 +504,15 @@ further changes are refused until repair and restart. Clearing an override
 that is not there changes nothing.
 
 ```console
-$ kwakore settings set relays '["wss://relay.example.com"]'
+$ kwak settings set relays '["wss://relay.example.com"]'
 {"settings":{"relays":["wss://relay.example.com"],"blossom_servers":["https://relay.nostrapps.com","https://nostr.download"],"discover_on_user_relays":true,"signer":{"mode":"none"}}}
-$ kwakore settings clear relays
+$ kwak settings clear relays
 ```
 
 **Reloading `config.json`.** There is no file watcher. After editing it, run
-`systemctl --user reload kwakore.service` (or `kwakore settings reload`). A
+`systemctl --user reload kwakore.service` (or `kwak settings reload`). A
 bad reload keeps the last valid settings in use, reports a sanitized warning
-(in `kwakore diagnostics` and the journal) and leaves the daemon ready; a
+(in `kwak diagnostics` and the journal) and leaves the daemon ready; a
 later good reload clears the warning.
 
 ## Signer setup
@@ -531,13 +531,13 @@ line:
 umask 077
 mkdir -p ~/.local/share/kwakore-secrets
 $EDITOR ~/.local/share/kwakore-secrets/nsec      # paste the nsec1… line
-kwakore signer switch nsec --secret-file ~/.local/share/kwakore-secrets/nsec
+kwak signer switch nsec --secret-file ~/.local/share/kwakore-secrets/nsec
 ```
 
 or from stdin, typed without echo:
 
 ```sh
-read -rs NSEC && printf '%s\n' "$NSEC" | kwakore signer switch nsec --secret-stdin; unset NSEC
+read -rs NSEC && printf '%s\n' "$NSEC" | kwak signer switch nsec --secret-stdin; unset NSEC
 ```
 
 Either way the result is public only:
@@ -550,11 +550,11 @@ After switching you may delete the source file; the daemon keeps its own
 private copy.
 
 **A remote signer (NIP-46).** With a `bunker://…` URL from your signer, use
-`kwakore signer switch bunker --secret-stdin` or `--secret-file PATH` the same
+`kwak signer switch bunker --secret-stdin` or `--secret-file PATH` the same
 way. To pair from Kwakore's side instead (nostrconnect):
 
 ```sh
-kwakore signer pair start
+kwak signer pair start
 ```
 
 prints `{"pairing_uri":"nostrconnect://…","notice":"Private pairing token: share only with your signer"}`.
@@ -563,10 +563,10 @@ a tool such as `qrencode`). Then wait for the signer to accept, for up to two
 minutes:
 
 ```sh
-kwakore signer pair wait
+kwak signer pair wait
 ```
 
-which prints the connected status. `kwakore signer pair cancel` drops a
+which prints the connected status. `kwak signer pair cancel` drops a
 pending offer. The pairing relay is the configured `signer.relay`, or
 `wss://bucket.coracle.social` when unset. Amber (NIP-55) is not available on
 Linux.
@@ -574,7 +574,7 @@ Linux.
 **A system signer.** On a system that signs users in with their Nostr key, a
 privileged service can sign for each user over a local socket, so the key
 never reaches Kwakore and the user is signed in from login. Select it with
-`kwakore signer switch system` (the socket from `config.json`, or
+`kwak signer switch system` (the socket from `config.json`, or
 `/run/nostr-signer.sock`) or `--signer-socket PATH`, or declaratively with
 `signer: {"mode": "system", "socket": …}`. See
 [the system signer protocol](system-signer.md).
@@ -582,8 +582,8 @@ never reaches Kwakore and the user is signed in from login. Select it with
 **Checking and logging out:**
 
 ```sh
-kwakore signer status        # {"mode":…,"public_key":…,"connection_state":…}
-kwakore signer switch none   # forget the signer
+kwak signer status        # {"mode":…,"public_key":…,"connection_state":…}
+kwak signer switch none   # forget the signer
 ```
 
 A secret the daemon cannot use, or a signer that does not answer, returns the
@@ -592,24 +592,24 @@ fixed error `{"error":{"code":1004,"message":"Unavailable"}}`, and
 file with the wrong mode, a symlink, a relative path, a secret given as an
 argument or two sources at once are refused before anything is sent, with
 `{"error":{"code":-32602,"message":"Invalid params"}}`.
-If a switch times out, run `kwakore signer status` before trying again.
+If a switch times out, run `kwak signer status` before trying again.
 
 ## Status, errors and logs
 
-Run `kwakore` or `kwakore help` for the command menu. Use `kwakore COMMAND --help` for command-specific options, for example `kwakore installed --help` or `kwakore settings set --help`. Help works even when the service is stopped.
+Run `kwak` or `kwak help` for the command menu. Use `kwak COMMAND --help` for command-specific options, for example `kwak installed --help` or `kwak settings set --help`. Help works even when the service is stopped.
 
 **Public status.** CLI output is labeled text by default; `--json` before the command returns JSON. Neither format contains secrets, signer
 URLs or private paths.
 
 ```console
-$ kwakore status
+$ kwak status
 Service status
 health:
   active windows: 0
   ready: true
   version: v0.2.0
 protocol version: 1
-$ kwakore --json status
+$ kwak --json status
 {"protocol_version":1,"health":{"ready":true,"version":"v0.2.0","uptime_seconds":2.01,"config_status":"valid","storage_status":"open","active_windows":0}}
 ```
 
@@ -620,12 +620,12 @@ fixed summaries `{category,time,detail}` (for example `native_entries`,
 rejected reload, such as
 `"warning":"configuration reload rejected: config.json: invalid relays"`.
 
-`kwakore-daemon status`, `kwakore-daemon diagnostics` and
-`kwakore-daemon validate` work without a running daemon: they inspect the
+`kwak status`, `kwak diagnostics` and
+`kwakore validate` work without a running daemon: they inspect the
 files with the same parser and ownership checks and report
 `"observed_from":"files"`, with `null` for what only a live daemon knows. They
 take no lock and create nothing. On a helper install the daemon binary is
-`~/.local/lib/kwakore/current/kwakore-daemon`.
+`~/.local/lib/kwakore/current/kwakore`.
 
 **CLI errors.** By default, failures write a readable message to stderr. With `--json`, every failure writes one JSON object to stderr. Both modes write nothing to stdout and exit 1. Codes and messages are fixed (the full table is in the
 [protocol reference](control-protocol.md#errors)):
@@ -646,7 +646,7 @@ take no lock and create nothing. On a helper install the daemon binary is
 argument (`install`, `update`, `uninstall`, `launch`, `permissions`) may be:
 
 - the canonical coordinate `<kind>:<64 lowercase hex public key>:<d tag>`,
-  as `kwakore installed` and `kwakore discover` print it;
+  as `kwak installed` and `kwak discover` print it;
 - a bare `naddr1…`;
 - a `nostr:naddr1…` link.
 
@@ -658,8 +658,8 @@ being decoded or sent, and web links or text with spaces around the address
 are refused too; the error never repeats what you typed.
 
 ```sh
-kwakore install nostr:naddr1…    # install from a shared link
-kwakore launch naddr1…           # the same napplet, by the same code
+kwak install nostr:naddr1…    # install from a shared link
+kwak launch naddr1…           # the same napplet, by the same code
 ```
 
 `install` also uses the naddr's relay hints (up to 8 `ws://` or `wss://`
@@ -678,7 +678,7 @@ such a napplet can always be removed.
 the file, the field and a fix:
 
 ```console
-$ ~/.local/lib/kwakore/current/kwakore-daemon validate
+$ ~/.local/lib/kwakore/current/kwakore validate
 /home/alice/.config/kwakore/config.json: relays: invalid URL "example.org"; use a canonical wss:// URL with a host
 ```
 
@@ -686,7 +686,7 @@ Under systemd the same line is in the journal, the service fails, and clients
 get `Unavailable`. A secret-like field fails with, for example,
 `config.json: nsec: secret field is forbidden`. Fix the file, then run
 `systemctl --user reset-failed kwakore.service` if the start limit was hit,
-and try `kwakore status` again.
+and try `kwak status` again.
 
 **Logs.** The daemon logs to stderr, which systemd sends to your user journal:
 
@@ -696,7 +696,7 @@ journalctl --user -u kwakore.service -f          # follow
 journalctl --user-unit kwakore.service -n 50     # same unit, from the system journal view
 ```
 
-Each start logs `kwakore-daemon VERSION ready (config: PATH)`, and a reload
+Each start logs `kwakore VERSION ready (config: PATH)`, and a reload
 logs `configuration reloaded`. The socket unit's own failures are under
 `journalctl --user -u kwakore.socket`.
 
@@ -715,7 +715,7 @@ The unit allows 15 seconds before systemd kills what is left.
 After a forced exit, the next daemon takes the lock and replays interrupted
 registry changes from their journal before it reports ready. A client that
 lost an install, update or uninstall response must check
-`kwakore installed` after the restart: a restart alone does not mean the
+`kwak installed` after the restart: a restart alone does not mean the
 interrupted request succeeded. An unrecoverable journal prevents readiness
 and needs operator action.
 
@@ -724,7 +724,7 @@ and needs operator action.
 - There is no bundled settings or store window. Napplets, permissions and
   settings are managed with the CLI or another client of the socket.
   Remembered permissions can be listed, set and removed one at a time with
-  `kwakore permissions get|set|clear`.
+  `kwak permissions get|set|clear`.
 - NAP-CONFIG values cannot be changed: napplets that declare a configuration
   schema always get its defaults.
 - Launcher notices, such as the warning that a napplet requires a NAP domain

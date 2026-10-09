@@ -27,7 +27,7 @@ func TestLinuxHostSession(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(dir, "napplet")
+	program := filepath.Join(dir, "kwaklet")
 	if err := os.WriteFile(program, []byte("#!/bin/sh\nsleep 5\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestLinuxHostRejectsUnsafeProgram(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(dir, "napplet")
+	program := filepath.Join(dir, "kwaklet")
 	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestLinuxHostAcceptsStickySharedDirectory(t *testing.T) {
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(bin, "napplet")
+	program := filepath.Join(bin, "kwaklet")
 	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0555); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestLinuxHostStopReapsUnresponsiveChild(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(dir, "napplet")
+	program := filepath.Join(dir, "kwaklet")
 	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"null\"}\\n'\nsleep 30\n"
 	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestLinuxHostRejectsForgedReadyAndReaps(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(dir, "napplet")
+	program := filepath.Join(dir, "kwaklet")
 	// A non-empty params field is not the host page's nap.start handshake.
 	script := "#!/bin/sh\nprintf '{\"t\":\"rpc\",\"id\":1,\"method\":\"nap.start\",\"params\":\"forged\"}\\n'\nsleep 30\n"
 	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
@@ -306,7 +306,7 @@ func TestLinuxHostChildEnvironment(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	program := filepath.Join(dir, "napplet")
+	program := filepath.Join(dir, "kwaklet")
 	envFile := filepath.Join(dir, "child.env")
 	// the fake child records its environment before the ready frame, so the
 	// file is complete once the window opens
@@ -419,7 +419,7 @@ func TestLinuxHostNativeEntry(t *testing.T) {
 	data := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", data)
 	apps := filepath.Join(data, "applications")
-	cli := filepath.Join(t.TempDir(), "kwakore")
+	cli := filepath.Join(t.TempDir(), "kwak")
 	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestLinuxHostNativeEntry(t *testing.T) {
 	}
 }
 
-// The NixOS module names a profile path (/run/current-system/sw/bin/kwakore)
+// The NixOS module names a profile path (/run/current-system/sw/bin/kwak)
 // that survives rebuilds and garbage collection. It is used only while it
 // resolves to the running daemon's own CLI; anything else falls back to the
 // CLI beside the daemon.
@@ -548,20 +548,20 @@ func TestLinuxHostNativeEntryStableCLI(t *testing.T) {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"kwakore-daemon", "kwakore", "napplet"} {
+		for _, name := range []string{"kwakore", "kwak", "kwaklet"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	daemon := filepath.Join(bundle, "kwakore-daemon")
-	beside := filepath.Join(bundle, "kwakore")
+	daemon := filepath.Join(bundle, "kwakore")
+	beside := filepath.Join(bundle, "kwak")
 	// a profile directory of per-file symlinks, as buildEnv makes it
 	profile := filepath.Join(root, "sw", "bin")
 	if err := os.MkdirAll(profile, 0700); err != nil {
 		t.Fatal(err)
 	}
-	stable := filepath.Join(profile, "kwakore")
+	stable := filepath.Join(profile, "kwak")
 	link := func(target string) {
 		t.Helper()
 		_ = os.Remove(stable)
@@ -576,24 +576,24 @@ func TestLinuxHostNativeEntryStableCLI(t *testing.T) {
 		t.Fatalf("stable path: %q, want %q", got, stable)
 	}
 	// unset, relative or unclean values are ignored
-	for _, bad := range []string{"", "sw/bin/kwakore", profile + "/./kwakore", profile + "//kwakore"} {
+	for _, bad := range []string{"", "sw/bin/kwak", profile + "/./kwakore", profile + "//kwakore"} {
 		if got := cliPath(bad, daemon, daemon); got != beside {
 			t.Fatalf("%q: %q, want the CLI beside the daemon %q", bad, got, beside)
 		}
 	}
 	// after a rebuild the profile names the next generation's CLI; the old
 	// daemon still running keeps its own CLI until it restarts
-	link(filepath.Join(next, "kwakore"))
+	link(filepath.Join(next, "kwak"))
 	if got := cliPath(stable, daemon, daemon); got != beside {
 		t.Fatalf("another generation's CLI accepted: %q", got)
 	}
 	// a path that resolves to some other file of the bundle is not the CLI
-	link(filepath.Join(bundle, "napplet"))
+	link(filepath.Join(bundle, "kwaklet"))
 	if got := cliPath(stable, daemon, daemon); got != beside {
 		t.Fatalf("a non-CLI bundle file accepted: %q", got)
 	}
 	// a dangling profile link is ignored
-	link(filepath.Join(root, "store", "gone-kwakore", "bin", "kwakore"))
+	link(filepath.Join(root, "store", "gone-kwakore", "bin", "kwak"))
 	if got := cliPath(stable, daemon, daemon); got != beside {
 		t.Fatalf("dangling profile link accepted: %q", got)
 	}
@@ -613,7 +613,7 @@ func TestLinuxHostNativeEntryCLIPath(t *testing.T) {
 	if err := os.MkdirAll(release, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"kwakore-daemon", "kwakore"} {
+	for _, name := range []string{"kwakore", "kwak"} {
 		if err := os.WriteFile(filepath.Join(release, name), []byte("#!/bin/sh\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -622,44 +622,44 @@ func TestLinuxHostNativeEntryCLIPath(t *testing.T) {
 	if err := os.Symlink(filepath.Join("releases", "abc"), current); err != nil {
 		t.Fatal(err)
 	}
-	daemon := filepath.Join(release, "kwakore-daemon")
+	daemon := filepath.Join(release, "kwakore")
 
 	// started through the stable link: the entry keeps the link
-	if got, want := cliBeside(filepath.Join(current, "kwakore-daemon"), daemon), filepath.Join(current, "kwakore"); got != want {
+	if got, want := cliBeside(filepath.Join(current, "kwakore"), daemon), filepath.Join(current, "kwak"); got != want {
 		t.Fatalf("through current: %q, want %q", got, want)
 	}
 	// a relative or foreign argv[0] falls back to the real bundle
-	if got, want := cliBeside("kwakore-daemon", daemon), filepath.Join(release, "kwakore"); got != want {
+	if got, want := cliBeside("kwakore", daemon), filepath.Join(release, "kwak"); got != want {
 		t.Fatalf("relative argv[0]: %q, want %q", got, want)
 	}
 	other := t.TempDir()
-	if err := os.WriteFile(filepath.Join(other, "kwakore"), []byte("#!/bin/sh\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(other, "kwak"), []byte("#!/bin/sh\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := cliBeside(filepath.Join(other, "kwakore-daemon"), daemon), filepath.Join(release, "kwakore"); got != want {
+	if got, want := cliBeside(filepath.Join(other, "kwakore"), daemon), filepath.Join(release, "kwak"); got != want {
 		t.Fatalf("foreign argv[0]: %q, want %q", got, want)
 	}
 
 	// a CLI that resolves outside the bundle, or is not executable, is no CLI
-	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+	if err := os.Remove(filepath.Join(release, "kwak")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(other, "kwakore"), filepath.Join(release, "kwakore")); err != nil {
+	if err := os.Symlink(filepath.Join(other, "kwak"), filepath.Join(release, "kwak")); err != nil {
 		t.Fatal(err)
 	}
 	if got := cliBeside(daemon, daemon); got != "" {
 		t.Fatalf("CLI outside the bundle accepted: %q", got)
 	}
-	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+	if err := os.Remove(filepath.Join(release, "kwak")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(release, "kwakore"), []byte("#!/bin/sh\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(release, "kwak"), []byte("#!/bin/sh\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if got := cliBeside(daemon, daemon); got != "" {
 		t.Fatalf("non-executable CLI accepted: %q", got)
 	}
-	if err := os.Remove(filepath.Join(release, "kwakore")); err != nil {
+	if err := os.Remove(filepath.Join(release, "kwak")); err != nil {
 		t.Fatal(err)
 	}
 	if got := cliBeside(daemon, daemon); got != "" {

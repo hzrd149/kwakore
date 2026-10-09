@@ -42,11 +42,11 @@ type Host struct {
 func New(program string) *Host { return &Host{Program: program, CLI: DefaultCLIPath()} }
 
 // cliName is the control CLI's file name inside the installed bundle.
-const cliName = "kwakore"
+const cliName = "kwak"
 
 // entryCLIEnv names an optional stable path for the CLI that native entries
 // carry, for packages whose bundle directory does not outlive an upgrade.
-// The NixOS module sets it to /run/current-system/sw/bin/kwakore: the store
+// The NixOS module sets it to /run/current-system/sw/bin/kwak: the store
 // path beside the daemon changes with every rebuild and is garbage collected,
 // and entries are only rewritten when the daemon starts, so an entry naming
 // the store path could outlive its CLI and with it the user's way to start
@@ -102,7 +102,7 @@ func stableCLI(path, exe string) string {
 // executable file in that same directory once symlinks are resolved, so an
 // entry never names some other installation's binary. When the daemon was
 // started through an absolute, clean path whose directory resolves to that
-// same bundle (systemd starts it as .../lib/kwakore/current/kwakore-daemon),
+// same bundle (systemd starts it as .../lib/kwakore/current/kwakore),
 // the entry keeps that unresolved directory: the `current` link survives an
 // upgrade, while a release directory is pruned two upgrades later.
 func cliBeside(arg0, exe string) string {

@@ -10,7 +10,7 @@
 # manager. CI runs none of them, except --bundle-only inside the tagged
 # release build (.github/workflows/linux.yml).
 #
-# --activation-only builds kwakore-daemon and kwakore from the tracked backend
+# --activation-only builds kwakore and kwakore from the tracked backend
 # sources into a temporary staging directory, renders
 # packaging/systemd/user/*.{socket,service} against those binaries, and
 # exercises them under the caller's real per-user systemd manager:
@@ -39,7 +39,7 @@
 # checks:
 #
 #   bundle      both runs leave the same file set and the same archive bytes;
-#               the archive holds exactly kwakore-daemon, kwakore, napplet and
+#               the archive holds exactly kwakore, kwak, kwaklet and
 #               libwebview.so as regular files in one directory and matches
 #               SHA256SUMS; the unpacked files are owner-only-writable regular
 #               files with the expected modes, ELF for this architecture, and
@@ -147,7 +147,7 @@ units_src="$repo_root/packaging/systemd/user"
 # ─── bundle ─────────────────────────────────────────────────────────────────
 
 bundle_version=0.0.0-smoke
-bundle_files=(kwakore-daemon kwakore napplet libwebview.so)
+bundle_files=(kwakore kwak kwaklet libwebview.so)
 
 host_arch() {
 	case "$(uname -m)" in
@@ -190,13 +190,13 @@ check_bundle() {
 	(cd "$release" && sha256sum --quiet --strict -c SHA256SUMS) || fail "archive does not match SHA256SUMS"
 
 	out=$(tar -tzf "$release/$archive" | LC_ALL=C sort | tr '\n' ' ')
-	[ "$out" = "$name/kwakore $name/kwakore-daemon $name/libwebview.so $name/napplet " ] ||
+	[ "$out" = "$name/kwak $name/kwaklet $name/kwakore $name/libwebview.so " ] ||
 		fail "archive members are not exactly the four bundle files: $out"
 	tar -tvzf "$release/$archive" | grep -qv '^-' && fail "archive holds a member that is not a regular file"
 	mkdir "$stage/unpacked"
 	tar -xzf "$release/$archive" -C "$stage/unpacked"
 
-	[ "$(ls -A "$bundle" | LC_ALL=C sort | tr '\n' ' ')" = "kwakore kwakore-daemon libwebview.so napplet " ] ||
+	[ "$(ls -A "$bundle" | LC_ALL=C sort | tr '\n' ' ')" = "kwak kwaklet kwakore libwebview.so " ] ||
 		fail "bundle directory is not exactly the four files: $(ls -A "$bundle" | tr '\n' ' ')"
 	[ "$(stat -c '%a %u' "$bundle")" = "755 $uid" ] || fail "bundle directory is not 0755 owned by $uid"
 	for f in "${bundle_files[@]}"; do
@@ -208,9 +208,9 @@ check_bundle() {
 		[ "$(elf_machine "$bundle/$f")" = "$want_machine" ] || fail "$f is not an ELF file for linux/$arch"
 		cmp -s "$bundle/$f" "$stage/unpacked/$name/$f" || fail "$f differs from its archive member"
 	done
-	pass "bundle: archive holds exactly kwakore-daemon, kwakore, napplet and libwebview.so, matching SHA256SUMS and the unpacked directory"
+	pass "bundle: archive holds exactly kwakore, kwak, kwaklet and libwebview.so, matching SHA256SUMS and the unpacked directory"
 
-	out=$("$bundle/kwakore-daemon" version) || fail "bundled daemon did not run: $out"
+	out=$("$bundle/kwakore" version) || fail "bundled daemon did not run: $out"
 	[ "$out" = "$bundle_version" ] || fail "bundled daemon reports version $out, not $bundle_version"
 
 	# The hardened loader (desktop/child/libcheck.go) must refuse to fall back
@@ -219,7 +219,7 @@ check_bundle() {
 	child_refuses() {
 		local want=$1 status=0
 		shift
-		env "$@" KWAKORE_NAPP_FORMAT=napplet "$bundle/napplet" </dev/null >/dev/null 2>"$stage/child.log" || status=$?
+		env "$@" KWAKORE_NAPP_FORMAT=napplet "$bundle/kwaklet" </dev/null >/dev/null 2>"$stage/child.log" || status=$?
 		[ "$status" = 1 ] && grep -qF "$want" "$stage/child.log" ||
 			fail "napplet child (status $status) did not refuse with \"$want\": $(cat "$stage/child.log")"
 		grep -qF 'window program started' "$stage/child.log" || fail "napplet child did not start: $(cat "$stage/child.log")"
@@ -231,7 +231,7 @@ check_bundle() {
 	pass "child: bundled napplet starts and refuses a missing, relative or empty WEBVIEW_PATH"
 
 	if [ "$arch" = "$(host_arch)" ] && command -v ldd >/dev/null; then
-		for f in napplet libwebview.so; do
+		for f in kwaklet libwebview.so; do
 			ldd "$bundle/$f" >"$stage/ldd.log" 2>&1 || fail "ldd $f failed: $(cat "$stage/ldd.log")"
 			grep -q 'not found' "$stage/ldd.log" && fail "$f has unresolved libraries on this host: $(grep 'not found' "$stage/ldd.log")"
 		done
@@ -428,7 +428,7 @@ check_activation_control() {
 
 	if command -v journalctl >/dev/null; then
 		journal=$(journalctl --user -u kwakore.service --since "@$start_epoch" -o cat --no-pager 2>/dev/null || true)
-		echo "$journal" | grep -q "kwakore-daemon .* ready (config: $config_root/kwakore/config.json)" ||
+		echo "$journal" | grep -q "kwakore .* ready (config: $config_root/kwakore/config.json)" ||
 			fail "user journal has no daemon ready line for the staged service"
 		echo "$journal" | grep -q 'Stopped kwakore.service' || fail "user journal has no manager stop record"
 		pass "control: user journal records daemon ready lines and manager stop records"
@@ -500,7 +500,7 @@ repack() {
 	mkdir -p "$dir/src/$name"
 	for f in "${bundle_files[@]}"; do cp -p "$bundle/$f" "$dir/src/$name/$f"; done
 	tar --owner=0 --group=0 --numeric-owner -C "$dir/src" -czf "$dir/kwakore-linux-$arch.tar.gz" \
-		"$name/kwakore-daemon" "$name/kwakore" "$name/napplet" "$name/libwebview.so"
+		"$name/kwakore" "$name/kwak" "$name/kwaklet" "$name/libwebview.so"
 	(cd "$dir" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
 	echo "$dir/kwakore-linux-$arch.tar.gz"
 }
@@ -539,7 +539,7 @@ run_install() {
 	trap 'exit 130' INT TERM
 	install_prefix="$stage/prefix"
 	root="$install_prefix/lib/kwakore"
-	cli="$install_prefix/bin/kwakore"
+	cli="$install_prefix/bin/kwak"
 	helper=(bash "$repo_root/scripts/install.sh" --prefix "$install_prefix" --runtime-units)
 
 	bash "$repo_root/scripts/build-linux-bundle.sh" --arch "$arch" --version "$bundle_version" --out "$stage/dist" >/dev/null ||
@@ -579,14 +579,14 @@ run_install() {
 		fail "the helper's socket template drifted from packaging/systemd/user"
 	bash "$repo_root/scripts/install.sh" --print-unit kwakore.service | cmp -s - "$units_src/kwakore.service" ||
 		fail "the helper's service template drifted from packaging/systemd/user"
-	grep -qx "ExecStart=$root/current/kwakore-daemon" "$runtime_units/kwakore.service" || fail "ExecStart is not the installed daemon"
+	grep -qx "ExecStart=$root/current/kwakore" "$runtime_units/kwakore.service" || fail "ExecStart is not the installed daemon"
 
 	# Payload: the ExecStart daemon resolves into the archive's release
 	# directory, beside the napplet child and library, byte for byte the bundle.
-	daemon=$(readlink -f "$root/current/kwakore-daemon")
-	[ "$daemon" = "$(realpath "$root")/releases/$sha/kwakore-daemon" ] || fail "ExecStart resolves to $daemon, not the archive's release"
+	daemon=$(readlink -f "$root/current/kwakore")
+	[ "$daemon" = "$(realpath "$root")/releases/$sha/kwakore" ] || fail "ExecStart resolves to $daemon, not the archive's release"
 	release=$(dirname "$daemon")
-	[ "$(ls -A "$release" | LC_ALL=C sort | tr '\n' ' ')" = "kwakore kwakore-daemon libwebview.so napplet " ] ||
+	[ "$(ls -A "$release" | LC_ALL=C sort | tr '\n' ' ')" = "kwak kwaklet kwakore libwebview.so " ] ||
 		fail "release directory is not exactly the four files"
 	for f in "${bundle_files[@]}"; do
 		[ -f "$release/$f" ] && [ ! -L "$release/$f" ] || fail "installed $f is not a regular file"
@@ -595,9 +595,9 @@ run_install() {
 		[ "$(stat -c '%a %u' "$release/$f")" = "$mode $uid" ] || fail "installed $f is not mode $mode owned by $uid"
 		cmp -s "$release/$f" "$bundle/$f" || fail "installed $f differs from the bundle"
 	done
-	check_child_path "$release/napplet"
+	check_child_path "$release/kwaklet"
 	check_child_path "$release/libwebview.so"
-	[ "$(readlink "$cli")" = "$root/current/kwakore" ] || fail "CLI link does not point at the installed release"
+	[ "$(readlink "$cli")" = "$root/current/kwak" ] || fail "CLI link does not point at the installed release"
 
 	# Activation: only the socket is enabled and started.
 	wait_state kwakore.socket active
@@ -656,17 +656,17 @@ run_install() {
 	for f in "${bundle_files[@]}"; do cp -p "$bundle/$f" "$stage/escape/src/kwakore-9-linux-$arch/"; done
 	: >"$stage/escape/src/escaped"
 	tar -P -C "$stage/escape/src" -czf "$stage/escape/kwakore-linux-$arch.tar.gz" \
-		"kwakore-9-linux-$arch/kwakore-daemon" "kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/napplet" \
+		"kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/kwak" "kwakore-9-linux-$arch/kwaklet" \
 		"kwakore-9-linux-$arch/libwebview.so" "kwakore-9-linux-$arch/../escaped" 2>/dev/null
 	tar -tzf "$stage/escape/kwakore-linux-$arch.tar.gz" 2>/dev/null | grep -qF '../escaped' || fail "could not build the ../ archive"
 	(cd "$stage/escape" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
 	refuse 'must hold exactly' "$stage/escape/kwakore-linux-$arch.tar.gz"
 	[ ! -e "$root/escaped" ] && [ ! -e "$install_prefix/lib/escaped" ] || fail "a ../ member escaped"
 	mkdir -p "$stage/link/src/kwakore-9-linux-$arch"
-	for f in kwakore-daemon kwakore libwebview.so; do cp -p "$bundle/$f" "$stage/link/src/kwakore-9-linux-$arch/"; done
-	ln -s /bin/sh "$stage/link/src/kwakore-9-linux-$arch/napplet"
+	for f in kwakore kwak libwebview.so; do cp -p "$bundle/$f" "$stage/link/src/kwakore-9-linux-$arch/"; done
+	ln -s /bin/sh "$stage/link/src/kwakore-9-linux-$arch/kwaklet"
 	tar -C "$stage/link/src" -czf "$stage/link/kwakore-linux-$arch.tar.gz" \
-		"kwakore-9-linux-$arch/kwakore-daemon" "kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/napplet" "kwakore-9-linux-$arch/libwebview.so"
+		"kwakore-9-linux-$arch/kwakore" "kwakore-9-linux-$arch/kwak" "kwakore-9-linux-$arch/kwaklet" "kwakore-9-linux-$arch/libwebview.so"
 	(cd "$stage/link" && sha256sum "kwakore-linux-$arch.tar.gz" >SHA256SUMS)
 	refuse 'not a regular file' "$stage/link/kwakore-linux-$arch.tar.gz"
 	cli_status
@@ -812,7 +812,7 @@ run_full() {
 	trap 'exit 130' INT TERM
 	install_prefix="$stage/prefix"
 	root="$install_prefix/lib/kwakore"
-	cli="$install_prefix/bin/kwakore"
+	cli="$install_prefix/bin/kwak"
 	apps_dir="$stage/data/applications"
 	real_entries >"$stage/real-entries.before"
 
@@ -839,7 +839,7 @@ run_full() {
 	top=${members%%/*}
 	[[ "$top" =~ ^kwakore-(.+)-linux-$arch$ ]] || fail "unexpected archive top directory: $top"
 	version=${BASH_REMATCH[1]}
-	[ "$members" = "$top/kwakore $top/kwakore-daemon $top/libwebview.so $top/napplet " ] ||
+	[ "$members" = "$top/kwak $top/kwaklet $top/kwakore $top/libwebview.so " ] ||
 		fail "the archive does not hold exactly the four bundle files: $members"
 
 	mkdir -m 0700 "$stage/config" "$stage/data" "$stage/config/kwakore" "$stage/seed"
@@ -852,17 +852,17 @@ run_full() {
 
 	bash "$repo_root/scripts/install.sh" --prefix "$install_prefix" --runtime-units --archive "$archive" --sha256sums "$sums" \
 		>"$stage/install.log" 2>&1 || fail "helper install failed: $(cat "$stage/install.log")"
-	grep -qx "ExecStart=$root/current/kwakore-daemon" "$runtime_units/kwakore.service" || fail "ExecStart is not the installed daemon"
+	grep -qx "ExecStart=$root/current/kwakore" "$runtime_units/kwakore.service" || fail "ExecStart is not the installed daemon"
 	[ "$(readlink -f "$root/current")" = "$(realpath "$root")/releases/$sha" ] || fail "the installed release is not this archive"
-	napplet_program="$(realpath "$root")/releases/$sha/napplet"
+	napplet_program="$(realpath "$root")/releases/$sha/kwaklet"
 	check_child_path "$napplet_program"
-	[ "$(readlink "$cli")" = "$root/current/kwakore" ] || fail "CLI link does not point at the installed release"
-	out=$("$root/current/kwakore-daemon" version) || fail "installed daemon did not run"
+	[ "$(readlink "$cli")" = "$root/current/kwak" ] || fail "CLI link does not point at the installed release"
+	out=$("$root/current/kwakore" version) || fail "installed daemon did not run"
 	[ "$out" = "$version" ] || fail "installed daemon reports $out, not the archive version $version"
 	[ "$(systemctl --user show -p UnitFileState --value kwakore.socket)" = enabled-runtime ] || fail "kwakore.socket is not enabled"
 	pass "release: the helper installed kwakore $version from the checksummed $(basename "$archive") with only kwakore.socket enabled"
 
-	check_activation_control "$root/current/kwakore-daemon" "$stage/config" "$stage/data"
+	check_activation_control "$root/current/kwakore" "$stage/config" "$stage/data"
 
 	# ─── entry ───
 	# Seed one signed napplet offline while the daemon is stopped, then let
@@ -894,7 +894,7 @@ run_full() {
 	[[ "$exec_line" =~ ^Exec=\"([^\"%]+)\"\ launch-token\ ([A-Za-z0-9_-]+)$ ]] || fail "unexpected Exec line: $exec_line"
 	exec_cli=${BASH_REMATCH[1]}
 	exec_token=${BASH_REMATCH[2]}
-	[ "$exec_cli" = "$root/current/kwakore" ] || fail "the entry runs $exec_cli, not the CLI beside the installed daemon"
+	[ "$exec_cli" = "$root/current/kwak" ] || fail "the entry runs $exec_cli, not the CLI beside the installed daemon"
 	out=$(printf '%s' "$exec_token" | tr '_-' '/+')
 	while [ $((${#out} % 4)) != 0 ]; do out="$out="; done
 	[ "$(printf '%s' "$out" | base64 -d)" = "$address" ] || fail "the entry token does not decode to $address"
@@ -989,7 +989,7 @@ fi
 # ─── staging and cleanup ────────────────────────────────────────────────────
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/kwakore-smoke.XXXXXX")
-cli="$stage/bin/kwakore"
+cli="$stage/bin/kwak"
 linked=0
 start_epoch=$(date +%s)
 
@@ -1019,7 +1019,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 mkdir -m 0700 "$stage/bin" "$stage/units" "$stage/config" "$stage/data"
-(cd "$repo_root/backend" && go build -o "$stage/bin/kwakore-daemon" ./cmd/kwakore-daemon && go build -o "$stage/bin/kwakore" ./cmd/kwakore) ||
+(cd "$repo_root/backend" && go build -o "$stage/bin/kwakore" ./cmd/kwakore-daemon && go build -o "$stage/bin/kwak" ./cmd/kwakore) ||
 	fail "could not build the staged daemon and CLI"
 mkdir -m 0700 "$stage/config/kwakore"
 # Offline settings keep the smoke deterministic and off the network.
@@ -1028,7 +1028,7 @@ printf '%s\n' '{"relays":[],"blossom_servers":[],"discover_on_user_relays":false
 cp "$units_src/kwakore.socket" "$stage/units/kwakore.socket"
 sed "s|@BINDIR@|$stage/bin|g" "$units_src/kwakore.service" >"$stage/units/kwakore.service"
 grep -q '@' "$stage/units/kwakore.service" && fail "rendered service still contains a placeholder"
-grep -qx "ExecStart=$stage/bin/kwakore-daemon" "$stage/units/kwakore.service" ||
+grep -qx "ExecStart=$stage/bin/kwakore" "$stage/units/kwakore.service" ||
 	fail "rendered service ExecStart is not the staged absolute daemon path"
 grep -qx 'ListenStream=%t/kwakore/daemon.sock' "$stage/units/kwakore.socket" ||
 	fail "socket unit does not listen at the daemon socket path"
@@ -1044,4 +1044,4 @@ fi
 systemctl --user --quiet link --runtime "$stage/units/kwakore.socket" "$stage/units/kwakore.service" >/dev/null
 linked=1
 systemctl --user --quiet enable --runtime --now kwakore.socket
-check_activation_control "$stage/bin/kwakore-daemon" "$stage/config" "$stage/data"
+check_activation_control "$stage/bin/kwakore" "$stage/config" "$stage/data"

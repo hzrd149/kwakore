@@ -92,7 +92,7 @@ let
   nixosEnvironment =
     l: lib.hasPrefix "Environment=\"LOCALE_ARCHIVE=" l || lib.hasPrefix "Environment=\"TZDIR=" l;
   # the stable CLI path native entries carry instead of the store path
-  entryCLILine = "Environment=\"KWAKORE_ENTRY_CLI=/run/current-system/sw/bin/kwakore\"";
+  entryCLILine = "Environment=\"KWAKORE_ENTRY_CLI=/run/current-system/sw/bin/kwak\"";
   serviceEnvironment = l: nixosEnvironment l || l == entryCLILine;
 
   expectedSocket = lib.sort (a: b: a < b) (unitLines (template "kwakore.socket") ++ conditions);
@@ -121,7 +121,7 @@ let
         builtins.elem entryCLILine (unitLines service.text)
         &&
           plain.systemd.user.services.kwakore.environment.KWAKORE_ENTRY_CLI
-          == "/run/current-system/sw/bin/kwakore"
+          == "/run/current-system/sw/bin/kwak"
         # the profile path resolves to this package because the module puts
         # it in the system profile
         && builtins.elem stub plain.environment.systemPackages;
@@ -402,7 +402,7 @@ let
     {
       name = "the default package and its config tree instantiate";
       ok =
-        builtins.match ".*ExecStart=${builtins.storeDir}/[a-z0-9]+-kwakore-[^/]*/bin/kwakore-daemon.*"
+        builtins.match ".*ExecStart=${builtins.storeDir}/[a-z0-9]+-kwakore-[^/]*/bin/kwakore.*"
           real.systemd.user.units."kwakore.service".text != null
         && lib.isDerivation real.programs.kwakore.package
         &&

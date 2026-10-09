@@ -1248,7 +1248,7 @@ func TestCLIHelpWithoutDaemon(t *testing.T) {
 	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "kwakore help") {
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "kwak help") {
 		t.Fatalf("invalid command: stdout=%q stderr=%q err=%v", stdout.String(), stderr.String(), err)
 	}
 }
@@ -1286,7 +1286,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		}
 	}
 	for topic, help := range commandHelp {
-		if !strings.Contains(help, "Usage:") || !strings.Contains(help, "kwakore "+topic) {
+		if !strings.Contains(help, "Usage:") || !strings.Contains(help, "kwak "+topic) {
 			t.Errorf("incomplete help for %q", topic)
 		}
 	}

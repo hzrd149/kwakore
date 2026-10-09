@@ -86,7 +86,7 @@ func run(args []string) error {
 		deadline.Stop()
 		close(shutdownDone)
 	}()
-	fmt.Fprintf(os.Stdout, "kwakore-daemon %s ready (config: %s)\n", version, paths.ConfigFile)
+	fmt.Fprintf(os.Stdout, "kwakore %s ready (config: %s)\n", version, paths.ConfigFile)
 	for {
 		select {
 		case <-shutdownDone:

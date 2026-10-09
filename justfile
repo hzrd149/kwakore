@@ -1,4 +1,4 @@
-# Linux service bundle: kwakore-daemon, kwakore, the napplet child and
+# Linux service bundle: kwakore, kwakore, the napplet child and
 # libwebview.so side by side in dist/<version>/kwakore-<version>-linux-<arch>/,
 # plus dist/<version>/kwakore-linux-<arch>.tar.gz and SHA256SUMS. The daemon
 # runs the napplet sibling of its own executable, so the four files ship and

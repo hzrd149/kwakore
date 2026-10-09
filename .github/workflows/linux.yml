@@ -1,6 +1,6 @@
 name: linux
 
-# Kwakore is a per-user Linux service: kwakore-daemon, the kwakore CLI, the
+# Kwakore is a per-user Linux service: kwakore, the kwakore CLI, the
 # napplet child and libwebview.so, shipped side by side. There is no Windows,
 # macOS, Android or Gio launcher build any more (D-09, D-10).
 #
@@ -94,7 +94,7 @@ jobs:
         working-directory: desktop
         env:
           CGO_ENABLED: "1"
-        run: go build -o child/napplet ./child
+        run: go build -o child/kwaklet ./child
 
       - name: vet desktop
         working-directory: desktop
@@ -206,7 +206,7 @@ jobs:
           bash scripts/build-linux-bundle.sh --arch "$ARCH" --version "$version" --out "$RUNNER_TEMP/dist"
           release="$RUNNER_TEMP/dist/$version"
           (cd "$release" && sha256sum --strict -c SHA256SUMS)
-          [ "$("$release/kwakore-$version-linux-$ARCH/kwakore-daemon" version)" = "$version" ] ||
+          [ "$("$release/kwakore-$version-linux-$ARCH/kwakore" version)" = "$version" ] ||
             { echo "bundled daemon does not report $version"; exit 1; }
           # this architecture's manifest names only kwakore files: exactly
           # the archive, its checksum line and the four bundle members
@@ -214,7 +214,7 @@ jobs:
           [ "$(cut -d' ' -f3- "$release/SHA256SUMS")" = "kwakore-linux-$ARCH.tar.gz" ] ||
             { echo "SHA256SUMS does not name exactly kwakore-linux-$ARCH.tar.gz"; exit 1; }
           members=$(tar -tzf "$release/kwakore-linux-$ARCH.tar.gz" | LC_ALL=C sort | tr '\n' ' ')
-          [ "$members" = "$top/kwakore $top/kwakore-daemon $top/libwebview.so $top/napplet " ] ||
+          [ "$members" = "$top/kwak $top/kwaklet $top/kwakore $top/libwebview.so " ] ||
             { echo "kwakore-linux-$ARCH.tar.gz does not hold exactly the four kwakore files: $members"; exit 1; }
           if tar -tzf "$release/kwakore-linux-$ARCH.tar.gz" | grep -i 'verd''ana'; then
             echo "kwakore-linux-$ARCH.tar.gz names the old product"
@@ -274,7 +274,7 @@ jobs:
             archive="kwakore-linux-$arch.tar.gz"
             top="kwakore-$VERSION-linux-$arch"
             members=$(tar -tzf "$archive" | LC_ALL=C sort | tr '\n' ' ')
-            [ "$members" = "$top/kwakore $top/kwakore-daemon $top/libwebview.so $top/napplet " ] ||
+            [ "$members" = "$top/kwak $top/kwaklet $top/kwakore $top/libwebview.so " ] ||
               { echo "$archive does not hold exactly the four bundle files: $members"; exit 1; }
             if tar -tvzf "$archive" | grep -v '^-'; then
               echo "$archive holds a member that is not a regular file"
