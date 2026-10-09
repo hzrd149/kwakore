@@ -11,12 +11,14 @@ Usage:
   kwak help
 
 Service:
+  tui                            Open the full-screen terminal manager
   status                         Show service health
   diagnostics                    Show health, settings, and recent errors
 
 Napplets:
   installed [--offset N] [--limit N]
                                  List installed napplets
+  windows                        List active napplet windows
   discover [--query TEXT] [--refresh] [--offset N] [--limit N]
                                  Search the napplet catalog
   install ADDRESS                Install a napplet
@@ -32,6 +34,7 @@ Napplets:
 
 Settings and signer:
   settings get                   Show effective settings
+  settings inspect               Show effective settings and their sources
   settings reload                Reload the configuration file
   settings set FIELD JSON_VALUE  Set relays, blossom_servers, or a boolean
                                  integration setting
@@ -92,6 +95,22 @@ func lookupHelp(parts []string) string {
 // Each entry includes the exact invocation and its command-specific choices.
 // Keep these alongside cliHelp when adding or changing commands.
 var commandHelp = map[string]string{
+	"windows": `List active napplet windows.
+
+Usage: kwak windows
+Shows window IDs accepted by kwak stop.
+`,
+	"settings inspect": `Show effective settings and their sources.
+
+Usage: kwak settings inspect
+Sources are default, config, or override.
+`,
+	"tui": `Open the interactive terminal manager.
+
+Usage: kwak tui
+Optional: kwak --socket PATH tui
+Requires an interactive terminal. Press ? inside the TUI for keys.
+`,
 	"status": `Show whether the Kwakore service is ready.
 
 Usage: kwak status

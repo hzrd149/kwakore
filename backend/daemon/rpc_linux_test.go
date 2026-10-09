@@ -1101,6 +1101,24 @@ func TestRPCInstalledPageAndValidation(t *testing.T) {
 	}
 }
 
+func TestRPCWindowsAndSettingSources(t *testing.T) {
+	_, reader, conn, _ := rpcService(t)
+	result, rpcErr, _ := rpcCall(t, reader, conn, "napplet.windows", `{}`)
+	if rpcErr != nil || !bytes.Contains(result, []byte(`"items":[]`)) {
+		t.Fatalf("windows: %s %+v", result, rpcErr)
+	}
+	result, rpcErr, _ = rpcCall(t, reader, conn, "settings.inspect", `{}`)
+	if rpcErr != nil || !bytes.Contains(result, []byte(`"sources"`)) || !bytes.Contains(result, []byte(`"relays":"default"`)) {
+		t.Fatalf("setting sources: %s %+v", result, rpcErr)
+	}
+	for _, method := range []string{"napplet.windows", "settings.inspect"} {
+		_, rpcErr, _ = rpcCall(t, reader, conn, method, `{"extra":true}`)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("accepted invalid %s params: %+v", method, rpcErr)
+		}
+	}
+}
+
 func TestRPCDiscoveryCachedAndValidation(t *testing.T) {
 	s, reader, conn, _ := rpcService(t)
 	result, rpcErr, raw := rpcCall(t, reader, conn, "napplet.discover", `{}`)

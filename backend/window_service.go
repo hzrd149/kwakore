@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"sort"
 )
 
 var ErrServiceSessionUnavailable = errors.New("graphical session unavailable")
@@ -17,6 +18,28 @@ type ServiceLaunchResult struct {
 type ServiceStopResult struct {
 	WindowID string `json:"window_id"`
 	Closed   bool   `json:"closed"`
+}
+
+type ServiceWindow struct {
+	WindowID string `json:"window_id"`
+	Address  string `json:"address"`
+	Name     string `json:"name"`
+}
+
+// ServiceWindows lists windows addressable by the public stop operation.
+func ServiceWindows() []ServiceWindow {
+	open := allInstances()
+	out := make([]ServiceWindow, 0, len(open))
+	for _, ci := range open {
+		id := ci.ID()
+		decoded, err := hex.DecodeString(id)
+		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != id || !ci.napp.IsNapplet() {
+			continue
+		}
+		out = append(out, ServiceWindow{WindowID: id, Address: ci.napp.Address(), Name: ci.napp.Label()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].WindowID < out[j].WindowID })
+	return out
 }
 
 // ServiceLaunch resolves only an installed canonical address. The host's

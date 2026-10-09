@@ -62,6 +62,32 @@ func TestOverridePrecedenceAndRestart(t *testing.T) {
 	}
 }
 
+func TestSettingSourcesTrackPrecedence(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"relays":["wss://file.example"],"desktop_entries":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := m.Sources(); s["relays"] != "config" || s["desktop_entries"] != "config" || s["gnome_search"] != "default" {
+		t.Fatalf("file sources: %v", s)
+	}
+	if err := m.SetOverride("relays", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.Sources(); s["relays"] != "override" || s["desktop_entries"] != "config" {
+		t.Fatalf("override sources: %v", s)
+	}
+	if err := m.ClearOverride("relays"); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.Sources(); s["relays"] != "config" {
+		t.Fatalf("cleared source: %v", s)
+	}
+}
+
 func TestInterruptedOverrideWriteLoadsCommittedFile(t *testing.T) {
 	for _, renamed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "before-rename", true: "after-rename"}[renamed], func(t *testing.T) {

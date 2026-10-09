@@ -64,7 +64,7 @@ let
     inherit version src;
 
     modRoot = "backend";
-    vendorHash = "sha256-Vkcq5s8ezj9g6lN7SALg/1Wgl3gMKiFxJ2p3o1+W7bQ=";
+    vendorHash = "sha256-bskKFzpBl4zemeHI2TCBNl2fUeksLg6qzA7mO0kB1ts=";
 
     subPackages = [
       "cmd/kwakore-daemon"

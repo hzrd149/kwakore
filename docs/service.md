@@ -75,6 +75,16 @@ Then try it:
 kwak status
 ```
 
+For an interactive terminal manager, run `kwak tui`. It opens full-screen
+views for service health, installed napplets, catalog discovery, settings,
+signers, diagnostics, and active windows. Use Tab or 1–7 to change views,
+arrow keys or j/k to select, Enter to open or edit, `r` to reload the current
+view, `?` for all keys, and `q` to exit. `kwak tui` requires a terminal;
+`--socket PATH` may precede it for a development daemon. Settings show their
+effective value and whether it came from a default, `config.json`, or a saved
+override. Enter edits a setting; `c` clears its override. Changes take effect
+through the same control methods as the ordinary CLI.
+
 From a source checkout, `just install` builds the current code and installs
 it for this user. Run it again to update. `just uninstall` removes the
 helper-managed service, binaries, and generated desktop entries while keeping

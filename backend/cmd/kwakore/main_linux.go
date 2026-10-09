@@ -42,6 +42,12 @@ func run(args []string) error {
 		_, err := io.WriteString(os.Stdout, topic)
 		return err
 	}
+	if len(args) == 1 && args[0] == "tui" {
+		if jsonOutput {
+			return inputFailure("--json is not available with tui")
+		}
+		return runTUI(socketOverride, timeoutOverride)
+	}
 	method, params, _, err := command(args)
 	if err != nil {
 		return err
@@ -427,6 +433,9 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{*offset, *limit})
 		return "napplet.installed", params, socketPath, nil
 	}
+	if len(args) == 1 && args[0] == "windows" {
+		return "napplet.windows", nil, socketPath, nil
+	}
 	if len(args) >= 1 && args[0] == "discover" {
 		flags := flag.NewFlagSet("discover", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
@@ -579,6 +588,10 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		case "get":
 			if len(args) == 2 {
 				return "settings.get", nil, socketPath, nil
+			}
+		case "inspect":
+			if len(args) == 2 {
+				return "settings.inspect", nil, socketPath, nil
 			}
 		case "reload":
 			if len(args) == 2 {

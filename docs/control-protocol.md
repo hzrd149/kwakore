@@ -23,6 +23,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `service.status` | none | `{protocol_version:1,health:Health}` |
 | `service.diagnostics` | none | `{observed_from:"live",health:Health,settings:Settings,recent_errors:DiagnosticError[],warning?:string}` |
 | `settings.get` | none | `Settings` |
+| `settings.inspect` | none | `{settings:Settings,sources:{FIELD:"default"|"config"|"override",...}}` for each non-secret setting and signer selection |
 | `settings.reload` | none | `{settings:Settings}` after re-reading declarative config; invalid reload keeps prior effective settings |
 | `settings.set` | `{field:string,value:array<string>\|boolean}` required | `{settings:Settings}` after persisting an override |
 | `settings.clear` | `{field:string}` required | `{settings:Settings}` after removing one override |
@@ -33,6 +34,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `signer.pair.cancel` | none | `{cancelled:boolean}` |
 | `napplet.discover` | `{query?:string,refresh?:boolean,offset?:integer,limit?:integer}` | `{items:Descriptor[],total:integer,next_offset:integer\|null,fetched_at:RFC3339 timestamp\|null,complete:boolean}` |
 | `napplet.installed` | `{offset?:integer,limit?:integer}` | `{items:Descriptor[],total:integer,next_offset:integer\|null}` |
+| `napplet.windows` | none | `{items:[{window_id:string,address:string,name:string},...]}` for active napplet windows |
 | `napplet.install` | `{address:string,relays?:string[]}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled",installed_version:Version}` |
 | `napplet.update` | `{address:string}` required | `{address:string,outcome:"updated",previous_version:Version,installed_version:Version}` |
 | `napplet.uninstall` | `{address:string,confirm:true}` required | `{address:string,outcome:"removed",previous_version:Version,cleanup_complete:true}` |
@@ -97,6 +99,12 @@ The unauthorized response is sent before dispatch and followed by close. `confir
 
 ## Bundled CLI
 
+`kwak tui` opens the interactive terminal manager using the same checked
+client transport and JSON results as the other commands. It requires an
+interactive terminal and does not accept `--json`. Its settings screen uses
+`settings.inspect` to show the source of each effective value; its Windows
+screen uses `napplet.windows` to list IDs accepted by `napplet.stop`.
+
 Run `kwak` or `kwak help` to see the full command menu without connecting to the daemon. `-h` and `--help` do the same. For command-specific usage, run `kwak COMMAND --help`, such as `kwak discover --help` or `kwak signer pair start --help`; `kwak help COMMAND` also works. Bare `settings`, `signer`, and `permissions` show their subcommand menus. Help never contacts the daemon.
 
 Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`); from source, build it with `cd backend && go build -o /tmp/kwak ./cmd/kwakore`. Syntax: `kwak [--socket ABSOLUTE_PATH] [--timeout POSITIVE_GO_DURATION] [--json] COMMAND`. Global options precede the command and may appear in either order. `--socket` selects another Unix socket and still enforces server UID. Without it, the CLI requires a valid private `XDG_RUNTIME_DIR` and uses the standard path; it never falls back to a shared directory. `--timeout` accepts a positive Go duration such as `45s` or `3m`. By default, the CLI prints labeled text. Put `--json` before the command to print the original JSON result and structured JSON errors for scripts.
@@ -106,6 +114,7 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `status` | `service.status` |
 | `diagnostics` | `service.diagnostics` |
 | `settings get` | `settings.get` |
+| `settings inspect` | `settings.inspect` |
 | `settings reload` | `settings.reload` |
 | `settings set FIELD JSON_VALUE` | `settings.set` |
 | `settings clear FIELD` | `settings.clear` |
@@ -120,6 +129,7 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `signer pair cancel` | `signer.pair.cancel` |
 | `discover [--query TEXT] [--refresh] [--offset N] [--limit N]` | `napplet.discover` |
 | `installed [--offset N] [--limit N]` | `napplet.installed` |
+| `windows` | `napplet.windows` |
 | `install ADDRESS` | `napplet.install` (an `naddr`'s usable relay hints are sent as `relays`) |
 | `update ADDRESS` | `napplet.update` |
 | `uninstall --yes ADDRESS` | `napplet.uninstall` |

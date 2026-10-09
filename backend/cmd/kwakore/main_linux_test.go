@@ -441,10 +441,10 @@ func TestCLIContractCatalog(t *testing.T) {
 	address := "35129:" + strings.Repeat("a", 64) + ":app"
 	windowID := strings.Repeat("b", 32)
 	commands := [][]string{
-		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "reload"},
+		{"status"}, {"diagnostics"}, {"settings", "get"}, {"settings", "inspect"}, {"settings", "reload"},
 		{"signer", "status"}, {"signer", "switch", "none"}, {"signer", "pair", "start"}, {"signer", "pair", "wait"}, {"signer", "pair", "cancel"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
-		{"discover"}, {"installed"}, {"install", address}, {"update", address},
+		{"discover"}, {"installed"}, {"windows"}, {"install", address}, {"update", address},
 		{"uninstall", "--yes", address}, {"launch", address}, {"stop", windowID},
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},

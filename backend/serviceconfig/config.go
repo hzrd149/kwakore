@@ -334,6 +334,46 @@ func (m *Manager) Effective() Effective {
 	return v
 }
 
+// Sources reports which layer currently supplies each non-secret setting.
+func (m *Manager) Sources() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sourcesLocked()
+}
+
+// Inspect returns values and their sources from one configuration snapshot.
+func (m *Manager) Inspect() (Effective, map[string]string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v := m.effective
+	v.Relays = append([]string{}, v.Relays...)
+	v.BlossomServers = append([]string{}, v.BlossomServers...)
+	return v, m.sourcesLocked()
+}
+
+func (m *Manager) sourcesLocked() map[string]string {
+	fields := map[string]struct{ file, override bool }{
+		"relays":                  {m.file.Relays != nil, m.override.Relays != nil},
+		"blossom_servers":         {m.file.BlossomServers != nil, m.override.BlossomServers != nil},
+		"discover_on_user_relays": {m.file.DiscoverOnUserRelays != nil, m.override.DiscoverOnUserRelays != nil},
+		"desktop_entries":         {m.file.DesktopEntries != nil, m.override.DesktopEntries != nil},
+		"gnome_search":            {m.file.GNOMESearch != nil, m.override.GNOMESearch != nil},
+		"signer":                  {m.file.Signer != nil, m.override.Signer != nil},
+	}
+	out := make(map[string]string, len(fields))
+	for field, layers := range fields {
+		source := "default"
+		if layers.file {
+			source = "config"
+		}
+		if layers.override {
+			source = "override"
+		}
+		out[field] = source
+	}
+	return out
+}
+
 func (m *Manager) Reload() error {
 	file, err := read(m.paths.ConfigFile)
 	if err != nil {

@@ -18,9 +18,9 @@ const MaxBatch = 64
 func MethodNames() []string {
 	return []string{
 		"service.status", "service.diagnostics",
-		"settings.get", "settings.reload", "settings.set", "settings.clear",
+		"settings.get", "settings.inspect", "settings.reload", "settings.set", "settings.clear",
 		"signer.status", "signer.switch", "signer.pair.start", "signer.pair.wait", "signer.pair.cancel",
-		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.stop",
+		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.windows", "napplet.stop",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
 	}
 }

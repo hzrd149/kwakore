@@ -130,6 +130,20 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		defer done()
 		return s.Manager().Effective(), nil
+	case "settings.inspect":
+		if err := controlprotocol.ValidateNamedParams(params); err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		settings, sources := s.Manager().Inspect()
+		return struct {
+			Settings serviceconfig.Effective `json:"settings"`
+			Sources  map[string]string       `json:"sources"`
+		}{settings, sources}, nil
 	case "settings.reload":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -167,6 +181,18 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		defer done()
 		return backend.ServiceInstalled(offset, limit), nil
+	case "napplet.windows":
+		if err := controlprotocol.ValidateNamedParams(params); err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		return struct {
+			Items []backend.ServiceWindow `json:"items"`
+		}{backend.ServiceWindows()}, nil
 	case "napplet.permissions.get":
 		address, err := decodeAddressParams(params)
 		if err != nil {
