@@ -304,20 +304,26 @@ systemctl --user reset-failed kwakore.service kwakore.socket
 systemctl --user start kwakore.socket
 ```
 
-For development you can also run the daemon in the foreground, outside
-systemd, when no socket unit is active:
+For development, run a source build in the foreground. If you have the
+installed socket and service, stop them first:
 
 ```sh
-cd backend && go build -o /tmp/kwakore-daemon ./cmd/kwakore-daemon
-/tmp/kwakore-daemon
+systemctl --user stop kwakore.socket kwakore.service
+just run
 ```
 
-It binds `$XDG_RUNTIME_DIR/kwakore/daemon.sock` itself, prints one line such
+`just run` builds the daemon, control CLI, napplet window program and pinned
+webview library under `~/.cache/kwakore/dev/`. In another terminal, use
+`~/.cache/kwakore/dev/kwakore status` (or another CLI command). The development
+service uses your normal configuration, data and control socket, so an
+installed service cannot run alongside it. Press Ctrl-C to stop it; start
+`kwakore.socket` again when you want the installed service back.
+
+The daemon binds `$XDG_RUNTIME_DIR/kwakore/daemon.sock` itself, prints one line such
 as `kwakore-daemon development ready (config: /home/alice/.config/kwakore/config.json)`
 on stdout and logs to stderr. A second daemon for the same data directory
 fails with `daemon already running for this user; inspect status or stop the
-existing instance`. A source build without the window program beside it
-cannot open napplet windows; use `just bundle` for a complete set.
+existing instance`.
 
 ## Napplet catalog
 

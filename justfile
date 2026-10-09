@@ -28,6 +28,12 @@ bundle-linux-arm64 *args:
 bundle-check:
     bash scripts/smoke-linux-service.sh --bundle-only
 
+# Stop an installed kwakore.socket/service first: both use the same user
+# socket and data directory.
+# build the local service, CLI and window host, then run the daemon
+run:
+    bash scripts/run-dev.sh
+
 # The napplet child loads libwebview.so from the directory it is installed in
 # (WEBVIEW_PATH, set by the daemon). The copies come from the pinned go-webview
 # module and are git-ignored; the bundle and child tests need them. GOOS/GOARCH
