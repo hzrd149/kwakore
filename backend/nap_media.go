@@ -291,7 +291,7 @@ func resolveMediaSource(ctx context.Context, c *napCall, src mediaSourceRef) (st
 		if !hex64.MatchString(sha) {
 			return "", "unsupported source"
 		}
-		for _, srv := range blossomServers(ctx, nil) {
+		for _, srv := range blossomServers(ctx, nil, Napp{}) {
 			if c.blossomHas(ctx, srv+"/"+sha) {
 				return srv + "/" + sha, ""
 			}

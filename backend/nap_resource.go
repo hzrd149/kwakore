@@ -353,6 +353,11 @@ func sniffResource(data []byte, declared string) (string, error) {
 	case base == "application/ogg", base == "application/pdf":
 		return base, nil
 	case base == "application/octet-stream":
+		// Asset packs and GLB models are passive binary data. Keep their
+		// browser type opaque; the napplet interprets their bytes itself.
+		if bytes.HasPrefix(data, []byte("\x89SSRCPK\n")) || bytes.HasPrefix(data, []byte("glTF")) {
+			return "application/octet-stream", nil
+		}
 		if len(data) > 12 && string(data[4:8]) == "ftyp" {
 			switch string(data[8:12]) {
 			case "avif", "avis":
@@ -418,7 +423,7 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 		return resourceResult{}, rerr("invalid-request", "not a sha256 blob reference")
 	}
 	var lastErr error = rerr("not-found", "")
-	for _, srv := range blossomServers(ctx, hinted) {
+	for _, srv := range blossomServers(ctx, hinted, c.ci.napp) {
 		res, err := c.fetchBlossom(ctx, srv+"/"+sha)
 		if err != nil {
 			lastErr = err
@@ -429,15 +434,17 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 			lastErr = rerr("decode-failed", "hash mismatch")
 			continue
 		}
+		log.Debug().Str("server", srv).Str("sha256", sha).Msg("napplet resource downloaded and verified")
 		return res, nil
 	}
 	return resourceResult{}, lastErr
 }
 
 // blossomServers is where a blob is looked for, in order: the servers the
-// napplet suggested, the user's own, and the launcher's defaults, as https
-// origins without duplicates.
-func blossomServers(ctx context.Context, hinted []string) []string {
+// napplet suggested, the user's own, the installed napplet's servers and
+// author's servers, and the launcher's defaults, as https origins without
+// duplicates.
+func blossomServers(ctx context.Context, hinted []string, napp Napp) []string {
 	servers := []string{}
 	add := func(s string) {
 		if u, err := url.Parse(s); err == nil && u.Scheme == "https" && u.Host != "" {
@@ -451,6 +458,9 @@ func blossomServers(ctx context.Context, hinted []string) []string {
 		}
 	}
 	for _, s := range hinted {
+		add(s)
+	}
+	for _, s := range napp.BlossomServers(ctx) {
 		add(s)
 	}
 	if pk, ok := currentUser(); ok && sys != nil {

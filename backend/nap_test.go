@@ -2209,8 +2209,51 @@ func TestSniffResource(t *testing.T) {
 	if m, err := sniffResource([]byte(`{"a":1}`), "application/json; charset=utf-8"); err != nil || m != "application/json" {
 		t.Errorf("json: %q %v", m, err)
 	}
+	for name, data := range map[string][]byte{
+		"asset pack": []byte("\x89SSRCPK\n\x01\x00\x00\x00"),
+		"glb model":  []byte("glTF\x02\x00\x00\x00"),
+	} {
+		if m, err := sniffResource(data, "application/octet-stream"); err != nil || m != "application/octet-stream" {
+			t.Errorf("%s: %q %v", name, m, err)
+		}
+	}
 	if r, err := decodeDataURL("data:image/png;base64," + b64(buf.Bytes())); err != nil || r.mime != "image/png" {
 		t.Errorf("data url: %v", err)
+	}
+}
+
+func TestResourceBlossomServersIncludeNappletServers(t *testing.T) {
+	setupNapTest(t)
+	napp := Napp{Servers: []string{"https://blossom.napplet.soy"}}
+	servers := blossomServers(context.Background(), []string{"https://hint.example"}, napp)
+	if len(servers) < 2 || servers[0] != "https://hint.example" || !slices.Contains(servers, "https://blossom.napplet.soy") {
+		t.Fatalf("resource server order: %v", servers)
+	}
+}
+
+func TestResourceFetchesVerifiedAssetPackFromNappletServer(t *testing.T) {
+	setupNapTest(t)
+	pack := []byte("\x89SSRCPK\n\x01\x00\x00\x00game data")
+	sum := sha256.Sum256(pack)
+	hash := hex.EncodeToString(sum[:])
+	wantURL := "https://blossom.napplet.soy/" + hash
+	var fetched bool
+	previous := resourceClient
+	resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != wantURL {
+			return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		}
+		fetched = true
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/octet-stream"}}, Body: io.NopCloser(bytes.NewReader(pack)), Request: r}, nil
+	})}
+	t.Cleanup(func() { resourceClient = previous })
+	ci, rec := openNapplet(t, "asset-pack")
+	ci.napp.Servers = []string{"https://blossom.napplet.soy"}
+	ready(t, ci, rec, 1)
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "pack", "url": "blossom:sha256:" + hash})
+	got := waitID(t, rec, "resource.bytes.result", "pack")
+	if !fetched || got["mime"] != "application/octet-stream" {
+		t.Fatalf("asset pack fetch: fetched=%v result=%v", fetched, got)
 	}
 }
 
