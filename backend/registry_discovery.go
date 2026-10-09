@@ -146,7 +146,31 @@ func RefreshDiscovery(parent context.Context) error {
 		return ErrDiscoveryConflict
 	}
 	cacheDiscoveryLocked(final)
+	setDiscovery(final)
 	return nil
+}
+
+// SystemSearchCatalog is a snapshot for desktop search providers. Installed
+// napplets remain searchable when relay discovery is empty or unavailable.
+func SystemSearchCatalog() []Napp {
+	discoverMu.Lock()
+	items := append([]Napp(nil), catalog...)
+	discoverMu.Unlock()
+	seen := make(map[string]bool, len(items))
+	out := make([]Napp, 0, len(items))
+	for _, n := range items {
+		if n.IsNapplet() && n.Unavailable == "" && !seen[n.ID] {
+			out = append(out, n)
+			seen[n.ID] = true
+		}
+	}
+	for _, n := range installedNapps() {
+		if n.IsNapplet() && !seen[n.ID] {
+			out = append(out, n)
+			seen[n.ID] = true
+		}
+	}
+	return out
 }
 
 // refreshFollows loads who the user follows for the discovery tab's friends

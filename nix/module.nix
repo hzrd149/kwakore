@@ -81,6 +81,8 @@ let
     "relays"
     "blossom_servers"
     "discover_on_user_relays"
+    "desktop_entries"
+    "gnome_search"
     "signer"
   ];
   # the same fragments serviceconfig refuses in a config file
@@ -129,7 +131,7 @@ let
 
   effective = lib.optionalAttrs hasSettings (
     lib.filterAttrs (_: v: v != null) {
-      inherit (settings) relays blossom_servers discover_on_user_relays;
+      inherit (settings) relays blossom_servers discover_on_user_relays desktop_entries gnome_search;
       signer =
         if signer == null then
           null
@@ -161,7 +163,7 @@ let
       if secretLike name then
         "${describeSecret "programs.kwakore.settings" name}: secret field is forbidden; supply signer secrets with `kwakore signer` --secret-stdin or --secret-file"
       else
-        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays or signer"
+        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search or signer"
     ) extraKeys
     ++ map (
       name:
@@ -286,6 +288,16 @@ in
               type = lib.types.nullOr lib.types.bool;
               default = null;
               description = "Whether napplet discovery also queries the user's relays.";
+            };
+            desktop_entries = lib.mkOption {
+              type = lib.types.nullOr lib.types.bool;
+              default = null;
+              description = "Whether installed napplets appear in application menus.";
+            };
+            gnome_search = lib.mkOption {
+              type = lib.types.nullOr lib.types.bool;
+              default = null;
+              description = "Whether GNOME search includes discovered napplets.";
             };
             signer = lib.mkOption {
               default = null;

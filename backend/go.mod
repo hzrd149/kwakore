@@ -7,6 +7,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/dgraph-io/ristretto/v2 v2.3.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/rs/zerolog v1.35.1
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839

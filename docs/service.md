@@ -392,6 +392,27 @@ command exits, so the message may only flash. To read it, run the same
 command from a terminal: copy the `Exec=` line from the entry, or use
 `kwakore launch ADDRESS` with the address from `kwakore installed`.
 
+`desktop_entries` defaults to `true`. Set it to `false` in `config.json` or
+run `kwakore settings set desktop_entries false` to remove installed napplet
+entries. Restoring `true` restores them. The daemon reconciles entries after
+each setting change or reload.
+
+## GNOME overview search
+
+`gnome_search` defaults to `true`. The daemon serves discovered and installed
+napplets through GNOME Shell's SearchProvider2 interface. It refreshes the
+catalog in the background. Selecting a discovered result opens its temporary
+trial; selecting an installed result launches it.
+
+Set `gnome_search` to `false` in `config.json`, or run
+`kwakore settings set gnome_search false`, to remove per-user registration and
+return no search results. Restoring `true` enables search again. For a bundle
+installation, the user manager needs an `XDG_DATA_DIRS` containing a
+user-writable directory that GNOME Shell also scans (usually the Flatpak user
+export directory). Restart the service and GNOME session after changing that
+environment so Shell rescans providers. The Nix package installs metadata in
+its system data directory.
+
 If entries are missing, `kwakore diagnostics` shows a `native_entries` item
 in `recent_errors`, and the journal has the details
 (`native desktop entries not fully reconciled`). The daemon writes no entries
@@ -434,11 +455,13 @@ optional; reading, validating or inspecting missing files creates nothing.
   "relays": ["wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"],
   "blossom_servers": ["https://relay.nostrapps.com", "https://nostr.download"],
   "discover_on_user_relays": true,
+  "desktop_entries": true,
+  "gnome_search": true,
   "signer": { "mode": "none" }
 }
 ```
 
-The first three values are the built-in defaults. `relays` accepts canonical
+The first five values are the built-in defaults. `relays` accepts canonical
 `wss://` URLs with a host. `blossom_servers` accepts canonical `http://` or
 `https://` URLs with a host. URL hosts must be lowercase; duplicate URLs, user
 information, queries and fragments are rejected, and relay URLs with a
@@ -449,7 +472,7 @@ absolute path of the signer service's `socket`; it never holds a secret.
 `KWAKORE_CONFIG_FILE`, when set to an absolute path, names the configuration
 file in place of `$XDG_CONFIG_HOME/kwakore/config.json`. An
 omitted field takes its default. An explicit empty array disables that list;
-an explicit `false` disables discovery on the user's relays. `null` is never
+an explicit `false` disables the named Boolean setting. `null` is never
 an alias for omission.
 
 Both `config.json` and `settings-overrides.json` use the same strict parser:
@@ -466,8 +489,8 @@ field's file value, or its default when the file omits it. Empty arrays and
 `false` are real override values.
 
 **Changing settings while running.** `kwakore settings set FIELD JSON_VALUE`
-and `kwakore settings clear FIELD` change one of `relays`, `blossom_servers`
-and `discover_on_user_relays`. They write only `settings-overrides.json`,
+and `kwakore settings clear FIELD` change one of `relays`, `blossom_servers`,
+`discover_on_user_relays`, `desktop_entries`, or `gnome_search`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,

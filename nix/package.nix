@@ -64,7 +64,7 @@ let
     inherit version src;
 
     modRoot = "backend";
-    vendorHash = "sha256-VU9WT75TONAeNPACPxjwzcwKMwVAcNsDQHyapUDCL4A=";
+    vendorHash = "sha256-Vkcq5s8ezj9g6lN7SALg/1Wgl3gMKiFxJ2p3o1+W7bQ=";
 
     subPackages = [
       "cmd/kwakore-daemon"
@@ -153,6 +153,28 @@ stdenv.mkDerivation {
     install -Dm555 ${napplet}/bin/napplet "$out/bin/napplet"
     install -Dm444 ${napplet}/bin/libwebview.so "$out/bin/libwebview.so"
 
+    install -Dm444 /dev/stdin "$out/share/gnome-shell/search-providers/org.kwakore.Search.search-provider.ini" <<'EOF'
+[Shell Search Provider]
+DesktopId=org.kwakore.Search.desktop
+BusName=org.kwakore.SearchProvider
+ObjectPath=/org/kwakore/SearchProvider
+Version=2
+EOF
+    install -Dm444 /dev/stdin "$out/share/applications/org.kwakore.Search.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Kwakore
+Comment=Discover Nostr napplets
+Exec=kwakore discover
+Terminal=true
+Categories=Network;
+EOF
+    install -Dm444 /dev/stdin "$out/share/dbus-1/services/org.kwakore.SearchProvider.service" <<'EOF'
+[D-BUS Service]
+Name=org.kwakore.SearchProvider
+Exec=/run/current-system/sw/bin/kwakore status
+EOF
+
     chmod u+w "$out/bin/napplet" "$out/bin/libwebview.so"
     patchelf --set-rpath "${webviewLibPath}" "$out/bin/libwebview.so"
     patchelf \
@@ -182,17 +204,19 @@ stdenv.mkDerivation {
     bin="$out/bin"
 
     # exactly the four pieces (plus the daemon behind its wrapper), as real
-    # files in one directory, and nothing else in the package
+    # files in one directory, plus GNOME provider metadata under share/
     expected=".kwakore-daemon-wrapped kwakore kwakore-daemon libwebview.so napplet"
     actual="$(cd "$bin" && LC_ALL=C ls -A | tr '\n' ' ' | sed 's/ $//')"
     if [ "$actual" != "$expected" ]; then
       echo "unexpected $bin contents: $actual" >&2
       exit 1
     fi
-    if [ "$(cd "$out" && ls -A)" != bin ]; then
-      echo "the package must contain only bin/" >&2
+    if [ "$(cd "$out" && LC_ALL=C ls -A | tr '\n' ' ' | sed 's/ $//')" != "bin share" ]; then
+      echo "the package must contain bin/ and share/" >&2
       exit 1
     fi
+    grep -qx 'BusName=org.kwakore.SearchProvider' "$out/share/gnome-shell/search-providers/org.kwakore.Search.search-provider.ini"
+    grep -qx 'Name=org.kwakore.SearchProvider' "$out/share/dbus-1/services/org.kwakore.SearchProvider.service"
     for f in "$bin"/* "$bin"/.kwakore-daemon-wrapped; do
       if [ -L "$f" ] || [ ! -f "$f" ]; then
         echo "$f is not a regular file" >&2

@@ -55,6 +55,8 @@ type Config struct {
 	Relays               *[]string `json:"relays,omitempty"`
 	BlossomServers       *[]string `json:"blossom_servers,omitempty"`
 	DiscoverOnUserRelays *bool     `json:"discover_on_user_relays,omitempty"`
+	DesktopEntries       *bool     `json:"desktop_entries,omitempty"`
+	GNOMESearch          *bool     `json:"gnome_search,omitempty"`
 	Signer               *Signer   `json:"signer,omitempty"`
 }
 
@@ -68,11 +70,13 @@ type Effective struct {
 	Relays               []string `json:"relays"`
 	BlossomServers       []string `json:"blossom_servers"`
 	DiscoverOnUserRelays bool     `json:"discover_on_user_relays"`
+	DesktopEntries       bool     `json:"desktop_entries"`
+	GNOMESearch          bool     `json:"gnome_search"`
 	Signer               Signer   `json:"signer"`
 }
 
 func Defaults() Effective {
-	return Effective{Relays: []string{"wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"}, BlossomServers: []string{"https://relay.nostrapps.com", "https://nostr.download"}, DiscoverOnUserRelays: true, Signer: Signer{Mode: "none"}}
+	return Effective{Relays: []string{"wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"}, BlossomServers: []string{"https://relay.nostrapps.com", "https://nostr.download"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Signer: Signer{Mode: "none"}}
 }
 
 func merge(file, override Config) Effective {
@@ -87,6 +91,12 @@ func merge(file, override Config) Effective {
 		if c.DiscoverOnUserRelays != nil {
 			v.DiscoverOnUserRelays = *c.DiscoverOnUserRelays
 		}
+		if c.DesktopEntries != nil {
+			v.DesktopEntries = *c.DesktopEntries
+		}
+		if c.GNOMESearch != nil {
+			v.GNOMESearch = *c.GNOMESearch
+		}
 		if c.Signer != nil {
 			v.Signer = *c.Signer
 		}
@@ -96,7 +106,7 @@ func merge(file, override Config) Effective {
 
 func validateMerged(file, override Config) error {
 	v := merge(file, override)
-	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, Signer: &v.Signer})
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, Signer: &v.Signer})
 }
 
 func validate(c Config) error {
@@ -171,8 +181,8 @@ func read(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	for key := range raw {
-		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "signer" {
-			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, or discover_on_user_relays", path, key)
+		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "signer" {
+			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, or gnome_search", path, key)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
 			return Config{}, fmt.Errorf("%s: %s must not be null; omit the setting to use its default", path, key)
@@ -397,5 +407,5 @@ func (m *Manager) fileSystemSignerSocketLocked() string {
 }
 
 func FieldName(name string) bool {
-	return strings.Contains(" relays blossom_servers discover_on_user_relays ", " "+name+" ")
+	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search ", " "+name+" ")
 }

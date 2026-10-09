@@ -658,7 +658,7 @@ func decodeSettingParams(params json.RawMessage) (string, any, *controlprotocol.
 	if !ok || bytes.Equal(raw, []byte("null")) {
 		return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
-	if field == "discover_on_user_relays" {
+	if field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" {
 		var value bool
 		if len(raw) == 0 || (raw[0] != 't' && raw[0] != 'f') || json.Unmarshal(raw, &value) != nil {
 			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)

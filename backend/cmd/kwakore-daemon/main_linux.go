@@ -69,6 +69,7 @@ func run(args []string) error {
 	if foregroundServiceHook != nil {
 		foregroundServiceHook(service)
 	}
+	service.StartDesktopSearch()
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)

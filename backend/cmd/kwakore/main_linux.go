@@ -807,14 +807,14 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 }
 
 func settingField(field string) bool {
-	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays"
+	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search"
 }
 
 func validSettingValue(field string, value json.RawMessage) bool {
 	if !json.Valid(value) || bytes.Equal(value, []byte("null")) {
 		return false
 	}
-	if field == "discover_on_user_relays" {
+	if field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" {
 		var v bool
 		return (bytes.Equal(value, []byte("true")) || bytes.Equal(value, []byte("false"))) && json.Unmarshal(value, &v) == nil
 	}

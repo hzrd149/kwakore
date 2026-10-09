@@ -85,6 +85,37 @@ func newNativeEntryRig(t *testing.T) *nativeEntryHost {
 	return h
 }
 
+func TestNativeEntriesSettingRemovesAndRestoresInstalledEntry(t *testing.T) {
+	h := newNativeEntryRig(t)
+	blobs := serveNapplets(t)
+	n := blobs.titledNapplet(t, nostr.Generate(), "desktop-switch", "Desktop switch", "content", 10)
+	if _, err := InstallNappContext(t.Context(), n); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(h.dir, desktopentry.FileName(n.Address()))
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := serviceConfig.SetOverride("desktop_entries", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncNativeEntries(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatalf("disabled entry remains: %v", err)
+	}
+	if err := serviceConfig.SetOverride("desktop_entries", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncNativeEntries(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // serveNapplets starts a Blossom rig the service trusts.
 func serveNapplets(t *testing.T) *blobRig {
 	t.Helper()

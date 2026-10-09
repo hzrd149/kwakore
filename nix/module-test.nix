@@ -181,6 +181,8 @@ let
       ];
       blossom_servers = [ "https://blossom.example.com" ];
       discover_on_user_relays = false;
+      desktop_entries = false;
+      gnome_search = false;
       signer = {
         mode = "bunker";
         relay = "wss://bunker.example.com";
@@ -203,6 +205,8 @@ let
           ];
           blossom_servers = [ "https://blossom.example.com" ];
           discover_on_user_relays = false;
+          desktop_entries = false;
+          gnome_search = false;
           signer = {
             mode = "bunker";
             relay = "wss://bunker.example.com";

@@ -33,8 +33,8 @@ Napplets:
 Settings and signer:
   settings get                   Show effective settings
   settings reload                Reload the configuration file
-  settings set FIELD JSON_VALUE  Set a field (relays, blossom_servers, or
-                                 discover_on_user_relays)
+  settings set FIELD JSON_VALUE  Set relays, blossom_servers, or a boolean
+                                 integration setting
   settings clear FIELD           Clear a setting override
   signer status                  Show signer mode and connection state
   signer switch none             Disconnect the signer
@@ -195,13 +195,15 @@ Usage:
   kwakore settings reload
   kwakore settings set FIELD JSON_VALUE
   kwakore settings clear FIELD
-FIELD: relays, blossom_servers, or discover_on_user_relays.
+FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
+       or gnome_search.
 Run 'kwakore settings get|reload|set|clear --help' for details.
 `,
 	"settings get": `Show effective service settings.
 
 Usage: kwakore settings get
-Shows relays, Blossom servers, discovery policy, and signer mode.
+Shows relays, Blossom servers, discovery and desktop integration settings,
+and signer mode.
 `,
 	"settings reload": `Reload the declarative configuration file.
 
@@ -211,15 +213,17 @@ Invalid configuration leaves the previous effective settings in place.
 	"settings set": `Save a setting override.
 
 Usage: kwakore settings set FIELD JSON_VALUE
-FIELD: relays, blossom_servers, or discover_on_user_relays.
+FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
+       or gnome_search.
 JSON_VALUE is an array of URLs for relays or blossom_servers, or a boolean
-for discover_on_user_relays. Quote JSON in your shell.
+for discover_on_user_relays, desktop_entries, or gnome_search. Quote JSON in your shell.
 Example: kwakore settings set discover_on_user_relays false
 `,
 	"settings clear": `Remove a setting override.
 
 Usage: kwakore settings clear FIELD
-FIELD: relays, blossom_servers, or discover_on_user_relays.
+FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
+       or gnome_search.
 The declarative or built-in value becomes effective again.
 Example: kwakore settings clear relays
 `,

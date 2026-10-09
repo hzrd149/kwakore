@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/godbus/dbus/v5"
+
 	"fiatjaf.com/nostr"
 
 	"kwakore/backend"
@@ -54,6 +56,9 @@ type Service struct {
 	setSignerOverride func(serviceconfig.Signer) error
 	closeBackend      func()
 	lock              *os.File
+	searchBus         *dbus.Conn
+	searchHost        *linuxhost.Host
+	searchRefreshOnce sync.Once
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
@@ -107,12 +112,13 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	if err := recoverSignerTransition(credentials, m); err != nil {
 		return nil, err
 	}
-	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: &linuxhost.Host{Program: windowProgramPath(), CLI: nativeEntryCLIPath()}})
+	searchHost := &linuxhost.Host{Program: windowProgramPath(), CLI: nativeEntryCLIPath()}
+	closeBackend, err := backend.Start(backend.Options{DataDir: paths.DataDir, ServiceConfig: m, Host: searchHost})
 	if err != nil {
 		return nil, err
 	}
 	workContext, cancelWork := context.WithCancel(context.Background())
-	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{})}
+	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{}), searchHost: searchHost}
 	// Native entry passes report failures as a fixed summary only: the
 	// joined error names files and paths and goes to the journal instead.
 	// A failure of the startup pass, which ran inside Start, is replayed
@@ -437,11 +443,23 @@ func (s *Service) ClearSetting(field string) error {
 
 func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	after := s.manager.Effective()
-	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays {
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch {
 		return
 	}
 	discoveryChanged := !slices.Equal(before.Relays, after.Relays) || before.DiscoverOnUserRelays != after.DiscoverOnUserRelays
 	backend.ServiceSettingsChanged(discoveryChanged)
+	if before.DesktopEntries != after.DesktopEntries {
+		_ = backend.SyncNativeEntries()
+	}
+	if before.GNOMESearch != after.GNOMESearch {
+		if err := s.searchHost.SetGNOMESearchIntegration(after.GNOMESearch); err != nil {
+			s.recordError("gnome_search", "GNOME search provider registration failed")
+		}
+		if after.GNOMESearch {
+			s.startGNOMESearch()
+			s.StartSearchCatalogRefresh()
+		}
+	}
 }
 
 func (s *Service) Reload() error {
@@ -525,6 +543,9 @@ func (s *Service) Close() {
 			s.signer.Close()
 		}
 		backend.SetNativeEntryReporter(nil)
+		if s.searchBus != nil {
+			_ = s.searchBus.Close()
+		}
 		if s.closeBackend != nil {
 			s.closeBackend()
 		}
@@ -558,6 +579,7 @@ func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready f
 		s.Close()
 		return err
 	}
+	s.StartDesktopSearch()
 	ready(fmt.Sprintf("kwakore-daemon %s ready (config: %s)", version, paths.ConfigFile))
 	<-ctx.Done()
 	s.BeginShutdown()

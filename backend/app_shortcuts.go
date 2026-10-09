@@ -191,7 +191,9 @@ func syncNativeEntries() error {
 	count := 0
 	if host.AppShortcutsSupported() {
 		var shortcuts []AppShortcut
-		shortcuts, err = serviceNativeEntries()
+		if serviceConfig == nil || serviceConfig.Effective().DesktopEntries {
+			shortcuts, err = serviceNativeEntries()
+		}
 		count = len(shortcuts)
 		err = errors.Join(err, host.SyncAppShortcuts(shortcuts))
 	}
@@ -204,6 +206,9 @@ func syncNativeEntries() error {
 	}
 	return err
 }
+
+// SyncNativeEntries reconciles entries after a live service setting change.
+func SyncNativeEntries() error { return syncNativeEntries() }
 
 // SetNativeEntryReporter installs the function told about every failed
 // native entry pass (nil removes it). A failure of the pass that already ran

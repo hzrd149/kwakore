@@ -105,6 +105,14 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			if m.override.DiscoverOnUserRelays == nil {
 				return nil
 			}
+		case "desktop_entries":
+			if m.override.DesktopEntries == nil {
+				return nil
+			}
+		case "gnome_search":
+			if m.override.GNOMESearch == nil {
+				return nil
+			}
 		}
 	}
 	next := cloneConfig(m.override)
@@ -121,12 +129,19 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			} else {
 				next.BlossomServers = &copyValue
 			}
-		case "discover_on_user_relays":
+		case "discover_on_user_relays", "desktop_entries", "gnome_search":
 			v, ok := value.(bool)
 			if !ok {
 				return fmt.Errorf("%s: expected boolean", field)
 			}
-			next.DiscoverOnUserRelays = &v
+			switch field {
+			case "desktop_entries":
+				next.DesktopEntries = &v
+			case "gnome_search":
+				next.GNOMESearch = &v
+			default:
+				next.DiscoverOnUserRelays = &v
+			}
 		case "signer":
 			v, ok := value.(Signer)
 			if !ok {
@@ -142,6 +157,10 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			next.BlossomServers = nil
 		case "discover_on_user_relays":
 			next.DiscoverOnUserRelays = nil
+		case "desktop_entries":
+			next.DesktopEntries = nil
+		case "gnome_search":
+			next.GNOMESearch = nil
 		}
 	}
 	if err := validateMerged(m.file, next); err != nil {
@@ -209,6 +228,14 @@ func cloneConfig(c Config) Config {
 	if c.DiscoverOnUserRelays != nil {
 		v := *c.DiscoverOnUserRelays
 		n.DiscoverOnUserRelays = &v
+	}
+	if c.DesktopEntries != nil {
+		v := *c.DesktopEntries
+		n.DesktopEntries = &v
+	}
+	if c.GNOMESearch != nil {
+		v := *c.GNOMESearch
+		n.GNOMESearch = &v
 	}
 	if c.Signer != nil {
 		v := *c.Signer

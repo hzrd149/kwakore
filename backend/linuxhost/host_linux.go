@@ -469,8 +469,6 @@ func (h *Host) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 	}
 	return desktopentry.Reconcile(dir, h.CLI, entries)
 }
-func (*Host) GNOMESearchSupported() bool                                       { return false }
-func (*Host) SetGNOMESearchIntegration(bool) error                             { return backend.ErrServiceUnavailable }
 func (*Host) AmberRequest(string, string, string, string, string, string) bool { return false }
 func (*Host) NotificationControls() []string                                   { return []string{"system"} }
 func (*Host) RequestNotificationPermission() bool                              { return true }

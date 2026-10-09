@@ -259,3 +259,11 @@ func quoteExecArg(value string) string {
 	value = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`).Replace(value)
 	return `"` + strings.ReplaceAll(value, "%", "%%") + `"`
 }
+
+// QuoteExecutable validates and quotes a CLI path for a desktop Exec value.
+func QuoteExecutable(path string) (string, error) {
+	if err := checkCLI(path); err != nil {
+		return "", err
+	}
+	return escapeString(quoteExecArg(path)), nil
+}

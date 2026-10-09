@@ -46,6 +46,8 @@ func TestCLISettingsCommands(t *testing.T) {
 		{[]string{"settings", "set", "relays", `[]`}, "settings.set", `{"field":"relays","value":[]}`},
 		{[]string{"settings", "set", "blossom_servers", `[]`}, "settings.set", `{"field":"blossom_servers","value":[]}`},
 		{[]string{"settings", "set", "discover_on_user_relays", `false`}, "settings.set", `{"field":"discover_on_user_relays","value":false}`},
+		{[]string{"settings", "set", "desktop_entries", `false`}, "settings.set", `{"field":"desktop_entries","value":false}`},
+		{[]string{"settings", "set", "gnome_search", `false`}, "settings.set", `{"field":"gnome_search","value":false}`},
 		{[]string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
@@ -542,6 +544,8 @@ func TestCLISettingsStructuredErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"settings", "set", "relays", `null`},
 		{"settings", "set", "discover_on_user_relays", `[]`},
+		{"settings", "set", "desktop_entries", `[]`},
+		{"settings", "set", "gnome_search", `null`},
 		{"settings", "set", "blossom_servers", `[true]`},
 	} {
 		err := run(args)
