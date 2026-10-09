@@ -46,3 +46,22 @@ func TestTUISanitizesDaemonText(t *testing.T) {
 		t.Fatalf("unsafe text: %q", got)
 	}
 }
+
+func TestTUIDiscoveryFiltersCachedItemsLocally(t *testing.T) {
+	m := tuiModel{tab: 2, discovered: []tuiItem{{label: "Notes", address: "35129:abc:notes", detail: "napplet"}, {label: "Photo Gallery", address: "35129:def:gallery", detail: "napplet"}}}
+	m.prompt = &tuiPrompt{title: "Filter", action: "search", value: "PHOTO"}
+	if view := m.View(); !strings.Contains(view, "1 matches") || !strings.Contains(view, "Photo Gallery") || strings.Contains(view, "  Notes\n") {
+		t.Fatalf("search preview: %q", view)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(tuiModel)
+	if cmd != nil || len(m.items) != 1 || m.items[0].label != "Photo Gallery" {
+		t.Fatalf("local filter issued request or selected wrong items: %+v", m.items)
+	}
+	m.prompt = &tuiPrompt{title: "Filter", action: "search", value: ""}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(tuiModel)
+	if cmd != nil || len(m.items) != 2 {
+		t.Fatalf("clearing filter failed: %+v", m.items)
+	}
+}

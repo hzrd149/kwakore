@@ -105,6 +105,44 @@ func (m tuiModel) request(kind string, args ...string) tea.Cmd {
 	}
 }
 
+// discoverAll reads the daemon's cached catalog page by page. Filtering then
+// happens entirely in the TUI, including while the user edits a search.
+func (m tuiModel) discoverAll(refresh bool) tea.Cmd {
+	return func() tea.Msg {
+		items := make([]json.RawMessage, 0)
+		offset := 0
+		for {
+			args := []string{"discover", "--offset", fmt.Sprint(offset), "--limit", "500"}
+			if refresh && offset == 0 {
+				args = append(args, "--refresh")
+			}
+			result := m.request("discover", args...)().(tuiResult)
+			if result.err != "" {
+				return result
+			}
+			var page struct {
+				Items      []json.RawMessage `json:"items"`
+				NextOffset *int              `json:"next_offset"`
+			}
+			if json.Unmarshal(result.data, &page) != nil {
+				return tuiResult{kind: "discover", err: "invalid catalog response"}
+			}
+			items = append(items, page.Items...)
+			if page.NextOffset == nil {
+				break
+			}
+			if *page.NextOffset <= offset {
+				return tuiResult{kind: "discover", err: "invalid catalog pagination"}
+			}
+			offset = *page.NextOffset
+		}
+		data, _ := json.Marshal(struct {
+			Items []json.RawMessage `json:"items"`
+		}{items})
+		return tuiResult{kind: "discover", data: data}
+	}
+}
+
 func (m tuiModel) refresh() tea.Cmd {
 	switch m.tab {
 	case 0:
@@ -112,8 +150,7 @@ func (m tuiModel) refresh() tea.Cmd {
 	case 1:
 		return m.request("installed", "installed", "--offset", fmt.Sprint(m.page*100), "--limit", "100")
 	case 2:
-		args := []string{"discover", "--query", m.query, "--offset", fmt.Sprint(m.page * 100), "--limit", "100"}
-		return m.request("discover", args...)
+		return m.discoverAll(false)
 	case 3:
 		return m.request("settings", "settings", "inspect")
 	case 4:
@@ -211,14 +248,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset++
 			}
 		case "pgdown":
-			if m.more {
+			if m.tab != 2 && m.more {
 				m.page++
 				m.cursor, m.offset = 0, 0
 				m.busy = true
 				return m, m.refresh()
 			}
 		case "pgup":
-			if m.page > 0 {
+			if m.tab != 2 && m.page > 0 {
 				m.page--
 				m.cursor, m.offset = 0, 0
 				m.busy = true
@@ -230,7 +267,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "R":
 			if m.tab == 2 {
 				m.busy = true
-				return m, m.request("discover", "discover", "--query", m.query, "--refresh", "--limit", "100")
+				return m, m.discoverAll(true)
 			}
 			if m.tab == 3 {
 				m.busy = true
@@ -238,7 +275,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "/":
 			if m.tab == 2 {
-				m.prompt = &tuiPrompt{title: "Search catalog", action: "search", value: m.query}
+				m.prompt = &tuiPrompt{title: "Filter discovered napplets", action: "search", value: m.query}
 			}
 		case "enter":
 			return m.activate()
@@ -349,7 +386,7 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 		m.prompt = &tuiPrompt{title: "Type INSTALL to install " + safeText(it.label), action: "install-selected", address: it.address}
 	case 3:
 		if it.address == "relays" || it.address == "blossom_servers" {
-			m.prompt = &tuiPrompt{title: "Edit " + it.address + " (comma-separated URLs)", action: "setting-list", address: it.address, value: strings.Join(parseStringList(m.settings[it.address]), ", ")}
+			m.prompt = &tuiPrompt{title: "Edit " + it.address + " (comma-separated URLs; scheme optional)", action: "setting-list", address: it.address, value: strings.Join(parseStringList(m.settings[it.address]), ", ")}
 		} else {
 			m.prompt = &tuiPrompt{title: "Set " + it.address + " to true or false", action: "setting-bool", address: it.address}
 		}
@@ -381,8 +418,7 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch p.action {
 		case "search":
 			m.query = value
-			m.page = 0
-			cmd = m.refresh()
+			m.applyDiscoverFilter()
 		case "install":
 			if value != "" {
 				cmd = m.request("install", "install", value)
@@ -539,10 +575,12 @@ func (m *tuiModel) consume(x tuiResult) {
 		m.more = page.NextOffset != nil
 		if x.kind == "installed" {
 			m.installed = items
+			m.items = items
 		} else {
 			m.discovered = items
+			m.applyDiscoverFilter()
 		}
-		m.notice = fmt.Sprintf("%d entries", len(items))
+		m.notice = fmt.Sprintf("%d entries", len(m.items))
 	case "settings":
 		var raw map[string]json.RawMessage
 		if json.Unmarshal(x.data, &raw) != nil {
@@ -600,6 +638,25 @@ func (m *tuiModel) consume(x tuiResult) {
 	}
 }
 
+func filterDiscovered(items []tuiItem, query string) []tuiItem {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return append([]tuiItem(nil), items...)
+	}
+	filtered := make([]tuiItem, 0)
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(it.label), query) || strings.Contains(strings.ToLower(it.address), query) || strings.Contains(strings.ToLower(it.detail), query) {
+			filtered = append(filtered, it)
+		}
+	}
+	return filtered
+}
+
+func (m *tuiModel) applyDiscoverFilter() {
+	m.items = filterDiscovered(m.discovered, m.query)
+	m.cursor, m.offset, m.page = 0, 0, 0
+}
+
 func parseStringList(raw json.RawMessage) []string {
 	var out []string
 	_ = json.Unmarshal(raw, &out)
@@ -635,7 +692,7 @@ func (m tuiModel) View() string {
 		b.WriteString("1-7 or Tab: switch screens   j/k or arrows: select   Enter: open/edit\n")
 		b.WriteString("r: reload   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
 		b.WriteString("Installed: i install, u update, l launch, x uninstall, p permissions\n")
-		b.WriteString("Discover: / search, R network refresh, Enter install\n")
+		b.WriteString("Discover: / filter cached list, r reload cache, R network refresh, Enter install\n")
 		b.WriteString("Settings: Enter edit, c clear override, R reload config\n")
 		b.WriteString("Signer: n none, s system, e nsec, b bunker, a pair, w wait, C cancel\n")
 		b.WriteString("Windows: Enter or x closes the selected window after confirmation\n")
@@ -650,6 +707,16 @@ func (m tuiModel) View() string {
 			b.WriteString(safeText(m.prompt.value))
 		}
 		b.WriteString("▌\n\nEnter: confirm   Esc: cancel\n")
+		if m.prompt.action == "search" {
+			matches := filterDiscovered(m.discovered, m.prompt.value)
+			b.WriteString(fmt.Sprintf("\n%d matches in the cached catalog\n", len(matches)))
+			for i, it := range matches {
+				if i >= m.listHeight() {
+					break
+				}
+				b.WriteString("  " + safeText(it.label) + "\n")
+			}
+		}
 		return b.String()
 	}
 	if m.permissionView {
@@ -665,7 +732,11 @@ func (m tuiModel) View() string {
 			b.WriteString("Search: " + safeText(m.query) + "\n")
 		}
 		if len(m.items) == 0 {
-			b.WriteString("No entries loaded. Press r to refresh.\n")
+			if m.tab == 2 && m.query != "" && len(m.discovered) > 0 {
+				b.WriteString("No matches. Press / to change the filter.\n")
+			} else {
+				b.WriteString("No entries loaded. Press r to refresh.\n")
+			}
 		}
 		for i := m.offset; i < len(m.items) && i < m.offset+m.listHeight(); i++ {
 			it := m.items[i]

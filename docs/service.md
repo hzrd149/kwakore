@@ -84,6 +84,8 @@ view, `?` for all keys, and `q` to exit. `kwak tui` requires a terminal;
 effective value and whether it came from a default, `config.json`, or a saved
 override. Enter edits a setting; `c` clears its override. Changes take effect
 through the same control methods as the ordinary CLI.
+In Discover, `/` filters the full cached catalog locally as you type; `r`
+reloads the cache and `R` refreshes it from relays.
 
 From a source checkout, `just install` builds the current code and installs
 it for this user. Run it again to update. `just uninstall` removes the
@@ -518,6 +520,10 @@ writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
 further changes are refused until repair and restart. Clearing an override
 that is not there changes nothing.
+In `kwak tui` or `kwak settings set`, relay hosts entered without a scheme
+gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
+Explicit schemes are preserved. The daemon still validates canonical URLs,
+and direct edits to `config.json` must include schemes.
 
 ```console
 $ kwak settings set relays '["wss://relay.example.com"]'

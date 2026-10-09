@@ -104,6 +104,10 @@ client transport and JSON results as the other commands. It requires an
 interactive terminal and does not accept `--json`. Its settings screen uses
 `settings.inspect` to show the source of each effective value; its Windows
 screen uses `napplet.windows` to list IDs accepted by `napplet.stop`.
+Its Discover screen loads the cached catalog and filters it locally;
+only an explicit refresh fetches from relays. The TUI and CLI add `wss://`
+to bare relay hosts and `https://` to bare Blossom hosts before sending
+`settings.set`. Direct protocol clients must send canonical URLs.
 
 Run `kwak` or `kwak help` to see the full command menu without connecting to the daemon. `-h` and `--help` do the same. For command-specific usage, run `kwak COMMAND --help`, such as `kwak discover --help` or `kwak signer pair start --help`; `kwak help COMMAND` also works. Bare `settings`, `signer`, and `permissions` show their subcommand menus. Help never contacts the daemon.
 

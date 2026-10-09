@@ -610,6 +610,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 				if !validSettingValue(args[2], value) {
 					return "", nil, "", inputFailure("invalid JSON setting value")
 				}
+				value = normalizeSettingURLs(args[2], value)
 				params, _ := json.Marshal(struct {
 					Field string          `json:"field"`
 					Value json.RawMessage `json:"value"`
@@ -836,6 +837,32 @@ func validSettingValue(field string, value json.RawMessage) bool {
 	}
 	var v []string
 	return json.Unmarshal(value, &v) == nil
+}
+
+// normalizeSettingURLs is a client convenience; the daemon and config file
+// still validate and persist fully qualified canonical URLs.
+func normalizeSettingURLs(field string, value json.RawMessage) json.RawMessage {
+	if field != "relays" && field != "blossom_servers" {
+		return value
+	}
+	var urls []string
+	if json.Unmarshal(value, &urls) != nil {
+		return value
+	}
+	scheme := "wss://"
+	if field == "blossom_servers" {
+		scheme = "https://"
+	}
+	for i, raw := range urls {
+		if !strings.Contains(raw, "://") {
+			urls[i] = scheme + raw
+		}
+	}
+	result, err := json.Marshal(urls)
+	if err != nil {
+		return value
+	}
+	return result
 }
 
 func peerUID(conn *net.UnixConn) (uint32, error) {

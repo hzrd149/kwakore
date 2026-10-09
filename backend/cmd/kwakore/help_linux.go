@@ -236,6 +236,7 @@ FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
        or gnome_search.
 JSON_VALUE is an array of URLs for relays or blossom_servers, or a boolean
 for discover_on_user_relays, desktop_entries, or gnome_search. Quote JSON in your shell.
+Bare relay hosts gain wss://; bare Blossom hosts gain https://.
 Example: kwak settings set discover_on_user_relays false
 `,
 	"settings clear": `Remove a setting override.
