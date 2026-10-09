@@ -20,13 +20,19 @@ import (
 var tuiTabs = []string{"Overview", "Installed", "Discover", "Settings", "Signer", "Diagnostics", "Windows"}
 
 type tuiItem struct {
-	label, address, detail string
+	label, address, detail                  string
+	author, authorName, description, reason string
+	sources                                 []string
+	eventID, artifactHash                   string
+	createdAt                               int64
+	available                               bool
 }
 
 type tuiResult struct {
 	kind string
 	data json.RawMessage
 	err  string
+	seq  uint64
 }
 
 type tuiPrompt struct {
@@ -49,9 +55,32 @@ type tuiModel struct {
 	permissions                        json.RawMessage
 	selectedAddress                    string
 	permissionView                     bool
+	detailView                         bool
 	pairURI                            string
 	page                               int
 	more                               bool
+	refreshing                         bool
+	discoveryLoading                   bool
+	loadingStarted                     time.Time
+	spinner                            int
+	catalogFetched                     string
+	catalogComplete                    bool
+	discoverySeq                       uint64
+}
+
+type tuiTick struct{ seq uint64 }
+
+func tickTUI(seq uint64) tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return tuiTick{seq} })
+}
+
+func (m *tuiModel) beginDiscovery(refresh bool) tea.Cmd {
+	m.discoverySeq++
+	m.busy, m.refreshing = true, refresh
+	m.discoveryLoading = true
+	m.loadingStarted = time.Now()
+	m.spinner = 0
+	return tea.Batch(m.discoverAll(refresh), tickTUI(m.discoverySeq))
 }
 
 func runTUI(socket string, timeout time.Duration) error {
@@ -108,9 +137,12 @@ func (m tuiModel) request(kind string, args ...string) tea.Cmd {
 // discoverAll reads the daemon's cached catalog page by page. Filtering then
 // happens entirely in the TUI, including while the user edits a search.
 func (m tuiModel) discoverAll(refresh bool) tea.Cmd {
+	seq := m.discoverySeq
 	return func() tea.Msg {
 		items := make([]json.RawMessage, 0)
 		offset := 0
+		var fetchedAt *string
+		var complete bool
 		for {
 			args := []string{"discover", "--offset", fmt.Sprint(offset), "--limit", "500"}
 			if refresh && offset == 0 {
@@ -118,28 +150,34 @@ func (m tuiModel) discoverAll(refresh bool) tea.Cmd {
 			}
 			result := m.request("discover", args...)().(tuiResult)
 			if result.err != "" {
+				result.seq = seq
 				return result
 			}
 			var page struct {
 				Items      []json.RawMessage `json:"items"`
 				NextOffset *int              `json:"next_offset"`
+				FetchedAt  *string           `json:"fetched_at"`
+				Complete   bool              `json:"complete"`
 			}
 			if json.Unmarshal(result.data, &page) != nil {
-				return tuiResult{kind: "discover", err: "invalid catalog response"}
+				return tuiResult{kind: "discover", err: "invalid catalog response", seq: seq}
 			}
 			items = append(items, page.Items...)
+			fetchedAt, complete = page.FetchedAt, page.Complete
 			if page.NextOffset == nil {
 				break
 			}
 			if *page.NextOffset <= offset {
-				return tuiResult{kind: "discover", err: "invalid catalog pagination"}
+				return tuiResult{kind: "discover", err: "invalid catalog pagination", seq: seq}
 			}
 			offset = *page.NextOffset
 		}
 		data, _ := json.Marshal(struct {
-			Items []json.RawMessage `json:"items"`
-		}{items})
-		return tuiResult{kind: "discover", data: data}
+			Items     []json.RawMessage `json:"items"`
+			FetchedAt *string           `json:"fetched_at"`
+			Complete  bool              `json:"complete"`
+		}{items, fetchedAt, complete})
+		return tuiResult{kind: "discover", data: data, seq: seq}
 	}
 }
 
@@ -166,7 +204,13 @@ func (m *tuiModel) setTab(tab int) tea.Cmd {
 	m.tab, m.cursor, m.offset, m.page, m.notice = tab, 0, 0, 0, ""
 	m.items = nil
 	m.permissionView = false
+	m.detailView = false
 	m.busy = true
+	if tab == 2 {
+		return m.beginDiscovery(false)
+	}
+	m.discoveryLoading = false
+	m.refreshing = false
 	return m.refresh()
 }
 
@@ -175,7 +219,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = x.Width, x.Height
 	case tuiResult:
+		if x.kind == "discover" && (x.seq != m.discoverySeq || m.tab != 2) {
+			return m, nil
+		}
 		m.busy = false
+		if x.kind == "discover" {
+			m.refreshing = false
+			m.discoveryLoading = false
+		}
 		if x.err != "" {
 			m.notice = x.err
 			return m, nil
@@ -189,6 +240,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.consume(x)
 		if x.kind == "install" || x.kind == "update" || x.kind == "uninstall" || x.kind == "stop" {
+			if m.tab == 2 {
+				return m, m.beginDiscovery(false)
+			}
 			m.busy = true
 			return m, m.refresh()
 		}
@@ -199,6 +253,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if x.kind == "pair-cancel" {
 			m.busy = true
 			return m, m.request("signer", "signer", "status")
+		}
+	case tuiTick:
+		if m.discoveryLoading && m.tab == 2 && x.seq == m.discoverySeq {
+			m.spinner = (m.spinner + 1) % 4
+			return m, tickTUI(x.seq)
 		}
 	case tea.KeyMsg:
 		if m.prompt != nil {
@@ -220,6 +279,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.help {
 			m.help = false
+			return m, nil
+		}
+		if m.detailView {
+			switch x.String() {
+			case "esc", "backspace":
+				m.detailView = false
+				return m, nil
+			case "i", "enter":
+				return m.selectedDiscoverInstall()
+			}
 			return m, nil
 		}
 		switch x.String() {
@@ -262,12 +331,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.refresh()
 			}
 		case "r":
+			if m.tab == 2 {
+				if m.busy {
+					return m, nil
+				}
+				return m, m.beginDiscovery(false)
+			}
 			m.busy = true
 			return m, m.refresh()
 		case "R":
 			if m.tab == 2 {
-				m.busy = true
-				return m, m.discoverAll(true)
+				if m.busy {
+					return m, nil
+				}
+				return m, m.beginDiscovery(true)
 			}
 			if m.tab == 3 {
 				m.busy = true
@@ -280,8 +357,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.activate()
 		case "i":
-			if m.tab == 1 || m.tab == 2 {
+			if m.tab == 2 {
+				return m.selectedDiscoverInstall()
+			}
+			if m.tab == 1 {
 				m.prompt = &tuiPrompt{title: "Install address or naddr", action: "install"}
+			}
+		case "d":
+			if m.tab == 2 && m.cursor < len(m.items) {
+				m.detailView = true
 			}
 		case "u":
 			if m.tab == 1 {
@@ -323,6 +407,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.prompt = &tuiPrompt{title: "nsec (hidden)", action: "signer-nsec", secret: true}
 			}
 		case "a":
+			if m.tab == 2 {
+				m.prompt = &tuiPrompt{title: "Install address or naddr", action: "install"}
+			}
 			if m.tab == 4 {
 				m.busy = true
 				return m, m.request("pair", "signer", "pair", "start")
@@ -383,7 +470,7 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 	case 1:
 		return m.itemAction("permissions")
 	case 2:
-		m.prompt = &tuiPrompt{title: "Type INSTALL to install " + safeText(it.label), action: "install-selected", address: it.address}
+		m.detailView = true
 	case 3:
 		if it.address == "relays" || it.address == "blossom_servers" {
 			m.prompt = &tuiPrompt{title: "Edit " + it.address + " (comma-separated URLs; scheme optional)", action: "setting-list", address: it.address, value: strings.Join(parseStringList(m.settings[it.address]), ", ")}
@@ -396,6 +483,20 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 	case 6:
 		return m.itemAction("stop")
 	}
+	return m, nil
+}
+
+func (m tuiModel) selectedDiscoverInstall() (tea.Model, tea.Cmd) {
+	if m.cursor >= len(m.items) {
+		return m, nil
+	}
+	it := m.items[m.cursor]
+	if !it.available {
+		m.notice = "This manifest is unavailable: " + safeText(it.reason)
+		return m, nil
+	}
+	m.detailView = false
+	m.prompt = &tuiPrompt{title: "Type INSTALL to install " + safeText(it.label), action: "install-selected", address: it.address}
 	return m, nil
 }
 
@@ -495,6 +596,7 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if cmd != nil {
 			m.busy = true
+			m.discoveryLoading = false
 		}
 		return m, cmd
 	default:
@@ -548,12 +650,21 @@ func (m *tuiModel) consume(x tuiResult) {
 		var page struct {
 			Items []struct {
 				Address, Name, Format string
+				Description           string   `json:"description"`
+				Author                string   `json:"author"`
+				AuthorName            string   `json:"author_name"`
+				UnavailableReason     string   `json:"unavailable_reason"`
+				Sources               []string `json:"sources"`
 				Available             bool
 				Version               struct {
-					CreatedAt int64 `json:"created_at"`
+					CreatedAt    int64  `json:"created_at"`
+					EventID      string `json:"event_id"`
+					ArtifactHash string `json:"artifact_hash"`
 				}
 			} `json:"items"`
-			NextOffset *int `json:"next_offset"`
+			NextOffset *int    `json:"next_offset"`
+			FetchedAt  *string `json:"fetched_at"`
+			Complete   bool    `json:"complete"`
 		}
 		if json.Unmarshal(x.data, &page) != nil {
 			m.notice = "Invalid catalog response"
@@ -569,7 +680,14 @@ func (m *tuiModel) consume(x tuiResult) {
 			if !it.Available {
 				state = "unavailable"
 			}
-			items = append(items, tuiItem{label: name, address: it.Address, detail: it.Format + " · " + state})
+			author := it.AuthorName
+			if author == "" {
+				author = shortAuthor(it.Author)
+			}
+			items = append(items, tuiItem{label: name, address: it.Address, detail: it.Format + " · " + safeText(author) + " · " + state,
+				author: it.Author, authorName: it.AuthorName, description: it.Description, reason: it.UnavailableReason,
+				sources: it.Sources, eventID: it.Version.EventID, artifactHash: it.Version.ArtifactHash,
+				createdAt: it.Version.CreatedAt, available: it.Available})
 		}
 		m.items = items
 		m.more = page.NextOffset != nil
@@ -578,6 +696,11 @@ func (m *tuiModel) consume(x tuiResult) {
 			m.items = items
 		} else {
 			m.discovered = items
+			m.catalogComplete = page.Complete
+			m.catalogFetched = ""
+			if page.FetchedAt != nil {
+				m.catalogFetched = *page.FetchedAt
+			}
 			m.applyDiscoverFilter()
 		}
 		m.notice = fmt.Sprintf("%d entries", len(m.items))
@@ -645,11 +768,19 @@ func filterDiscovered(items []tuiItem, query string) []tuiItem {
 	}
 	filtered := make([]tuiItem, 0)
 	for _, it := range items {
-		if strings.Contains(strings.ToLower(it.label), query) || strings.Contains(strings.ToLower(it.address), query) || strings.Contains(strings.ToLower(it.detail), query) {
+		if strings.Contains(strings.ToLower(it.label), query) || strings.Contains(strings.ToLower(it.address), query) || strings.Contains(strings.ToLower(it.detail), query) ||
+			strings.Contains(strings.ToLower(it.author), query) || strings.Contains(strings.ToLower(it.description), query) {
 			filtered = append(filtered, it)
 		}
 	}
 	return filtered
+}
+
+func shortAuthor(author string) string {
+	if len(author) < 16 {
+		return author
+	}
+	return author[:8] + "…" + author[len(author)-8:]
 }
 
 func (m *tuiModel) applyDiscoverFilter() {
@@ -677,6 +808,57 @@ func safeText(s string) string {
 	return b.String()
 }
 
+func truncateTUILine(s string, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return string(r[:width-1]) + "…"
+}
+
+func (m tuiModel) discoverDetail(it tuiItem) string {
+	var b strings.Builder
+	b.WriteString(safeText(it.label) + "\n")
+	b.WriteString("Format: " + safeText(strings.SplitN(it.detail, " · ", 2)[0]) + "\n")
+	if it.authorName != "" {
+		b.WriteString("Author: " + safeText(it.authorName) + "\n")
+	}
+	b.WriteString("Author key: " + safeText(it.author) + "\n")
+	b.WriteString("Address: " + safeText(it.address) + "\n")
+	if it.createdAt > 0 {
+		b.WriteString("Published: " + time.Unix(it.createdAt, 0).UTC().Format(time.RFC3339) + "\n")
+	}
+	if it.eventID != "" {
+		b.WriteString("Event: " + safeText(it.eventID) + "\n")
+	}
+	if it.artifactHash != "" {
+		b.WriteString("Artifact hash: " + safeText(it.artifactHash) + "\n")
+	}
+	if it.available {
+		b.WriteString("Status: available\n")
+	} else {
+		b.WriteString("Status: unavailable · " + safeText(it.reason) + "\n")
+	}
+	if it.description != "" {
+		b.WriteString("\nDescription\n" + safeText(it.description) + "\n")
+	}
+	if len(it.sources) > 0 {
+		b.WriteString("\nSource\n")
+		for _, source := range it.sources {
+			b.WriteString(safeText(source) + "\n")
+		}
+	}
+	b.WriteString("\nEsc back")
+	if it.available {
+		b.WriteString("   i install")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 func (m tuiModel) View() string {
 	var b strings.Builder
 	b.WriteString("KWAKORE  ")
@@ -688,11 +870,29 @@ func (m tuiModel) View() string {
 		}
 	}
 	b.WriteString("\n" + strings.Repeat("─", min(m.width, 90)) + "\n")
+	if m.tab == 2 {
+		if m.discoveryLoading {
+			frames := []string{"◐", "◓", "◑", "◒"}
+			activity := "Loading cached catalog"
+			if m.refreshing {
+				activity = "Refreshing napplets from relays"
+			}
+			b.WriteString(fmt.Sprintf("%s %s… %ds elapsed\n", frames[m.spinner%len(frames)], activity, int(time.Since(m.loadingStarted).Seconds())))
+		} else if m.catalogComplete {
+			b.WriteString(fmt.Sprintf("Catalog: %d napplets and napps", len(m.discovered)))
+			if m.catalogFetched != "" {
+				b.WriteString(" · fetched " + safeText(m.catalogFetched))
+			}
+			b.WriteString("\n")
+		} else {
+			b.WriteString("No completed catalog refresh yet · press R to fetch from relays\n")
+		}
+	}
 	if m.help {
 		b.WriteString("1-7 or Tab: switch screens   j/k or arrows: select   Enter: open/edit\n")
 		b.WriteString("r: reload   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
 		b.WriteString("Installed: i install, u update, l launch, x uninstall, p permissions\n")
-		b.WriteString("Discover: / filter cached list, r reload cache, R network refresh, Enter install\n")
+		b.WriteString("Discover: / filter, r reload cache, R fetch relays, Enter/d details, i install, a address\n")
 		b.WriteString("Settings: Enter edit, c clear override, R reload config\n")
 		b.WriteString("Signer: n none, s system, e nsec, b bunker, a pair, w wait, C cancel\n")
 		b.WriteString("Windows: Enter or x closes the selected window after confirmation\n")
@@ -724,6 +924,12 @@ func (m tuiModel) View() string {
 		b.WriteString("a add or change rule   d clear rule   r refresh   Esc back\n")
 		return b.String()
 	}
+	if m.detailView && m.tab == 2 {
+		if m.cursor < len(m.items) {
+			b.WriteString(m.discoverDetail(m.items[m.cursor]))
+		}
+		return b.String()
+	}
 	switch m.tab {
 	case 0:
 		b.WriteString("Service\n" + prettyJSON(m.health) + "\n")
@@ -744,7 +950,7 @@ func (m tuiModel) View() string {
 			if i == m.cursor {
 				marker = "› "
 			}
-			b.WriteString(marker + safeText(it.label) + "  " + safeText(it.detail) + "\n")
+			b.WriteString(truncateTUILine(marker+safeText(it.label)+"  "+safeText(it.detail), m.width) + "\n")
 		}
 		if m.tab == 1 && len(m.permissions) > 0 {
 			b.WriteString("\nSelected permissions:\n" + prettyJSON(m.permissions) + "\n")

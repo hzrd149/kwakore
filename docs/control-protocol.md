@@ -62,6 +62,14 @@ For Linux installation, place the existing hardened `kwaklet` child executable b
 
 Permission methods accept only the full canonical address of an installed napplet. `required_domains` and `optional_domains` are the manifest's declared network domains; they are separate from host `Permission` rules. `SavedRule` is `{permission:Permission,subject:string,decision:"allow"|"deny"}` and contains only persisted decisions for that address, sorted by permission then subject. Session-only answers never appear. `Permission` is one of `sign`, `encrypt`, `decrypt`, `publish`, `open_link`, `save_file`, `copy_text`, `upload`, `fetch`, `notify`, `media`, or `dispatch`. A `dispatch` rule requires a nonempty subject naming its action. A new `dispatch` allow is rejected unless that exact saved rule already has a handler target; this API has no handler-target parameter and cannot invent a valid one. Other permissions may use an optional subject. A subject must be valid UTF-8, at most 256 bytes, with no control characters. Set accepts only `allow` or `deny`; clear removes exactly one saved key and returns `cleared:false` when it was absent. Neither operation changes session-only answers. A saved allow does not override a NAP route declaration, an in-window prompt's owner, or any other runtime consent gate. Invalid enum, subject, decision, address, or parameter shape yields `Invalid params`; a missing installed address yields `Not found`; failed persistence yields `Unavailable` and restores the prior in-memory rule.
 
+`Descriptor` includes `address`, `name`, `description`, `author` (the full
+publisher pubkey in hex), optional cached `author_name`, `format`,
+`available`, optional fixed `unavailable_reason`, optional validated `sources`,
+and `version`. An invalid optional source tag is omitted; it does not make an
+otherwise valid legacy NIP-5D napplet unavailable. Artifact and signature
+validation still determine availability. A refresh drains events arriving
+alongside EOSE before committing its catalog snapshot.
+
 ## Errors
 
 Errors use `{code:integer,message:string}` and, only for partial cleanup or headless launch as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:

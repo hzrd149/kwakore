@@ -1,12 +1,29 @@
 package backend
 
 import (
+	"context"
 	"slices"
 	"testing"
 	"time"
 
 	"fiatjaf.com/nostr"
 )
+
+func TestRefreshDrainsEventsAfterEOSESignal(t *testing.T) {
+	events := make(chan nostr.RelayEvent)
+	eose := make(chan struct{})
+	close(eose)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		events <- testNappEvent(nostr.Generate(), "notes", "Notes", 1)
+		close(events)
+	}()
+	var last discoveryPublish
+	complete := collectDiscoveryContext(context.Background(), events, eose, time.Hour, true, func(list []Napp, done bool) { last = discoveryPublish{list, done} })
+	if !complete || !last.done || len(last.list) != 1 || last.list[0].Name != "Notes" {
+		t.Fatalf("refresh lost queued event: complete=%v %+v", complete, last)
+	}
+}
 
 type discoveryPublish struct {
 	list []Napp

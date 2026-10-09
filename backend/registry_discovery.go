@@ -210,6 +210,13 @@ func collectDiscoveryContext(ctx context.Context, events <-chan nostr.RelayEvent
 
 	ticker := time.NewTicker(flush)
 	defer ticker.Stop()
+	var settle *time.Timer
+	var settleC <-chan time.Time
+	defer func() {
+		if settle != nil {
+			settle.Stop()
+		}
+	}()
 
 	for {
 		select {
@@ -234,6 +241,15 @@ func collectDiscoveryContext(ctx context.Context, events <-chan nostr.RelayEvent
 				list = append(list, n)
 			}
 			dirty = true
+			if settle != nil {
+				if !settle.Stop() {
+					select {
+					case <-settle.C:
+					default:
+					}
+				}
+				settle.Reset(discoveryFlushInterval)
+			}
 		case <-ticker.C:
 			if dirty {
 				publish(append([]Napp(nil), list...), finished)
@@ -242,11 +258,18 @@ func collectDiscoveryContext(ctx context.Context, events <-chan nostr.RelayEvent
 		case <-eose:
 			eose = nil
 			finished = true
-			publish(append([]Napp(nil), list...), true)
-			dirty = false
 			if stopAtEOSE {
-				return true
+				// The pool announces EOSE independently of forwarding queued
+				// events. Give that channel one quiet interval to drain.
+				settle = time.NewTimer(discoveryFlushInterval)
+				settleC = settle.C
+			} else {
+				publish(append([]Napp(nil), list...), true)
+				dirty = false
 			}
+		case <-settleC:
+			publish(append([]Napp(nil), list...), true)
+			return true
 		}
 	}
 }

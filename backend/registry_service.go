@@ -171,11 +171,16 @@ type ServiceVersion struct {
 
 // ServiceDescriptor contains only catalog fields safe for local clients.
 type ServiceDescriptor struct {
-	Address   string         `json:"address"`
-	Name      string         `json:"name"`
-	Format    string         `json:"format"`
-	Available bool           `json:"available"`
-	Version   ServiceVersion `json:"version"`
+	Address           string         `json:"address"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description,omitempty"`
+	Author            string         `json:"author"`
+	AuthorName        string         `json:"author_name,omitempty"`
+	Format            string         `json:"format"`
+	Available         bool           `json:"available"`
+	UnavailableReason string         `json:"unavailable_reason,omitempty"`
+	Sources           []string       `json:"sources,omitempty"`
+	Version           ServiceVersion `json:"version"`
 }
 
 type ServicePage struct {
@@ -256,21 +261,46 @@ func serviceDescriptor(n Napp) ServiceDescriptor {
 	if n.IsNapplet() {
 		format = FormatNapplet
 	}
-	name := make([]rune, 0, 256)
-	for _, r := range n.Name {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			continue
-		}
-		name = append(name, r)
-		if len(name) == 256 {
-			break
+	authorName := ""
+	if sys != nil && n.Author != nostr.ZeroPK {
+		if metadata, ok := sys.MetadataCache.Get(n.Author); ok {
+			authorName = metadata.ShortName()
 		}
 	}
 	return ServiceDescriptor{
-		Address: n.Address(), Name: string(name), Format: format,
-		Available: n.Unavailable == "",
-		Version:   ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash},
+		Address: n.Address(), Name: serviceDisplayText(n.Name, 256), Description: serviceDisplayText(n.Description, 1024),
+		Author: n.Author.Hex(), AuthorName: serviceDisplayText(authorName, 128), Format: format,
+		Available: n.Unavailable == "", UnavailableReason: publicUnavailableReason(n.Unavailable),
+		Sources: append([]string(nil), n.Sources...),
+		Version: ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash},
 	}
+}
+
+func publicUnavailableReason(reason string) string {
+	switch reason {
+	case "":
+		return ""
+	case reasonFileList, reasonHashes, reasonRequiredTags, reasonConventions, reasonManifest:
+		return reason
+	default:
+		return reasonManifest
+	}
+}
+
+func serviceDisplayText(raw string, limit int) string {
+	var b strings.Builder
+	count := 0
+	for _, r := range raw {
+		if count >= limit {
+			break
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return b.String()
 }
 
 func servicePage(items []ServiceDescriptor, offset, limit int) ServicePage {

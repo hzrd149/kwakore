@@ -177,6 +177,19 @@ func TestServiceInstalledCanonicalSafePages(t *testing.T) {
 	}
 }
 
+func TestServiceDescriptorIncludesSafeAuthorAndDetails(t *testing.T) {
+	pk := nostr.Generate().Public()
+	n := Napp{Author: pk, D: "notes", Format: FormatNapplet, Kind: KindNapplet, Name: "Notes", Description: "Hello\x1b[2J world", Unavailable: reasonRequiredTags, EventID: "event", CreatedAt: 42}
+	d := serviceDescriptor(n)
+	if d.Author != pk.Hex() || d.Description != "Hello[2J world" || d.UnavailableReason != reasonRequiredTags || d.Version.CreatedAt != 42 {
+		t.Fatalf("descriptor: %+v", d)
+	}
+	n.Unavailable = "private error\n"
+	if got := serviceDescriptor(n).UnavailableReason; got != reasonManifest {
+		t.Fatalf("unreviewed reason exposed: %q", got)
+	}
+}
+
 func TestServiceInstallCanonicalAddress(t *testing.T) {
 	pk := nostr.Generate().Public().Hex()
 	valid := "15129:" + pk + ":"

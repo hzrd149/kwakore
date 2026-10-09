@@ -130,7 +130,6 @@ const (
 	reasonFileList     = "Its file list is malformed"
 	reasonHashes       = "Its files don't match their hashes"
 	reasonRequiredTags = "Required tags are missing or malformed"
-	reasonSource       = "Its source isn't a valid git URL" // the NIP-5D source rule
 	reasonConventions  = "Its conventions are malformed"
 	reasonManifest     = "Its manifest is malformed" // anything else
 )

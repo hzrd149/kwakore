@@ -65,3 +65,35 @@ func TestTUIDiscoveryFiltersCachedItemsLocally(t *testing.T) {
 		t.Fatalf("clearing filter failed: %+v", m.items)
 	}
 }
+
+func TestTUIDiscoveryShowsAuthorDetailsAndRefreshProgress(t *testing.T) {
+	const author = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	m := tuiModel{tab: 2, width: 100, height: 24}
+	m.consume(tuiResult{kind: "discover", data: []byte(`{"items":[{"address":"35129:` + author + `:notes","name":"Notes","description":"A note app","author":"` + author + `","format":"napplet","available":true,"version":{"event_id":"event-id","created_at":42,"artifact_hash":"hash"}}],"fetched_at":"2026-10-09T00:00:00Z","complete":true}`)})
+	if len(m.items) != 1 || !strings.Contains(m.items[0].detail, "aaaaaaaa…aaaaaaaa") {
+		t.Fatalf("author missing from list: %+v", m.items)
+	}
+	m.detailView = true
+	if view := m.View(); !strings.Contains(view, "Author key: "+author) || !strings.Contains(view, "A note app") || !strings.Contains(view, "Artifact hash: hash") {
+		t.Fatalf("detail missing: %q", view)
+	}
+	m.detailView = false
+	_ = m.beginDiscovery(true)
+	if view := m.View(); !strings.Contains(view, "Refreshing napplets from relays") {
+		t.Fatalf("refresh status missing: %q", view)
+	}
+}
+
+func TestTUIStaleDiscoveryMessagesDoNotEndRefresh(t *testing.T) {
+	m := tuiModel{tab: 2, discoverySeq: 2, busy: true, discoveryLoading: true}
+	updated, _ := m.Update(tuiResult{kind: "discover", seq: 1, err: "old request failed"})
+	m = updated.(tuiModel)
+	if !m.busy || !m.discoveryLoading || m.notice != "" {
+		t.Fatalf("stale result changed current refresh: %+v", m)
+	}
+	updated, _ = m.Update(tuiTick{seq: 1})
+	m = updated.(tuiModel)
+	if m.spinner != 0 {
+		t.Fatalf("stale tick advanced spinner: %d", m.spinner)
+	}
+}

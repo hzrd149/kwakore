@@ -487,7 +487,7 @@ func TestWebNappletMalformedSourceIgnored(t *testing.T) {
 	}
 }
 
-func TestNIP5DInvalidSourceIsUnavailable(t *testing.T) {
+func TestNIP5DInvalidSourceIsIgnored(t *testing.T) {
 	index := NappPath{Path: "/index.html", Sha256: testArtifact}
 
 	// no source tag at all is fine, and a cloneable one is kept
@@ -507,15 +507,16 @@ func TestNIP5DInvalidSourceIsUnavailable(t *testing.T) {
 		"host:path", "user@host:", "a/b:c", "./repo", "file:///repo"} {
 		tags := append(nip5dTags("app", index), nostr.Tag{"source", raw})
 		evt := signedNapplet(t, tags, "")
-		if _, err := nappletFromEvent(evt); err == nil {
-			t.Errorf("source %q accepted", raw)
+		parsed, err := nappletFromEvent(evt)
+		if err != nil || parsed.Unavailable != "" {
+			t.Errorf("source %q rejected the manifest: %+v %v", raw, parsed, err)
 		}
 		n := nappFromLatest(evt)
-		if n.Unavailable != "Its source isn't a valid git URL" {
+		if n.Unavailable != "" {
 			t.Errorf("source %q: unavailable %q", raw, n.Unavailable)
 		}
-		if len(n.Sources) != 0 || len(n.Paths) != 0 {
-			t.Errorf("source %q: unavailable entry kept %v %v", raw, n.Sources, n.Paths)
+		if len(n.Sources) != 0 || len(n.Paths) == 0 {
+			t.Errorf("source %q: unexpected source or missing runnable path %v %v", raw, n.Sources, n.Paths)
 		}
 	}
 }

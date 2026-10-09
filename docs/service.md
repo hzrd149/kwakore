@@ -84,8 +84,12 @@ view, `?` for all keys, and `q` to exit. `kwak tui` requires a terminal;
 effective value and whether it came from a default, `config.json`, or a saved
 override. Enter edits a setting; `c` clears its override. Changes take effect
 through the same control methods as the ordinary CLI.
+
 In Discover, `/` filters the full cached catalog locally as you type; `r`
-reloads the cache and `R` refreshes it from relays.
+reloads the cache and `R` refreshes it from relays with a visible progress
+indicator. Each row shows its author and availability. Enter opens details
+with the full author key, description, version and source metadata; `i`
+installs an available napplet after confirmation.
 
 From a source checkout, `just install` builds the current code and installs
 it for this user. Run it again to update. `just uninstall` removes the
