@@ -167,7 +167,7 @@ func DefaultProgramPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(filepath.Dir(exe), "napplet")
+	return filepath.Join(filepath.Dir(exe), "kwaklet")
 }
 
 func (h *Host) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {

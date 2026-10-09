@@ -18,6 +18,21 @@ import (
 	"kwakore/backend/desktopentry"
 )
 
+func TestDefaultProgramPathUsesKwaklet(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(exe), "kwaklet")
+	if got := DefaultProgramPath(); got != want {
+		t.Fatalf("DefaultProgramPath() = %q, want %q", got, want)
+	}
+}
+
 func TestLinuxHostSession(t *testing.T) {
 	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
 	if err != nil {
