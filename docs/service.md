@@ -85,6 +85,12 @@ effective value and whether it came from a default, `config.json`, or a saved
 override. Enter edits a setting; `c` clears its override. Changes take effect
 through the same control methods as the ordinary CLI.
 
+In Installed, select a napplet and press Enter or `l` to open its window;
+press `p` to manage its permissions. In Discover, `l` opens the selected
+napplet if it is already installed. A discovered napplet must be installed
+with `i` before it can open. Legacy napps remain visible for catalog and
+installation management, but this Linux build has no napp window runtime.
+
 In Discover, `/` filters the full cached catalog locally as you type; `r`
 reloads the cache and `R` refreshes it from relays with a visible progress
 indicator. Each row shows its author and availability. Enter opens details

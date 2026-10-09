@@ -21,6 +21,7 @@ var tuiTabs = []string{"Overview", "Installed", "Discover", "Settings", "Signer"
 
 type tuiItem struct {
 	label, address, detail                  string
+	format                                  string
 	author, authorName, description, reason string
 	sources                                 []string
 	eventID, artifactHash                   string
@@ -288,6 +289,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "i", "enter":
 				return m.selectedDiscoverInstall()
+			case "l":
+				return m.selectedDiscoverLaunch()
 			}
 			return m, nil
 		}
@@ -375,6 +378,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.tab == 1 {
 				return m.itemAction("launch")
 			}
+			if m.tab == 2 {
+				return m.selectedDiscoverLaunch()
+			}
 		case "x":
 			if m.tab == 1 {
 				return m.itemAction("uninstall")
@@ -443,7 +449,15 @@ func (m tuiModel) itemAction(action string) (tea.Model, tea.Cmd) {
 	}
 	it := m.items[m.cursor]
 	switch action {
-	case "update", "launch":
+	case "launch":
+		if it.format != "napplet" {
+			m.notice = "Napps cannot launch on this Linux build: the window runtime supports napplets only"
+			return m, nil
+		}
+		m.busy = true
+		m.notice = "Opening " + safeText(it.label) + "…"
+		return m, m.request(action, action, it.address)
+	case "update":
 		m.busy = true
 		return m, m.request(action, action, it.address)
 	case "uninstall":
@@ -468,7 +482,7 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 	it := m.items[m.cursor]
 	switch m.tab {
 	case 1:
-		return m.itemAction("permissions")
+		return m.itemAction("launch")
 	case 2:
 		m.detailView = true
 	case 3:
@@ -498,6 +512,21 @@ func (m tuiModel) selectedDiscoverInstall() (tea.Model, tea.Cmd) {
 	m.detailView = false
 	m.prompt = &tuiPrompt{title: "Type INSTALL to install " + safeText(it.label), action: "install-selected", address: it.address}
 	return m, nil
+}
+
+func (m tuiModel) selectedDiscoverLaunch() (tea.Model, tea.Cmd) {
+	if m.cursor >= len(m.items) {
+		return m, nil
+	}
+	it := m.items[m.cursor]
+	if it.format != "napplet" {
+		m.notice = "Napps cannot launch on this Linux build: the window runtime supports napplets only"
+		return m, nil
+	}
+	m.busy = true
+	m.detailView = false
+	m.notice = "Opening " + safeText(it.label) + "…"
+	return m, m.request("launch", "launch", it.address)
 }
 
 func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -684,7 +713,7 @@ func (m *tuiModel) consume(x tuiResult) {
 			if author == "" {
 				author = shortAuthor(it.Author)
 			}
-			items = append(items, tuiItem{label: name, address: it.Address, detail: it.Format + " · " + safeText(author) + " · " + state,
+			items = append(items, tuiItem{label: name, address: it.Address, format: it.Format, detail: it.Format + " · " + safeText(author) + " · " + state,
 				author: it.Author, authorName: it.AuthorName, description: it.Description, reason: it.UnavailableReason,
 				sources: it.Sources, eventID: it.Version.EventID, artifactHash: it.Version.ArtifactHash,
 				createdAt: it.Version.CreatedAt, available: it.Available})
@@ -855,6 +884,7 @@ func (m tuiModel) discoverDetail(it tuiItem) string {
 	if it.available {
 		b.WriteString("   i install")
 	}
+	b.WriteString("   l launch installed napplet")
 	b.WriteString("\n")
 	return b.String()
 }
@@ -891,8 +921,8 @@ func (m tuiModel) View() string {
 	if m.help {
 		b.WriteString("1-7 or Tab: switch screens   j/k or arrows: select   Enter: open/edit\n")
 		b.WriteString("r: reload   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
-		b.WriteString("Installed: i install, u update, l launch, x uninstall, p permissions\n")
-		b.WriteString("Discover: / filter, r reload cache, R fetch relays, Enter/d details, i install, a address\n")
+		b.WriteString("Installed: Enter/l launch, i install, u update, x uninstall, p permissions\n")
+		b.WriteString("Discover: / filter, r reload cache, R fetch relays, Enter/d details, i install, l launch installed, a address\n")
 		b.WriteString("Settings: Enter edit, c clear override, R reload config\n")
 		b.WriteString("Signer: n none, s system, e nsec, b bunker, a pair, w wait, C cancel\n")
 		b.WriteString("Windows: Enter or x closes the selected window after confirmation\n")
@@ -936,6 +966,9 @@ func (m tuiModel) View() string {
 	case 1, 2, 3, 6:
 		if m.tab == 2 {
 			b.WriteString("Search: " + safeText(m.query) + "\n")
+			b.WriteString("Enter details   i install   l launch installed\n")
+		} else if m.tab == 1 {
+			b.WriteString("Enter launch   p permissions   u update   x uninstall\n")
 		}
 		if len(m.items) == 0 {
 			if m.tab == 2 && m.query != "" && len(m.discovered) > 0 {

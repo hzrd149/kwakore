@@ -97,3 +97,24 @@ func TestTUIStaleDiscoveryMessagesDoNotEndRefresh(t *testing.T) {
 		t.Fatalf("stale tick advanced spinner: %d", m.spinner)
 	}
 }
+
+func TestTUILaunchShortcuts(t *testing.T) {
+	m := tuiModel{tab: 1, items: []tuiItem{{label: "Notes", address: "35129:abc:notes", format: "napplet"}}}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(tuiModel)
+	if cmd == nil || !m.busy || !strings.Contains(m.notice, "Opening Notes") {
+		t.Fatalf("installed Enter did not launch: %+v", m)
+	}
+	m = tuiModel{tab: 1, items: []tuiItem{{label: "Legacy", address: "35130:abc:legacy"}}}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(tuiModel)
+	if cmd != nil || !strings.Contains(m.notice, "Napps cannot launch") {
+		t.Fatalf("legacy napp launch was not explained: %+v", m)
+	}
+	m = tuiModel{tab: 2, items: []tuiItem{{label: "Notes", address: "35129:abc:notes", format: "napplet"}}}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(tuiModel)
+	if cmd == nil || !m.busy {
+		t.Fatalf("discovery launch did not invoke service: %+v", m)
+	}
+}
