@@ -75,6 +75,11 @@ Then try it:
 kwak status
 ```
 
+From a source checkout, `just install` builds the current code and installs
+it for this user. Run it again to update. `just uninstall` removes the
+helper-managed service, binaries, and generated desktop entries while keeping
+configuration and installed napplet data. `just unintall` is an alias.
+
 Run the same command again to upgrade. When upgrading from a release with the old CLI name, the helper removes only its own `~/.local/bin/kwakore` symlink and starts the service once to rewrite installed napplet entries for `kwak`. A different file at that path is left alone. A new release becomes live through one
 rename of the `current` symlink, a running daemon is restarted on it, the
 previous release is kept, and older ones are pruned. Running it again with the
@@ -157,8 +162,9 @@ there need an absolute `kill` in `ExecReload` (see the NixOS notes).
 
 ### Removing Kwakore
 
-The helper has no uninstall command. To remove an installation it made with
-the defaults:
+From a source checkout, run `just uninstall`. It removes a helper-managed
+installation and leaves configuration and installed napplet data in place.
+If you installed manually, remove its files and units directly:
 
 ```sh
 kwak installed                 # optional: list napplets, then
@@ -176,7 +182,7 @@ With `--prefix DIR`, remove `DIR/bin/kwak` and `DIR/lib/kwakore` instead.
 With `--runtime-units`, the units are in `$XDG_RUNTIME_DIR/systemd/user` and
 are disabled with `systemctl --user disable --runtime kwakore.socket`.
 
-Desktop entries of napplets you did not uninstall stay in
+After a manual removal, desktop entries of napplets you did not uninstall stay in
 `${XDG_DATA_HOME:-~/.local/share}/applications/` as
 `kwakore-napplet-<hash>.desktop` and now point at a missing CLI; remove them
 with `rm ~/.local/share/applications/kwakore-napplet-*.desktop`. Your data

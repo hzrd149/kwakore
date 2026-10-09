@@ -1,4 +1,4 @@
-# Linux service bundle: kwakore, kwakore, the napplet child and
+# Linux service bundle: kwakore, kwak, the kwaklet child and
 # libwebview.so side by side in dist/<version>/kwakore-<version>-linux-<arch>/,
 # plus dist/<version>/kwakore-linux-<arch>.tar.gz and SHA256SUMS. The daemon
 # runs the napplet sibling of its own executable, so the four files ship and
@@ -27,6 +27,17 @@ bundle-linux-arm64 *args:
 # bytes, exactly the four files, matching SHA256SUMS, and a child that starts
 bundle-check:
     bash scripts/smoke-linux-service.sh --bundle-only
+
+# Build this checkout and install or update the current user's service.
+install:
+    bash scripts/install-local.sh
+
+# Remove this user's helper-managed service and binaries; keep app data.
+uninstall:
+    bash scripts/uninstall.sh
+
+# Common spelling when typed quickly.
+unintall: uninstall
 
 # Stop an installed kwakore.socket/service first: both use the same user
 # socket and data directory.
