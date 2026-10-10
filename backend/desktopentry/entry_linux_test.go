@@ -242,7 +242,7 @@ func TestEntryWrite(t *testing.T) {
 		gotKeys = append(gotKeys, k)
 	}
 	slices.Sort(gotKeys)
-	if want := []string{"Categories", "Comment", "Exec", "Name", "Terminal", "Type", "Version"}; !slices.Equal(gotKeys, want) {
+	if want := []string{"Categories", "Comment", "Exec", "Name", "Terminal", "Type"}; !slices.Equal(gotKeys, want) {
 		t.Fatalf("keys %v, want %v", gotKeys, want)
 	}
 	if keys["Type"] != "Application" || keys["Terminal"] != "true" || keys["Categories"] != "Network;" {

@@ -94,7 +94,7 @@ func Render(cli string, e Entry) ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString("[Desktop Entry]\n")
 	b.WriteString("Type=Application\n")
-	b.WriteString("Version=1.5\n")
+	// Version is optional; omit it for validators that predate spec 1.5.
 	b.WriteString("Name=" + escapeString(name) + "\n")
 	if comment := displayText(e.Description, maxDescriptionRunes); comment != "" && comment != name {
 		b.WriteString("Comment=" + escapeString(comment) + "\n")
