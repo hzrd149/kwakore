@@ -113,7 +113,7 @@ interactive terminal and does not accept `--json`. Its settings screen uses
 `settings.inspect` to show the source of each effective value; its Windows
 screen uses `napplet.windows` to list IDs accepted by `napplet.stop`.
 Its Discover screen loads the cached catalog and filters it locally;
-only an explicit refresh fetches from relays. The TUI and CLI add `wss://`
+pressing `r` or `R` refreshes it from relays. The TUI and CLI add `wss://`
 to bare relay hosts and `https://` to bare Blossom hosts before sending
 `settings.set`. Direct protocol clients must send canonical URLs.
 

@@ -98,6 +98,23 @@ func TestTUIStaleDiscoveryMessagesDoNotEndRefresh(t *testing.T) {
 	}
 }
 
+func TestTUIDiscoveryRefreshKeys(t *testing.T) {
+	for _, key := range []rune{'r', 'R'} {
+		t.Run(string(key), func(t *testing.T) {
+			m := tuiModel{tab: 2}
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			m = updated.(tuiModel)
+			if cmd == nil || !m.refreshing || !m.discoveryLoading || m.discoverySeq != 1 {
+				t.Fatalf("key %c did not start a relay refresh: %+v", key, m)
+			}
+			updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			if cmd != nil || updated.(tuiModel).discoverySeq != 1 {
+				t.Fatal("busy refresh started another request")
+			}
+		})
+	}
+}
+
 func TestTUILaunchShortcuts(t *testing.T) {
 	m := tuiModel{tab: 1, items: []tuiItem{{label: "Notes", address: "35129:abc:notes", format: "napplet"}}}
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})

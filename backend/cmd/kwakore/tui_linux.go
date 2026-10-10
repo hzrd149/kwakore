@@ -338,7 +338,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.busy {
 					return m, nil
 				}
-				return m, m.beginDiscovery(false)
+				return m, m.beginDiscovery(true)
 			}
 			m.busy = true
 			return m, m.refresh()
@@ -915,14 +915,14 @@ func (m tuiModel) View() string {
 			}
 			b.WriteString("\n")
 		} else {
-			b.WriteString("No completed catalog refresh yet · press R to fetch from relays\n")
+			b.WriteString("No completed catalog refresh yet · press r to fetch from relays\n")
 		}
 	}
 	if m.help {
 		b.WriteString("1-7 or Tab: switch screens   j/k or arrows: select   Enter: open/edit\n")
-		b.WriteString("r: reload   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
+		b.WriteString("r: refresh   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
 		b.WriteString("Installed: Enter/l launch, i install, u update, x uninstall, p permissions\n")
-		b.WriteString("Discover: / filter, r reload cache, R fetch relays, Enter/d details, i install, l launch installed, a address\n")
+		b.WriteString("Discover: / filter, r/R fetch relays, Enter/d details, i install, l launch installed, a address\n")
 		b.WriteString("Settings: Enter edit, c clear override, R reload config\n")
 		b.WriteString("Signer: n none, s system, e nsec, b bunker, a pair, w wait, C cancel\n")
 		b.WriteString("Windows: Enter or x closes the selected window after confirmation\n")
