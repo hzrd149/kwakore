@@ -8,9 +8,8 @@
   //   napplet --postMessage--> here --rpc("nap.msg")--> Go
   //   napplet <--postMessage-- here <--rpc result / __nap_push(...)-- Go
   //
-  // It never interprets a NAP message itself. Every decision (what a type
-  // means, whether it is allowed, who sent it) is made in Go, which knows the
-  // napplet this window was opened for. Nothing here is reachable from the
+  // Go owns NAP routing and subscriptions. Immediate gamepad
+  // focus-loss neutralization runs here. Nothing here is reachable from the
   // napplet: a sandboxed frame without allow-same-origin cannot touch this
   // window's globals, only post messages to it.
 
@@ -168,6 +167,18 @@
     const list = Array.isArray(envelopes) ? envelopes : [envelopes]
     for (const env of list) {
       if (!env || typeof env.type !== "string") continue
+      if (env.type === "__kwakore.gamepad") {
+        gamepadControl(env)
+        continue
+      }
+      if (env.type === "gamepad.state") {
+        if (!gamepadSubscribed) continue
+        gamepadState = env
+        // A daemon push may already be in flight when this window loses
+        // focus. Never let it restore live values in an inactive frame.
+        gamepadDeliver(env)
+        continue
+      }
       // the napplet's origin is opaque, so "*" is the only target that reaches
       // it; the message is addressed by contentWindow, not by origin
       frame.contentWindow.postMessage(revive(env), "*")
@@ -184,6 +195,81 @@
       console.error("[napplet-host] bad push", err)
     }
   }
+
+  // ── trusted controller focus ───────────────────────────────────
+  // The daemon reads devices for all windows. Host pages report focus and
+  // mask incoming snapshots immediately on blur. Focus updates bypass the
+  // napplet's bounded outbound lane so floods cannot delay neutralization.
+  let gamepadSubscribed = false
+  let gamepadFocusTimer = null
+  let gamepadFocus = false
+  let gamepadFocusSeq = 0
+  let gamepadState = null
+  let gamepadLastView = null
+
+  const gamepadFocused = () => !!frame &&
+    document.visibilityState === "visible" && document.hasFocus() &&
+    document.activeElement === frame && !document.getElementById("__kwakore_prompt")
+
+  const neutralGamepadState = state => ({
+    ...state, focused: false,
+    pads: state.pads.map(pad => pad && ({
+      ...pad, timestamp: 0, axes: pad.axes.map(() => 0),
+      buttons: pad.buttons.map(() => ({ value: 0, pressed: false, touched: false })),
+    })),
+  })
+
+  const gamepadDeliver = state => {
+    if (!frame) return
+    const view = gamepadFocused() ? state : neutralGamepadState(state)
+    const encoded = JSON.stringify(view)
+    // Late live pushes must not expose input timing through repeated neutral
+    // onChange callbacks while a blur RPC is still reaching the daemon.
+    if (encoded === gamepadLastView) return
+    gamepadLastView = encoded
+    frame.contentWindow.postMessage(view, "*")
+  }
+
+  const gamepadCheckFocus = (force = false) => {
+    if (!gamepadSubscribed || session === null) return
+    const focused = gamepadFocused()
+    if (!force && focused === gamepadFocus) return
+    gamepadFocus = focused
+    // Clear locally before any RPC. This also covers prompt overlays and
+    // hidden windows whose animation frames are suspended by the engine.
+    if (!focused && gamepadState && frame) {
+      gamepadDeliver(neutralGamepadState(gamepadState))
+    }
+    rpc("nap.gamepad", { gen: session, focused, focusSeq: ++gamepadFocusSeq }).catch(() => {})
+  }
+
+  const gamepadStop = () => {
+    gamepadSubscribed = false
+    clearInterval(gamepadFocusTimer)
+    gamepadFocusTimer = null
+    gamepadState = null
+    gamepadLastView = null
+    gamepadFocus = false
+  }
+
+  const gamepadControl = env => {
+    if (!env.subscribed) { gamepadStop(); return }
+    const first = !gamepadSubscribed
+    gamepadSubscribed = true
+    gamepadLastView = null // each accepted subscribe receives its snapshot
+    if (first) {
+      gamepadCheckFocus(true)
+      gamepadFocusTimer = setInterval(gamepadCheckFocus, 50)
+    }
+  }
+
+  window.addEventListener("blur", () => gamepadCheckFocus())
+  window.addEventListener("focus", () => gamepadCheckFocus())
+  window.addEventListener("focusin", () => gamepadCheckFocus())
+  window.addEventListener("focusout", () => gamepadCheckFocus())
+  document.addEventListener("visibilitychange", () => gamepadCheckFocus())
+  // The trusted native prompt renderer calls this after changing its overlay.
+  window.__nap_gamepad_focus_changed = () => gamepadCheckFocus()
 
   // ── napplet -> Go ───────────────────────────────────────────────
   // One ordered lane to Go, bounded so a napplet cannot queue without limit.
@@ -224,6 +310,7 @@
   // that forges one only gets itself rebuilt, under the reload cap.
   const DOCUMENT_MARKER = "__kwakore.document"
   let markers = 0
+  let gamepadPolicyChecked = false
 
   window.addEventListener("message", event => {
     // sender binding: only this window's own napplet frame, never anyone else
@@ -232,6 +319,24 @@
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
     if (data.type === DOCUMENT_MARKER) {
       if (++markers >= 2) replaced(frame)
+      return
+    }
+    if (data.type === "__kwakore.gamepad.policy") {
+      if (gamepadPolicyChecked) return
+      gamepadPolicyChecked = true
+      if (data.denied !== true) {
+        // The first report precedes all untrusted scripts in this srcdoc.
+        // Refuse this engine rather than advertise controller isolation it
+        // does not enforce. Later forged reports cannot reopen the frame.
+        const old = frame
+        gamepadStop()
+        frame = null
+        session = null
+        ++bootSerial
+        old.remove()
+        enqueue(() => rpc("nap.reset"), true).catch(() => {})
+        showBootError(new Error("This web engine cannot isolate controller input"))
+      }
       return
     }
     // the frame this envelope came from: Go's reply or a refusal is its
@@ -286,6 +391,8 @@
     "config.registerSchema": { "kind": "okFalseCode" },
     "config.subscribe": { "kind": "none" },
     "config.unsubscribe": { "kind": "none" },
+    "gamepad.subscribe": { "kind": "none" },
+    "gamepad.unsubscribe": { "kind": "none" },
     "identity.getBadges": { "fields": { "badges": [] }, "kind": "err" },
     "identity.getBlocked": { "fields": { "pubkeys": [] }, "kind": "err" },
     "identity.getFollows": { "fields": { "pubkeys": [] }, "kind": "err" },
@@ -535,6 +642,7 @@
     if (serial !== bootSerial) return
     if (!doc || typeof doc.srcdoc !== "string") return
 
+    gamepadStop()
     if (frame) frame.remove()
     frame = null
     session = null
@@ -556,6 +664,8 @@
     const f = document.createElement("iframe")
     // allow-scripts and nothing else: never allow-same-origin
     f.setAttribute("sandbox", "allow-scripts")
+    // Controllers belong to the trusted runtime. CSP cannot deny this API.
+    f.setAttribute("allow", "gamepad 'none'")
     f.setAttribute("referrerpolicy", "no-referrer")
     f.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
     f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
@@ -571,6 +681,7 @@
     f.srcdoc = doc.srcdoc
     frame = f
     markers = 0
+    gamepadPolicyChecked = false
     document.body.appendChild(f)
   }
 
@@ -615,6 +726,7 @@
   const replaced = f => {
     if (frame !== f) return
     f.remove()
+    gamepadStop()
     frame = null
     session = null
     const serial = ++bootSerial

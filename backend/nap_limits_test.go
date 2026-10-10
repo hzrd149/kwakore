@@ -115,6 +115,7 @@ func TestNapLimiterDefaults(t *testing.T) {
 		limitNotify:       {rate.Every(3 * time.Second), 20},
 		limitNotifyUrgent: {rate.Every(20 * time.Second), 3},
 		limitOpenSettings: {rate.Every(2 * time.Second), 1},
+		limitGamepad:      {rate.Limit(2), 8},
 	}
 	if len(want) != int(limitCount)-1 {
 		t.Fatalf("%d classes checked, %d declared", len(want), limitCount-1)
@@ -208,6 +209,8 @@ func TestNapRouteLimitClasses(t *testing.T) {
 		"common.unfollow":        limitPublish,
 		"common.react":           limitPublish,
 		"common.report":          limitPublish,
+		"gamepad.subscribe":      limitGamepad,
+		"gamepad.unsubscribe":    limitGamepad,
 	}
 	for typ := range napGoldenRoutes {
 		r := napRoutes[typ]

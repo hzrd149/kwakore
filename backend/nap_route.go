@@ -359,9 +359,11 @@ var napRouteSpecs = map[string]napRoute{
 	"intent.invoke": {gate: openGate("PermDispatch routing; handler authorization INTN-01 Phase 6"), fail: failShape(failIntent).withCodes(map[string]string{
 		napErrDenied: "user cancelled", napErrInternal: "invoke failed",
 	}), limit: limitIntent},
-	"intent.available": {gate: napGateIntentFind, fail: failShape(failErr)},
-	"intent.handlers":  {gate: napGateIntentFind, fail: failShape(failErr)},
-	"catalog.get":      {gate: openGate("read installed napplet metadata; catalog discovery"), fail: failShape(failErr)},
+	"intent.available":    {gate: napGateIntentFind, fail: failShape(failErr)},
+	"intent.handlers":     {gate: napGateIntentFind, fail: failShape(failErr)},
+	"catalog.get":         {gate: openGate("read installed napplet metadata; catalog discovery"), fail: failShape(failErr)},
+	"gamepad.subscribe":   {gate: openGate("focus-scoped controller snapshots"), fail: failShape(failNone), limit: limitGamepad},
+	"gamepad.unsubscribe": {gate: openGate("own controller subscription"), fail: failShape(failNone), limit: limitGamepad},
 
 	"inc.emit":              {gate: openGate("INC broadcast; consent INTN-03 Phase 6"), fail: failShape(failNone), limit: limitIncEmit},
 	"inc.subscribe":         {gate: openGate("INC topic subscription; INTN-03 Phase 6"), fail: failShape(failErr)},

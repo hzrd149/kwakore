@@ -55,10 +55,10 @@
     else fail("NappletShimPrelude is reachable from napplet code (" + typeof NappletShimPrelude + ")")
   })
 
-  // ── domains (NIP-5D presence detection): exactly the launcher's 16 ──
+  // ── domains (NIP-5D presence detection): exactly the launcher's 17 ──
   const expected = [
     "relay", "identity", "storage", "resource", "common", "theme", "inc",
-    "intent", "link", "upload", "outbox", "media", "config", "notify", "catalog", "shell",
+    "intent", "link", "upload", "outbox", "media", "config", "notify", "catalog", "gamepad", "shell",
   ].sort()
   guard("domains", () => {
     const keys = Object.keys(window.napplet || {}).sort()

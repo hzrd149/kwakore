@@ -33,6 +33,7 @@ re-pin deliberately and record the change here.
 | NAP-LINK | `refs/pull/53/head` | draft PR #53 | `e25143355f6d416bfce73b12ec814f1c795ec16a` |
 | NAP-COMMON | `refs/pull/67/head` | draft PR #67 | `de603e205a9b498f252be9a5e8e6825c4648df39` |
 | NAP-RESOURCE | `refs/pull/80/head` | draft PR #80 | `fa6bcc6935aa19e7b70ab2a2c721dafca77c78e1` |
+| NAP-GAMEPAD | `refs/pull/108/head` | draft PR #108 | `0b28f77e3dfa0f07dd7c0f9d61a7090ee99f3a5e` |
 | NAP-CATALOG | `refs/pull/95/head` | draft PR #95 | `7573383ffe33b9ef7c57248ec84736cc93d8d184` |
 
 ## Reference implementation (napplet/web)

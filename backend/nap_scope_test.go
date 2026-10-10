@@ -143,14 +143,21 @@ func TestSrcdocLeavesOnlyWindowNapplet(t *testing.T) {
 		t.Errorf("window.napplet domains = %v, want %v", have, want)
 	}
 
-	// D-18: the activation posts the document-start marker and nothing else,
-	// exactly once, to "*" (the host page is addressed by window, not origin)
-	if len(got.Wrapped.Posts) != 1 {
-		t.Errorf("the activation posted %d messages, want exactly the document marker: %+v", len(got.Wrapped.Posts), got.Wrapped.Posts)
+	// D-18: the document marker must precede any eager domain subscription.
+	if len(got.Wrapped.Posts) != 3 {
+		t.Errorf("the activation posted %d messages, want marker, policy check, then gamepad subscription: %+v", len(got.Wrapped.Posts), got.Wrapped.Posts)
 	} else {
 		post := got.Wrapped.Posts[0]
 		if len(post.Message) != 1 || post.Message["type"] != webview.DocumentMarker || post.Target != "*" {
 			t.Errorf("posted %+v, want {type: %q} to \"*\"", post, webview.DocumentMarker)
+		}
+		post = got.Wrapped.Posts[1]
+		if post.Message["type"] != "__kwakore.gamepad.policy" || post.Message["denied"] != true || post.Target != "*" {
+			t.Errorf("policy report = %+v, want denied native input", post)
+		}
+		post = got.Wrapped.Posts[2]
+		if len(post.Message) != 1 || post.Message["type"] != "gamepad.subscribe" || post.Target != "*" {
+			t.Errorf("second post = %+v, want gamepad.subscribe to *", post)
 		}
 	}
 	// the bare prelude posts nothing: the marker is the launcher's, not the shim's

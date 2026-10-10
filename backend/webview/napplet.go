@@ -118,6 +118,10 @@ func NappletSrcdoc(html []byte, domains []string) (string, error) {
 	if slices.Contains(domains, "catalog") {
 		catalog = catalogPrelude
 	}
+	gamepad := ""
+	if slices.Contains(domains, "gamepad") {
+		gamepad = gamepadPrelude
+	}
 
 	return "<!doctype html><html><head>" +
 		`<meta http-equiv="Content-Security-Policy" content="` + nappletCSP + `">` +
@@ -125,6 +129,7 @@ func NappletSrcdoc(html []byte, domains []string) (string, error) {
 		"\n;NappletShimPrelude.install(" + string(domainsJSON) + ")" +
 		catalog +
 		"\n;parent.postMessage({type:" + strconv.Quote(DocumentMarker) + `},"*")` +
+		gamepad +
 		"\n})()</script>" +
 		"</head>" + doc, nil
 }

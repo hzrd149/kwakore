@@ -158,6 +158,8 @@ const (
 	limitNotifyUrgent
 	// limitOpenSettings: config.openSettings (charged by its handler)
 	limitOpenSettings
+	// limitGamepad: controller subscription churn, shared across reloads.
+	limitGamepad
 
 	limitCount
 )
@@ -201,6 +203,7 @@ var napLimitSpecs = [limitCount]napLimitSpec{
 	// config.openSettings: one settings window per 2 s, so a napplet cannot
 	// keep throwing its settings window in the user's face
 	limitOpenSettings: {rate.Every(2 * time.Second), 1},
+	limitGamepad:      {rate.Limit(2), 8},
 }
 
 // napLimiter is one window's buckets. A nil *napLimiter allows everything

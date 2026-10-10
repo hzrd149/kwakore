@@ -148,17 +148,17 @@ func TestAdversarialNappletFolderLoads(t *testing.T) {
 
 	t.Run("fresh document", func(t *testing.T) {
 		rep := runAdversarial(t, node, activation, fixture, "", nil)
-		if len(rep.Posts) < 2 {
-			t.Fatalf("posts = %v, want the marker and then the fixture's storage reads", rep.Posts)
+		if len(rep.Posts) < 4 {
+			t.Fatalf("posts = %v, want the preamble and then the fixture's storage reads", rep.Posts)
 		}
 		if typ, _ := rep.Posts[0].Message["type"].(string); typ != webview.DocumentMarker {
 			t.Errorf("first post %v, want the launcher's document-start marker", rep.Posts[0].Message)
 		}
-		first := rep.Posts[1].Message
+		first := rep.Posts[3].Message
 		if first["type"] != "storage.get" || first["scope"] != "instance" || first["key"] != "adv.step" {
 			t.Errorf("the fixture's first envelope is %v, want an instance storage.get for adv.step", first)
 		}
-		for _, p := range rep.Posts[1:] {
+		for _, p := range rep.Posts[3:] {
 			if p.Message["type"] != "storage.get" {
 				t.Errorf("before its storage answers the fixture posted %v", p.Message)
 			}
@@ -183,8 +183,8 @@ func TestAdversarialNappletFolderLoads(t *testing.T) {
 		const target = "http://127.0.0.1:9/"
 		rep := runAdversarial(t, node, activation, fixture, "",
 			map[string]string{"data-adv-mode": "nav-js-early", "data-adv-target": target})
-		if len(rep.Posts) != 1 {
-			t.Fatalf("posts = %v, want only the marker: the navigation must come before any envelope", rep.Posts)
+		if len(rep.Posts) != 3 {
+			t.Fatalf("posts = %v, want only the trusted preamble's marker, policy check and subscription", rep.Posts)
 		}
 		js, ok := strings.CutPrefix(rep.Href, "javascript:")
 		if !ok {
@@ -210,13 +210,13 @@ func TestAdversarialNappletFolderLoads(t *testing.T) {
 
 	t.Run("load-delayed reloaded document", func(t *testing.T) {
 		rep := runAdversarial(t, node, activation, fixture, "adv-reload-delayed", nil)
-		if len(rep.Posts) != 2 {
-			t.Fatalf("posts = %v, want exactly the marker and one storage.set", rep.Posts)
+		if len(rep.Posts) != 4 {
+			t.Fatalf("posts = %v, want exactly the trusted preamble and one storage.set", rep.Posts)
 		}
 		if typ, _ := rep.Posts[0].Message["type"].(string); typ != webview.DocumentMarker {
 			t.Errorf("first post %v, want the document-start marker", rep.Posts[0].Message)
 		}
-		leak := rep.Posts[1].Message
+		leak := rep.Posts[3].Message
 		if leak["type"] != "storage.set" || leak["key"] != "adv.leak" || leak["scope"] != "instance" {
 			t.Errorf("the replaced document posted %v, want an instance storage.set for adv.leak", leak)
 		}

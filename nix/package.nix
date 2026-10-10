@@ -7,6 +7,7 @@
   gtk3,
   webkitgtk_4_1,
   glib,
+  SDL2,
   gsettings-desktop-schemas,
   version ? "unstable",
 }:
@@ -64,7 +65,7 @@ let
     inherit version src;
 
     modRoot = "backend";
-    vendorHash = "sha256-bskKFzpBl4zemeHI2TCBNl2fUeksLg6qzA7mO0kB1ts=";
+    vendorHash = "sha256-Ozj2KWgSNXRbdID6881h4W+aMVghkT5DOfuqsU+USnE=";
 
     subPackages = [
       "cmd/kwakore-daemon"
@@ -174,6 +175,10 @@ EOF
 Name=org.kwakore.SearchProvider
 Exec=/run/current-system/sw/bin/kwak status
 EOF
+
+    chmod u+w "$out/bin/kwakore"
+    patchelf --set-rpath "${lib.makeLibraryPath [ SDL2 ]}" "$out/bin/kwakore"
+    chmod a-w "$out/bin/kwakore"
 
     chmod u+w "$out/bin/kwaklet" "$out/bin/libwebview.so"
     patchelf --set-rpath "${webviewLibPath}" "$out/bin/libwebview.so"

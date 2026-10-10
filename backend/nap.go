@@ -41,7 +41,7 @@ import (
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox", "media",
-	"config", "notify", "catalog",
+	"config", "notify", "catalog", "gamepad",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -396,6 +396,8 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 	case "nap.reset":
 		ci.napReset()
 		return nil, nil
+	case "nap.gamepad":
+		return nil, napGamepads.update(ci, params)
 	case "nap.openSettings":
 		// the gear in the host page's chrome, never the napplet: its frame
 		// cannot reach these rpcs. The bundled settings window is retired
@@ -622,6 +624,7 @@ func (ci *Instance) napStart() (int, error) {
 	// waits out a handler the worker is inside of (napSession.dispatchMu)
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	napGamepads.remove(ci)
 	s.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
 	s.established = true
@@ -675,6 +678,7 @@ func (ci *Instance) napReset() {
 	}
 	ci.nap.dispatchMu.Lock()
 	defer ci.nap.dispatchMu.Unlock()
+	napGamepads.remove(ci)
 	ci.nap.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
 	gen := ci.nap.gen
@@ -696,6 +700,7 @@ func (ci *Instance) napClosed() {
 	}
 	ci.nap.dispatchMu.Lock()
 	defer ci.nap.dispatchMu.Unlock()
+	napGamepads.remove(ci)
 	ci.nap.mu.Lock()
 	ci.napTeardownLocked("peer destroyed")
 	ci.nap.mu.Unlock()

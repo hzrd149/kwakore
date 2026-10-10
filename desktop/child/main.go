@@ -335,7 +335,8 @@ func promptOverlayCode(pv promptView) string {
 
 func promptHideCode() string {
 	return ";(function(){var o = document.getElementById('__kwakore_prompt');" +
-		"if (o && o.parentNode) o.parentNode.removeChild(o);})();"
+		"if (o && o.parentNode) o.parentNode.removeChild(o);" +
+		"if (window.__nap_gamepad_focus_changed) window.__nap_gamepad_focus_changed();})();"
 }
 
 // promptShowScript is the overlay runtime, a function of the prompt and of
@@ -432,4 +433,5 @@ const promptShowScript = "function(p, answer){" +
 	"}" +
 	"o.appendChild(box);" +
 	"document.documentElement.appendChild(o);" +
+	"if (window.__nap_gamepad_focus_changed) window.__nap_gamepad_focus_changed();" +
 	"}"

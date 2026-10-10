@@ -6,6 +6,8 @@ daemon. Everything is controlled through that socket: the bundled `kwak`
 CLI, the native desktop entry of each installed napplet, and any third-party
 client that speaks the [version 1 control protocol](control-protocol.md).
 
+Game napplets can use the [game controller API](gamepad.md), including focus-controlled compatibility for `navigator.getGamepads()`.
+
 A release is four files that must stay side by side:
 
 | File | Role |
@@ -41,6 +43,8 @@ You need:
 - WebKitGTK 4.1, which brings GTK 3. On Debian or Ubuntu:
   `sudo apt install libwebkit2gtk-4.1-0`. The release binaries are built on
   Ubuntu 24.04, so a much older distribution may lack a new enough glibc.
+- SDL2 for [game controllers](gamepad.md): `sudo apt install libsdl2-2.0-0`
+  on Debian or Ubuntu.
 - Optional, found on `PATH` when a napplet asks for them: `xdg-open` for
   links, `wl-copy` or `xclip` for the clipboard, `notify-send` for
   notifications, and [mpv](https://mpv.io) or [VLC](https://www.videolan.org)

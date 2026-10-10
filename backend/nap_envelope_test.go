@@ -292,9 +292,9 @@ func TestNapRouteSizeCapsAndDeadlines(t *testing.T) {
 			t.Errorf("%s: promptDeadline %v, want %v", typ, got, wantDeadline)
 		}
 	}
-	// 69 routes, six with a cap of their own
-	if want := len(napGoldenRoutes) - len(caps); others != want || want != 63 {
-		t.Errorf("%d routes on the default cap, want %d (63)", others, want)
+	// 71 routes, six with a cap of their own
+	if want := len(napGoldenRoutes) - len(caps); others != want || want != 65 {
+		t.Errorf("%d routes on the default cap, want %d (65)", others, want)
 	}
 	if napDeadlineDefault.Seconds() != 30 || napDeadlineStorage.Seconds() != 5 {
 		t.Errorf("deadlines %v %v", napDeadlineDefault, napDeadlineStorage)

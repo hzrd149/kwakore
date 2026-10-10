@@ -36,9 +36,10 @@ import (
 // GTK must own the process's main thread (Pitfall 8), which is why the child
 // runs as a subprocess and nothing here calls webview.New.
 type fakeLauncher struct {
-	t    *testing.T
-	html []byte
-	cmd  *exec.Cmd
+	t       *testing.T
+	html    []byte
+	domains []string // nil uses the storage-only baseline
+	cmd     *exec.Cmd
 
 	inMu  sync.Mutex
 	stdin io.WriteCloser
@@ -282,7 +283,11 @@ func (f *fakeLauncher) rpc(m wireMsg) {
 	case "nap.boot":
 		f.record("rpc:nap.boot")
 		// rebuilt on every call, as the launcher verifies and rebuilds it
-		doc, err := nappbridge.NappletSrcdoc(f.html, []string{"storage"})
+		domains := f.domains
+		if domains == nil {
+			domains = []string{"storage"}
+		}
+		doc, err := nappbridge.NappletSrcdoc(f.html, domains)
 		if err != nil {
 			f.t.Errorf("NappletSrcdoc: %v", err)
 			f.send(wireMsg{T: "resp", ID: m.ID, Error: err.Error()})
@@ -306,6 +311,8 @@ func (f *fakeLauncher) rpc(m wireMsg) {
 		f.mu.Unlock()
 	case "nap.msg":
 		f.envelope(m.Params)
+	case "nap.gamepad":
+		f.record("rpc:" + m.Method)
 	default:
 		f.record("rpc:" + m.Method)
 	}

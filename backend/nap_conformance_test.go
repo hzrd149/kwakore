@@ -83,9 +83,9 @@ var bidirectionalOut = map[string]string{
 	"media.command": "NAP-MEDIA @2b2d29e9: for shell-owned sessions media.command is napplet -> shell; the fixture lists it only as shell -> napplet",
 }
 
-// catalog.get is sent by Kwakore's trusted preamble until the upstream shim
-// publishes the NAP-CATALOG binding.
-var localPreludeOut = map[string]bool{"catalog.get": true}
+// Kwakore supplies catalog and gamepad bindings in a trusted preamble until
+// the upstream shim publishes these domains.
+var localPreludeOut = map[string]bool{"catalog.get": true, "gamepad.subscribe": true, "gamepad.unsubscribe": true}
 
 // naTypes is explicit type-level N/A: a request type in an offered domain that
 // the launcher deliberately leaves unhandled. Every entry needs a reason, and
