@@ -174,6 +174,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 261007-htm | Make CLI output human friendly by default with optional --json | 2026-10-07 | ec2b210 | [261007-htm-the-cli-should-be-updated-to-be-human-fr](./quick/261007-htm-the-cli-should-be-updated-to-be-human-fr/) |
 | 261011-czi | Yes/no TUI install confirm and launch from Discover without installing | 2026-10-11 | d1ae23b | [261011-czi-simplify-tui-install-confirm-and-launch-](./quick/261011-czi-simplify-tui-install-confirm-and-launch-/) |
+| 261011-fuc | Default to napplet.soy and ditto.pub relays and Blossom servers | 2026-10-11 | 91629bf | [261011-fuc-use-napplet-soy-and-ditto-pub-default-re](./quick/261011-fuc-use-napplet-soy-and-ditto-pub-default-re/) |
 
 ## Deferred Items
 
