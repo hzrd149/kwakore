@@ -3,16 +3,22 @@
 package linuxhost
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"fiatjaf.com/nostr"
+	"github.com/rs/zerolog"
 
 	"kwakore/backend"
 	"kwakore/backend/desktopentry"
@@ -399,6 +405,289 @@ func TestLinuxHostChildEnvironment(t *testing.T) {
 	if !strings.HasPrefix(name, "Bad Name ") || len([]rune(name)) != maxWindowTitleRunes ||
 		strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\u202e' }) {
 		t.Fatalf("hostile name reached the child as %q", name)
+	}
+}
+
+// ─── window program stderr and exits ─────────────────────────────
+
+// logSink collects the JSON entries of a test logger.
+type logSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *logSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *logSink) entries(t *testing.T) []map[string]any {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(s.buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log entry %q: %v", line, err)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// captureChildLog routes window program output to a Debug-level JSON logger
+// for the rest of the test.
+func captureChildLog(t *testing.T) *logSink {
+	t.Helper()
+	sink := &logSink{}
+	logger := zerolog.New(sink).Level(zerolog.DebugLevel)
+	old := childLogger
+	childLogger = func() zerolog.Logger { return logger }
+	t.Cleanup(func() { childLogger = old })
+	return sink
+}
+
+// fakeChild writes script as a checked window program in a private
+// directory and returns its path.
+func fakeChild(t *testing.T, script string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(os.Getenv("HOME"), "kwakore-host-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(dir, "kwaklet")
+	if err := os.WriteFile(program, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "libwebview.so"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return program
+}
+
+// exitRecorder collects what a host's exit reporter is told.
+type exitRecorder struct {
+	mu    sync.Mutex
+	exits []WindowExit
+}
+
+func (r *exitRecorder) report(e WindowExit) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.exits = append(r.exits, e)
+}
+
+func (r *exitRecorder) got() []WindowExit {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]WindowExit(nil), r.exits...)
+}
+
+const readyFrame = `printf '{"t":"rpc","id":1,"method":"nap.start","params":"null"}\n'` + "\n"
+
+func waitDone(t *testing.T, child *childTransport) {
+	t.Helper()
+	select {
+	case <-child.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("window program did not finish")
+	}
+}
+
+// A window program that dies on its own after opening (GTK exits 1 on a
+// Wayland protocol error) leaves its stderr, capped, and its exit status in
+// the journal, and the host's exit reporter hears about it once.
+func TestLinuxHostLogsChildStderrAndUnexpectedExit(t *testing.T) {
+	sink := captureChildLog(t)
+	long := strings.Repeat("L", 5000)
+	script := "#!/bin/sh\n" + readyFrame +
+		// stay up long enough for the open to see the ready frame first
+		"sleep 0.3\n" +
+		"echo 'Gdk-Message: 10:49:06.416: Error 71 (Protocol error) dispatching to Wayland display.' >&2\n" +
+		`printf '\033[90m3:04PM\033[0m \033[32mINF\033[0m webkit hardening applied \033[36m_=\033[0m1\n' >&2` + "\n" +
+		"printf '%s\\n' '" + long + "' >&2\n" +
+		"i=0; while [ $i -lt 300 ]; do echo \"noise $i\" >&2; i=$((i+1)); done\n" +
+		"exit 1\n"
+	program := fakeChild(t, script)
+	t.Setenv("DISPLAY", ":stale")
+	host := New(program)
+	var exits exitRecorder
+	host.SetExitReporter(exits.report)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	transport, err := host.OpenWindowContext(ctx, backend.WindowSpec{Instance: "41", Format: backend.FormatNapplet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := transport.(*childTransport)
+	waitDone(t, child)
+
+	var lines, suppressed, unexpected int
+	var gdk, console, truncated map[string]any
+	for _, e := range sink.entries(t) {
+		msg, _ := e["message"].(string)
+		line, _ := e["line"].(string)
+		switch msg {
+		case "window program stderr", "window program log":
+			lines++
+			if e["instance"] != "41" {
+				t.Errorf("stderr entry without the instance: %v", e)
+			}
+			if len(line) > maxStderrLineBytes {
+				t.Errorf("logged line of %d bytes", len(line))
+			}
+			switch {
+			case strings.Contains(line, "Error 71"):
+				gdk = e
+			case strings.Contains(line, "webkit hardening applied"):
+				console = e
+			case strings.HasPrefix(line, "LLLL"):
+				truncated = e
+			}
+		case "window program stderr: further output suppressed":
+			suppressed++
+			if e["level"] != "warn" || e["instance"] != "41" || e["max_lines"] != float64(maxStderrLines) {
+				t.Errorf("suppression entry: %v", e)
+			}
+		case "window program exited unexpectedly":
+			unexpected++
+			if e["level"] != "warn" || e["instance"] != "41" || e["code"] != float64(1) {
+				t.Errorf("exit entry: %v", e)
+			}
+		}
+	}
+	if gdk == nil || gdk["level"] != "warn" || gdk["message"] != "window program stderr" {
+		t.Errorf("Gdk line: %v", gdk)
+	}
+	if console == nil || console["level"] != "debug" || console["message"] != "window program log" ||
+		console["line"] != "3:04PM INF webkit hardening applied _=1" {
+		t.Errorf("child log line: %v", console)
+	}
+	if truncated == nil || truncated["truncated"] != true || len(truncated["line"].(string)) != maxStderrLineBytes {
+		t.Errorf("long line: %v", truncated)
+	}
+	if lines != maxStderrLines || suppressed != 1 {
+		t.Errorf("logged %d stderr lines and %d suppression entries, want %d and 1", lines, suppressed, maxStderrLines)
+	}
+	if unexpected != 1 {
+		t.Errorf("unexpected-exit entries = %d, want 1", unexpected)
+	}
+	if got := exits.got(); len(got) != 1 || got[0] != (WindowExit{Instance: "41", Code: 1}) {
+		t.Errorf("reported exits = %+v", got)
+	}
+}
+
+// A window the daemon closes is not a surprise, whatever status it exits
+// with.
+func TestLinuxHostRequestedCloseIsNotUnexpected(t *testing.T) {
+	sink := captureChildLog(t)
+	script := "#!/bin/sh\n" + readyFrame +
+		`while IFS= read -r line; do case "$line" in *'"t":"close"'*) echo 'closing' >&2; exit 1;; esac; done` + "\n"
+	program := fakeChild(t, script)
+	t.Setenv("DISPLAY", ":stale")
+	host := New(program)
+	var exits exitRecorder
+	host.SetExitReporter(exits.report)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	transport, err := host.OpenWindowContext(ctx, backend.WindowSpec{Instance: "42", Format: backend.FormatNapplet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := transport.(*childTransport)
+	child.Close()
+	waitDone(t, child)
+	sawStderr := false
+	for _, e := range sink.entries(t) {
+		if e["message"] == "window program exited unexpectedly" {
+			t.Errorf("requested close logged as unexpected: %v", e)
+		}
+		if e["line"] == "closing" {
+			sawStderr = true
+		}
+	}
+	if !sawStderr {
+		t.Error("stderr of a closing window was not logged")
+	}
+	if got := exits.got(); len(got) != 0 {
+		t.Errorf("requested close reported: %+v", got)
+	}
+	// a removed reporter hears nothing
+	host.SetExitReporter(nil)
+	host.reportExit(WindowExit{Instance: "42", Code: 1})
+	if got := exits.got(); len(got) != 0 {
+		t.Errorf("removed reporter called: %+v", got)
+	}
+}
+
+func TestUnexpectedExitClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    syscall.WaitStatus
+		requested bool
+		want      WindowExit
+		ok        bool
+	}{
+		{"clean exit", 0, false, WindowExit{}, false},
+		{"exit 1", 1 << 8, false, WindowExit{Code: 1}, true},
+		{"exit 124", 124 << 8, false, WindowExit{Code: 124}, true},
+		{"sigkill", syscall.WaitStatus(syscall.SIGKILL), false, WindowExit{Signal: 9}, true},
+		{"sigsegv with core", syscall.WaitStatus(syscall.SIGSEGV) | 0x80, false, WindowExit{Signal: 11}, true},
+		{"requested exit 1", 1 << 8, true, WindowExit{}, false},
+		{"requested sigkill", syscall.WaitStatus(syscall.SIGKILL), true, WindowExit{}, false},
+		{"requested clean", 0, true, WindowExit{}, false},
+	} {
+		got, ok := unexpectedExit(tc.status, tc.requested)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%s: got %+v, %v; want %+v, %v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+	if ws := waitStatus(nil); ws != 0 {
+		t.Errorf("missing process state = %v", ws)
+	}
+}
+
+func TestIsChildLogLine(t *testing.T) {
+	for line, want := range map[string]bool{
+		"3:04PM INF window program started _=1234 kind=napplet": true,
+		"11:59AM WRN something":                                 true,
+		"12:00PM DBG":                                           true,
+		cleanStderrLine([]byte("\x1b[90m3:04PM\x1b[0m \x1b[32mINF\x1b[0m webkit up")):          true,
+		`{"level":"info","message":"window program started"}`:                                  true,
+		"Gdk-Message: 10:49:06.416: Error 71 (Protocol error) dispatching to Wayland display.": false,
+		"(kwaklet:1234): GLib-CRITICAL **: 10:49:06.416: g_source_remove: assertion failed":    false,
+		"Overriding existing handler for signal 10. Set JSC_SIGNAL_FOR_GC":                     false,
+		"{}":                         false,
+		`{"level":3}`:                false,
+		"{not json":                  false,
+		"3:04PM INFO not zerolog":    false,
+		"13:04 INF not kitchen time": false,
+		"":                           false,
+	} {
+		if got := isChildLogLine(line); got != want {
+			t.Errorf("isChildLogLine(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
+func TestCleanStderrLine(t *testing.T) {
+	if got := cleanStderrLine([]byte("a\x1b[1;31mb\x1b[0m\x00c\xffd\r")); got != "ab c�d" {
+		t.Errorf("cleaned = %q", got)
+	}
+	// the cap never splits a rune
+	long := strings.Repeat("é", maxStderrLineBytes)
+	got := cleanStderrLine([]byte(long))
+	if len(got) > maxStderrLineBytes || !utf8.ValidString(got) {
+		t.Errorf("capped line: %d bytes, valid %v", len(got), utf8.ValidString(got))
 	}
 }
 

@@ -13,13 +13,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/rs/zerolog"
 
 	"kwakore/backend"
 	"kwakore/backend/desktopentry"
@@ -37,7 +41,46 @@ const readyTimeout = 10 * time.Second
 type Host struct {
 	Program string
 	CLI     string
+
+	exitMu       sync.Mutex
+	exitReporter func(WindowExit)
 }
+
+// WindowExit describes a window program that ended without the daemon asking
+// it to: Code is its non-zero exit status, or Signal the signal that killed
+// it (Signal is 0 for a normal exit).
+type WindowExit struct {
+	Instance string
+	Code     int
+	Signal   int
+}
+
+// SetExitReporter installs the function told about every window program that
+// exits on its own with a failure status or a signal, after the exit is
+// logged and before the backend hears the window closed. nil removes it. Like
+// backend.SetNativeEntryReporter it lets the service surface a failure the
+// launcher would otherwise only log.
+func (h *Host) SetExitReporter(report func(WindowExit)) {
+	h.exitMu.Lock()
+	h.exitReporter = report
+	h.exitMu.Unlock()
+}
+
+func (h *Host) reportExit(e WindowExit) {
+	if h == nil {
+		return
+	}
+	h.exitMu.Lock()
+	report := h.exitReporter
+	h.exitMu.Unlock()
+	if report != nil {
+		report(e)
+	}
+}
+
+// childLogger is where window program stderr and exits are logged: the
+// backend's logger, which the daemon sends to the user journal. Tests swap it.
+var childLogger = backend.Logger
 
 func New(program string) *Host { return &Host{Program: program, CLI: DefaultCLIPath()} }
 
@@ -214,13 +257,29 @@ func (h *Host) OpenWindowContext(ctx context.Context, spec backend.WindowSpec) (
 		_ = stdin.Close()
 		return nil, backend.ErrServiceUnavailable
 	}
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	// The window program's stderr is where GTK, GLib and WebKit report the
+	// failures that end it (a Wayland protocol error exits it with status 1),
+	// so it goes to the journal, capped, instead of being discarded.
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		return nil, backend.ErrServiceUnavailable
 	}
-	transport := &childTransport{cmd: cmd, enc: json.NewEncoder(stdin), stdin: stdin, done: make(chan struct{})}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return nil, backend.ErrServiceUnavailable
+	}
+	logger := childLogger()
+	transport := &childTransport{
+		cmd: cmd, enc: json.NewEncoder(stdin), stdin: stdin, done: make(chan struct{}),
+		log: logger, host: h, instance: spec.Instance, stderrDone: make(chan struct{}),
+	}
+	// read stderr from the start, so early output is kept and the child never
+	// blocks on a full pipe
+	go logChildStderr(logger, spec.Instance, stderr, transport.stderrDone)
 	ready := make(chan struct{}, 1)
 	failed := make(chan struct{}, 1)
 	go readChild(transport, spec.Instance, stdout, ready, failed)
@@ -254,6 +313,15 @@ type childTransport struct {
 	mu        sync.Mutex
 	closeOnce sync.Once
 	done      chan struct{}
+
+	log        zerolog.Logger
+	host       *Host
+	instance   string
+	stderrDone chan struct{}
+	// expectedExit is set whenever the daemon asked the window to end (or
+	// killed it) and when the child reported its own failure over the wire,
+	// so only a window program that died on its own is reported.
+	expectedExit atomic.Bool
 }
 
 func (c *childTransport) Send(m backend.WireMsg) {
@@ -263,6 +331,7 @@ func (c *childTransport) Send(m backend.WireMsg) {
 }
 func (c *childTransport) Focus() {}
 func (c *childTransport) Close() {
+	c.expectedExit.Store(true)
 	c.closeOnce.Do(func() {
 		// A child can stop reading stdin. Never make a stop RPC wait on a
 		// pipe write, and reap the selected child if it ignores the request.
@@ -277,6 +346,7 @@ func (c *childTransport) Close() {
 	})
 }
 func (c *childTransport) killAndWait() {
+	c.expectedExit.Store(true)
 	_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	<-c.done
 }
@@ -291,6 +361,9 @@ func readChild(c *childTransport, instance string, stdout io.ReadCloser, ready, 
 			continue
 		}
 		if msg.T == "windowFailed" {
+			// the child reported its own failure, which the backend surfaces;
+			// its exit is not a further surprise
+			c.expectedExit.Store(true)
 			backend.HandleMessage(instance, msg)
 			select {
 			case failed <- struct{}{}:
@@ -311,12 +384,173 @@ func readChild(c *childTransport, instance string, stdout io.ReadCloser, ready, 
 		backend.HandleMessage(instance, msg)
 	}
 	if scanner.Err() != nil {
+		// an overlong or unreadable line: the daemon chose to end the window
+		c.expectedExit.Store(true)
 		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 	}
 	_ = stdout.Close()
 	_ = c.stdin.Close()
+	// Wait closes the stderr read end, so let the reader finish first. The
+	// wait is bounded: a grandchild still holding the pipe must not keep the
+	// window from closing, and Wait unblocks the reader anyway.
+	if c.stderrDone != nil {
+		select {
+		case <-c.stderrDone:
+		case <-time.After(stderrDrainTimeout):
+		}
+	}
 	_ = c.cmd.Wait()
+	if exit, ok := unexpectedExit(waitStatus(c.cmd.ProcessState), c.expectedExit.Load()); ok {
+		exit.Instance = instance
+		event := c.log.Warn().Str("instance", instance)
+		if exit.Signal != 0 {
+			event = event.Int("signal", exit.Signal)
+		} else {
+			event = event.Int("code", exit.Code)
+		}
+		event.Msg("window program exited unexpectedly")
+		c.host.reportExit(exit)
+	}
 	backend.WindowClosed(instance)
+}
+
+// waitStatus is the raw wait status of a finished child; a missing state
+// reads as a clean exit, which is never reported.
+func waitStatus(state *os.ProcessState) syscall.WaitStatus {
+	if state == nil {
+		return 0
+	}
+	ws, ok := state.Sys().(syscall.WaitStatus)
+	if !ok {
+		return 0
+	}
+	return ws
+}
+
+// unexpectedExit classifies a finished window program: a failure status or a
+// signal is unexpected unless the daemon asked the window to end.
+func unexpectedExit(ws syscall.WaitStatus, requested bool) (WindowExit, bool) {
+	switch {
+	case requested:
+		return WindowExit{}, false
+	case ws.Signaled():
+		return WindowExit{Signal: int(ws.Signal())}, true
+	case ws.Exited() && ws.ExitStatus() != 0:
+		return WindowExit{Code: ws.ExitStatus()}, true
+	}
+	return WindowExit{}, false
+}
+
+// ─── window program stderr ───────────────────────────────────────
+
+const (
+	// maxStderrLineBytes caps one logged stderr line; the rest of a longer
+	// line is read and dropped.
+	maxStderrLineBytes = 2048
+	// maxStderrLines caps the stderr lines logged per window. Later output
+	// is drained without being logged, so a noisy engine cannot flood the
+	// journal.
+	maxStderrLines = 200
+	// stderrDrainTimeout bounds how long a closing window waits for its
+	// stderr to reach EOF before reaping the child.
+	stderrDrainTimeout = 2 * time.Second
+)
+
+// sgrSequence matches the colour codes the child's console logger writes even
+// into a pipe.
+var sgrSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// childConsoleLine matches the child's zerolog console form once colours are
+// gone: a time.Kitchen timestamp, then a level abbreviation.
+var childConsoleLine = regexp.MustCompile(`^[0-9]{1,2}:[0-9]{2}[AP]M (TRC|DBG|INF|WRN|ERR|FTL|PNC)( |$)`)
+
+// isChildLogLine reports whether a cleaned stderr line came from the window
+// program's own logger (its console form, or JSON with a string level)
+// rather than from GTK, GLib or WebKit.
+func isChildLogLine(line string) bool {
+	if childConsoleLine.MatchString(line) {
+		return true
+	}
+	if !strings.HasPrefix(line, "{") {
+		return false
+	}
+	var entry map[string]any
+	if json.Unmarshal([]byte(line), &entry) != nil {
+		return false
+	}
+	_, ok := entry["level"].(string)
+	return ok
+}
+
+// cleanStderrLine makes one stderr line safe to log as a structured field:
+// colours stripped, invalid UTF-8 replaced, other control characters turned
+// into spaces, and the result capped at maxStderrLineBytes on a rune
+// boundary.
+func cleanStderrLine(raw []byte) string {
+	text := strings.TrimRight(string(raw), "\r")
+	text = sgrSequence.ReplaceAllString(text, "")
+	text = strings.ToValidUTF8(text, "�")
+	text = strings.Map(func(r rune) rune {
+		if r != '\t' && unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	if len(text) > maxStderrLineBytes {
+		cut := maxStderrLineBytes
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+	}
+	return text
+}
+
+// logChildStderr logs a window program's stderr line by line until EOF, then
+// closes done. The child's own log lines go out at Debug, everything else
+// (GTK, GLib, WebKit) at Warn, always as the structured line field. Memory
+// stays bounded by the line cap, and past maxStderrLines the output is
+// drained unlogged rather than left to block the child.
+func logChildStderr(logger zerolog.Logger, instance string, r io.Reader, done chan<- struct{}) {
+	defer close(done)
+	br := bufio.NewReaderSize(r, maxStderrLineBytes)
+	logged := 0
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if err != nil {
+			return
+		}
+		raw := append([]byte(nil), chunk...)
+		truncated := false
+		for isPrefix && err == nil {
+			truncated = true
+			_, isPrefix, err = br.ReadLine()
+		}
+		if text := cleanStderrLine(raw); strings.TrimSpace(text) != "" {
+			if logged == maxStderrLines {
+				logger.Warn().Str("instance", instance).Int("max_lines", maxStderrLines).
+					Msg("window program stderr: further output suppressed")
+				_, _ = io.Copy(io.Discard, br)
+				return
+			}
+			logged++
+			var event *zerolog.Event
+			msg := "window program stderr"
+			if isChildLogLine(text) {
+				event, msg = logger.Debug(), "window program log"
+			} else {
+				event = logger.Warn()
+			}
+			event = event.Str("instance", instance).Str("line", text)
+			if truncated {
+				event = event.Bool("truncated", true)
+			}
+			event.Msg(msg)
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // checkProgram rejects symlinks, shared-writable path components (other than
