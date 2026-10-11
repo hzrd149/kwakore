@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-11 — Completed quick task 261011-kfc: bounded multi-relay requests (15s after first EOSE, 30s cap)
+Last activity: 2026-10-11 — Completed quick task 261011-lzk: sync the installed napplet list across machines through a NIP-78 event (sync_id)
 
 ## Performance Metrics
 
@@ -177,6 +177,7 @@ None yet.
 | 261011-fuc | Default to napplet.soy and ditto.pub relays and Blossom servers | 2026-10-11 | 91629bf | [261011-fuc-use-napplet-soy-and-ditto-pub-default-re](./quick/261011-fuc-use-napplet-soy-and-ditto-pub-default-re/) |
 | 261011-i5x | Fix napplet windows closing on Wayland (DMABUF), log window program stderr and surface unexpected exits | 2026-10-11 | 384228a | [261011-i5x-wayland-dmabuf-window-crash-diagnostics](./quick/261011-i5x-wayland-dmabuf-window-crash-diagnostics/) |
 | 261011-kfc | Bound multi-relay requests: finish 15s after the first EOSE, 30s hard cap, offline relays no longer stall discovery or sync | 2026-10-11 | 054fcf8 | [261011-kfc-bound-multi-relay-requests-finish-15s-af](./quick/261011-kfc-bound-multi-relay-requests-finish-15s-af/) |
+| 261011-lzk | Sync installed napplets and their pinned versions across machines through an encrypted NIP-78 event named by the `sync_id` setting | 2026-10-11 | c411419 | [261011-lzk-sync-installed-napplets-list-via-nip-78-](./quick/261011-lzk-sync-installed-napplets-list-via-nip-78-/) |
 
 ## Deferred Items
 
