@@ -536,6 +536,13 @@ omitted field takes its default. An explicit empty array disables that list;
 an explicit `false` disables the named Boolean setting. `null` is never
 an alias for omission.
 
+`sync_id` is optional and off by default. Set it to the same string on each
+of your machines and they share one installed napplet list (see
+[syncing installed napplets](#syncing-installed-napplets)). It must be 1 to 64
+printable ASCII characters without spaces; an empty string, like omitting it,
+turns sync off, so an override of `""` switches off an id set in
+`config.json`. An invalid value is rejected without repeating it in the error.
+
 Both `config.json` and `settings-overrides.json` use the same strict parser:
 the root must be one JSON object of at most 1 MiB; unknown or duplicate
 fields, trailing JSON, wrong types, malformed URLs, explicit `null` and
@@ -551,7 +558,7 @@ field's file value, or its default when the file omits it. Empty arrays and
 
 **Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
 and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
-`discover_on_user_relays`, `desktop_entries`, or `gnome_search`. They write only `settings-overrides.json`,
+`discover_on_user_relays`, `desktop_entries`, `gnome_search`, or `sync_id`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
@@ -560,7 +567,9 @@ that is not there changes nothing.
 In `kwak tui` or `kwak settings set`, relay hosts entered without a scheme
 gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
 Explicit schemes are preserved. The daemon still validates canonical URLs,
-and direct edits to `config.json` must include schemes.
+and direct edits to `config.json` must include schemes. `sync_id` takes a JSON
+string or a bare word: `kwak settings set sync_id laptops` and
+`kwak settings set sync_id '"laptops"'` are the same.
 
 ```console
 $ kwak settings set relays '["wss://relay.example.com"]'

@@ -447,7 +447,7 @@ func (s *Service) ClearSetting(field string) error {
 
 func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	after := s.manager.Effective()
-	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch {
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID {
 		return
 	}
 	discoveryChanged := !slices.Equal(before.Relays, after.Relays) || before.DiscoverOnUserRelays != after.DiscoverOnUserRelays
@@ -508,7 +508,7 @@ func reloadWarning(path string, err error) string {
 		name = "[redacted]"
 	}
 	field := "file"
-	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "signer"} {
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "signer"} {
 		if strings.Contains(err.Error(), name) {
 			field = name
 			break

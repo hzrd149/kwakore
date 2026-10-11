@@ -612,6 +612,11 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		case "set":
 			if len(args) == 4 && settingField(args[2]) {
 				value := json.RawMessage(args[3])
+				// a bare word is taken as the sync_id string, like the URL
+				// scheme normalization below
+				if args[2] == "sync_id" && !strings.HasPrefix(args[3], `"`) {
+					value, _ = json.Marshal(args[3])
+				}
 				if !validSettingValue(args[2], value) {
 					return "", nil, "", inputFailure("invalid JSON setting value")
 				}
@@ -826,7 +831,7 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 }
 
 func settingField(field string) bool {
-	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search"
+	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" || field == "sync_id"
 }
 
 func validSettingValue(field string, value json.RawMessage) bool {
@@ -836,6 +841,10 @@ func validSettingValue(field string, value json.RawMessage) bool {
 	if field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" {
 		var v bool
 		return (bytes.Equal(value, []byte("true")) || bytes.Equal(value, []byte("false"))) && json.Unmarshal(value, &v) == nil
+	}
+	if field == "sync_id" {
+		var v string
+		return len(value) > 0 && value[0] == '"' && json.Unmarshal(value, &v) == nil
 	}
 	if len(value) == 0 || value[0] != '[' {
 		return false

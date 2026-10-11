@@ -83,6 +83,7 @@ let
     "discover_on_user_relays"
     "desktop_entries"
     "gnome_search"
+    "sync_id"
     "signer"
   ];
   # the same fragments serviceconfig refuses in a config file
@@ -131,7 +132,14 @@ let
 
   effective = lib.optionalAttrs hasSettings (
     lib.filterAttrs (_: v: v != null) {
-      inherit (settings) relays blossom_servers discover_on_user_relays desktop_entries gnome_search;
+      inherit (settings)
+        relays
+        blossom_servers
+        discover_on_user_relays
+        desktop_entries
+        gnome_search
+        sync_id
+        ;
       signer =
         if signer == null then
           null
@@ -163,7 +171,7 @@ let
       if secretLike name then
         "${describeSecret "programs.kwakore.settings" name}: secret field is forbidden; supply signer secrets with `kwakore signer` --secret-stdin or --secret-file"
       else
-        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search or signer"
+        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id or signer"
     ) extraKeys
     ++ map (
       name:
@@ -176,6 +184,9 @@ let
     ++
       urlErrors "blossom_servers" validServer "use an http:// or https:// server URL with a host"
         settings.blossom_servers
+    ++ lib.optional (
+      settings.sync_id != null && builtins.match "[!-~]{0,64}" settings.sync_id == null
+    ) "programs.kwakore.settings.sync_id: use 1 to 64 printable ASCII characters without spaces"
     ++ lib.optional (
       signer != null && signer.mode == "bunker" && (signer.relay == null || !validRelay signer.relay)
     ) "programs.kwakore.settings.signer.relay: bunker needs a canonical wss:// relay URL"
@@ -298,6 +309,11 @@ in
               type = lib.types.nullOr lib.types.bool;
               default = null;
               description = "Whether GNOME search includes discovered napplets.";
+            };
+            sync_id = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Identifier of the NIP-78 event that syncs the installed napplet list across machines; empty turns sync off.";
             };
             signer = lib.mkOption {
               default = null;

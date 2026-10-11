@@ -57,6 +57,7 @@ type Config struct {
 	DiscoverOnUserRelays *bool     `json:"discover_on_user_relays,omitempty"`
 	DesktopEntries       *bool     `json:"desktop_entries,omitempty"`
 	GNOMESearch          *bool     `json:"gnome_search,omitempty"`
+	SyncID               *string   `json:"sync_id,omitempty"`
 	Signer               *Signer   `json:"signer,omitempty"`
 }
 
@@ -72,7 +73,10 @@ type Effective struct {
 	DiscoverOnUserRelays bool     `json:"discover_on_user_relays"`
 	DesktopEntries       bool     `json:"desktop_entries"`
 	GNOMESearch          bool     `json:"gnome_search"`
-	Signer               Signer   `json:"signer"`
+	// SyncID names the NIP-78 event that syncs the installed napplet list
+	// across machines. Empty means sync is off.
+	SyncID string `json:"sync_id"`
+	Signer Signer `json:"signer"`
 }
 
 func Defaults() Effective {
@@ -97,6 +101,9 @@ func merge(file, override Config) Effective {
 		if c.GNOMESearch != nil {
 			v.GNOMESearch = *c.GNOMESearch
 		}
+		if c.SyncID != nil {
+			v.SyncID = *c.SyncID
+		}
 		if c.Signer != nil {
 			v.Signer = *c.Signer
 		}
@@ -106,10 +113,30 @@ func merge(file, override Config) Effective {
 
 func validateMerged(file, override Config) error {
 	v := merge(file, override)
-	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, Signer: &v.Signer})
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, SyncID: &v.SyncID, Signer: &v.Signer})
+}
+
+// errInvalidSyncID never repeats the rejected value, because settings errors
+// are wrapped into Go errors that may be logged.
+var errInvalidSyncID = errors.New("sync_id: use 1 to 64 printable ASCII characters without spaces, or an empty string to turn sync off")
+
+// validSyncID accepts "" (sync off) or 1 to 64 bytes in '!'..'~'.
+func validSyncID(s string) bool {
+	if len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func validate(c Config) error {
+	if c.SyncID != nil && !validSyncID(*c.SyncID) {
+		return errInvalidSyncID
+	}
 	if c.Signer != nil {
 		s := *c.Signer
 		if s.Mode != "none" && s.Mode != "nsec" && s.Mode != "bunker" && s.Mode != "system" {
@@ -181,8 +208,8 @@ func read(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	for key := range raw {
-		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "signer" {
-			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, or gnome_search", path, key)
+		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "sync_id" && key != "signer" {
+			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, or sync_id", path, key)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
 			return Config{}, fmt.Errorf("%s: %s must not be null; omit the setting to use its default", path, key)
@@ -358,6 +385,7 @@ func (m *Manager) sourcesLocked() map[string]string {
 		"discover_on_user_relays": {m.file.DiscoverOnUserRelays != nil, m.override.DiscoverOnUserRelays != nil},
 		"desktop_entries":         {m.file.DesktopEntries != nil, m.override.DesktopEntries != nil},
 		"gnome_search":            {m.file.GNOMESearch != nil, m.override.GNOMESearch != nil},
+		"sync_id":                 {m.file.SyncID != nil, m.override.SyncID != nil},
 		"signer":                  {m.file.Signer != nil, m.override.Signer != nil},
 	}
 	out := make(map[string]string, len(fields))
@@ -447,5 +475,5 @@ func (m *Manager) fileSystemSignerSocketLocked() string {
 }
 
 func FieldName(name string) bool {
-	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search ", " "+name+" ")
+	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search sync_id ", " "+name+" ")
 }
