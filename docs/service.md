@@ -408,6 +408,25 @@ $ kwak launch 35129:<author hex public key>:<identifier>
 {"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}
 ```
 
+On Wayland (`WAYLAND_DISPLAY` set) the window program turns off WebKitGTK's
+DMABUF renderer (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) unless that variable is
+already set, because on some compositor and GPU combinations the renderer
+makes napplet windows close right after they open. X11 sessions are not
+changed. To keep DMABUF on a setup where it works, for example for heavy
+WebGL napplets, set `KWAKORE_WEBKIT_DMABUF=1` for the service with a drop-in
+from `systemctl --user edit kwakore.service`:
+
+```ini
+[Service]
+Environment=KWAKORE_WEBKIT_DMABUF=1
+```
+
+then run `systemctl --user restart kwakore.service`. On NixOS, set
+`systemd.user.services.kwakore.environment.KWAKORE_WEBKIT_DMABUF = "1";`.
+If windows still close immediately, look for a `window` entry in
+`kwak diagnostics` and for the window program's messages in the journal (see
+[Status, errors and logs](#status-errors-and-logs)).
+
 ## Native desktop entries
 
 For each installed napplet the daemon writes one desktop entry,

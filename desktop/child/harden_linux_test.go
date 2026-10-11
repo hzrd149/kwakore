@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -178,4 +179,86 @@ func TestHardenWindowFailsClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─── the DMABUF renderer on Wayland ─────────────────────────────
+
+func TestDisableDMABufByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{"wayland only", map[string]string{"WAYLAND_DISPLAY": "wayland-1"}, true},
+		{"wayland and x11", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"}, true},
+		{"wayland display empty", map[string]string{"WAYLAND_DISPLAY": "", "DISPLAY": ":0"}, false},
+		{"x11 only", map[string]string{"DISPLAY": ":0"}, false},
+		{"nothing", map[string]string{}, false},
+		// whatever the user set for the renderer wins, "0" included: WebKit
+		// reads it as keep DMABUF
+		{"renderer kept with 0", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "WEBKIT_DISABLE_DMABUF_RENDERER": "0"}, false},
+		{"renderer already off", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "WEBKIT_DISABLE_DMABUF_RENDERER": "1"}, false},
+		{"renderer set empty", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "WEBKIT_DISABLE_DMABUF_RENDERER": ""}, false},
+		{"opt-out", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "KWAKORE_WEBKIT_DMABUF": "1"}, false},
+		{"opt-out 0", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "KWAKORE_WEBKIT_DMABUF": "0"}, true},
+		{"opt-out yes", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "KWAKORE_WEBKIT_DMABUF": "yes"}, true},
+		{"opt-out empty", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "KWAKORE_WEBKIT_DMABUF": ""}, true},
+	} {
+		lookup := func(key string) (string, bool) {
+			value, ok := tc.env[key]
+			return value, ok
+		}
+		if got := disableDMABufByDefault(lookup); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// unsetEnv removes key for the rest of the test and restores it afterwards.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareEngineDisablesDMABufOnWayland(t *testing.T) {
+	t.Run("wayland", func(t *testing.T) {
+		t.Setenv("WAYLAND_DISPLAY", "wayland-test")
+		unsetEnv(t, "WEBKIT_DISABLE_DMABUF_RENDERER")
+		unsetEnv(t, "KWAKORE_WEBKIT_DMABUF")
+		prepareEngine()
+		if got, ok := os.LookupEnv("WEBKIT_DISABLE_DMABUF_RENDERER"); !ok || got != "1" {
+			t.Fatalf("WEBKIT_DISABLE_DMABUF_RENDERER = %q (set %v), want 1", got, ok)
+		}
+	})
+	t.Run("opt-out", func(t *testing.T) {
+		t.Setenv("WAYLAND_DISPLAY", "wayland-test")
+		unsetEnv(t, "WEBKIT_DISABLE_DMABUF_RENDERER")
+		t.Setenv("KWAKORE_WEBKIT_DMABUF", "1")
+		prepareEngine()
+		if got, ok := os.LookupEnv("WEBKIT_DISABLE_DMABUF_RENDERER"); ok {
+			t.Fatalf("opt-out still set WEBKIT_DISABLE_DMABUF_RENDERER=%q", got)
+		}
+	})
+	t.Run("user value kept", func(t *testing.T) {
+		t.Setenv("WAYLAND_DISPLAY", "wayland-test")
+		t.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "0")
+		unsetEnv(t, "KWAKORE_WEBKIT_DMABUF")
+		prepareEngine()
+		if got := os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER"); got != "0" {
+			t.Fatalf("user value replaced with %q", got)
+		}
+	})
+	t.Run("x11", func(t *testing.T) {
+		unsetEnv(t, "WAYLAND_DISPLAY")
+		t.Setenv("DISPLAY", ":0")
+		unsetEnv(t, "WEBKIT_DISABLE_DMABUF_RENDERER")
+		unsetEnv(t, "KWAKORE_WEBKIT_DMABUF")
+		prepareEngine()
+		if got, ok := os.LookupEnv("WEBKIT_DISABLE_DMABUF_RENDERER"); ok {
+			t.Fatalf("x11 session set WEBKIT_DISABLE_DMABUF_RENDERER=%q", got)
+		}
+	})
 }

@@ -63,15 +63,21 @@ func buildChild(t *testing.T) string {
 
 // childEnv is the environment a child started by buildChild runs with: the
 // test's own, the variables every window needs, headless-safe WebKit
-// rendering, then extra (later entries win).
+// rendering under xvfb only, then extra (later entries win). On a Wayland
+// session the child runs with its production renderer default
+// (prepareEngine), so these tests do not mask what users get.
 func childEnv(dir string, extra ...string) []string {
 	env := append(os.Environ(),
 		"KWAKORE_INSTANCE_ID=webkit-test",
 		"KWAKORE_NAPP_ID=webkit-test",
 		"WEBVIEW_PATH="+dir,
-		"WEBKIT_DISABLE_COMPOSITING_MODE=1",
-		"WEBKIT_DISABLE_DMABUF_RENDERER=1",
 	)
+	if os.Getenv("WAYLAND_DISPLAY") == "" {
+		env = append(env,
+			"WEBKIT_DISABLE_COMPOSITING_MODE=1",
+			"WEBKIT_DISABLE_DMABUF_RENDERER=1",
+		)
+	}
 	return append(env, extra...)
 }
 
