@@ -14,6 +14,9 @@ import (
 	"fiatjaf.com/nostr"
 )
 
+// answeredTrue stands in for a discovery run where some relay sent EOSE.
+func answeredTrue() bool { return true }
+
 func resetServiceCatalog(t *testing.T) {
 	t.Helper()
 	discoverMu.Lock()
@@ -31,7 +34,7 @@ func TestServiceDiscoveryCompletesAndFilters(t *testing.T) {
 	resetLauncherState(t)
 	resetServiceCatalog(t)
 	old := subscribeDiscovery
-	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
+	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, func() bool, error) {
 		events := make(chan nostr.RelayEvent)
 		eose := make(chan struct{})
 		go func() {
@@ -40,7 +43,7 @@ func TestServiceDiscoveryCompletesAndFilters(t *testing.T) {
 			<-ctx.Done()
 			close(events)
 		}()
-		return events, eose, nil
+		return events, eose, answeredTrue, nil
 	}
 	t.Cleanup(func() { subscribeDiscovery = old })
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -76,14 +79,14 @@ func TestServiceDiscoverySupersededRefresh(t *testing.T) {
 	old := subscribeDiscovery
 	var calls atomic.Int32
 	started := make(chan struct{})
-	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
+	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, func() bool, error) {
 		if calls.Add(1) == 1 {
 			close(started)
-			return make(chan nostr.RelayEvent), make(chan struct{}), nil
+			return make(chan nostr.RelayEvent), make(chan struct{}), answeredTrue, nil
 		}
 		events := make(chan nostr.RelayEvent)
 		close(events)
-		return events, make(chan struct{}), nil
+		return events, make(chan struct{}), answeredTrue, nil
 	}
 	t.Cleanup(func() { subscribeDiscovery = old })
 	firstErr := make(chan error, 1)
@@ -134,14 +137,42 @@ func TestServiceDiscoveryTimeoutKeepsCache(t *testing.T) {
 	catalogFetched = &now
 	discoverMu.Unlock()
 	old := subscribeDiscovery
-	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
-		return make(chan nostr.RelayEvent), make(chan struct{}), nil
+	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, func() bool, error) {
+		return make(chan nostr.RelayEvent), make(chan struct{}), answeredTrue, nil
 	}
 	t.Cleanup(func() { subscribeDiscovery = old })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 	if _, err := ServiceDiscover(ctx, "", true, 0, 100); !errors.Is(err, ErrDiscoveryTimeout) {
 		t.Fatalf("refresh timeout: %v", err)
+	}
+	page, err := ServiceDiscover(t.Context(), "", false, 0, 100)
+	if err != nil || !page.Complete || page.Total != 1 || page.Items[0].Name != "Saved" {
+		t.Fatalf("cached catalog lost: %+v %v", page, err)
+	}
+}
+
+func TestServiceDiscoveryNoRelayAnsweredKeepsCache(t *testing.T) {
+	resetLauncherState(t)
+	resetServiceCatalog(t)
+	now := time.Now().UTC()
+	discoverMu.Lock()
+	catalog = []Napp{{D: "saved", Author: nostr.Generate().Public(), Name: "Saved"}}
+	catalogFetched = &now
+	discoverMu.Unlock()
+	old := subscribeDiscovery
+	subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, func() bool, error) {
+		// every relay failed: the rule says done at once, and nothing answered
+		eose := make(chan struct{})
+		close(eose)
+		return make(chan nostr.RelayEvent), eose, func() bool { return false }, nil
+	}
+	t.Cleanup(func() { subscribeDiscovery = old })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	// a refresh no relay answered is unavailable, not an empty catalog
+	if _, err := ServiceDiscover(ctx, "", true, 0, 100); !errors.Is(err, ErrDiscoveryUnavailable) {
+		t.Fatalf("unanswered refresh: %v", err)
 	}
 	page, err := ServiceDiscover(t.Context(), "", false, 0, 100)
 	if err != nil || !page.Complete || page.Total != 1 || page.Items[0].Name != "Saved" {

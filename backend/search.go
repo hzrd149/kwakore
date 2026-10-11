@@ -136,11 +136,11 @@ func searchUser(ctx context.Context, term string) []map[string]any {
 	defer cancel()
 
 	newest := make(map[nostr.PubKey]nostr.Event)
-	for ie := range sys.Pool.FetchMany(fetchCtx, relays, nostr.Filter{
+	for ie := range fetchRelays(fetchCtx, relays, nostr.Filter{
 		Kinds:  []nostr.Kind{0},
 		Search: q,
 		Limit:  searchResultLimit,
-	}, nostr.SubscriptionOptions{Label: "usersearch"}) {
+	}, "usersearch").Events() {
 		if prev, ok := newest[ie.PubKey]; !ok || ie.CreatedAt > prev.CreatedAt {
 			newest[ie.PubKey] = ie.Event
 		}

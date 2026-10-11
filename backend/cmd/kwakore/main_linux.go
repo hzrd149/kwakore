@@ -88,6 +88,10 @@ func run(args []string) error {
 	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "napplet.try" || method == "signer.pair.wait" {
 		deadline = 180 * time.Second
 	}
+	if method == "napplet.discover" {
+		// a refresh is bounded by the 30s relay cap plus a short drain
+		deadline = 45 * time.Second
+	}
 	if timeoutOverride > 0 {
 		deadline = timeoutOverride
 	}

@@ -138,18 +138,22 @@ func napOutboxGetEvent(c *napCall) {
 		for _, u := range append(outboxFallback(), Relays()...) {
 			relays = nostr.AppendUnique(relays, nostr.NormalizeURL(u))
 		}
+		var q *relayQuery
 		if len(relays) > 0 {
-			for re := range sys.Pool.FetchMany(ctx, relays, f, nostr.SubscriptionOptions{Label: "napplet-outbox"}) {
+			q = fetchRelays(ctx, relays, f, "napplet-outbox")
+			for re := range q.Events() {
 				if re.Event.ID != id || !validEvent(re.Event) {
 					continue
 				}
 				sys.Publisher.Publish(ctx, re.Event)
 				c.reply(map[string]any{"result": outboxResult(re.Event, []string{re.Relay.URL})})
-				return
+				return // the deferred cancel ends the query
 			}
 		}
 		res := map[string]any{"error": "not found"}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// some relay never answered before the read ended: not found is not
+		// the final word
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (q != nil && !q.Complete()) {
 			res["incomplete"] = true
 		}
 		c.reply(res)
@@ -227,7 +231,7 @@ func napOutboxQuery(c *napCall) {
 		}
 		byID := map[nostr.ID]*found{}
 		order := []*found{}
-		// the pool drops an event a second relay sends, so the hints are
+		// the query drops an event a second relay sends, so the hints are
 		// the first relay it came from; one already in the store gets that
 		// relay added when the network sends it too
 		add := func(evt nostr.Event, relay string) {
@@ -253,8 +257,10 @@ func napOutboxQuery(c *napCall) {
 				add(evt, "")
 			}
 		}
+		var q *relayQuery
 		if dfs := outboxRoutes(ctx, filters, r.Options); len(dfs) > 0 {
-			for re := range sys.Pool.BatchedQueryMany(ctx, dfs, nostr.SubscriptionOptions{Label: "napplet-outbox"}) {
+			q = fetchDirected(ctx, dfs, "napplet-outbox")
+			for re := range q.Events() {
 				if _, seen := byID[re.Event.ID]; !seen {
 					sys.Publisher.Publish(ctx, re.Event)
 				}
@@ -274,7 +280,8 @@ func napOutboxQuery(c *napCall) {
 			events = append(events, outboxResult(f.evt, f.relays))
 		}
 		res := map[string]any{"events": events}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// the relay rule may end the read before every relay answered
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (q != nil && !q.Complete()) {
 			res["incomplete"] = true
 		}
 		c.reply(res)
@@ -381,6 +388,8 @@ func napOutboxPump(ctx context.Context, c *napCall, subID string, filters []nost
 		return "no relays to ask"
 	}
 
+	// a live NAP-OUTBOX stream has no EOSE signal and its relays run
+	// independently, so the relay rule (nostr_query.go) does not apply
 	events := sys.Pool.BatchedSubscribeMany(ctx, dfs, nostr.SubscriptionOptions{Label: "napplet-outbox"})
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()

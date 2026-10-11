@@ -873,7 +873,12 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 		return nil, errors.New("denied by the user")
 	}
 
-	return publishSigned(ctx, evt, targets), nil
+	// the target lookup's ctx started before the prompt, so a user taking more
+	// than 5s to approve used to get every relay reported failed although the
+	// EVENT had been written; the publish gets a ctx of its own
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), relayQueryTimeout)
+	defer pubCancel()
+	return publishSigned(pubCtx, evt, targets), nil
 }
 
 // publishSigned sends an already approved, signed event to its targets:
@@ -894,7 +899,9 @@ func publishSigned(ctx context.Context, evt nostr.Event, targets []string) map[s
 
 	relayResults := make(map[string]any, len(targets))
 	published, failed := 0, 0
-	for res := range sys.Pool.PublishMany(ctx, targets, evt) {
+	// capped at relayQueryTimeout: a relay still silent then arrives with
+	// errRelayTimeout and counts as failed
+	for res := range publishRelays(ctx, targets, evt) {
 		if res.Error != nil {
 			failed++
 			relayResults[res.RelayURL] = map[string]any{"ok": false, "error": res.Error.Error()}

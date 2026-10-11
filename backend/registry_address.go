@@ -153,7 +153,7 @@ var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.
 		urls = nostr.AppendUnique(urls, r)
 	}
 	if len(urls) > 0 {
-		for re := range sys.Pool.FetchMany(ctx, urls, filter, nostr.SubscriptionOptions{Label: "kwakore-address"}) {
+		for re := range fetchRelays(ctx, urls, filter, "kwakore-address").Events() {
 			events = append(events, re.Event)
 		}
 	}

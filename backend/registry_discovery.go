@@ -21,14 +21,18 @@ var (
 	catalogFetched *time.Time
 )
 
-var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, error) {
+// subscribeDiscovery opens the live discovery subscription on urls. done
+// closes once every relay has sent EOSE or failed, 15s after the first EOSE,
+// or 30s after the start, whichever comes first (the relay rule in
+// nostr_query.go); events keep streaming after it until ctx ends. answered
+// reports whether any relay sent a real EOSE, so a run no relay answered is
+// never taken for an empty catalog.
+var subscribeDiscovery = func(ctx context.Context, urls []string) (<-chan nostr.RelayEvent, <-chan struct{}, func() bool, error) {
 	if sys == nil {
-		return nil, nil, ErrDiscoveryUnavailable
+		return nil, nil, nil, ErrDiscoveryUnavailable
 	}
-	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
-		nostr.Filter{Kinds: napKinds},
-		nostr.SubscriptionOptions{Label: "kwakore-discovery", MaxWaitForEOSE: 20 * time.Second})
-	return events, eose, nil
+	q := subscribeRelays(ctx, urls, nostr.Filter{Kinds: napKinds}, "kwakore-discovery")
+	return q.Events(), q.Done(), q.Answered, nil
 }
 
 // discoveryFlushInterval is how often napps arriving from the relays are
@@ -62,7 +66,7 @@ func Discover() {
 		discoverMu.Unlock()
 		return
 	}
-	events, eose, err := subscribeDiscovery(ctx, urls)
+	events, eose, answered, err := subscribeDiscovery(ctx, urls)
 	if err != nil {
 		discoverMu.Lock()
 		if run == discoverRun {
@@ -72,10 +76,22 @@ func Discover() {
 		return
 	}
 
+	warned := false
 	collectDiscoveryContext(ctx, events, eose, discoveryFlushInterval, false, func(list []Napp, done bool) {
 		discoverMu.Lock()
 		defer discoverMu.Unlock()
 		if ctx.Err() != nil || run != discoverRun {
+			return
+		}
+		if done && !answered() {
+			// every relay failed or stayed silent: keep the cached catalog.
+			// answered only turns true, so a relay that comes back and sends
+			// EOSE later is cached on the next done flush
+			if !warned {
+				log.Warn().Int("relays", len(urls)).Msg("no discovery relay answered, keeping the cached catalog")
+				warned = true
+			}
+			setFetching(false)
 			return
 		}
 		setDiscovery(list)
@@ -108,14 +124,18 @@ func cacheDiscoveryLocked(list []Napp) {
 	catalogFetched = &now
 }
 
-// RefreshDiscovery waits for EOSE or stream completion and returns the final
-// catalog. A newer run cancels this one and cannot be overwritten by it.
+// RefreshDiscovery waits for the relay rule's EOSE or stream completion and
+// returns the final catalog. A run no relay answered returns
+// ErrDiscoveryUnavailable and keeps the cached catalog. A newer run cancels
+// this one and cannot be overwritten by it.
 func RefreshDiscovery(parent context.Context) error {
 	urls := discoveryRelays()
 	if len(urls) == 0 {
 		return ErrDiscoveryUnavailable
 	}
-	deadlineCtx, deadlineCancel := context.WithTimeout(parent, 25*time.Second)
+	// the relay rule ends the stored-events phase by relayQueryTimeout; the
+	// margin only covers the final drain (the discoveryFlushInterval settle)
+	deadlineCtx, deadlineCancel := context.WithTimeout(parent, relayQueryTimeout+2*time.Second)
 	defer deadlineCancel()
 	ctx, cancel, run := beginDiscovery(deadlineCtx)
 	defer cancel()
@@ -124,7 +144,7 @@ func RefreshDiscovery(parent context.Context) error {
 		setFetching(false)
 	}
 	discoverMu.Unlock()
-	events, eose, err := subscribeDiscovery(ctx, urls)
+	events, eose, answered, err := subscribeDiscovery(ctx, urls)
 	if err != nil {
 		return ErrDiscoveryUnavailable
 	}
@@ -139,6 +159,11 @@ func RefreshDiscovery(parent context.Context) error {
 			return ErrDiscoveryTimeout
 		}
 		return ErrDiscoveryConflict
+	}
+	if !answered() {
+		// no relay sent EOSE: an empty list here says nothing about the
+		// catalog, so the cached one stays
+		return ErrDiscoveryUnavailable
 	}
 	discoverMu.Lock()
 	defer discoverMu.Unlock()
@@ -181,6 +206,11 @@ func refreshFollows(ctx context.Context) {
 	if !ok {
 		return
 	}
+	// Discover's ctx has no deadline, and the sdk loader behind
+	// FollowedAuthors fans out inside the library where the relay rule cannot
+	// reach, so bound it here
+	ctx, cancel := context.WithTimeout(ctx, relayQueryTimeout)
+	defer cancel()
 	authors := FollowedAuthors(ctx)
 	if ctx.Err() != nil || len(authors) == 0 {
 		return

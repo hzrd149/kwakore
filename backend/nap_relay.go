@@ -274,8 +274,10 @@ func napRelayPump(ctx context.Context, c *napCall, subID string, filters []nostr
 			cancel()
 		}
 		safeGo(c, "relay pump", func() {
-			events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, relays, f,
-				nostr.SubscriptionOptions{Label: "napplet-relay"})
+			// this filter's eose follows the relay rule (nostr_query.go) and
+			// its live events keep coming after it
+			q := subscribeRelays(ctx, relays, f, "napplet-relay")
+			events, eose := q.Events(), q.Done()
 			for {
 				select {
 				case <-ctx.Done():
@@ -386,7 +388,7 @@ func napRelayQuery(c *napCall) {
 			if relays == nil {
 				relays = napRelaysFor(ctx, f)
 			}
-			for re := range sys.Pool.FetchMany(ctx, relays, f, nostr.SubscriptionOptions{Label: "napplet-query"}) {
+			for re := range fetchRelays(ctx, relays, f, "napplet-query").Events() {
 				add(re.Event)
 			}
 		}
