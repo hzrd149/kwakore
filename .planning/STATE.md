@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-07 — Completed quick task 261007-htm: human-friendly CLI output with --json
+Last activity: 2026-10-11 — Completed quick task 261011-czi: yes/no TUI install confirm and launch from Discover
 
 ## Performance Metrics
 
@@ -173,6 +173,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261007-htm | Make CLI output human friendly by default with optional --json | 2026-10-07 | ec2b210 | [261007-htm-the-cli-should-be-updated-to-be-human-fr](./quick/261007-htm-the-cli-should-be-updated-to-be-human-fr/) |
+| 261011-czi | Yes/no TUI install confirm and launch from Discover without installing | 2026-10-11 | d1ae23b | [261011-czi-simplify-tui-install-confirm-and-launch-](./quick/261011-czi-simplify-tui-install-confirm-and-launch-/) |
 
 ## Deferred Items
 
