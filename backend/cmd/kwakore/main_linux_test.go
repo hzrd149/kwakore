@@ -247,6 +247,7 @@ func TestCLIContract(t *testing.T) {
 		{"installed", []string{"installed", "--offset", "2", "--limit", "3"}, "napplet.installed", `{"offset":2,"limit":3}`},
 		{"install", []string{"install", address}, "napplet.install", `{"address":"` + address + `"}`},
 		{"launch", []string{"launch", address}, "napplet.launch", `{"address":"` + address + `"}`},
+		{"try", []string{"try", address}, "napplet.try", `{"address":"` + address + `"}`},
 		{"stop", []string{"stop", windowID}, "napplet.stop", `{"window_id":"` + windowID + `"}`},
 		{"permissions get", []string{"permissions", "get", address}, "napplet.permissions.get", `{"address":"` + address + `"}`},
 		{"permissions set", []string{"permissions", "set", address, "dispatch", "deny", "--subject", "view"}, "napplet.permissions.set", `{"address":"` + address + `","permission":"dispatch","decision":"deny","subject":"view"}`},
@@ -447,7 +448,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"signer", "status"}, {"signer", "switch", "none"}, {"signer", "pair", "start"}, {"signer", "pair", "wait"}, {"signer", "pair", "cancel"},
 		{"settings", "set", "relays", `[]`}, {"settings", "clear", "relays"},
 		{"discover"}, {"installed"}, {"windows"}, {"install", address}, {"update", address},
-		{"uninstall", "--yes", address}, {"launch", address}, {"stop", windowID},
+		{"uninstall", "--yes", address}, {"launch", address}, {"try", address}, {"stop", windowID},
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
@@ -944,6 +945,7 @@ func addressCommands(canonical string) []struct {
 		{[]string{"install", "X"}, "napplet.install", `{"address":` + q + `}`},
 		{[]string{"update", "X"}, "napplet.update", `{"address":` + q + `}`},
 		{[]string{"launch", "X"}, "napplet.launch", `{"address":` + q + `}`},
+		{[]string{"try", "X"}, "napplet.try", `{"address":` + q + `}`},
 		{[]string{"uninstall", "--yes", "X"}, "napplet.uninstall", `{"address":` + q + `,"confirm":true}`},
 		{[]string{"permissions", "get", "X"}, "napplet.permissions.get", `{"address":` + q + `}`},
 		{[]string{"permissions", "set", "X", "sign", "allow"}, "napplet.permissions.set", `{"address":` + q + `,"permission":"sign","decision":"allow"}`},
@@ -1131,10 +1133,12 @@ func TestCLIDoesNotLinkBackendOrNostr(t *testing.T) {
 func TestCLIInstallForwardsRelayHints(t *testing.T) {
 	canonical, naddr := testNaddr(t, 35129, "n-143146b0d6f", []string{"wss://relay.napplet.soy", "relay.damus.io"})
 	q := mustJSONString(canonical)
-	for _, form := range []string{naddr, "nostr:" + strings.ToUpper(naddr)} {
-		method, params, _, err := command([]string{"install", form})
-		if err != nil || method != "napplet.install" || string(params) != `{"address":`+q+`,"relays":["wss://relay.napplet.soy"]}` {
-			t.Fatalf("install %q: %s %s %v", form, method, params, err)
+	for _, verb := range []string{"install", "try"} {
+		for _, form := range []string{naddr, "nostr:" + strings.ToUpper(naddr)} {
+			method, params, _, err := command([]string{verb, form})
+			if err != nil || method != "napplet."+verb || string(params) != `{"address":`+q+`,"relays":["wss://relay.napplet.soy"]}` {
+				t.Fatalf("%s %q: %s %s %v", verb, form, method, params, err)
+			}
 		}
 	}
 	// canonical input and an naddr without usable hints send address only
@@ -1147,7 +1151,7 @@ func TestCLIInstallForwardsRelayHints(t *testing.T) {
 	}
 	// every other command sends address-only params
 	for _, tc := range addressCommands(canonical) {
-		if tc.method == "napplet.install" {
+		if tc.method == "napplet.install" || tc.method == "napplet.try" {
 			continue
 		}
 		method, params, _, err := command(withAddress(tc.args, naddr))

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"sort"
+	"sync"
 )
 
 var ErrServiceSessionUnavailable = errors.New("graphical session unavailable")
@@ -75,6 +77,60 @@ func ServiceLaunch(ctx context.Context, address string) (ServiceLaunchResult, er
 			return ServiceLaunchResult{}, ErrServiceTimeout
 		}
 		return ServiceLaunchResult{}, ErrServiceUnavailable
+	}
+	return ServiceLaunchResult{Address: address, WindowID: ci.ID(), Outcome: "opened"}, nil
+}
+
+// ServiceTry opens the napplet at a canonical address without installing it.
+// An installed napplet opens as ServiceLaunch would. Otherwise the address is
+// resolved as install resolves it and the latest manifest's files are
+// downloaded and verified into memory before a trial window opens: nothing is
+// written to the install directory or the installed list, and the trial's
+// data is dropped when it closes unless the napplet was installed meanwhile.
+// relays are optional naddr hints, used as install uses them. launchLock is
+// held only while a window opens, never during the downloads.
+func ServiceTry(ctx context.Context, address string, relays []string, launchLock sync.Locker) (ServiceLaunchResult, error) {
+	ptr, err := ParseCanonicalServiceAddress(address)
+	if err != nil {
+		return ServiceLaunchResult{}, err
+	}
+	stateMu.Lock()
+	installed := false
+	for _, n := range state.InstalledNapps {
+		if n.Address() == address && n.IsNapplet() {
+			installed = true
+			break
+		}
+	}
+	stateMu.Unlock()
+	if installed {
+		launchLock.Lock()
+		defer launchLock.Unlock()
+		return ServiceLaunch(ctx, address)
+	}
+	ptr.Relays = slices.Clone(relays)
+	n, err := resolveNappPointer(ctx, ptr)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ServiceLaunchResult{}, ErrServiceTimeout
+		}
+		if errors.Is(err, ErrNappAddressNotFound) {
+			return ServiceLaunchResult{}, ErrServiceNotFound
+		}
+		return ServiceLaunchResult{}, ErrServiceUnavailable
+	}
+	if !n.IsNapplet() {
+		return ServiceLaunchResult{}, ErrServiceNotFound
+	}
+	if n.Unavailable != "" {
+		return ServiceLaunchResult{}, ErrServiceUnavailable
+	}
+	ci, err := openTrial(ctx, n, launchLock, true)
+	if err != nil {
+		if errors.Is(err, ErrServiceSessionUnavailable) {
+			return ServiceLaunchResult{}, err
+		}
+		return ServiceLaunchResult{}, serviceMutationError(ctx, err)
 	}
 	return ServiceLaunchResult{Address: address, WindowID: ci.ID(), Outcome: "opened"}, nil
 }

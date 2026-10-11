@@ -413,24 +413,36 @@ const trialFilesFetchErr = "try failed: a file couldn't be downloaded or didn't 
 // any file that fails stops the others and opens nothing. A napplet that is
 // busy already is left alone and nil is returned.
 func tryNapplet(ctx context.Context, n Napp) error {
+	_, err := openTrial(ctx, n, nil, false)
+	if errors.Is(err, errBusy) {
+		return nil
+	}
+	return err
+}
+
+// openTrial is tryNapplet's work. A napplet that is busy already returns
+// errBusy. launchLock, when set, is held only while the window opens, never
+// during the downloads. quiet marks a trial that makes no close-time install
+// offer (Instance.quietTrial).
+func openTrial(ctx context.Context, n Napp, launchLock sync.Locker, quiet bool) (*Instance, error) {
 	if n.Unavailable != "" {
-		return errUnavailable
+		return nil, errUnavailable
 	}
 	if !n.IsNapplet() {
-		return errors.New("only napplets can be tried without installing")
+		return nil, errors.New("only napplets can be tried without installing")
 	}
 	if n.ID == "" {
-		return errors.New("napplet has no id")
+		return nil, errors.New("napplet has no id")
 	}
 	index, ok := nappletIndexPath(n.Paths)
 	if !ok {
-		return errors.New("napplet has no index document")
+		return nil, errors.New("napplet has no index document")
 	}
 	// one claim, under one lock: a second click, a search launcher and a
 	// single-instance token all land here, and only one may download
 	if !trySetBusy(n.ID) {
 		log.Debug().Str("napp", n.ID).Msg("napplet is busy, ignoring the try")
-		return nil
+		return nil, errBusy
 	}
 	defer setBusy(n.ID, false)
 
@@ -438,12 +450,12 @@ func tryNapplet(ctx context.Context, n Napp) error {
 	defer cancel()
 	files, err := fetchTrialFiles(fetchCtx, n.Paths, n.BlossomServers(fetchCtx))
 	if err != nil {
-		return fmt.Errorf("%w: %w", errTrialFiles, err)
+		return nil, fmt.Errorf("%w: %w", errTrialFiles, err)
 	}
 	if err := fetchCtx.Err(); err != nil {
 		// cancelled or timed out after the last file came in: still nothing
 		// to open
-		return fmt.Errorf("%w: %w", errTrialFiles, err)
+		return nil, fmt.Errorf("%w: %w", errTrialFiles, err)
 	}
 	var document []byte
 	for i, p := range n.Paths {
@@ -452,8 +464,11 @@ func tryNapplet(ctx context.Context, n Napp) error {
 			break
 		}
 	}
-	_, err = launchWithDocument(ctx, n, "", document)
-	return err
+	if launchLock != nil {
+		launchLock.Lock()
+		defer launchLock.Unlock()
+	}
+	return launchWindow(ctx, n, "", document, quiet, nil)
 }
 
 // fetchTrialFiles downloads and verifies every path of a trial into memory,
@@ -553,6 +568,11 @@ func trialTarget(arg string) (n Napp, installed bool, ok bool) {
 func finishNappletTrial(ci *Instance) {
 	if installed, ok := InstalledNapp(ci.napp.ID); ok {
 		promoteTrial(ci, installed, "could not keep trial data: ")
+		return
+	}
+	if ci.quietTrial {
+		forgetWindow(ci)
+		dropTrial(ci)
 		return
 	}
 	p := newPrompt(

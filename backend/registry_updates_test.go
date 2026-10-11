@@ -671,7 +671,7 @@ func TestLaunchCheckThrottled(t *testing.T) {
 	// trials, napps, napplets that aren't installed and an offline launcher
 	// never check
 	now = now.Add(launchCheckEvery)
-	ci, err := launchWindow(context.Background(), n, "", []byte("<!doctype html>"), nil)
+	ci, err := launchWindow(context.Background(), n, "", []byte("<!doctype html>"), false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

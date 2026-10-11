@@ -85,7 +85,7 @@ func run(args []string) error {
 		return errors.New("unauthorized server")
 	}
 	deadline := 30 * time.Second
-	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "signer.pair.wait" {
+	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "napplet.try" || method == "signer.pair.wait" {
 		deadline = 180 * time.Second
 	}
 	if timeoutOverride > 0 {
@@ -159,7 +159,7 @@ func run(args []string) error {
 			}
 			if raw, ok := fields["data"]; ok {
 				data, valid := parseSessionUnavailableData(raw)
-				if method != "napplet.launch" || !valid {
+				if (method != "napplet.launch" && method != "napplet.try") || !valid {
 					return errors.New("invalid daemon response")
 				}
 				fixed.Data = data
@@ -454,16 +454,17 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{*query, *refresh, *offset, *limit})
 		return "napplet.discover", params, socketPath, nil
 	}
-	if len(args) == 2 && (args[0] == "install" || args[0] == "update") {
+	if len(args) == 2 && (args[0] == "install" || args[0] == "update" || args[0] == "try") {
 		addr, err := commandAddress(args[1], false)
 		if err != nil {
 			return "", nil, "", err
 		}
-		// Only install carries an naddr's relay hints (already filtered,
-		// deduplicated and capped by napaddr); the daemon refuses them on
-		// update, and running install again updates an installed napplet.
+		// Only install and try carry an naddr's relay hints (already
+		// filtered, deduplicated and capped by napaddr); the daemon refuses
+		// them on update, and running install again updates an installed
+		// napplet.
 		var relays []string
-		if args[0] == "install" {
+		if args[0] == "install" || args[0] == "try" {
 			relays = addr.Relays
 		}
 		params, _ := json.Marshal(struct {

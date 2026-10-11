@@ -731,6 +731,17 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || !strings.Contains(raw, `"reason":"session_unavailable"`) {
 		t.Fatalf("headless launch: %s %+v", raw, rpcErr)
 	}
+	// try opens an installed napplet through the same launch path
+	_, rpcErr, raw = rpcCall(t, bufio.NewReader(conn), conn, "napplet.try", `{"address":"`+napp.Address()+`"}`)
+	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || !strings.Contains(raw, `"reason":"session_unavailable"`) {
+		t.Fatalf("headless try: %s %+v", raw, rpcErr)
+	}
+	for _, params := range []string{`{"address":"bad"}`, `{}`, `{"address":"` + napp.Address() + `","relays":["https://x.example"]}`, `{"address":"` + napp.Address() + `","confirm":true}`} {
+		_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.try", params)
+		if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
+			t.Fatalf("try accepted %s: %+v", params, rpcErr)
+		}
+	}
 }
 
 func TestRPCWindowStop(t *testing.T) {

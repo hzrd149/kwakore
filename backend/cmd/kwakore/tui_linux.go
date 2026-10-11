@@ -39,6 +39,9 @@ type tuiResult struct {
 type tuiPrompt struct {
 	title, action, value, address string
 	secret                        bool
+	// confirm makes the prompt a yes/no question instead of a text field.
+	// no is the highlighted choice; the zero value highlights Yes.
+	confirm, no bool
 }
 
 type tuiModel struct {
@@ -68,6 +71,9 @@ type tuiModel struct {
 	catalogComplete                    bool
 	discoverySeq                       uint64
 }
+
+// tuiCommand runs one kwak subcommand for the TUI; tests replace it.
+var tuiCommand = exec.CommandContext
 
 type tuiTick struct{ seq uint64 }
 
@@ -112,7 +118,7 @@ func (m tuiModel) request(kind string, args ...string) tea.Cmd {
 		argv = append(argv, args...)
 		ctx, cancel := context.WithTimeout(context.Background(), 190*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, exe, argv...)
+		cmd := tuiCommand(ctx, exe, argv...)
 		output, err := cmd.Output()
 		if err != nil {
 			var exit *exec.ExitError
@@ -461,7 +467,7 @@ func (m tuiModel) itemAction(action string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		return m, m.request(action, action, it.address)
 	case "uninstall":
-		m.prompt = &tuiPrompt{title: "Type REMOVE to uninstall " + safeText(it.label), action: action, address: it.address}
+		m.prompt = &tuiPrompt{title: "Uninstall " + safeText(it.label) + "?", action: action, address: it.address, confirm: true}
 	case "permissions":
 		m.selectedAddress = it.address
 		m.permissionView = true
@@ -510,7 +516,7 @@ func (m tuiModel) selectedDiscoverInstall() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.detailView = false
-	m.prompt = &tuiPrompt{title: "Type INSTALL to install " + safeText(it.label), action: "install-selected", address: it.address}
+	m.prompt = &tuiPrompt{title: "Install " + safeText(it.label) + "?", action: "install-selected", address: it.address, confirm: true}
 	return m, nil
 }
 
@@ -523,14 +529,19 @@ func (m tuiModel) selectedDiscoverLaunch() (tea.Model, tea.Cmd) {
 		m.notice = "Napps cannot launch on this Linux build: the window runtime supports napplets only"
 		return m, nil
 	}
+	// try opens an installed napplet as launch would, and an uninstalled
+	// one in memory without installing it
 	m.busy = true
 	m.detailView = false
 	m.notice = "Opening " + safeText(it.label) + "…"
-	return m, m.request("launch", "launch", it.address)
+	return m, m.request("launch", "try", it.address)
 }
 
 func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := m.prompt
+	if p.confirm {
+		return m.confirmKey(key)
+	}
 	switch key.String() {
 	case "esc":
 		m.prompt = nil
@@ -552,14 +563,6 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "install":
 			if value != "" {
 				cmd = m.request("install", "install", value)
-			}
-		case "install-selected":
-			if value == "INSTALL" {
-				cmd = m.request("install", "install", p.address)
-			}
-		case "uninstall":
-			if value == "REMOVE" {
-				cmd = m.request("uninstall", "uninstall", "--yes", p.address)
 			}
 		case "stop":
 			if value == "STOP" {
@@ -638,6 +641,43 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// confirmKey answers a yes/no prompt. Enter takes the highlighted choice,
+// which starts on Yes; y and n answer directly, and Esc is No.
+func (m tuiModel) confirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.prompt
+	switch key.String() {
+	case "left", "right", "tab", "shift+tab", "h", "l":
+		p.no = !p.no
+		return m, nil
+	case "y", "Y":
+		p.no = false
+	case "n", "N", "esc", "q":
+		m.prompt = nil
+		return m, nil
+	case "enter", " ":
+	default:
+		return m, nil
+	}
+	m.prompt = nil
+	if p.no {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	switch p.action {
+	case "install-selected":
+		m.notice = "Installing…"
+		cmd = m.request("install", "install", p.address)
+	case "uninstall":
+		m.notice = "Uninstalling…"
+		cmd = m.request("uninstall", "uninstall", "--yes", p.address)
+	}
+	if cmd != nil {
+		m.busy = true
+		m.discoveryLoading = false
+	}
+	return m, cmd
 }
 
 func (m tuiModel) secretRequest(mode, secret string) tea.Cmd {
@@ -884,7 +924,7 @@ func (m tuiModel) discoverDetail(it tuiItem) string {
 	if it.available {
 		b.WriteString("   i install")
 	}
-	b.WriteString("   l launch installed napplet")
+	b.WriteString("   l launch")
 	b.WriteString("\n")
 	return b.String()
 }
@@ -922,11 +962,20 @@ func (m tuiModel) View() string {
 		b.WriteString("1-7 or Tab: switch screens   j/k or arrows: select   Enter: open/edit\n")
 		b.WriteString("r: refresh   R: refresh catalog or reload config   PgUp/PgDn: pages\n")
 		b.WriteString("Installed: Enter/l launch, i install, u update, x uninstall, p permissions\n")
-		b.WriteString("Discover: / filter, r/R fetch relays, Enter/d details, i install, l launch installed, a address\n")
+		b.WriteString("Discover: / filter, r/R fetch relays, Enter/d details, i install, l launch without installing, a address\n")
 		b.WriteString("Settings: Enter edit, c clear override, R reload config\n")
 		b.WriteString("Signer: n none, s system, e nsec, b bunker, a pair, w wait, C cancel\n")
 		b.WriteString("Windows: Enter or x closes the selected window after confirmation\n")
 		b.WriteString("Esc closes prompts; q quits. Press any key to return.\n")
+		return b.String()
+	}
+	if m.prompt != nil && m.prompt.confirm {
+		yes, no := "\x1b[7m Yes \x1b[0m", " No "
+		if m.prompt.no {
+			yes, no = " Yes ", "\x1b[7m No \x1b[0m"
+		}
+		b.WriteString(safeText(m.prompt.title) + "\n\n  " + yes + "  " + no + "\n\n")
+		b.WriteString("Enter: choose   y/n: answer   ←/→: switch   Esc: cancel\n")
 		return b.String()
 	}
 	if m.prompt != nil {
@@ -966,7 +1015,7 @@ func (m tuiModel) View() string {
 	case 1, 2, 3, 6:
 		if m.tab == 2 {
 			b.WriteString("Search: " + safeText(m.query) + "\n")
-			b.WriteString("Enter details   i install   l launch installed\n")
+			b.WriteString("Enter details   i install   l launch (no install needed)\n")
 		} else if m.tab == 1 {
 			b.WriteString("Enter launch   p permissions   u update   x uninstall\n")
 		}

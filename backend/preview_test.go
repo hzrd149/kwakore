@@ -1038,3 +1038,114 @@ func TestTrialPromotionNeverOverwritesAConcurrentWrite(t *testing.T) {
 		ls.mu.Unlock()
 	}
 }
+
+// ─── service trials (kwak try) ───────────────────────────────────
+
+func TestServiceTryOpensQuietTrialWithoutInstalling(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	const document = "<!doctype html>v1"
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", document})
+	n := installedFrom(t, evt)
+	r.ids = append(r.ids, n.ID)
+	prevEvents := addressEvents
+	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{evt}, nil }
+	t.Cleanup(func() { addressEvents = prevEvents })
+
+	gate := make(chan struct{})
+	r.srv.holdUntil(hashOf(document), gate)
+	var launchLock sync.Mutex
+	type outcome struct {
+		result ServiceLaunchResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := ServiceTry(context.Background(), n.Address(), nil, &launchLock)
+		done <- outcome{result, err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for r.srv.count(hashOf(document)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("try never downloaded the document")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// the download is under way: the daemon's operation lock is still free
+	if !launchLock.TryLock() {
+		t.Fatal("the launch lock was held during the download")
+	}
+	launchLock.Unlock()
+	close(gate)
+	got := <-done
+	if got.err != nil || got.result.Outcome != "opened" || got.result.Address != n.Address() {
+		t.Fatalf("try: %+v %v", got.result, got.err)
+	}
+	open := runningForNapp(n.ID)
+	if len(open) != 1 || open[0].ID() != got.result.WindowID || !open[0].trial || !open[0].quietTrial {
+		t.Fatalf("trial window: %+v", open)
+	}
+	if _, ok := InstalledNapp(n.ID); ok {
+		t.Fatal("try installed the napplet")
+	}
+	base, err := nappBaseDir(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
+		t.Fatalf("try wrote an install directory: %v", err)
+	}
+}
+
+func TestServiceTryRefusesUnknownAndUnavailable(t *testing.T) {
+	r := newTrialRig(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	n := installedFrom(t, evt)
+	prevEvents := addressEvents
+	t.Cleanup(func() { addressEvents = prevEvents })
+	var launchLock sync.Mutex
+
+	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return nil, nil }
+	if _, err := ServiceTry(context.Background(), n.Address(), nil, &launchLock); !errors.Is(err, ErrServiceNotFound) {
+		t.Fatalf("unknown address: %v", err)
+	}
+	if _, err := ServiceTry(context.Background(), "not-an-address", nil, &launchLock); !errors.Is(err, ErrServiceInvalidAddress) {
+		t.Fatalf("invalid address: %v", err)
+	}
+	// a manifest whose file is gone opens nothing
+	addressEvents = func(context.Context, nostr.EntityPointer) ([]nostr.Event, error) { return []nostr.Event{evt}, nil }
+	r.srv.drop(hashOf("<!doctype html>v1"))
+	if _, err := ServiceTry(context.Background(), n.Address(), nil, &launchLock); !errors.Is(err, ErrServiceUnavailable) {
+		t.Fatalf("missing file: %v", err)
+	}
+	if got := r.host.count(); got != 0 {
+		t.Fatalf("a refused try opened %d windows", got)
+	}
+}
+
+func TestQuietTrialCloseDropsDataWithoutPrompt(t *testing.T) {
+	r := newTrialRig(t)
+	resetTrialPrompts(t)
+	evt := r.event(t, "paint", 10, trialFile{"/index.html", "<!doctype html>v1"})
+	r.manifests.set(evt)
+	trial := installedFrom(t, evt)
+	s := newTrialSession(t, trial)
+	s.ci.quietTrial = true
+
+	// nothing on the control socket can answer an install offer
+	if s.finish(t, true) {
+		t.Fatal("a quiet trial offered an install")
+	}
+	if _, ok := InstalledNapp(trial.ID); ok {
+		t.Error("quiet trial was installed")
+	}
+	if onDisk(s.shared) || onDisk(s.instance) {
+		t.Error("quiet trial data was kept")
+	}
+	if onDisk(s.config) {
+		t.Error("quiet trial's config was not forgotten")
+	}
+	if _, ok := windows.Load(s.ci.instance); ok {
+		t.Error("quiet trial remained in the window history")
+	}
+}

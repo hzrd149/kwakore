@@ -90,16 +90,20 @@ override. Enter edits a setting; `c` clears its override. Changes take effect
 through the same control methods as the ordinary CLI.
 
 In Installed, select a napplet and press Enter or `l` to open its window;
-press `p` to manage its permissions. In Discover, `l` opens the selected
-napplet if it is already installed. A discovered napplet must be installed
-with `i` before it can open. Legacy napps remain visible for catalog and
+press `p` to manage its permissions and `x` to uninstall it. In Discover, `l`
+opens the selected napplet without installing it (`kwak try`): its files are
+downloaded and verified into memory, and what it saves is dropped when the
+window closes unless you install it meanwhile. An installed napplet opens as
+usual. Install and uninstall ask one question, `Install NAME?` or
+`Uninstall NAME?`, with Yes highlighted: Enter or `y` accepts, `n` or Esc
+cancels, and the arrow keys move between Yes and No. Legacy napps remain visible for catalog and
 installation management, but this Linux build has no napp window runtime.
 
 In Discover, `/` filters the full cached catalog locally as you type; `r`
 reloads the cache and `R` refreshes it from relays with a visible progress
 indicator. Each row shows its author and availability. Enter opens details
 with the full author key, description, version and source metadata; `i`
-installs an available napplet after confirmation.
+installs an available napplet and `l` opens it.
 
 From a source checkout, `just install` builds the current code and installs
 it for this user. Run it again to update. `just uninstall` removes the
@@ -679,7 +683,7 @@ take no lock and create nothing. On a helper install the daemon binary is
 | `{"error":{"code":1008,"message":"client timeout; operation outcome unknown; check service, signer, or installed state"}}` | the CLI stopped waiting; check `status`, `signer status` or `installed` before retrying |
 
 <a id="napplet-addresses"></a>**Napplet addresses.** Every `ADDRESS`
-argument (`install`, `update`, `uninstall`, `launch`, `permissions`) may be:
+argument (`install`, `update`, `uninstall`, `launch`, `try`, `permissions`) may be:
 
 - the canonical coordinate `<kind>:<64 lowercase hex public key>:<d tag>`,
   as `kwak installed` and `kwak discover` print it;
@@ -696,6 +700,7 @@ are refused too; the error never repeats what you typed.
 ```sh
 kwak install nostr:naddr1…    # install from a shared link
 kwak launch naddr1…           # the same napplet, by the same code
+kwak try naddr1…              # open one without installing it
 ```
 
 `install` also uses the naddr's relay hints (up to 8 `ws://` or `wss://`

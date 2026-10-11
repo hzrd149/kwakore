@@ -256,6 +256,27 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(launchErr)
 		}
 		return result, nil
+	case "napplet.try":
+		address, relays, err := decodeInstallParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		// the downloads (bounded at 120 seconds) run outside the operation
+		// lock; ServiceTry takes it only to open the window
+		workCtx, cancelWork := s.registryContext(ctx)
+		defer cancelWork()
+		workCtx, cancelDeadline := context.WithTimeout(workCtx, 150*time.Second)
+		defer cancelDeadline()
+		result, tryErr := backend.ServiceTry(workCtx, address, relays, &s.operationMu)
+		if tryErr != nil {
+			return nil, mutationError(tryErr)
+		}
+		return result, nil
 	case "napplet.stop":
 		windowID, err := decodeWindowIDParams(params)
 		if err != nil {

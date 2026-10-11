@@ -44,6 +44,10 @@ type Instance struct {
 	// in trialStorage until the user accepts the close-time install offer.
 	trial        bool
 	trialStorage map[string]*nappStorage
+	// quietTrial is a trial opened through the control socket. Nothing
+	// there can answer a close-time install offer, so none is made: its
+	// data survives only when the napplet was installed while it ran.
+	quietTrial bool
 	// failedClosed is set when the napplet window reported that it closed
 	// itself before running the napplet (windowFailed engine-hardening):
 	// its close is then no trial to offer for install, and no window to
@@ -715,7 +719,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 }
 
 func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte) (*Instance, error) {
-	return launchWindow(ctx, napp, requestedInstance, previewDocument, nil)
+	return launchWindow(ctx, napp, requestedInstance, previewDocument, false, nil)
 }
 
 // launchWindow opens the window. coldLaunch, when set, is the cold-launch
@@ -723,13 +727,14 @@ func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string
 // window that launched it (CR-02): the budget follows the launch chain, so a
 // napplet that keeps launching copies of itself (or of others that launch it
 // back) never gets a fresh bucket per copy. A window the user opens starts a
-// chain of its own.
+// chain of its own. quietTrial marks a trial window (previewDocument set)
+// that makes no install offer when it closes (Instance.quietTrial).
 // launchReadHook, when set by a test, runs in launchWindow after an
 // installed napplet's record is re-read and before its window is registered,
 // with reclaimMu held.
 var launchReadHook func()
 
-func launchWindow(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte, coldLaunch *rate.Limiter) (*Instance, error) {
+func launchWindow(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte, quietTrial bool, coldLaunch *rate.Limiter) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
@@ -813,6 +818,7 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		napp:            napp,
 		previewDocument: previewDocument,
 		trial:           previewDocument != nil,
+		quietTrial:      previewDocument != nil && quietTrial,
 		trialStorage:    make(map[string]*nappStorage),
 		subs:            make(map[int]context.CancelFunc),
 		actions:         make(map[string]int),
@@ -1074,7 +1080,7 @@ func (opts actionOptions) launchFor(ctx context.Context, n Napp) (*Instance, err
 			return nil, err
 		}
 	}
-	return launchWindow(ctx, n, "", nil, opts.ColdLaunch)
+	return launchWindow(ctx, n, "", nil, false, opts.ColdLaunch)
 }
 
 // dispatchReport is filled with where an action went, for callers that

@@ -25,6 +25,7 @@ Napplets:
   update ADDRESS                 Update an installed napplet
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
+  try ADDRESS                    Open a napplet without installing it
   stop WINDOW_ID                 Close a window
   permissions get ADDRESS        Show saved permission rules
   permissions set ADDRESS PERMISSION allow|deny [--subject NAME]
@@ -165,6 +166,16 @@ Usage: kwak launch ADDRESS
 ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
 A graphical session is required. The result includes a WINDOW_ID for stop.
 Example: kwak launch nostr:naddr1...
+`,
+	"try": `Open a napplet without installing it.
+
+Usage: kwak try ADDRESS
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+An installed napplet opens as with launch. Otherwise its files are
+downloaded and verified into memory and nothing is installed; the data it
+saves is dropped when the window closes unless you install it meanwhile.
+A graphical session is required. The result includes a WINDOW_ID for stop.
+Example: kwak try nostr:naddr1...
 `,
 	"launch-token": `Open a napplet from a generated desktop entry.
 

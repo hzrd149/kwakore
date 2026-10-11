@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -26,18 +28,68 @@ func TestTUIConfirmationAndSecretMask(t *testing.T) {
 	m := tuiModel{tab: 1, items: []tuiItem{{label: "Notes", address: "35129:abc:notes"}}, height: 24, width: 80}
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	m = updated.(tuiModel)
-	if m.prompt == nil || m.prompt.action != "uninstall" {
+	if m.prompt == nil || m.prompt.action != "uninstall" || !m.prompt.confirm {
 		t.Fatalf("uninstall prompt: %+v", m.prompt)
-	}
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(tuiModel)
-	if cmd != nil {
-		t.Fatal("empty confirmation triggered uninstall")
 	}
 	m.prompt = &tuiPrompt{title: "Secret", action: "signer-nsec", value: "private-key", secret: true}
 	view := m.View()
 	if strings.Contains(view, "private-key") || !strings.Contains(view, "•••") {
 		t.Fatalf("secret leaked or mask missing: %q", view)
+	}
+}
+
+func TestTUIYesNoConfirmDefaultsToYes(t *testing.T) {
+	key := func(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+	installed := tuiModel{tab: 1, items: []tuiItem{{label: "Notes", address: "35129:abc:notes"}}, height: 24, width: 80}
+	discover := tuiModel{tab: 2, items: []tuiItem{{label: "Notes", address: "35129:abc:notes", available: true}}, height: 24, width: 80}
+	for _, tc := range []struct {
+		name   string
+		m      tuiModel
+		open   tea.KeyMsg
+		action string
+	}{
+		{"uninstall", installed, key('x'), "uninstall"},
+		{"install", discover, key('i'), "install-selected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updated, _ := tc.m.Update(tc.open)
+			m := updated.(tuiModel)
+			if m.prompt == nil || m.prompt.action != tc.action || !m.prompt.confirm || m.prompt.no {
+				t.Fatalf("prompt is not a yes-default question: %+v", m.prompt)
+			}
+			// Yes is highlighted and the question names the napplet
+			if view := m.View(); !strings.Contains(view, "Notes?") || !strings.Contains(view, "\x1b[7m Yes \x1b[0m") {
+				t.Fatalf("yes not highlighted: %q", view)
+			}
+			// a single Enter accepts the default
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if cmd == nil || updated.(tuiModel).prompt != nil || !updated.(tuiModel).busy {
+				t.Fatal("Enter did not accept the default Yes")
+			}
+			// y answers directly
+			updated, cmd = m.Update(key('y'))
+			if cmd == nil {
+				t.Fatal("y did not confirm")
+			}
+			// n, Esc, and Enter on No all cancel without a request
+			for _, cancel := range []tea.KeyMsg{key('n'), {Type: tea.KeyEsc}} {
+				m.prompt = &tuiPrompt{action: tc.action, address: "35129:abc:notes", confirm: true}
+				updated, cmd = m.Update(cancel)
+				if cmd != nil || updated.(tuiModel).prompt != nil {
+					t.Fatalf("%v did not cancel", cancel)
+				}
+			}
+			m.prompt = &tuiPrompt{action: tc.action, address: "35129:abc:notes", confirm: true}
+			updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+			m = updated.(tuiModel)
+			if !m.prompt.no || !strings.Contains(m.View(), "\x1b[7m No \x1b[0m") {
+				t.Fatal("arrow did not move the highlight to No")
+			}
+			updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if cmd != nil || updated.(tuiModel).prompt != nil {
+				t.Fatal("Enter on No issued a request")
+			}
+		})
 	}
 }
 
@@ -128,10 +180,21 @@ func TestTUILaunchShortcuts(t *testing.T) {
 	if cmd != nil || !strings.Contains(m.notice, "Napps cannot launch") {
 		t.Fatalf("legacy napp launch was not explained: %+v", m)
 	}
+	// Discover launches through try, which needs no install
+	var argv []string
+	tuiCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		argv = args
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { tuiCommand = exec.CommandContext })
 	m = tuiModel{tab: 2, items: []tuiItem{{label: "Notes", address: "35129:abc:notes", format: "napplet"}}}
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m = updated.(tuiModel)
 	if cmd == nil || !m.busy {
 		t.Fatalf("discovery launch did not invoke service: %+v", m)
+	}
+	cmd()
+	if len(argv) < 2 || argv[len(argv)-2] != "try" || argv[len(argv)-1] != "35129:abc:notes" {
+		t.Fatalf("discovery launch ran %q, want try ADDRESS", argv)
 	}
 }

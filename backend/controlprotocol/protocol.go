@@ -20,7 +20,7 @@ func MethodNames() []string {
 		"service.status", "service.diagnostics",
 		"settings.get", "settings.inspect", "settings.reload", "settings.set", "settings.clear",
 		"signer.status", "signer.switch", "signer.pair.start", "signer.pair.wait", "signer.pair.cancel",
-		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.windows", "napplet.stop",
+		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.try", "napplet.windows", "napplet.stop",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
 	}
 }
