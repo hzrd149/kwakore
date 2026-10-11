@@ -51,6 +51,10 @@ func TestCLISettingsCommands(t *testing.T) {
 		{[]string{"settings", "set", "desktop_entries", `false`}, "settings.set", `{"field":"desktop_entries","value":false}`},
 		{[]string{"settings", "set", "gnome_search", `false`}, "settings.set", `{"field":"gnome_search","value":false}`},
 		{[]string{"settings", "clear", "relays"}, "settings.clear", `{"field":"relays"}`},
+		{[]string{"settings", "set", "sync_id", `"laptops"`}, "settings.set", `{"field":"sync_id","value":"laptops"}`},
+		{[]string{"settings", "set", "sync_id", `laptops`}, "settings.set", `{"field":"sync_id","value":"laptops"}`},
+		{[]string{"settings", "set", "sync_id", ``}, "settings.set", `{"field":"sync_id","value":""}`},
+		{[]string{"settings", "clear", "sync_id"}, "settings.clear", `{"field":"sync_id"}`},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			seen := make(chan string, 1)
@@ -93,6 +97,19 @@ func TestCLISettingsCommands(t *testing.T) {
 				t.Fatalf("request %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestCLISyncIDRejectsBrokenJSONString(t *testing.T) {
+	for _, arg := range []string{`"unterminated`, `"a" "b"`} {
+		if _, _, _, err := command([]string{"settings", "set", "sync_id", arg}); err == nil {
+			t.Fatalf("accepted %q", arg)
+		}
+	}
+	for _, field := range []string{"relays", "gnome_search"} {
+		if _, _, _, err := command([]string{"settings", "set", field, `"laptops"`}); err == nil {
+			t.Fatalf("%s accepted a string", field)
+		}
 	}
 }
 

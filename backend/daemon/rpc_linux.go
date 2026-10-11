@@ -712,6 +712,13 @@ func decodeSettingParams(params json.RawMessage) (string, any, *controlprotocol.
 		}
 		return field, value, nil
 	}
+	if field == "sync_id" {
+		var value string
+		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
+			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+		return field, value, nil
+	}
 	if len(raw) == 0 || raw[0] != '[' {
 		return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}

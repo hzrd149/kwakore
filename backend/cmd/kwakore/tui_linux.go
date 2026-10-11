@@ -494,6 +494,10 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 	case 3:
 		if it.address == "relays" || it.address == "blossom_servers" {
 			m.prompt = &tuiPrompt{title: "Edit " + it.address + " (comma-separated URLs; scheme optional)", action: "setting-list", address: it.address, value: strings.Join(parseStringList(m.settings[it.address]), ", ")}
+		} else if it.address == "sync_id" {
+			var current string
+			_ = json.Unmarshal(m.settings["sync_id"], &current)
+			m.prompt = &tuiPrompt{title: "Set sync_id (empty turns sync off)", action: "setting-string", address: it.address, value: current}
 		} else {
 			m.prompt = &tuiPrompt{title: "Set " + it.address + " to true or false", action: "setting-bool", address: it.address}
 		}
@@ -587,6 +591,13 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			b, _ := json.Marshal(list)
 			cmd = m.request("settings", "settings", "set", p.address, string(b))
+		case "setting-string":
+			if value == "" {
+				cmd = m.request("settings", "settings", "clear", p.address)
+			} else {
+				b, _ := json.Marshal(value)
+				cmd = m.request("settings", "settings", "set", p.address, string(b))
+			}
 		case "signer-none":
 			if value == "yes" {
 				cmd = m.request("signer", "signer", "switch", "none")
@@ -785,7 +796,7 @@ func (m *tuiModel) consume(x tuiResult) {
 		}
 		m.settings = raw
 		m.items = nil
-		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search"} {
+		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search", "sync_id"} {
 			m.items = append(m.items, tuiItem{label: field, address: field, detail: safeText(string(raw[field])) + "  (" + m.sources[field] + ")"})
 		}
 		m.notice = "Settings loaded"

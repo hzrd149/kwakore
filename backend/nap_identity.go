@@ -545,6 +545,9 @@ func pushIdentityChanged() {
 	for _, ci := range liveNapplets() {
 		ci.napPush(map[string]any{"type": "identity.changed", "pubkey": pk})
 	}
+	// another account has another list; never blocks, since ServiceSigner
+	// calls this with its mutex held
+	kickInstallSync()
 }
 
 // ─── shared helpers ──────────────────────────────────────────────
@@ -589,6 +592,17 @@ func fetchAddressable(ctx context.Context, kind nostr.Kind, author nostr.PubKey,
 }
 
 func fetchLatest(ctx context.Context, author nostr.PubKey, filter nostr.Filter) *nostr.Event {
+	urls := sys.FetchWriteRelays(ctx, author)
+	if len(urls) == 0 {
+		urls = Relays()
+	}
+	return fetchLatestOn(ctx, urls, filter)
+}
+
+// fetchLatestOn is the newest event matching filter in the local store and
+// on urls (none asked when urls is empty). The installed-list sync passes
+// its own relays, so tests never resolve a real relay list.
+func fetchLatestOn(ctx context.Context, urls []string, filter nostr.Filter) *nostr.Event {
 	var best *nostr.Event
 	consider := func(evt nostr.Event) {
 		if best == nil || evt.CreatedAt > best.CreatedAt {
@@ -599,9 +613,8 @@ func fetchLatest(ctx context.Context, author nostr.PubKey, filter nostr.Filter) 
 	for evt := range sys.Store.QueryEvents(filter, 1) {
 		consider(evt)
 	}
-	urls := sys.FetchWriteRelays(ctx, author)
 	if len(urls) == 0 {
-		urls = Relays()
+		return best
 	}
 	filter.Limit = 1
 	for re := range fetchRelays(ctx, urls, filter, "kwakore-nap-latest").Events() {

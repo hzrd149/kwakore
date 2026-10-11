@@ -226,14 +226,14 @@ Usage:
   kwak settings set FIELD JSON_VALUE
   kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       or gnome_search.
+       gnome_search, or sync_id.
 Run 'kwak settings get|reload|set|clear --help' for details.
 `,
 	"settings get": `Show effective service settings.
 
 Usage: kwak settings get
 Shows relays, Blossom servers, discovery and desktop integration settings,
-and signer mode.
+the sync identifier for the installed napplet list, and signer mode.
 `,
 	"settings reload": `Reload the declarative configuration file.
 
@@ -244,17 +244,20 @@ Invalid configuration leaves the previous effective settings in place.
 
 Usage: kwak settings set FIELD JSON_VALUE
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       or gnome_search.
-JSON_VALUE is an array of URLs for relays or blossom_servers, or a boolean
-for discover_on_user_relays, desktop_entries, or gnome_search. Quote JSON in your shell.
+       gnome_search, or sync_id.
+JSON_VALUE is an array of URLs for relays or blossom_servers, a boolean
+for discover_on_user_relays, desktop_entries, or gnome_search, or a string
+for sync_id (a bare word is taken as the string; an empty string turns sync
+off). Quote JSON in your shell.
 Bare relay hosts gain wss://; bare Blossom hosts gain https://.
 Example: kwak settings set discover_on_user_relays false
+Example: kwak settings set sync_id laptops
 `,
 	"settings clear": `Remove a setting override.
 
 Usage: kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       or gnome_search.
+       gnome_search, or sync_id.
 The declarative or built-in value becomes effective again.
 Example: kwak settings clear relays
 `,

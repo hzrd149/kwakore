@@ -429,6 +429,9 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 	}
 
 	refreshInstalled()
+	if newer.IsNapplet() {
+		installSyncLocalChange(newer.Address())
+	}
 	log.Info().Str("napp", current.ID).Msg("update complete")
 	return result, nil
 }

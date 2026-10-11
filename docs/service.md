@@ -536,6 +536,13 @@ omitted field takes its default. An explicit empty array disables that list;
 an explicit `false` disables the named Boolean setting. `null` is never
 an alias for omission.
 
+`sync_id` is optional and off by default. Set it to the same string on each
+of your machines and they share one installed napplet list (see
+[syncing installed napplets](#syncing-installed-napplets)). It must be 1 to 64
+printable ASCII characters without spaces; an empty string, like omitting it,
+turns sync off, so an override of `""` switches off an id set in
+`config.json`. An invalid value is rejected without repeating it in the error.
+
 Both `config.json` and `settings-overrides.json` use the same strict parser:
 the root must be one JSON object of at most 1 MiB; unknown or duplicate
 fields, trailing JSON, wrong types, malformed URLs, explicit `null` and
@@ -551,7 +558,7 @@ field's file value, or its default when the file omits it. Empty arrays and
 
 **Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
 and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
-`discover_on_user_relays`, `desktop_entries`, or `gnome_search`. They write only `settings-overrides.json`,
+`discover_on_user_relays`, `desktop_entries`, `gnome_search`, or `sync_id`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
@@ -560,7 +567,9 @@ that is not there changes nothing.
 In `kwak tui` or `kwak settings set`, relay hosts entered without a scheme
 gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
 Explicit schemes are preserved. The daemon still validates canonical URLs,
-and direct edits to `config.json` must include schemes.
+and direct edits to `config.json` must include schemes. `sync_id` takes a JSON
+string or a bare word: `kwak settings set sync_id laptops` and
+`kwak settings set sync_id '"laptops"'` are the same.
 
 ```console
 $ kwak settings set relays '["wss://relay.example.com"]'
@@ -652,6 +661,48 @@ file with the wrong mode, a symlink, a relative path, a secret given as an
 argument or two sources at once are refused before anything is sent, with
 `{"error":{"code":-32602,"message":"Invalid params"}}`.
 If a switch times out, run `kwak signer status` before trying again.
+
+## Syncing installed napplets
+
+Kwakore can keep one installed napplet list across your machines. Sign in
+with the same signer key on each machine and set the same `sync_id` on all of
+them, in `config.json` or with the CLI:
+
+```console
+$ kwak settings set sync_id laptops
+```
+
+The `sync_id` is the `d` tag of a NIP-78 event (kind 30078) signed by your
+signer and published to your write relays, or to the configured `relays` when
+you have no relay list. Its content is the list of installed napplets with
+their canonical addresses and pinned versions, NIP-44 encrypted to your own
+key. The event carries no other tag, so relays see neither which napplets you
+run nor how many. Napps and napplets without a canonical address are not
+synced.
+
+- Installing, updating or uninstalling a napplet on one machine does the same
+  on the others. An uninstall is mirrored, and it closes that napplet's open
+  windows on the other machines like any uninstall.
+- Nothing is ever downgraded. When the list pins an older version than the
+  one installed here, the newer local version is kept and published, so the
+  other machines move up to it.
+- The first time sync is turned on, the local and remote lists are merged:
+  napplets from both sides are installed and nothing is removed.
+- A pass runs at start, when the signer changes, when `sync_id` changes, a
+  couple of seconds after a local install, update or uninstall, when another
+  machine publishes a newer list, and every 30 minutes.
+- Failures appear only in the journal
+  (`journalctl --user -u kwakore.service`) and are retried on the next pass;
+  a failed install or uninstall is never turned into the opposite change. A
+  list that cannot be decrypted or read is left alone: nothing is installed,
+  removed or published because of it.
+- Kwakore does not answer NIP-42 AUTH challenges, so a relay that serves kind
+  30078 events only to their authenticated owner cannot carry the list. Use a
+  write relay without that restriction.
+
+`kwak settings set sync_id ""` turns sync off, whatever `config.json` says;
+`kwak settings clear sync_id` goes back to the value in `config.json`, if any.
+Turning sync off leaves the installed napplets as they are.
 
 ## Status, errors and logs
 

@@ -183,6 +183,7 @@ let
       discover_on_user_relays = false;
       desktop_entries = false;
       gnome_search = false;
+      sync_id = "laptops";
       signer = {
         mode = "bunker";
         relay = "wss://bunker.example.com";
@@ -207,6 +208,7 @@ let
           discover_on_user_relays = false;
           desktop_entries = false;
           gnome_search = false;
+          sync_id = "laptops";
           signer = {
             mode = "bunker";
             relay = "wss://bunker.example.com";
@@ -350,6 +352,10 @@ let
           "wss://relay.example.com"
         ];
       } "programs.kwakore.settings.relays: duplicate URL";
+    }
+    {
+      name = "a sync_id with a space is rejected";
+      ok = rejects { sync_id = "has space"; } "programs.kwakore.settings.sync_id:";
     }
     {
       name = "a bunker signer without a relay is rejected";

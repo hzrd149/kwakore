@@ -189,6 +189,9 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 	}
 
 	refreshInstalled()
+	if n.IsNapplet() {
+		installSyncLocalChange(n.Address())
+	}
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 	return result, nil
 }
@@ -334,6 +337,9 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 	}
 
 	refreshInstalled()
+	if record.IsNapplet() {
+		installSyncLocalChange(record.Address())
+	}
 	log.Info().Str("napp", id).Msg("uninstall complete")
 	result.CleanupComplete = cleanupErr == nil
 	if cleanupErr != nil {

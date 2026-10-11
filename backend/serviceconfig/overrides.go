@@ -113,6 +113,10 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			if m.override.GNOMESearch == nil {
 				return nil
 			}
+		case "sync_id":
+			if m.override.SyncID == nil {
+				return nil
+			}
 		}
 	}
 	next := cloneConfig(m.override)
@@ -142,6 +146,12 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			default:
 				next.DiscoverOnUserRelays = &v
 			}
+		case "sync_id":
+			v, ok := value.(string)
+			if !ok {
+				return errors.New("sync_id: expected string")
+			}
+			next.SyncID = &v
 		case "signer":
 			v, ok := value.(Signer)
 			if !ok {
@@ -161,6 +171,8 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			next.DesktopEntries = nil
 		case "gnome_search":
 			next.GNOMESearch = nil
+		case "sync_id":
+			next.SyncID = nil
 		}
 	}
 	if err := validateMerged(m.file, next); err != nil {
@@ -236,6 +248,10 @@ func cloneConfig(c Config) Config {
 	if c.GNOMESearch != nil {
 		v := *c.GNOMESearch
 		n.GNOMESearch = &v
+	}
+	if c.SyncID != nil {
+		v := *c.SyncID
+		n.SyncID = &v
 	}
 	if c.Signer != nil {
 		v := *c.Signer
