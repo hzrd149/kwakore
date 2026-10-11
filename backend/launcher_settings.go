@@ -12,11 +12,11 @@ import (
 // SetRelays) and the Blossom servers files are fetched from.
 
 // defaultBlossomServers are where napp files are looked for first when the
-// user never chose: the napp host most napps are published to, and a big
-// public server.
+// user never chose: the napplet.soy and ditto.pub servers, where most
+// napplets are published.
 var defaultBlossomServers = []string{
-	"https://relay.nostrapps.com",
-	"https://nostr.download",
+	"https://blossom.napplet.soy",
+	"https://blossom.ditto.pub",
 }
 
 // BlossomServers are the launcher's own Blossom servers, in order.

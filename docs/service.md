@@ -247,7 +247,7 @@ and WebKitGTK as the rest of the system:
             users = [ "alice" ];
             # optional, non-secret only; see below
             settings = {
-              relays = [ "wss://relay.nostrapps.com" ];
+              relays = [ "wss://relay.napplet.soy" ];
               discover_on_user_relays = true;
             };
           };
@@ -494,8 +494,8 @@ optional; reading, validating or inspecting missing files creates nothing.
 
 ```json
 {
-  "relays": ["wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"],
-  "blossom_servers": ["https://relay.nostrapps.com", "https://nostr.download"],
+  "relays": ["wss://relay.napplet.soy", "wss://relay.ditto.pub"],
+  "blossom_servers": ["https://blossom.napplet.soy", "https://blossom.ditto.pub"],
   "discover_on_user_relays": true,
   "desktop_entries": true,
   "gnome_search": true,
@@ -545,7 +545,7 @@ and direct edits to `config.json` must include schemes.
 
 ```console
 $ kwak settings set relays '["wss://relay.example.com"]'
-{"settings":{"relays":["wss://relay.example.com"],"blossom_servers":["https://relay.nostrapps.com","https://nostr.download"],"discover_on_user_relays":true,"signer":{"mode":"none"}}}
+{"settings":{"relays":["wss://relay.example.com"],"blossom_servers":["https://blossom.napplet.soy","https://blossom.ditto.pub"],"discover_on_user_relays":true,"signer":{"mode":"none"}}}
 $ kwak settings clear relays
 ```
 

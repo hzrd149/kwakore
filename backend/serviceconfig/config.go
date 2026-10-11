@@ -76,7 +76,7 @@ type Effective struct {
 }
 
 func Defaults() Effective {
-	return Effective{Relays: []string{"wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"}, BlossomServers: []string{"https://relay.nostrapps.com", "https://nostr.download"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Signer: Signer{Mode: "none"}}
+	return Effective{Relays: []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}, BlossomServers: []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Signer: Signer{Mode: "none"}}
 }
 
 func merge(file, override Config) Effective {

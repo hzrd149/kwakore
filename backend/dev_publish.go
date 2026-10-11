@@ -30,7 +30,7 @@ type DevPublishInfo struct {
 
 // DevPublishDefaults returns useful initial targets for the publish form.
 func DevPublishDefaults() (servers, relays []string) {
-	servers = []string{"https://relay.nostrapps.com", "https://nostr.download"}
+	servers = []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}
 	relays = Relays()
 	_, pubkey := identitySnapshot()
 

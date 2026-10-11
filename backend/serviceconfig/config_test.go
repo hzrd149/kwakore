@@ -266,3 +266,17 @@ func TestConfigFileEnvironmentOverride(t *testing.T) {
 		t.Fatal("accepted a relative KWAKORE_CONFIG_FILE")
 	}
 }
+
+func TestDefaultsUsePublicNappletServers(t *testing.T) {
+	d := Defaults()
+	if want := []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}; !reflect.DeepEqual(d.Relays, want) {
+		t.Fatalf("default relays = %v, want %v", d.Relays, want)
+	}
+	if want := []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}; !reflect.DeepEqual(d.BlossomServers, want) {
+		t.Fatalf("default blossom servers = %v, want %v", d.BlossomServers, want)
+	}
+	// the built-in values must pass the same validation as a config file
+	if err := validateMerged(Config{}, Config{}); err != nil {
+		t.Fatalf("defaults do not validate: %v", err)
+	}
+}

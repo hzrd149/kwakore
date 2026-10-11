@@ -175,8 +175,8 @@ func loadState() {
 	// keyring. clientKey() makes one only when the user starts a login.
 	if len(state.Relays) == 0 {
 		state.Relays = []string{
-			"relay.nostrapps.com",
-			"relay.nostrapps.com/public",
+			"relay.napplet.soy",
+			"relay.ditto.pub",
 		}
 	}
 	if state.NostrConnectRelay == "" {
