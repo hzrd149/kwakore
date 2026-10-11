@@ -84,6 +84,12 @@ func startFeed(ctx context.Context, ci *Instance, method string, p feedParams) {
 		inbox   bool
 	)
 
+	// the follow-list and relay-list lookups below go through sdk loaders
+	// that fan out inside the library, where the relay rule cannot apply, so
+	// bound them by its cap; the feed itself still runs on ctx
+	rctx, rcancel := context.WithTimeout(ctx, relayQueryTimeout)
+	defer rcancel()
+
 	switch method {
 	case "napp.feeds.profile":
 		authors = pubkeyList(p.Pubkey)
@@ -93,7 +99,7 @@ func startFeed(ctx context.Context, ci *Instance, method string, p feedParams) {
 			log.Debug().Str("source", preview(p.Source, 40)).Msg("following feed: bad source")
 			return
 		}
-		res := loadFollowsList(ctx, *source)
+		res := loadFollowsList(rctx, *source)
 		items, _ := res["items"].([]any)
 		for _, item := range items {
 			if hex, ok := item.(string); ok {
@@ -124,9 +130,9 @@ func startFeed(ctx context.Context, ci *Instance, method string, p feedParams) {
 	for _, pk := range authors {
 		var found []string
 		if inbox {
-			found = sys.FetchInboxRelays(ctx, pk, 3)
+			found = sys.FetchInboxRelays(rctx, pk, 3)
 		} else {
-			found = sys.FetchOutboxRelays(ctx, pk, 3)
+			found = sys.FetchOutboxRelays(rctx, pk, 3)
 		}
 		for _, url := range found {
 			relays = nostr.AppendUnique(relays, url)
@@ -185,8 +191,10 @@ func feedPump(ctx context.Context, ci *Instance, callbackID int, filter nostr.Fi
 	}
 	flush()
 
-	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, relays, filter,
-		nostr.SubscriptionOptions{Label: "napp-feed"})
+	// synced follows the relay rule (nostr_query.go): every relay answered or
+	// failed, 15s after the first EOSE, or 30s; live events keep coming after
+	q := subscribeRelays(ctx, relays, filter, "napp-feed")
+	events, eose := q.Events(), q.Done()
 
 	ticker := time.NewTicker(300 * time.Millisecond)
 	defer ticker.Stop()

@@ -67,7 +67,7 @@ func CheckForUpdates() {
 // checkAllUpdates asks the relays about every napp at once and works out
 // each one's update state from what came back (see updateStates).
 func checkAllUpdates(napps []Napp) map[string]*Napp {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), relayQueryTimeout)
 	defer cancel()
 	return updateStates(napps, fetchManifestEvents(ctx, napps))
 }
@@ -93,9 +93,7 @@ var fetchManifestEvents = func(ctx context.Context, napps []Napp) []nostr.Event 
 		if len(urls) == 0 {
 			return
 		}
-		for re := range sys.Pool.FetchMany(ctx, urls, f, nostr.SubscriptionOptions{
-			Label: "kwakore-napp-update",
-		}) {
+		for re := range fetchRelays(ctx, urls, f, "kwakore-napp-update").Events() {
 			mu.Lock()
 			out = append(out, re.Event)
 			mu.Unlock()
@@ -466,6 +464,8 @@ func newerVersion(n Napp) *Napp {
 
 // fetchServiceManifestEvents reports whether a relay completed its history
 // response. An empty result is authoritative only after at least one EOSE.
+// The read follows the relay rule (nostr_query.go), so one silent relay no
+// longer holds it to the lookup deadline once another relay has answered.
 var fetchServiceManifestEvents = func(ctx context.Context, n Napp) ([]nostr.Event, bool) {
 	if sys == nil {
 		return nil, false
@@ -477,46 +477,12 @@ var fetchServiceManifestEvents = func(ctx context.Context, n Napp) ([]nostr.Even
 	if len(urls) == 0 {
 		return nil, false
 	}
-	var mu sync.Mutex
+	q := fetchRelays(ctx, urls, manifestFilter(n), "kwakore-service-update")
 	var events []nostr.Event
-	completed := false
-	var wg sync.WaitGroup
-	for _, url := range urls {
-		wg.Go(func() {
-			relay, err := nostr.RelayConnect(ctx, url, sys.Pool.RelayOptions)
-			if err != nil {
-				return
-			}
-			defer relay.Close()
-			sub, err := relay.Subscribe(ctx, manifestFilter(n), nostr.SubscriptionOptions{Label: "kwakore-service-update"})
-			if err != nil {
-				return
-			}
-			defer sub.Unsub()
-			for {
-				select {
-				case evt, ok := <-sub.Events:
-					if !ok {
-						return
-					}
-					mu.Lock()
-					events = append(events, evt)
-					mu.Unlock()
-				case <-sub.EndOfStoredEvents:
-					mu.Lock()
-					completed = true
-					mu.Unlock()
-					return
-				case <-sub.ClosedReason:
-					return
-				case <-ctx.Done():
-					return
-				}
-			}
-		})
+	for re := range q.Events() {
+		events = append(events, re.Event)
 	}
-	wg.Wait()
-	return events, completed
+	return events, q.Answered()
 }
 
 func newerVersionService(ctx context.Context, n Napp) (*Napp, error) {
@@ -525,15 +491,21 @@ func newerVersionService(ctx context.Context, n Napp) (*Napp, error) {
 			return &cached, nil
 		}
 	}
-	lookupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	lookupCtx, cancel := context.WithTimeout(ctx, relayQueryTimeout)
 	defer cancel()
 	events, completed := fetchServiceManifestEvents(lookupCtx, n)
-	if err := lookupCtx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !completed {
+		// nothing answered: a lookup that ran out its time stays a timeout
+		if err := lookupCtx.Err(); errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
 		return nil, ErrServiceUnavailable
 	}
+	// some relay answered, so its events count even if the lookup's time has
+	// run out since
 	winners := latestByAddress{}
 	for _, evt := range events {
 		winners.add(evt)
