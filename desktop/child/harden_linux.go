@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -282,9 +283,51 @@ func hardenWindow(resolve func() (*webkitAPI, error), win uintptr) (h hardening,
 	return api.harden(win)
 }
 
-// prepareEngine has nothing to do before webview.New on WebKitGTK: its
-// switches are per view, set by hardenEngine.
-func prepareEngine() {}
+// dmabufOptOut keeps WebKitGTK's DMABUF renderer on Wayland when set to "1"
+// in the service environment, which the daemon passes through.
+const dmabufOptOut = "KWAKORE_WEBKIT_DMABUF"
+
+// disableDMABufByDefault decides whether this window program turns off
+// WebKitGTK's DMABUF renderer: only on Wayland (WAYLAND_DISPLAY non-empty),
+// only when WEBKIT_DISABLE_DMABUF_RENDERER is absent, and only without the
+// KWAKORE_WEBKIT_DMABUF=1 opt-out. The renderer variable is checked for
+// presence, not value: WebKit reads "0" as keep DMABUF, so whatever the user
+// set wins.
+func disableDMABufByDefault(lookup func(string) (string, bool)) bool {
+	if display, _ := lookup("WAYLAND_DISPLAY"); display == "" {
+		return false
+	}
+	if _, set := lookup("WEBKIT_DISABLE_DMABUF_RENDERER"); set {
+		return false
+	}
+	optOut, _ := lookup(dmabufOptOut)
+	return optOut != "1"
+}
+
+// prepareEngine runs before webview.New. The per-view switches are set later
+// by hardenEngine; this only picks WebKitGTK's renderer for the process.
+//
+// On some Wayland compositors and GPUs (reproduced on Hyprland with NVIDIA,
+// with both nouveau and the proprietary driver) WebKitGTK's DMABUF renderer
+// makes GTK fail with "Error 71 (Protocol error) dispatching to Wayland
+// display" and exit the window program with status 1, so a napplet window
+// flashes and closes. On Wayland the renderer is therefore off unless the
+// user decided otherwise. It must be set before webview.New because WebKit
+// reads the variable at display init and its web and network processes
+// inherit it; os.Setenv reaches libc's getenv because the build links
+// runtime/cgo through purego. X11 sessions are left alone. The cost is
+// zero-copy DMABUF rendering for heavy WebGL napplets, which is why
+// KWAKORE_WEBKIT_DMABUF=1 on the user unit keeps it.
+func prepareEngine() {
+	if !disableDMABufByDefault(os.LookupEnv) {
+		return
+	}
+	if err := os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1"); err != nil {
+		log.Warn().Err(err).Msg("could not disable the webkit dmabuf renderer on wayland")
+		return
+	}
+	log.Info().Str("opt_out", dmabufOptOut+"=1").Msg("webkit dmabuf renderer disabled on wayland")
+}
 
 // hardenEngine turns off WebRTC, media capture and link preconnect in this
 // window's WebKitSettings and logs the values read back. It runs on the UI

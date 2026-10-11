@@ -408,6 +408,25 @@ $ kwak launch 35129:<author hex public key>:<identifier>
 {"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}
 ```
 
+On Wayland (`WAYLAND_DISPLAY` set) the window program turns off WebKitGTK's
+DMABUF renderer (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) unless that variable is
+already set, because on some compositor and GPU combinations the renderer
+makes napplet windows close right after they open. X11 sessions are not
+changed. To keep DMABUF on a setup where it works, for example for heavy
+WebGL napplets, set `KWAKORE_WEBKIT_DMABUF=1` for the service with a drop-in
+from `systemctl --user edit kwakore.service`:
+
+```ini
+[Service]
+Environment=KWAKORE_WEBKIT_DMABUF=1
+```
+
+then run `systemctl --user restart kwakore.service`. On NixOS, set
+`systemd.user.services.kwakore.environment.KWAKORE_WEBKIT_DMABUF = "1";`.
+If windows still close immediately, look for a `window` entry in
+`kwak diagnostics` and for the window program's messages in the journal (see
+[Status, errors and logs](#status-errors-and-logs)).
+
 ## Native desktop entries
 
 For each installed napplet the daemon writes one desktop entry,
@@ -656,9 +675,18 @@ $ kwak --json status
 `ready` means valid configuration, open storage and acceptance of work; it
 does not need a signer or reachable relays. `recent_errors` holds at most 32
 fixed summaries `{category,time,detail}` (for example `native_entries`,
-`signer`, `setting_update`, `config_reload`), and `warning` appears after a
-rejected reload, such as
+`signer`, `setting_update`, `config_reload`, `window`), and `warning` appears
+after a rejected reload, such as
 `"warning":"configuration reload rejected: config.json: invalid relays"`.
+
+A napplet window program that exits on its own with a failure status or a
+signal adds `{"category":"window","detail":"napplet window closed unexpectedly: exit 1"}`
+(or `... signal N`); a window that closes normally, or that `napplet.stop`
+or the service closed, adds nothing. The details stay in the journal
+(`journalctl --user -u kwakore.service`): the window program's stderr (GTK,
+GLib and WebKit messages, at most 200 lines of 2 KiB per window) under
+"window program stderr", and the exit status under "window program exited
+unexpectedly".
 
 `kwak status`, `kwak diagnostics` and
 `kwakore validate` work without a running daemon: they inspect the

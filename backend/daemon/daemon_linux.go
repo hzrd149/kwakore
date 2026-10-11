@@ -126,6 +126,10 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	backend.SetNativeEntryReporter(func(error) {
 		s.recordError("native_entries", "native desktop entry reconciliation failed")
 	})
+	// A window program that dies on its own (a GTK fatal error on Wayland
+	// exits it with status 1) becomes a fixed window summary in
+	// recent_errors. No RPC can launch a window before Open returns.
+	searchHost.SetExitReporter(s.recordWindowExit)
 	// Startup stays available with a disconnected public status when the
 	// requested signer cannot be restored. The private record never enters
 	// ordinary service configuration or diagnostics.
@@ -543,6 +547,9 @@ func (s *Service) Close() {
 			s.signer.Close()
 		}
 		backend.SetNativeEntryReporter(nil)
+		if s.searchHost != nil {
+			s.searchHost.SetExitReporter(nil)
+		}
 		if s.searchBus != nil {
 			_ = s.searchBus.Close()
 		}
