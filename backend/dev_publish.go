@@ -217,7 +217,7 @@ func publishManifest(ctx context.Context, event nostr.Event, relays []string, st
 
 	results := 0
 	failed := 0
-	for result := range sys.Pool.PublishMany(ctx, relays, event) {
+	for result := range publishRelays(ctx, relays, event) {
 		if result.Error != nil {
 			failed++
 			step("  %s: failed: %v", result.RelayURL, result.Error)

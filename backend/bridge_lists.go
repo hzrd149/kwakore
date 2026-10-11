@@ -690,10 +690,7 @@ func loadEventsByID(ctx context.Context, ids []string) []nostr.Event {
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	for ie := range sys.Pool.FetchMany(fetchCtx, relays,
-		nostr.Filter{IDs: missing},
-		nostr.SubscriptionOptions{Label: "loadEvents"},
-	) {
+	for ie := range fetchRelays(fetchCtx, relays, nostr.Filter{IDs: missing}, "loadEvents").Events() {
 		sys.Publisher.Publish(fetchCtx, ie.Event)
 		out = append(out, ie.Event)
 	}
