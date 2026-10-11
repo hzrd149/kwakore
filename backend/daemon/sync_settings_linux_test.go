@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"kwakore/backend/controlprotocol"
 )
@@ -51,5 +52,36 @@ func TestReloadWarningNamesSyncID(t *testing.T) {
 	err := errors.New("/home/u/.config/kwakore/config.json: sync_id: use 1 to 64 printable ASCII characters without spaces, or an empty string to turn sync off")
 	if got := reloadWarning("/home/u/.config/kwakore/config.json", err); !strings.Contains(got, "invalid sync_id") {
 		t.Fatalf("warning = %q", got)
+	}
+}
+
+func TestServiceSyncIDSettingStartsAndStopsCleanly(t *testing.T) {
+	s, err := Open(daemonPaths(t), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	if s.installSyncWait == nil {
+		t.Fatal("no sync worker started")
+	}
+	// no signer is set, so the passes these kick return at once
+	if err := s.SetSetting("sync_id", "laptops"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Manager().Effective().SyncID; got != "laptops" {
+		t.Fatalf("sync_id = %q", got)
+	}
+	if err := s.ClearSetting("sync_id"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		s.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return")
 	}
 }

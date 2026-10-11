@@ -662,6 +662,48 @@ argument or two sources at once are refused before anything is sent, with
 `{"error":{"code":-32602,"message":"Invalid params"}}`.
 If a switch times out, run `kwak signer status` before trying again.
 
+## Syncing installed napplets
+
+Kwakore can keep one installed napplet list across your machines. Sign in
+with the same signer key on each machine and set the same `sync_id` on all of
+them, in `config.json` or with the CLI:
+
+```console
+$ kwak settings set sync_id laptops
+```
+
+The `sync_id` is the `d` tag of a NIP-78 event (kind 30078) signed by your
+signer and published to your write relays, or to the configured `relays` when
+you have no relay list. Its content is the list of installed napplets with
+their canonical addresses and pinned versions, NIP-44 encrypted to your own
+key. The event carries no other tag, so relays see neither which napplets you
+run nor how many. Napps and napplets without a canonical address are not
+synced.
+
+- Installing, updating or uninstalling a napplet on one machine does the same
+  on the others. An uninstall is mirrored, and it closes that napplet's open
+  windows on the other machines like any uninstall.
+- Nothing is ever downgraded. When the list pins an older version than the
+  one installed here, the newer local version is kept and published, so the
+  other machines move up to it.
+- The first time sync is turned on, the local and remote lists are merged:
+  napplets from both sides are installed and nothing is removed.
+- A pass runs at start, when the signer changes, when `sync_id` changes, a
+  couple of seconds after a local install, update or uninstall, when another
+  machine publishes a newer list, and every 30 minutes.
+- Failures appear only in the journal
+  (`journalctl --user -u kwakore.service`) and are retried on the next pass;
+  a failed install or uninstall is never turned into the opposite change. A
+  list that cannot be decrypted or read is left alone: nothing is installed,
+  removed or published because of it.
+- Kwakore does not answer NIP-42 AUTH challenges, so a relay that serves kind
+  30078 events only to their authenticated owner cannot carry the list. Use a
+  write relay without that restriction.
+
+`kwak settings set sync_id ""` turns sync off, whatever `config.json` says;
+`kwak settings clear sync_id` goes back to the value in `config.json`, if any.
+Turning sync off leaves the installed napplets as they are.
+
 ## Status, errors and logs
 
 Run `kwak` or `kwak help` for the command menu. Use `kwak COMMAND --help` for command-specific options, for example `kwak installed --help` or `kwak settings set --help`. Help works even when the service is stopped.

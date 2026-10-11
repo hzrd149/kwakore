@@ -59,6 +59,9 @@ type Service struct {
 	searchBus         *dbus.Conn
 	searchHost        *linuxhost.Host
 	searchRefreshOnce sync.Once
+	// installSyncWait waits for the installed-list sync worker, which runs
+	// on workContext.
+	installSyncWait func()
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
@@ -134,6 +137,7 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	// requested signer cannot be restored. The private record never enters
 	// ordinary service configuration or diagnostics.
 	_ = s.reconcileSigner(context.Background())
+	s.installSyncWait = backend.StartInstallSync(workContext)
 	return s, nil
 }
 
@@ -450,6 +454,9 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID {
 		return
 	}
+	if before.SyncID != after.SyncID {
+		backend.InstallSyncChanged()
+	}
 	discoveryChanged := !slices.Equal(before.Relays, after.Relays) || before.DiscoverOnUserRelays != after.DiscoverOnUserRelays
 	backend.ServiceSettingsChanged(discoveryChanged)
 	if before.DesktopEntries != after.DesktopEntries {
@@ -543,6 +550,11 @@ func (s *Service) Close() {
 	s.mu.Unlock()
 	s.closeOnce.Do(func() {
 		s.work.Wait()
+		// BeginShutdown cancelled workContext: the sync worker ends at once,
+		// and no pass races the signer teardown or closeBackend
+		if s.installSyncWait != nil {
+			s.installSyncWait()
+		}
 		if s.signer != nil {
 			s.signer.Close()
 		}

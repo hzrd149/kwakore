@@ -545,6 +545,9 @@ func pushIdentityChanged() {
 	for _, ci := range liveNapplets() {
 		ci.napPush(map[string]any{"type": "identity.changed", "pubkey": pk})
 	}
+	// another account has another list; never blocks, since ServiceSigner
+	// calls this with its mutex held
+	kickInstallSync()
 }
 
 // ─── shared helpers ──────────────────────────────────────────────
