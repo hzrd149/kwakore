@@ -100,6 +100,11 @@ type AppState struct {
 	// hidden across restarts: "keyring-fallback" and "state-corrupt:<unix>"
 	// (see launcher_notices.go).
 	DismissedNotices []string `json:"dismissed_notices,omitempty"`
+
+	// Sync is the installed-list sync's record of the last list the machines
+	// agreed on, and of the remote event it was merged against
+	// (registry_sync.go). Nil until sync first runs.
+	Sync *installSyncState `json:"install_sync,omitempty"`
 }
 
 var (
