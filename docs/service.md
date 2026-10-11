@@ -656,9 +656,18 @@ $ kwak --json status
 `ready` means valid configuration, open storage and acceptance of work; it
 does not need a signer or reachable relays. `recent_errors` holds at most 32
 fixed summaries `{category,time,detail}` (for example `native_entries`,
-`signer`, `setting_update`, `config_reload`), and `warning` appears after a
-rejected reload, such as
+`signer`, `setting_update`, `config_reload`, `window`), and `warning` appears
+after a rejected reload, such as
 `"warning":"configuration reload rejected: config.json: invalid relays"`.
+
+A napplet window program that exits on its own with a failure status or a
+signal adds `{"category":"window","detail":"napplet window closed unexpectedly: exit 1"}`
+(or `... signal N`); a window that closes normally, or that `napplet.stop`
+or the service closed, adds nothing. The details stay in the journal
+(`journalctl --user -u kwakore.service`): the window program's stderr (GTK,
+GLib and WebKit messages, at most 200 lines of 2 KiB per window) under
+"window program stderr", and the exit status under "window program exited
+unexpectedly".
 
 `kwak status`, `kwak diagnostics` and
 `kwakore validate` work without a running daemon: they inspect the

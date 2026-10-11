@@ -26,6 +26,7 @@ import (
 	"fiatjaf.com/nostr/nip19"
 	"kwakore/backend"
 	"kwakore/backend/controlprotocol"
+	"kwakore/backend/linuxhost"
 	"kwakore/backend/serviceconfig"
 )
 
@@ -619,6 +620,22 @@ func copyGraphicalFile(t *testing.T, source, target string, mode os.FileMode) {
 	}
 }
 
+func TestWindowExitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		exit linuxhost.WindowExit
+		want string
+	}{
+		{linuxhost.WindowExit{Instance: "secret-instance", Code: 1}, "napplet window closed unexpectedly: exit 1"},
+		{linuxhost.WindowExit{Instance: "secret-instance", Code: 124}, "napplet window closed unexpectedly: exit 124"},
+		{linuxhost.WindowExit{Instance: "secret-instance", Signal: 11}, "napplet window closed unexpectedly: signal 11"},
+		{linuxhost.WindowExit{Instance: "secret-instance", Code: 1, Signal: 9}, "napplet window closed unexpectedly: signal 9"},
+	} {
+		if got := windowExitDetail(tc.exit); got != tc.want {
+			t.Errorf("windowExitDetail(%+v) = %q, want %q", tc.exit, got, tc.want)
+		}
+	}
+}
+
 func TestRPCLinuxHostLaunch(t *testing.T) {
 	paths := daemonPaths(t)
 	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
@@ -710,12 +727,33 @@ func TestRPCLinuxHostLaunch(t *testing.T) {
 	if rpcErr == nil || rpcErr.Code != controlprotocol.NotFound {
 		t.Fatalf("second stop: %+v", rpcErr)
 	}
+	// a window the daemon was asked to stop did not close unexpectedly
+	for _, item := range s.Diagnostics().RecentErrors {
+		if item.Category == diagnosticWindow {
+			t.Fatalf("requested stop recorded a window error: %+v", item)
+		}
+	}
 	if err := os.WriteFile(program, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"`+napp.Address()+`"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.Unavailable || len(backend.OpenWindows()) != 0 {
 		t.Fatalf("failed child left a window or returned success: %+v, windows=%v", rpcErr, backend.OpenWindows())
+	}
+	// a window program that died on its own is a fixed summary in
+	// recent_errors, with no path or stderr text
+	diagnostics := s.Diagnostics()
+	found := false
+	for _, item := range diagnostics.RecentErrors {
+		if item.Category == diagnosticWindow && item.Detail == "napplet window closed unexpectedly: exit 1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no window error after the child exited 1: %+v", diagnostics.RecentErrors)
+	}
+	if encoded, err := json.Marshal(diagnostics); err != nil || strings.Contains(string(encoded), programDir) {
+		t.Fatalf("diagnostics carry the program path: %s %v", encoded, err)
 	}
 	_, rpcErr, _ = rpcCall(t, bufio.NewReader(conn), conn, "napplet.launch", `{"address":"bad"}`)
 	if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {

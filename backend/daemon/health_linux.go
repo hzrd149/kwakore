@@ -5,9 +5,11 @@ package daemon
 import (
 	"errors"
 	"os"
+	"strconv"
 	"time"
 
 	"kwakore/backend"
+	"kwakore/backend/linuxhost"
 	"kwakore/backend/serviceconfig"
 )
 
@@ -113,6 +115,26 @@ func (s *Service) recordError(category, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recordErrorLocked(category, detail)
+}
+
+// diagnosticWindow is the recent_errors category of a napplet window program
+// that ended on its own with a failure status or a signal.
+const diagnosticWindow = "window"
+
+// windowExitDetail is the fixed summary of an unexpected window exit: service
+// text and an integer only.
+func windowExitDetail(e linuxhost.WindowExit) string {
+	if e.Signal != 0 {
+		return "napplet window closed unexpectedly: signal " + strconv.Itoa(e.Signal)
+	}
+	return "napplet window closed unexpectedly: exit " + strconv.Itoa(e.Code)
+}
+
+// recordWindowExit is the linuxhost exit reporter. Like every recordError
+// caller it passes no path, stderr text, instance id or raw error: those stay
+// in the journal, next to the "window program exited unexpectedly" line.
+func (s *Service) recordWindowExit(e linuxhost.WindowExit) {
+	s.recordError(diagnosticWindow, windowExitDetail(e))
 }
 
 // recordErrorLocked accepts only fixed, already-sanitized service summaries.
