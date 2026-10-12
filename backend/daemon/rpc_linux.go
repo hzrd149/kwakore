@@ -782,7 +782,11 @@ func mutationError(err error) *controlprotocol.Error {
 	switch {
 	case errors.Is(err, backend.ErrServiceSessionUnavailable):
 		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
-		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: "session_unavailable"}
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSessionUnavailable}
+		return rpcErr
+	case errors.Is(err, backend.ErrServiceSignerUnavailable):
+		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSignerUnavailable}
 		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)

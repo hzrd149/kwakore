@@ -84,9 +84,32 @@ type PartialCleanupData struct {
 	CleanupComplete bool   `json:"cleanup_complete"`
 }
 
+// SessionUnavailableData is the reason data of an Unavailable error. Only a
+// reason UnavailableReason accepts reaches the wire.
 type SessionUnavailableData struct {
 	Reason string `json:"reason"`
 }
+
+// The reasons an Unavailable error may carry.
+const (
+	// ReasonSessionUnavailable is a launch without a graphical session.
+	ReasonSessionUnavailable = "session_unavailable"
+	// ReasonSignerUnavailable is a social action without a signer.
+	ReasonSignerUnavailable = "signer_unavailable"
+)
+
+// UnavailableReason says whether reason is in the closed list of reasons an
+// Unavailable error may carry. A new reason (such as a later not_zappable)
+// is one more case here plus the protocol docs; none is reserved ahead of
+// time, so the docs only list reasons the daemon can actually send.
+func UnavailableReason(reason string) bool {
+	switch reason {
+	case ReasonSessionUnavailable, ReasonSignerUnavailable:
+		return true
+	}
+	return false
+}
+
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
@@ -190,7 +213,7 @@ func processRequest(frame []byte, dispatch Dispatch) []byte {
 			}
 		}
 		if fixed.Code == Unavailable && rpcErr.Code == Unavailable {
-			if data, ok := rpcErr.Data.(SessionUnavailableData); ok && data.Reason == "session_unavailable" {
+			if data, ok := rpcErr.Data.(SessionUnavailableData); ok && UnavailableReason(data.Reason) {
 				fixed.Data = data
 			}
 		}
