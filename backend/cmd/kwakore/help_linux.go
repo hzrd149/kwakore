@@ -34,11 +34,13 @@ Napplets:
                                  Browse observed manifest versions
   snapshots ADDRESS [--refresh] [--offset N] [--limit N]
                                  Browse author snapshots and derivatives
-  social ADDRESS [--refresh] [--only reactions,comments,mentions]
-                                 Show reactions, comments and mentions
+  social ADDRESS [--refresh] [--only reactions,comments,mentions,zaps]
+                                 Show reactions, comments, mentions and zaps
   reactions ADDRESS [--event ID] List reactions
   comments ADDRESS [--parent ID] List comments or replies
   mentions ADDRESS               List notes that mention a napplet
+  zaps ADDRESS [--offset N] [--limit N]
+                                 List verified zaps of a napplet
   vote ADDRESS up|down|none [--event ID]
                                  Vote on a napplet
   react ADDRESS EMOJI [--url URL] [--event ID]
@@ -47,6 +49,8 @@ Napplets:
                                  Comment on a napplet or reply to a comment
   unpublish ADDRESS EVENT_ID     Delete your own reaction, comment or share
   share ADDRESS [TEXT]           Share a napplet in a note
+  zap ADDRESS SATS [--comment TEXT] [--event ID]
+                                 Get a lightning invoice to zap a napplet
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
@@ -153,18 +157,44 @@ Same-author snapshots and other-author derivatives are labeled separately.
 Lineage is provenance; snapshots do not replace the latest mutable version.
 Example: kwak snapshots nostr:naddr1... --refresh
 `,
-	"social": `Show a napplet's reactions, comments and mentions.
+	"social": `Show a napplet's reactions, comments, mentions and zaps.
 
-Usage: kwak social ADDRESS [--refresh] [--only reactions,comments,mentions]
+Usage: kwak social ADDRESS [--refresh] [--only reactions,comments,mentions,zaps]
   --refresh    Ask relays first: the author's, discovery and your read relays
-  --only LIST  Refresh only these categories (reactions, comments, mentions)
+  --only LIST  Refresh only these categories (reactions, comments, mentions,
+               zaps)
 Without --refresh, reads local data only. A category is asked at most once
 per 30 seconds. Votes are each person's latest +, empty (both up) or -
 reaction; other reactions are emoji, counted once per person. Mentions are
-notes that name or quote the napplet. Works for any napplet, installed or
+notes that name or quote the napplet. Zaps are receipts signed by the
+author's lightning provider; zaps is unavailable when the author has no
+lightning address that takes nostr zaps. Works for any napplet, installed or
 not. This command only reads; kwak vote, react, comment, share and unpublish
-publish.
+publish, and kwak zap asks for an invoice.
 Example: kwak social nostr:naddr1... --refresh
+`,
+	"zaps": `List a napplet's verified zaps, newest first.
+
+Usage: kwak zaps ADDRESS [--offset N] [--limit N]
+  --offset N   Start at zap N (default 0)
+  --limit N    Return 1–500 zaps (default 100)
+Only receipts signed by the author's lightning provider, for exactly the
+amount the zap asked, count. total_msats sums every zap, not only the page.
+Reads local data only; kwak social ADDRESS --refresh --only zaps fetches new
+ones.
+Example: kwak zaps nostr:naddr1... --limit 20
+`,
+	"zap": `Get a lightning invoice to zap a napplet.
+
+Usage: kwak zap ADDRESS SATS [--comment TEXT] [--event ID]
+  --comment TEXT  A comment for the author, if their provider takes one
+  --event ID      Zap this manifest version (64 hex event ID)
+Prints a bolt11 invoice for SATS sats: pay it with any lightning wallet.
+Kwakore never pays and never publishes the zap request; the author's
+provider publishes the receipt once the invoice is paid. Needs a signer
+(kwak signer), and the author needs a lightning address that takes nostr
+zaps. --json shows the full result.
+Example: kwak zap nostr:naddr1... 21 --comment "thanks"
 `,
 	"reactions": `List a napplet's reactions, newest first.
 
