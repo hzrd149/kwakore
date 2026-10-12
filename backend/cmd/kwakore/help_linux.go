@@ -38,6 +38,13 @@ Napplets:
                                  Show reactions and comments
   reactions ADDRESS [--event ID] List reactions
   comments ADDRESS [--parent ID] List comments or replies
+  vote ADDRESS up|down|none [--event ID]
+                                 Vote on a napplet
+  react ADDRESS EMOJI [--url URL] [--event ID]
+                                 React to a napplet with an emoji
+  comment ADDRESS TEXT [--reply ID]
+                                 Comment on a napplet or reply to a comment
+  unpublish ADDRESS EVENT_ID     Delete your own reaction or comment
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
@@ -152,7 +159,8 @@ Usage: kwak social ADDRESS [--refresh] [--only reactions,comments]
 Without --refresh, reads local data only. A category is asked at most once
 per 30 seconds. Votes are each person's latest +, empty (both up) or -
 reaction; other reactions are emoji, counted once per person. Works for any
-napplet, installed or not, and only reads: nothing is published.
+napplet, installed or not. This command only reads; kwak vote, react,
+comment and unpublish publish.
 Example: kwak social nostr:naddr1... --refresh
 `,
 	"reactions": `List a napplet's reactions, newest first.
@@ -173,6 +181,43 @@ Usage: kwak comments ADDRESS [--parent ID] [--offset N] [--limit N]
 Without --parent, lists top-level comments and replies whose parent is not
 held. Reads local data only; kwak social ADDRESS --refresh fetches new ones.
 Example: kwak comments nostr:naddr1... --parent COMMENT_ID
+`,
+	"vote": `Vote on a napplet, or withdraw your vote.
+
+Usage: kwak vote ADDRESS up|down|none [--event ID]
+  --event ID   Vote on this manifest version (64 hex event ID); not with none
+Without --event, votes on the installed version, else the newest known one.
+A vote already in place publishes nothing. A new vote replaces your previous
+ones once a relay took it. Needs a signer (kwak signer). published: 0 means
+no relay took the event; it is kept locally.
+Example: kwak vote nostr:naddr1... up
+`,
+	"react": `React to a napplet with an emoji.
+
+Usage: kwak react ADDRESS EMOJI [--url URL] [--event ID]
+  --url URL    Image of a :shortcode: emoji (https, NIP-30); only then
+  --event ID   React to this manifest version (64 hex event ID)
++ and - are votes: use kwak vote. Needs a signer (kwak signer).
+published: 0 means no relay took the event; it is kept locally.
+Example: kwak react nostr:naddr1... :pepe: --url https://cdn.example/pepe.png
+`,
+	"comment": `Comment on a napplet, or reply to a comment.
+
+Usage: kwak comment ADDRESS TEXT [--reply ID]
+  --reply ID   Reply to this comment (64 hex event ID), as listed by
+               kwak comments
+TEXT is published as given, up to 8 KiB. Needs a signer (kwak signer).
+published: 0 means no relay took the event; it is kept locally.
+Example: kwak comment nostr:naddr1... "Works great" --reply COMMENT_ID
+`,
+	"unpublish": `Delete your own reaction or comment on a napplet.
+
+Usage: kwak unpublish ADDRESS EVENT_ID
+EVENT_ID is one of your reactions or comments on this napplet (64 hex event
+ID). Publishes a NIP-09 deletion and removes the event locally. Needs a
+signer (kwak signer). published: 0 means no relay took the deletion; it is
+kept locally.
+Example: kwak unpublish nostr:naddr1... EVENT_ID
 `,
 	"windows": `List active napplet windows.
 

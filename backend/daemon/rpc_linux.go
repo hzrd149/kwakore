@@ -257,6 +257,39 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(socialErr)
 		}
 		return result, nil
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+		p, err := decodeSocialActionParams(params, method)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		// no operation lock: the backend runs one social action at a time
+		// itself, and holding the registry lock across a signer wait of up to
+		// 20 s would stall installs and launches
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, 60*time.Second)
+		defer cancelTimeout()
+		// plain ifs: the protocol docs test reads every case label as a route
+		var result any
+		var actionErr error
+		if method == "napplet.vote" {
+			result, actionErr = backend.ServiceSocialVote(workCtx, p.address, p.vote, p.eventID)
+		} else if method == "napplet.react" {
+			result, actionErr = backend.ServiceSocialReact(workCtx, p.address, p.emoji, p.emojiURL, p.eventID)
+		} else if method == "napplet.comment" {
+			result, actionErr = backend.ServiceSocialComment(workCtx, p.address, p.content, p.eventID)
+		} else {
+			result, actionErr = backend.ServiceSocialDelete(workCtx, p.address, p.eventID)
+		}
+		if actionErr != nil {
+			return nil, mutationError(actionErr)
+		}
+		return result, nil
 	case "napplet.detail":
 		address, err := decodeAddressParams(params)
 		if err != nil {
@@ -782,7 +815,11 @@ func mutationError(err error) *controlprotocol.Error {
 	switch {
 	case errors.Is(err, backend.ErrServiceSessionUnavailable):
 		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
-		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: "session_unavailable"}
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSessionUnavailable}
+		return rpcErr
+	case errors.Is(err, backend.ErrServiceSignerUnavailable):
+		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSignerUnavailable}
 		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
@@ -902,6 +939,70 @@ func decodeSocialParams(params json.RawMessage, method string) (socialParams, *c
 			if !slices.Contains(known, c) || slices.Contains(p.categories[:i], c) {
 				return socialParams{}, invalid
 			}
+		}
+	}
+	return p, nil
+}
+
+// socialActionParams are the params of napplet.vote, napplet.react,
+// napplet.comment and napplet.delete. eventID is the version (vote, react),
+// the parent comment (comment) or the event to delete.
+type socialActionParams struct {
+	address, vote, emoji, emojiURL, content, eventID string
+}
+
+// decodeSocialActionParams reads one social action's params strictly: only
+// that method's fields, required strings present and never null, ids as 64
+// lowercase hex. The backend enforces the content rules.
+func decodeSocialActionParams(params json.RawMessage, method string) (socialActionParams, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	idField := "event_id"
+	var allowed, required []string
+	if method == "napplet.vote" {
+		allowed, required = []string{"address", "vote", "event_id"}, []string{"vote"}
+	} else if method == "napplet.react" {
+		allowed, required = []string{"address", "emoji", "emoji_url", "event_id"}, []string{"emoji"}
+	} else if method == "napplet.comment" {
+		allowed, required, idField = []string{"address", "content", "parent_id"}, []string{"content"}, "parent_id"
+	} else {
+		allowed, required = []string{"address", "event_id"}, []string{"event_id"}
+	}
+	if err := controlprotocol.ValidateNamedParams(params, allowed...); err != nil {
+		return socialActionParams{}, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return socialActionParams{}, invalid
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return socialActionParams{}, err
+	}
+	for _, name := range required {
+		if _, ok := fields[name]; !ok {
+			return socialActionParams{}, invalid
+		}
+	}
+	p := socialActionParams{address: address}
+	texts := map[string]*string{"vote": &p.vote, "emoji": &p.emoji, "emoji_url": &p.emojiURL, "content": &p.content}
+	for name, dst := range texts {
+		raw, ok := fields[name]
+		if !ok {
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, dst) != nil {
+			return socialActionParams{}, invalid
+		}
+	}
+	if _, ok := fields["vote"]; ok && p.vote != "up" && p.vote != "down" && p.vote != "none" {
+		return socialActionParams{}, invalid
+	}
+	if _, ok := fields["emoji"]; ok && p.emoji == "" {
+		return socialActionParams{}, invalid
+	}
+	if raw, ok := fields[idField]; ok {
+		if p.eventID, err = eventIDField(raw); err != nil {
+			return socialActionParams{}, err
 		}
 	}
 	return p, nil

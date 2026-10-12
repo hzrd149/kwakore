@@ -501,6 +501,8 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"versions", address}, {"snapshots", address},
 		{"select", address, strings.Repeat("e", 64)},
 		{"social", address}, {"reactions", address}, {"comments", address},
+		{"vote", address, "up"}, {"react", address, "🔥"}, {"comment", address, "hi"},
+		{"unpublish", address, strings.Repeat("e", 64)},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -1688,5 +1690,135 @@ func TestCLIIconOutput(t *testing.T) {
 		if _, err := os.Stat(bad); !os.IsNotExist(err) {
 			t.Fatalf("%s: a file was written: %v", name, err)
 		}
+	}
+}
+
+func TestCLISocialActionCommands(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	addr := `"address":"` + address + `"`
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		args   []string
+		method string
+		params string
+	}{
+		{[]string{"vote", address, "up"}, "napplet.vote", `{` + addr + `,"vote":"up"}`},
+		{[]string{"vote", address, "down", "--event", id}, "napplet.vote", `{` + addr + `,"vote":"down","event_id":"` + id + `"}`},
+		{[]string{"vote", address, "none"}, "napplet.vote", `{` + addr + `,"vote":"none"}`},
+		{[]string{"react", address, "🔥"}, "napplet.react", `{` + addr + `,"emoji":"🔥"}`},
+		{[]string{"react", address, "🔥", "--url", "https://x/y.png", "--event", id}, "napplet.react",
+			`{` + addr + `,"emoji":"🔥","emoji_url":"https://x/y.png","event_id":"` + id + `"}`},
+		{[]string{"comment", address, "hi there"}, "napplet.comment", `{` + addr + `,"content":"hi there"}`},
+		{[]string{"comment", address, "hi there", "--reply", id}, "napplet.comment", `{` + addr + `,"content":"hi there","parent_id":"` + id + `"}`},
+		{[]string{"unpublish", address, id}, "napplet.delete", `{` + addr + `,"event_id":"` + id + `"}`},
+	} {
+		method, params, _, err := command(tc.args)
+		if err != nil || method != tc.method || string(params) != tc.params {
+			t.Fatalf("%v: %s %s %v", tc.args, method, params, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"vote"}, {"vote", "bad", "up"}, {"vote", address}, {"vote", address, "maybe"}, {"vote", address, "up", "extra"},
+		{"vote", address, "up", "--event", "BAD"}, {"vote", address, "up", "--event", strings.ToUpper(id)},
+		{"vote", address, "up", "--reply", id},
+		{"react", address}, {"react", address, "+"}, {"react", address, "-"}, {"react", address, ""},
+		{"react", address, "🔥", "--event", id[:63]}, {"react", address, "🔥", "extra"},
+		{"comment", address}, {"comment", address, ""}, {"comment", address, "  "}, {"comment", address, "hi", "--reply", "xyz"},
+		{"comment", address, "hi", "--event", id}, {"comment", address, "hi", "extra"},
+		{"unpublish", address}, {"unpublish", address, "BAD"}, {"unpublish", address, id, "extra"},
+		{"unpublish", address, strings.Repeat("g", 64)},
+	} {
+		_, _, _, err := command(args)
+		var input inputFailure
+		var addrErr addressFailure
+		if err == nil || (!errors.As(err, &input) && !errors.As(err, &addrErr)) {
+			t.Fatalf("%v: %v, want a refusal before dialing", args, err)
+		}
+	}
+	for _, method := range []string{"napplet.vote", "napplet.react", "napplet.comment", "napplet.delete"} {
+		if got := commandDeadline(method, 0); got != 75*time.Second {
+			t.Fatalf("%s deadline %v", method, got)
+		}
+	}
+	for _, topic := range []string{"vote", "react", "comment", "unpublish"} {
+		if text, ok := helpTopic([]string{"help", topic}); !ok || !strings.Contains(text, "Usage: kwak "+topic+" ADDRESS") || !strings.Contains(text, "signer") {
+			t.Fatalf("missing help for %s", topic)
+		}
+		if !strings.Contains(cliHelp, "\n  "+topic+" ADDRESS") {
+			t.Fatalf("top-level help lacks %s", topic)
+		}
+	}
+}
+
+func TestCLISignerUnavailableData(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	signer := `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"signer_unavailable"}}}`
+	session := `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"session_unavailable"}}}`
+	extra := `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"signer_unavailable","path":"secret"}}}`
+	run := func(response string, args ...string) (string, error) {
+		go func() {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = bufio.NewReader(conn).ReadBytes('\n')
+			_, _ = conn.Write([]byte(response + "\n"))
+		}()
+		cmd := exec.Command(cli, append([]string{"--socket", listener.Addr().String()}, args...)...)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		if stdout.Len() != 0 {
+			t.Fatalf("%v wrote stdout %q", args, stdout.String())
+		}
+		return stderr.String(), err
+	}
+	for _, tc := range []struct {
+		name, response string
+		args           []string
+		want           string
+	}{
+		{"vote json", signer, []string{"--json", "vote", address, "up"},
+			`{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` + "\n"},
+		{"unpublish json", signer, []string{"--json", "unpublish", address, strings.Repeat("e", 64)},
+			`{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` + "\n"},
+		{"launch with the signer reason", signer, []string{"--json", "launch", address}, `"Invalid`},
+		{"vote with the session reason", session, []string{"--json", "vote", address, "up"}, `"Invalid`},
+		{"extra key", extra, []string{"--json", "react", address, "🔥"}, `"Invalid`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stderr, err := run(tc.response, tc.args...)
+			if err == nil || strings.Contains(stderr, "secret") || strings.Contains(stderr, "private") {
+				t.Fatalf("unsafe error: %q %v", stderr, err)
+			}
+			if strings.HasPrefix(tc.want, `"Invalid`) {
+				if strings.Contains(stderr, "reason") || !strings.Contains(stderr, `"code":1004`) {
+					t.Fatalf("accepted a reason the method cannot carry: %q", stderr)
+				}
+				return
+			}
+			if stderr != tc.want {
+				t.Fatalf("stderr %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+	stderr, err := run(signer, "comment", address, "hi")
+	if err == nil || !strings.Contains(stderr, "A signer is required: set one up with kwak signer.") || strings.Contains(stderr, "private") {
+		t.Fatalf("human signer error: %q %v", stderr, err)
+	}
+	stderr, err = run(signer, "launch", address)
+	if err == nil || strings.Contains(stderr, "signer is required") {
+		t.Fatalf("human launch error: %q %v", stderr, err)
 	}
 }

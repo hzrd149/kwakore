@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/eventstore"
 	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/sdk"
 )
@@ -884,11 +885,19 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 // publishSigned sends an already approved, signed event to its targets:
 // the local store first, then the relays. It reports per relay.
 func publishSigned(ctx context.Context, evt nostr.Event, targets []string) map[string]any {
-	// keep it locally first, so the napp can query it back right away
-	if _, err := sys.Store.ReplaceEvent(evt); err != nil {
-		if err := sys.Store.SaveEvent(evt); err != nil {
-			log.Warn().Err(err).Msg("failed to store published event locally")
+	// keep it locally first, so the napp can query it back right away.
+	// Only a replaceable or addressable event replaces anything: the
+	// store's ReplaceEvent drops every older event of the same kind and
+	// author, which for a regular kind (a reaction, a comment, a deletion)
+	// would wipe the user's other events.
+	if evt.Kind.IsReplaceable() || evt.Kind.IsAddressable() {
+		if _, err := sys.Store.ReplaceEvent(evt); err != nil {
+			if err := sys.Store.SaveEvent(evt); err != nil {
+				log.Warn().Err(err).Msg("failed to store published event locally")
+			}
 		}
+	} else if err := sys.Store.SaveEvent(evt); err != nil && !errors.Is(err, eventstore.ErrDupEvent) {
+		log.Warn().Err(err).Msg("failed to store published event locally")
 	}
 	// and let the load* caches know they're stale for this kind+author
 	invalidateList(evt.Kind, evt.PubKey)
