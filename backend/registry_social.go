@@ -30,12 +30,20 @@ import (
 // A napplet is also mentioned by kind 1 notes, which name it with an "a"
 // tag (a mention) or a NIP-18 "q" tag (a quote). A "q" may name the address
 // as well as a version id; a snapshot is again named only by its id.
+//
+// A napplet is zapped through NIP-57 kind 9735 receipts, which copy the "a"
+// and "e" tags of their zap request. A receipt counts only when the provider
+// behind the author's lightning address signed it and its embedded kind 9734
+// request is valid, names the author as its one "p", names the napplet by
+// "a" (never a snapshot) or by a known version's "e", and asks for exactly
+// the invoice's amount (registry_social_zap.go).
 
 // The social categories a client can ask a refresh for.
 const (
 	SocialReactions = "reactions"
 	SocialComments  = "comments"
 	SocialMentions  = "mentions"
+	SocialZaps      = "zaps"
 )
 
 const (
@@ -52,6 +60,10 @@ const (
 	socialVersionLimit = 20
 	// socialEmojiURLBytes caps a NIP-30 emoji image url.
 	socialEmojiURLBytes = 512
+	// socialZapCommentRunes caps a zap comment on the wire.
+	socialZapCommentRunes = 280
+	// socialZapTopLimit caps a summary's top zappers.
+	socialZapTopLimit = 5
 )
 
 // ErrServiceInvalidSocial is a social request with categories outside
@@ -61,7 +73,7 @@ var ErrServiceInvalidSocial = errors.New("invalid social parameters")
 // SocialCategories is every category a refresh can name, sorted. The daemon
 // validates params against it, so the two lists cannot drift.
 func SocialCategories() []string {
-	return []string{SocialComments, SocialMentions, SocialReactions}
+	return []string{SocialComments, SocialMentions, SocialReactions, SocialZaps}
 }
 
 // socialTarget is one canonical napplet address and the event ids that name
@@ -117,11 +129,12 @@ func newSocialTarget(address string) (socialTarget, error) {
 }
 
 // socialTagNames are the address and event tag names that link evt's kind
-// to its target: lowercase for a reaction, the uppercase root scope for a
-// comment, and "a" and the NIP-18 quote "q" for a note.
+// to its target: lowercase for a reaction and for a zap receipt (which
+// copies its request's), the uppercase root scope for a comment, and "a"
+// and the NIP-18 quote "q" for a note.
 func socialTagNames(kind nostr.Kind) (string, string, bool) {
 	switch kind {
-	case nostr.KindReaction:
+	case nostr.KindReaction, nostr.KindZap:
 		return "a", "e", true
 	case nostr.KindComment:
 		return "A", "E", true
@@ -242,7 +255,7 @@ func socialCategoriesParam(categories []string) ([]string, error) {
 	return slices.Clone(categories), nil
 }
 
-// ServiceSocial is the reactions, comments and mentions summary of a napplet address,
+// ServiceSocial is the reactions, comments, mentions and zaps summary of a napplet address,
 // installed or not, read from the local store. refresh first asks relays for
 // the named categories (all when none are named), within the refresh floor.
 func ServiceSocial(ctx context.Context, address string, refresh bool, categories []string) (ServiceSocialSummary, error) {
@@ -370,6 +383,21 @@ type ServiceSocialMentionSummary struct {
 	Count int `json:"count"`
 }
 
+// ServiceSocialZapper is one sender's verified zaps of a napplet.
+type ServiceSocialZapper struct {
+	Pubkey string `json:"pubkey"`
+	Msats  int64  `json:"msats"`
+	Count  int    `json:"count"`
+}
+
+// ServiceSocialZapSummary totals a napplet's verified zaps. Top is the
+// biggest senders, at most five, never null.
+type ServiceSocialZapSummary struct {
+	Count      int                   `json:"count"`
+	TotalMsats int64                 `json:"total_msats"`
+	Top        []ServiceSocialZapper `json:"top"`
+}
+
 type ServiceSocialOwnReaction struct {
 	ID      string `json:"id"`
 	Content string `json:"content"`
@@ -391,6 +419,7 @@ type ServiceSocialSummary struct {
 	ByEvent  []ServiceSocialByEvent       `json:"by_event"`
 	Comments ServiceSocialCommentSummary  `json:"comments"`
 	Mentions ServiceSocialMentionSummary  `json:"mentions"`
+	Zaps     ServiceSocialZapSummary      `json:"zaps"`
 	// Own is null when no signer is set up.
 	Own *ServiceSocialOwn `json:"own"`
 }
@@ -446,4 +475,25 @@ type ServiceMentionPage struct {
 	Items      []ServiceMention `json:"items"`
 	Total      int              `json:"total"`
 	NextOffset *int             `json:"next_offset"`
+}
+
+// ServiceZap is one verified zap receipt of a napplet. Sender is the zap
+// request's pubkey; EventID is the version the request names, or "".
+type ServiceZap struct {
+	ReceiptID   string `json:"receipt_id"`
+	Sender      string `json:"sender"`
+	SenderName  string `json:"sender_name,omitempty"`
+	AmountMsats int64  `json:"amount_msats"`
+	Comment     string `json:"comment"`
+	EventID     string `json:"event_id"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+// ServiceZapPage is napplet.zaps' result. TotalMsats sums every verified
+// receipt, not only the page.
+type ServiceZapPage struct {
+	Items      []ServiceZap `json:"items"`
+	Total      int          `json:"total"`
+	TotalMsats int64        `json:"total_msats"`
+	NextOffset *int         `json:"next_offset"`
 }

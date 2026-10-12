@@ -217,34 +217,62 @@ func identityZaps(ctx context.Context, pk nostr.PubKey) (any, error) {
 	return zaps, nil
 }
 
+// zapReceiptInfo is a receipt verifyZapReceipt accepted: its embedded zap
+// request and the invoice's amount in millisats, or 0 when the bolt11 tag
+// names none.
+type zapReceiptInfo struct {
+	Request nostr.Event
+	Msats   int64
+}
+
+// verifyZapReceipt reads a kind 9735 receipt from provider: its embedded
+// zap request must be a kind 9734 with a valid id and signature that match
+// accepts. Who the zap is for is match's call, so NAP identity reads (the
+// user) and napplet zaps (an author and one napplet) share one check. As
+// it always has, it trusts the provider's key, not the receipt's own id
+// and signature.
+func verifyZapReceipt(evt nostr.Event, provider nostr.PubKey, match func(req nostr.Event) bool) (zapReceiptInfo, bool) {
+	if evt.Kind != 9735 || evt.PubKey != provider {
+		return zapReceiptInfo{}, false
+	}
+	desc := evt.Tags.Find("description")
+	if desc == nil || len(desc) < 2 {
+		return zapReceiptInfo{}, false
+	}
+	var req nostr.Event
+	if err := req.UnmarshalJSON([]byte(desc[1])); err != nil {
+		return zapReceiptInfo{}, false
+	}
+	if req.Kind != 9734 || !req.CheckID() || !req.VerifySignature() {
+		return zapReceiptInfo{}, false
+	}
+	if !match(req) {
+		return zapReceiptInfo{}, false
+	}
+	info := zapReceiptInfo{Request: req}
+	if b := evt.Tags.Find("bolt11"); b != nil && len(b) >= 2 {
+		if parsed, ok := bolt11Msats(b[1]); ok {
+			info.Msats = parsed
+		}
+	}
+	return info, true
+}
+
 // zapReceipt reads a kind 9735 receipt from provider for recipient: who
 // zapped (the embedded, signed zap request) and how much (the invoice, in
 // millisats). eventId is the receipt's own id.
 func zapReceipt(evt nostr.Event, provider, recipient nostr.PubKey) (map[string]any, bool) {
-	if evt.Kind != 9735 || evt.PubKey != provider {
+	info, ok := verifyZapReceipt(evt, provider, func(req nostr.Event) bool {
+		// the first p tag names the recipient
+		p := req.Tags.Find("p")
+		return p != nil && len(p) >= 2 && p[1] == recipient.Hex()
+	})
+	if !ok {
 		return nil, false
 	}
-	desc := evt.Tags.Find("description")
-	if desc == nil || len(desc) < 2 {
-		return nil, false
-	}
-	var req nostr.Event
-	if err := req.UnmarshalJSON([]byte(desc[1])); err != nil {
-		return nil, false
-	}
-	if req.Kind != 9734 || !req.CheckID() || !req.VerifySignature() {
-		return nil, false
-	}
-	if p := req.Tags.Find("p"); p == nil || len(p) < 2 || p[1] != recipient.Hex() {
-		return nil, false
-	}
+	req := info.Request
 
-	var amount int64
-	if b := evt.Tags.Find("bolt11"); b != nil && len(b) >= 2 {
-		if parsed, ok := bolt11Msats(b[1]); ok {
-			amount = parsed
-		}
-	}
+	amount := info.Msats
 	if amount == 0 {
 		if amt := req.Tags.Find("amount"); amt != nil && len(amt) >= 2 {
 			if parsed, err := strconv.ParseInt(amt[1], 10, 64); err == nil {
@@ -310,60 +338,131 @@ func bolt11Msats(invoice string) (int64, bool) {
 	return n * per, true
 }
 
-// zapProviders caches lightning address lookups: lud16 → zapProviderEntry.
-var zapProviders sync.Map
+// lnurlpCache caches lightning address lookups: lud16 → lnurlpEntry.
+var lnurlpCache sync.Map
 
-type zapProviderEntry struct {
-	pk nostr.PubKey
-	ok bool
-	at time.Time
+type lnurlpEntry struct {
+	info lnurlpInfo
+	at   time.Time
 }
 
-const zapProviderTTL = time.Hour
+const lnurlpTTL = time.Hour
+
+// lnurlpInfo is a lightning address's LNURL-pay answer (LUD-06, LUD-12 and
+// NIP-57). Every field is the provider's word: callers check what they use.
+type lnurlpInfo struct {
+	Callback       string
+	MinSendable    int64
+	MaxSendable    int64
+	CommentAllowed int
+	Tag            string
+	AllowsNostr    bool
+	NostrPubkey    nostr.PubKey
+	// pubkeyOK says nostrPubkey parsed as a hex pubkey.
+	pubkeyOK bool
+}
+
+// provider is the pubkey that signs the address's zap receipts; ok is
+// false when the address doesn't take nostr zaps.
+func (i lnurlpInfo) provider() (nostr.PubKey, bool) {
+	if !i.AllowsNostr || !i.pubkeyOK {
+		return nostr.ZeroPK, false
+	}
+	return i.NostrPubkey, true
+}
+
+// lnurlpParams reads a lightning address's LNURL-pay endpoint, cached for
+// an hour. valid is false (with a nil error) for an address that names no
+// endpoint. The lud16 always comes from a kind 0 (the user's own for NAP
+// identity reads, a napplet author's for socket zaps), never from a
+// napplet. Only allowsNostr and nostrPubkey must be well typed; any other
+// field that is not the JSON type LNURL names reads as its zero value, so a
+// sloppy provider never fails the lookup.
+func lnurlpParams(ctx context.Context, lud16 string) (lnurlpInfo, bool, error) {
+	if v, hit := lnurlpCache.Load(lud16); hit {
+		if e := v.(lnurlpEntry); time.Since(e.at) < lnurlpTTL {
+			return e.info, true, nil
+		}
+	}
+	endpoint, valid := lnurlpURL(lud16)
+	if !valid {
+		return lnurlpInfo{}, false, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return lnurlpInfo{}, false, nil
+	}
+	resp, err := resourceClient.Do(req)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return lnurlpInfo{}, false, errIdentityTimeout
+		}
+		return lnurlpInfo{}, false, fmt.Errorf("zap provider unreachable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return lnurlpInfo{}, false, fmt.Errorf("zap provider unreachable")
+	}
+	var params struct {
+		AllowsNostr    bool            `json:"allowsNostr"`
+		NostrPubkey    string          `json:"nostrPubkey"`
+		Callback       json.RawMessage `json:"callback"`
+		MinSendable    json.RawMessage `json:"minSendable"`
+		MaxSendable    json.RawMessage `json:"maxSendable"`
+		CommentAllowed json.RawMessage `json:"commentAllowed"`
+		Tag            json.RawMessage `json:"tag"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&params); err != nil {
+		return lnurlpInfo{}, false, fmt.Errorf("zap provider unreachable")
+	}
+	info := lnurlpInfo{
+		Callback:    lnurlpString(params.Callback),
+		MinSendable: lnurlpInt(params.MinSendable),
+		MaxSendable: lnurlpInt(params.MaxSendable),
+		Tag:         lnurlpString(params.Tag),
+		AllowsNostr: params.AllowsNostr,
+	}
+	// a negative limit allows nothing; an absurd one is clamped
+	info.CommentAllowed = int(min(max(lnurlpInt(params.CommentAllowed), 0), math.MaxInt32))
+	if pk, err := nostr.PubKeyFromHex(params.NostrPubkey); err == nil {
+		info.NostrPubkey, info.pubkeyOK = pk, true
+	}
+	lnurlpCache.Store(lud16, lnurlpEntry{info: info, at: time.Now()})
+	return info, true, nil
+}
+
+// lnurlpString is a JSON string, or "" for anything else.
+func lnurlpString(raw json.RawMessage) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// lnurlpInt is a JSON integer, or 0 for anything else: a string, a
+// fraction, an exponent or an overflow.
+func lnurlpInt(raw json.RawMessage) int64 {
+	var n int64
+	if len(raw) == 0 || json.Unmarshal(raw, &n) != nil {
+		return 0
+	}
+	return n
+}
 
 // zapProvider is the pubkey that signs zap receipts for a lightning address,
 // read from its LNURL-pay endpoint. ok is false when the address doesn't
 // take nostr zaps.
 func zapProvider(ctx context.Context, lud16 string) (nostr.PubKey, bool, error) {
-	if v, hit := zapProviders.Load(lud16); hit {
-		if e := v.(zapProviderEntry); time.Since(e.at) < zapProviderTTL {
-			return e.pk, e.ok, nil
-		}
+	info, valid, err := lnurlpParams(ctx, lud16)
+	if err != nil {
+		return nostr.ZeroPK, false, err
 	}
-	endpoint, valid := lnurlpURL(lud16)
 	if !valid {
 		return nostr.ZeroPK, false, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nostr.ZeroPK, false, nil
-	}
-	resp, err := resourceClient.Do(req)
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nostr.ZeroPK, false, errIdentityTimeout
-		}
-		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
-	}
-	var params struct {
-		AllowsNostr bool   `json:"allowsNostr"`
-		NostrPubkey string `json:"nostrPubkey"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&params); err != nil {
-		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
-	}
-	e := zapProviderEntry{at: time.Now()}
-	if params.AllowsNostr {
-		if pk, err := nostr.PubKeyFromHex(params.NostrPubkey); err == nil {
-			e.pk, e.ok = pk, true
-		}
-	}
-	zapProviders.Store(lud16, e)
-	return e.pk, e.ok, nil
+	pk, ok := info.provider()
+	return pk, ok, nil
 }
 
 // lnurlpURL is a lightning address's LNURL-pay endpoint (LUD-16).

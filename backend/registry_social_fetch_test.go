@@ -67,11 +67,14 @@ func socialRig(t *testing.T, urls ...string) {
 	t.Helper()
 	newUpdateRig(t)
 	withSystem(t)
-	prevRelays, prevLimits, prevFloor := socialRelays, socialLimits, socialRefreshFloor
+	prevRelays, prevLimits, prevFloor, prevLUD16 := socialRelays, socialLimits, socialRefreshFloor, socialZapLUD16
 	socialRelays = func(context.Context, socialTarget) []string { return slices.Clone(urls) }
 	socialRefreshFloor = 0
+	// authors have no lightning address unless a test says so, so no test
+	// ever reaches the sdk for a kind 0 and a refresh sends no 9735 REQ
+	socialZapLUD16 = func(context.Context, nostr.PubKey) string { return "" }
 	t.Cleanup(func() {
-		socialRelays, socialLimits, socialRefreshFloor = prevRelays, prevLimits, prevFloor
+		socialRelays, socialLimits, socialRefreshFloor, socialZapLUD16 = prevRelays, prevLimits, prevFloor, prevLUD16
 		socialResetMemo()
 	})
 	socialResetMemo()
@@ -157,7 +160,12 @@ func TestSocialRefreshIngestsOnlyExactMatches(t *testing.T) {
 	}
 	for _, category := range SocialCategories() {
 		s := summary.Sync[category]
-		if s.Status != "answered" || s.SyncedAt == nil {
+		// the author has no lightning address, so zaps are unavailable
+		want := "answered"
+		if category == SocialZaps {
+			want = "unavailable"
+		}
+		if s.Status != want || s.SyncedAt == nil {
 			t.Errorf("%s sync %+v", category, s)
 		}
 	}
@@ -505,7 +513,8 @@ func TestSocialNoRelaysUnavailable(t *testing.T) {
 func TestSocialFiltersNeverEmptyTagLists(t *testing.T) {
 	pk := nostr.Generate().Public()
 	named := socialTarget{Address: nappletAddress(pk, "app"), Author: pk, Kind: KindNapplet, VersionIDs: []string{}}
-	for _, category := range SocialCategories() {
+	// zaps need the provider: TestSocialZapFilters covers socialZapFilters
+	for _, category := range []string{SocialComments, SocialMentions, SocialReactions} {
 		filters := socialFilters(named, category)
 		// a note may quote the address itself, so mentions also ask #q
 		want := 1
@@ -570,7 +579,7 @@ func TestSocialPrunedOnUninstall(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	socialRecordSync(target, map[string]string{SocialReactions: "answered"})
+	socialRecordSync(target, map[string]string{SocialReactions: "answered"}, nil)
 	if _, ok := readSocialIndex(t)[address]; !ok {
 		t.Fatal("index entry missing before uninstall")
 	}
@@ -638,7 +647,7 @@ func TestSocialServiceErrors(t *testing.T) {
 	if _, err := ServiceSocial(t.Context(), "bad", false, nil); !errors.Is(err, ErrServiceInvalidAddress) {
 		t.Fatalf("bad address: %v", err)
 	}
-	for _, categories := range [][]string{{"zaps"}, {SocialReactions, SocialReactions}, {""}} {
+	for _, categories := range [][]string{{"tips"}, {SocialReactions, SocialReactions}, {""}} {
 		if _, err := ServiceSocial(t.Context(), address, false, categories); !errors.Is(err, ErrServiceInvalidSocial) {
 			t.Fatalf("%v: %v", categories, err)
 		}
