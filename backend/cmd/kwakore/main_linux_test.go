@@ -501,6 +501,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"versions", address}, {"snapshots", address},
 		{"select", address, strings.Repeat("e", 64)},
 		{"social", address}, {"reactions", address}, {"comments", address}, {"mentions", address}, {"share", address},
+		{"zaps", address}, {"zap", address, "21"},
 		{"vote", address, "up"}, {"react", address, "🔥"}, {"comment", address, "hi"},
 		{"unpublish", address, strings.Repeat("e", 64)},
 	}
@@ -548,7 +549,7 @@ func TestCLISocialCommands(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"social"}, {"social", "bad"}, {"social", address, "extra"},
-		{"social", address, "--only", ""}, {"social", address, "--only", "zaps"},
+		{"social", address, "--only", ""}, {"social", address, "--only", "tips"},
 		{"social", address, "--only", "reactions,reactions"}, {"social", address, "--only", "reactions,"},
 		{"social", address, "--refresh", "true"}, {"social", address, "--event", id},
 		{"reactions"}, {"reactions", address, "--event", strings.ToUpper(id)},
@@ -1780,7 +1781,7 @@ func TestCLIMentionsAndShareCommands(t *testing.T) {
 		{"mentions", address, "--event", id}, {"mentions", address, "--parent", id},
 		{"mentions", address, "--limit", "0"}, {"mentions", address, "--limit", "501"}, {"mentions", address, "--offset", "-1"},
 		{"share"}, {"share", "bad"}, {"share", address, ""}, {"share", address, "  "}, {"share", address, "hi", "extra"},
-		{"social", address, "--only", "zaps"}, {"social", address, "--only", "mentions,mentions"},
+		{"social", address, "--only", "tips"}, {"social", address, "--only", "mentions,mentions"},
 	} {
 		_, _, _, err := command(args)
 		var input inputFailure
@@ -1882,5 +1883,156 @@ func TestCLISignerUnavailableData(t *testing.T) {
 	stderr, err = run(signer, "launch", address)
 	if err == nil || strings.Contains(stderr, "signer is required") {
 		t.Fatalf("human launch error: %q %v", stderr, err)
+	}
+}
+
+// fakeExchange runs exchange for method against a peer that answers one
+// request with response.
+func fakeExchange(t *testing.T, response, method string, params json.RawMessage) (json.RawMessage, error) {
+	t.Helper()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = bufio.NewReader(conn).ReadBytes('\n')
+		_, _ = conn.Write([]byte(response + "\n"))
+	}()
+	conn, err := net.DialUnix("unix", nil, listener.Addr().(*net.UnixAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	return exchange(conn, method, params, 5*time.Second)
+}
+
+func TestCLIZapCommands(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	addr := `"address":"` + address + `"`
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		args   []string
+		method string
+		params string
+	}{
+		{[]string{"zaps", address}, "napplet.zaps", `{` + addr + `,"limit":100,"offset":0}`},
+		{[]string{"zaps", address, "--offset", "2", "--limit", "5"}, "napplet.zaps", `{` + addr + `,"limit":5,"offset":2}`},
+		{[]string{"zap", address, "21"}, "napplet.zap", `{` + addr + `,"amount_msats":21000}`},
+		{[]string{"zap", address, "21", "--comment", "hi", "--event", id}, "napplet.zap",
+			`{` + addr + `,"amount_msats":21000,"comment":"hi","event_id":"` + id + `"}`},
+		{[]string{"zap", address, "9223372036854775"}, "napplet.zap", `{` + addr + `,"amount_msats":9223372036854775000}`},
+		{[]string{"social", address, "--only", "zaps"}, "napplet.social", `{` + addr + `,"refresh":false,"categories":["zaps"]}`},
+		{[]string{"social", address, "--refresh", "--only", "reactions,comments,mentions,zaps"}, "napplet.social",
+			`{` + addr + `,"refresh":true,"categories":["reactions","comments","mentions","zaps"]}`},
+	} {
+		method, params, _, err := command(tc.args)
+		if err != nil || method != tc.method || string(params) != tc.params {
+			t.Fatalf("%v: %s %s %v", tc.args, method, params, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"zap", address}, {"zap", "bad", "21"},
+		{"zap", address, "0"}, {"zap", address, "-1"}, {"zap", address, "1.5"}, {"zap", address, "+5"},
+		{"zap", address, "007"}, {"zap", address, "abc"}, {"zap", address, ""}, {"zap", address, "9223372036854776"},
+		{"zap", address, "99999999999999999999"},
+		{"zap", address, "21", "--comment", ""}, {"zap", address, "21", "--comment", "  "},
+		{"zap", address, "21", "--event", strings.ToUpper(id)}, {"zap", address, "21", "--event", id[:63]},
+		{"zap", address, "21", "extra"}, {"zap", address, "21", "--comment", "hi", "extra"}, {"zap", address, "21", "--url", "x"},
+		{"zaps"}, {"zaps", "bad"}, {"zaps", address, "extra"}, {"zaps", address, "--event", id}, {"zaps", address, "--parent", id},
+		{"zaps", address, "--limit", "0"}, {"zaps", address, "--limit", "501"}, {"zaps", address, "--offset", "-1"},
+		{"social", address, "--only", "tips"}, {"social", address, "--only", "zaps,zaps"},
+	} {
+		_, _, _, err := command(args)
+		var input inputFailure
+		var addrErr addressFailure
+		if err == nil || (!errors.As(err, &input) && !errors.As(err, &addrErr)) {
+			t.Fatalf("%v: %v, want a refusal before dialing", args, err)
+		}
+	}
+
+	if got := commandDeadline("napplet.zap", 0); got != 60*time.Second {
+		t.Fatalf("zap deadline %v", got)
+	}
+	if got := commandDeadline("napplet.zaps", 0); got != 30*time.Second {
+		t.Fatalf("zaps deadline %v", got)
+	}
+	if got := unavailableReason("napplet.share"); got != controlprotocol.ReasonSignerUnavailable {
+		t.Fatalf("share unavailable reason %q", got)
+	}
+	if !unavailableAllowed("napplet.zap", "not_zappable") || !unavailableAllowed("napplet.zap", "signer_unavailable") ||
+		unavailableAllowed("napplet.share", "not_zappable") || unavailableAllowed("napplet.zaps", "not_zappable") {
+		t.Fatal("not_zappable gating")
+	}
+
+	// the daemon's reasons reach the CLI only for the method that may carry them
+	zapParams := json.RawMessage(`{` + addr + `,"amount_msats":21000}`)
+	notZappable := `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"not_zappable"}}}`
+	_, err := fakeExchange(t, notZappable, "napplet.zap", zapParams)
+	var remote rpcFailure
+	if !errors.As(err, &remote) || remote.RPC.Data != (controlprotocol.SessionUnavailableData{Reason: "not_zappable"}) || remote.RPC.Message != "Unavailable" {
+		t.Fatalf("zap not_zappable: %#v", err)
+	}
+	var human bytes.Buffer
+	writeHumanError(&human, err)
+	if !strings.Contains(human.String(), "The napplet's author has no lightning address that takes nostr zaps.") || strings.Contains(human.String(), "private") {
+		t.Fatalf("human not_zappable error %q", human.String())
+	}
+	if _, err := fakeExchange(t, notZappable, "napplet.share", json.RawMessage(`{`+addr+`}`)); err == nil || err.Error() != "invalid daemon response" {
+		t.Fatalf("share with not_zappable: %v", err)
+	}
+	signer := `{"jsonrpc":"2.0","id":1,"error":{"code":1004,"message":"private","data":{"reason":"signer_unavailable"}}}`
+	if _, err := fakeExchange(t, signer, "napplet.zap", zapParams); !errors.As(err, &remote) || remote.RPC.Data != (controlprotocol.SessionUnavailableData{Reason: "signer_unavailable"}) {
+		t.Fatalf("zap signer_unavailable: %#v", err)
+	}
+
+	// the result is checked, then only the invoice is printed
+	good := json.RawMessage(`{"address":"` + address + `","invoice":"lnbc210n1pqqqqqq","amount_msats":21000,"recipient":"` + strings.Repeat("a", 64) + `","zap_request_id":"` + id + `"}`)
+	var out bytes.Buffer
+	if err := writeZapResult(&out, zapParams, good, false); err != nil || out.String() != "lnbc210n1pqqqqqq\n" {
+		t.Fatalf("human zap %q %v", out.String(), err)
+	}
+	out.Reset()
+	if err := writeZapResult(&out, zapParams, good, true); err != nil || out.String() != string(good)+"\n" {
+		t.Fatalf("json zap %q %v", out.String(), err)
+	}
+	for _, bad := range []string{
+		`{"invoice":"lnbc210n1pqqqqqq","amount_msats":21001}`,
+		`{"invoice":"lnbc210n1pqqqqqq","amount_msats":"21000"}`,
+		`{"invoice":"lnbc210n1pqqqqqq","amount_msats":21000.5}`,
+		`{"invoice":"lnbc210n1pqqqqqq"}`,
+		`{"invoice":"https://leak.example","amount_msats":21000}`,
+		`{"invoice":"LNBC210N1PQQQQQQ","amount_msats":21000}`,
+		`{"invoice":"lnbc210n1pqqqqqq\n","amount_msats":21000}`,
+		`{"invoice":"lnbc` + strings.Repeat("q", 4096) + `","amount_msats":21000}`,
+		`{"invoice":null,"amount_msats":21000}`,
+		`{"amount_msats":21000}`,
+		`[]`, `"lnbc210n1pqqqqqq"`, `null`,
+	} {
+		out.Reset()
+		if err := writeZapResult(&out, zapParams, json.RawMessage(bad), false); err == nil || err.Error() != "invalid daemon response" || out.Len() != 0 {
+			t.Fatalf("%s: %q %v", bad, out.String(), err)
+		}
+	}
+
+	for _, topic := range []string{"zaps", "zap"} {
+		text, ok := helpTopic([]string{"help", topic})
+		if !ok || !strings.Contains(text, "Usage: kwak "+topic+" ADDRESS") {
+			t.Fatalf("missing help for %s", topic)
+		}
+		if !strings.Contains(cliHelp, "\n  "+topic+" ADDRESS") {
+			t.Fatalf("top-level help lacks %s", topic)
+		}
+	}
+	if text, _ := helpTopic([]string{"help", "zap"}); !strings.Contains(text, "never pays") || !strings.Contains(text, "kwak signer") {
+		t.Fatal("zap help does not say who pays and that it needs a signer")
+	}
+	if text, _ := helpTopic([]string{"help", "social"}); !strings.Contains(text, "zaps") {
+		t.Fatal("social help does not list zaps")
 	}
 }

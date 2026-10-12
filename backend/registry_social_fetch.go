@@ -23,8 +23,9 @@ import (
 // relay set for the reactions, comments and mentions that name the target, then for
 // NIP-09 deletions of what is held. Everything it keeps passed the same
 // checks: a real id and signature, an exact tag match, sane size and time,
-// and for a reaction NIP-25's content rules. Relay URLs never leave this
-// file: results carry only a per-category status.
+// and for a reaction NIP-25's content rules. Zap receipts are asked of the
+// author's zap provider only and verified by registry_social_zap.go. Relay
+// URLs never leave this file: results carry only a per-category status.
 
 // socialRelays is where a refresh asks: the author's inbox and outbox (four
 // each, public relays only, since an author's list is not to be trusted),
@@ -73,20 +74,21 @@ const (
 	// socialIndexKey is the KV entry holding every address's sync status.
 	socialIndexKey = "kwakore:social:index"
 	// socialMemoTTL bounds how long a memoized aggregate is reused, since
-	// other paths may also write kind 7, 1111 and 1 events to the store.
+	// other paths may also write kind 7, 1111, 1 and 9735 events to the store.
 	socialMemoTTL = 15 * time.Second
 )
 
 // socialLimits bound what a refresh fetches and what is kept. Tests shrink
 // them.
 var socialLimits = struct {
-	Reactions, Comments, Mentions               int
+	Reactions, Comments, Mentions, Zaps         int
 	AuthorComments, AuthorEmoji, AuthorMentions int
 	IndexEntries, PerFilter                     int
 }{
 	Reactions:      2000,
 	Comments:       1000,
 	Mentions:       500,
+	Zaps:           1000,
 	AuthorComments: 50,
 	AuthorEmoji:    20,
 	AuthorMentions: 50,
@@ -113,18 +115,24 @@ func socialKind(category string) nostr.Kind {
 		return nostr.KindComment
 	case SocialMentions:
 		return nostr.KindTextNote
+	case SocialZaps:
+		return nostr.KindZap
 	}
 	return nostr.KindReaction
 }
 
-// socialKinds are the kinds held per address: reactions, comments and
-// mentions.
-var socialKinds = []nostr.Kind{nostr.KindReaction, nostr.KindComment, nostr.KindTextNote}
+// socialKinds are the kinds held per address: reactions, comments,
+// mentions and zap receipts.
+var socialKinds = []nostr.Kind{nostr.KindReaction, nostr.KindComment, nostr.KindTextNote, nostr.KindZap}
 
 // socialFilters are the relay filters of one category. A snapshot has no
 // address filter, and no filter ever carries an empty tag list, which some
-// relays read as no constraint at all.
+// relays read as no constraint at all. Zaps have none here: they are asked
+// of the author's provider only (socialZapFilters).
 func socialFilters(t socialTarget, category string) []nostr.Filter {
+	if category == SocialZaps {
+		return nil
+	}
 	kind := socialKind(category)
 	aName, eName, _ := socialTagNames(kind)
 	var filters []nostr.Filter
@@ -137,8 +145,13 @@ func socialFilters(t socialTarget, category string) []nostr.Filter {
 	return filters
 }
 
-// socialIngestable says whether a relay's event may be kept for t.
+// socialIngestable says whether a relay's event may be kept for t. A zap
+// receipt never is here: only socialZapIngestable, which knows the
+// provider, keeps receipts.
 func socialIngestable(evt nostr.Event, t socialTarget, now time.Time) bool {
+	if evt.Kind == nostr.KindZap {
+		return false
+	}
 	if !evt.CheckID() || !evt.VerifySignature() || !socialMatches(evt, t) {
 		return false
 	}
@@ -403,14 +416,46 @@ func socialRefresh(ctx context.Context, t socialTarget, categories []string) err
 		for _, category := range due {
 			statuses[category] = "unavailable"
 		}
-		socialRecordSync(t, statuses)
+		socialRecordSync(t, statuses, nil)
 		return ctx.Err()
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	var fetched []nostr.Event
+	// zaps are asked of the author's provider and kept apart, since only
+	// socialZapIngest knows that provider; zapProvider is the index record:
+	// nil leaves it, "" clears it
+	var (
+		zapEvents   []nostr.Event
+		zapEndpoint *socialZapEndpoint
+		zapProvider *string
+	)
 	for _, category := range due {
 		wg.Go(func() {
+			if category == SocialZaps {
+				lookupCtx, cancel := context.WithTimeout(ctx, socialZapLookupTimeout)
+				z, err := socialZapLookup(lookupCtx, t.Author)
+				cancel()
+				status, record := "unavailable", (*string)(nil)
+				var result socialFetched
+				switch {
+				case errors.Is(err, ErrServiceNotZappable):
+					record = new(string)
+				case err == nil:
+					result = socialFetch(ctx, relays, socialZapFilters(t, z.provider))
+					status = result.status
+					hex := z.provider.Hex()
+					record = &hex
+				}
+				mu.Lock()
+				statuses[category] = status
+				zapProvider = record
+				if err == nil {
+					zapEvents, zapEndpoint = result.events, &z
+				}
+				mu.Unlock()
+				return
+			}
 			result := socialFetch(ctx, relays, socialFilters(t, category))
 			mu.Lock()
 			statuses[category] = result.status
@@ -420,9 +465,12 @@ func socialRefresh(ctx context.Context, t socialTarget, categories []string) err
 	}
 	wg.Wait()
 	socialIngest(t, fetched)
+	if zapEndpoint != nil {
+		socialZapIngest(t, zapEvents, *zapEndpoint)
+	}
 	socialDeletionPass(ctx, t, relays, due)
 	socialEnforceCaps(t)
-	socialRecordSync(t, statuses)
+	socialRecordSync(t, statuses, zapProvider)
 	socialGeneration.Add(1)
 	return ctx.Err()
 }
@@ -430,11 +478,16 @@ func socialRefresh(ctx context.Context, t socialTarget, categories []string) err
 // socialDeletionPass asks relays for kind 5s naming the held events of the
 // refreshed categories, and applies those signed by the event's own author:
 // the target goes and the deletion stays as a tombstone that blocks a later
-// re-ingest. Anyone else's kind 5 is never stored.
+// re-ingest. Anyone else's kind 5 is never stored. Zap receipts are
+// skipped: a receipt is the provider's record of a payment, so NIP-09 is
+// never applied to them.
 func socialDeletionPass(ctx context.Context, t socialTarget, relays []string, categories []string) {
 	authors := map[string]nostr.PubKey{}
 	var ids []string
 	for _, category := range categories {
+		if category == SocialZaps {
+			continue
+		}
 		for _, evt := range socialHeld(t, socialKind(category)) {
 			id := evt.ID.Hex()
 			if _, ok := authors[id]; !ok {
@@ -523,13 +576,31 @@ func socialOwnKey() nostr.PubKey {
 	return pk
 }
 
+// socialKeepOwn says whether evt is the user's own and so never dropped by
+// a cap, an eviction or a prune: signed by own, or a zap receipt whose
+// request own signed.
+func socialKeepOwn(evt nostr.Event, own nostr.PubKey) bool {
+	if own == nostr.ZeroPK {
+		return false
+	}
+	if evt.PubKey == own {
+		return true
+	}
+	if evt.Kind == nostr.KindZap {
+		sender, ok := socialZapSender(evt)
+		return ok && sender == own
+	}
+	return false
+}
+
 // socialEnforceCaps keeps at most AuthorEmoji emoji reactions,
 // AuthorComments comments and AuthorMentions mentions per author, then at
-// most Reactions reactions, Comments comments and Mentions mentions for the
-// address, dropping the oldest. The user's own events are never dropped.
+// most Reactions reactions, Comments comments, Mentions mentions and Zaps
+// zap receipts for the address, dropping the oldest. The user's own events
+// are never dropped.
 func socialEnforceCaps(t socialTarget) {
 	own := socialOwnKey()
-	keep := func(evt nostr.Event) bool { return own != nostr.ZeroPK && evt.PubKey == own }
+	keep := func(evt nostr.Event) bool { return socialKeepOwn(evt, own) }
 	var drop []nostr.ID
 	for _, kind := range socialKinds {
 		held := socialHeld(t, kind)
@@ -539,6 +610,8 @@ func socialEnforceCaps(t socialTarget) {
 			perAuthor, total = socialLimits.AuthorEmoji, socialLimits.Reactions
 		case nostr.KindComment:
 			perAuthor, total = socialLimits.AuthorComments, socialLimits.Comments
+		case nostr.KindZap:
+			total = socialLimits.Zaps
 		default:
 			perAuthor, total = socialLimits.AuthorMentions, socialLimits.Mentions
 		}
@@ -546,8 +619,16 @@ func socialEnforceCaps(t socialTarget) {
 		counts := map[nostr.PubKey]int{}
 		var kept []nostr.Event
 		for _, evt := range held {
-			// only a vote escapes the per-author cap; an empty note is capped
-			capped := kind != nostr.KindReaction || !isVoteContent(evt.Content)
+			// comments and notes (even empty ones) are always capped per
+			// author, reactions unless they are votes, and receipts never:
+			// one provider signs them all
+			var capped bool
+			switch kind {
+			case nostr.KindReaction:
+				capped = !isVoteContent(evt.Content)
+			case nostr.KindComment, nostr.KindTextNote:
+				capped = true
+			}
 			if capped && !keep(evt) {
 				counts[evt.PubKey]++
 				if counts[evt.PubKey] > perAuthor {
@@ -576,14 +657,15 @@ func socialEnforceCaps(t socialTarget) {
 	}
 }
 
-// socialPruneEvents removes t's held reactions, comments and mentions except
-// the user's own. Tombstones stay: they only block a re-ingest.
+// socialPruneEvents removes t's held reactions, comments, mentions and zap
+// receipts except the user's own. Tombstones stay: they only block a
+// re-ingest.
 func socialPruneEvents(t socialTarget) {
 	own := socialOwnKey()
 	changed := false
 	for _, kind := range socialKinds {
 		for _, evt := range socialHeld(t, kind) {
-			if own != nostr.ZeroPK && evt.PubKey == own {
+			if socialKeepOwn(evt, own) {
 				continue
 			}
 			if err := sys.Store.DeleteEvent(evt.ID); err != nil {
@@ -640,6 +722,9 @@ type socialIndexEntry struct {
 	// unix nanoseconds so refreshes in one second still order.
 	Touched    int64                          `json:"touched"`
 	Categories map[string]socialIndexCategory `json:"categories"`
+	// ZapProvider is the hex key whose receipts count, found by the last
+	// zaps refresh; "" when the author was not zappable or never looked up.
+	ZapProvider string `json:"zap_provider,omitempty"`
 }
 
 func socialIndexDecode(raw []byte) map[string]socialIndexEntry {
@@ -664,10 +749,11 @@ func socialInstalledAddresses() map[string]bool {
 	return out
 }
 
-// socialRecordSync stores the statuses of a refresh of t, then evicts the
-// least recently synced uninstalled addresses past IndexEntries and prunes
-// their events.
-func socialRecordSync(t socialTarget, statuses map[string]string) {
+// socialRecordSync stores the statuses of a refresh of t and its zap
+// provider record (nil leaves it, "" clears it, a hex key sets it), then
+// evicts the least recently synced uninstalled addresses past IndexEntries
+// and prunes their events.
+func socialRecordSync(t socialTarget, statuses map[string]string, zapProvider *string) {
 	if sys == nil {
 		return
 	}
@@ -684,6 +770,9 @@ func socialRecordSync(t socialTarget, statuses map[string]string) {
 		}
 		for category, status := range statuses {
 			entry.Categories[category] = socialIndexCategory{SyncedAt: now.Unix(), Status: status}
+		}
+		if zapProvider != nil {
+			entry.ZapProvider = *zapProvider
 		}
 		entry.Installed = installed[t.Address]
 		entry.Touched = now.UnixNano()
@@ -748,6 +837,28 @@ func socialSyncStatus(address string) map[string]ServiceSocialSync {
 	return out
 }
 
+// socialZapProviderOf is the zap provider the last zaps refresh of address
+// recorded, or the zero key without one.
+func socialZapProviderOf(address string) nostr.PubKey {
+	if sys == nil {
+		return nostr.ZeroPK
+	}
+	raw, err := sys.KVStore.Get([]byte(socialIndexKey))
+	if err != nil {
+		log.Warn().Err(err).Msg("social index could not be read")
+		return nostr.ZeroPK
+	}
+	entry, ok := socialIndexDecode(raw)[address]
+	if !ok || entry.ZapProvider == "" {
+		return nostr.ZeroPK
+	}
+	pk, err := nostr.PubKeyFromHex(entry.ZapProvider)
+	if err != nil {
+		return nostr.ZeroPK
+	}
+	return pk
+}
+
 // ─── reads ──────────────────────────────────────────────────────────────
 
 type socialMemoEntry struct {
@@ -769,10 +880,12 @@ func socialResetMemo() {
 }
 
 // socialAggregate is t's summary without Sync and Own, and its live
-// reactions for the viewer's own state, memoized by the generation and the
-// version ids.
+// reactions for the viewer's own state, memoized by the generation, the
+// version ids and the zap provider. Deletions apply to reactions, comments
+// and mentions (kinds 7, 1111 and 1), never to zap receipts.
 func socialAggregate(t socialTarget) (ServiceSocialSummary, []nostr.Event) {
-	key := fmt.Sprintf("%d|%s", socialGeneration.Load(), strings.Join(t.VersionIDs, ","))
+	provider := socialZapProviderOf(t.Address)
+	key := fmt.Sprintf("%d|%s|%s", socialGeneration.Load(), strings.Join(t.VersionIDs, ","), provider.Hex())
 	socialMemo.Lock()
 	entry, ok := socialMemo.entries[t.Address]
 	socialMemo.Unlock()
@@ -785,6 +898,7 @@ func socialAggregate(t socialTarget) (ServiceSocialSummary, []nostr.Event) {
 	deletions := socialDeletions(slices.Concat(reactions, comments, mentions))
 	summary := socialSummary(t, reactions, comments, deletions, nil)
 	summary.Mentions = mentionSummary(t, mentions, deletions)
+	summary.Zaps = zapSummary(socialZapsOf(t, socialHeld(t, nostr.KindZap), provider))
 	live := socialLive(reactions, deletions)
 	socialMemo.Lock()
 	if len(socialMemo.entries) >= 64 {

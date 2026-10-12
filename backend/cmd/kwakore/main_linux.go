@@ -15,11 +15,14 @@ import (
 	"image"
 	_ "image/png"
 	"io"
+	"math"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -120,6 +123,9 @@ func run(args []string) error {
 		}{uri, "Private pairing token: share only with your signer"})
 		return writeCLIResult(os.Stdout, method, out, jsonOutput)
 	}
+	if method == "napplet.zap" {
+		return writeZapResult(os.Stdout, params, result, jsonOutput)
+	}
 	if method == "signer.pair.cancel" {
 		if !validPairCancelResult(result) {
 			return errors.New("invalid daemon response")
@@ -186,6 +192,9 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share":
 		// the daemon bounds a social action at 60s
 		return 75 * time.Second
+	case "napplet.zap":
+		// the daemon bounds a zap invoice request at 45s
+		return 60 * time.Second
 	}
 	return 30 * time.Second
 }
@@ -262,7 +271,7 @@ func exchange(conn *net.UnixConn, method string, params json.RawMessage, deadlin
 			}
 			if raw, ok := fields["data"]; ok {
 				data, valid := parseUnavailableData(raw)
-				if !valid || data.Reason != unavailableReason(method) {
+				if !valid || !unavailableAllowed(method, data.Reason) {
 					return nil, errors.New("invalid daemon response")
 				}
 				fixed.Data = data
@@ -513,10 +522,90 @@ func unavailableReason(method string) string {
 	switch method {
 	case "napplet.launch", "napplet.try":
 		return controlprotocol.ReasonSessionUnavailable
-	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share":
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share", "napplet.zap":
 		return controlprotocol.ReasonSignerUnavailable
 	}
 	return ""
+}
+
+// unavailableAllowed says whether an Unavailable error of method may carry
+// reason: its unavailableReason, or not_zappable for napplet.zap.
+func unavailableAllowed(method, reason string) bool {
+	return reason == unavailableReason(method) || (method == "napplet.zap" && reason == controlprotocol.ReasonNotZappable)
+}
+
+// zapInvoiceShape is a lowercased bolt11 invoice.
+var zapInvoiceShape = regexp.MustCompile(`^ln[0-9a-z]+$`)
+
+// zapCommand maps "zap ADDRESS SATS [--comment TEXT] [--event ID]" onto
+// napplet.zap. SATS is a plain positive whole number, sent as millisats.
+func zapCommand(args []string) (string, json.RawMessage, error) {
+	usage := inputFailure("usage: kwak zap ADDRESS SATS [--comment TEXT] [--event ID]")
+	if len(args) < 3 {
+		return "", nil, usage
+	}
+	addr, err := commandAddress(args[1], false)
+	if err != nil {
+		return "", nil, err
+	}
+	raw := args[2]
+	if raw == "" || raw[0] == '0' || strings.IndexFunc(raw, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return "", nil, inputFailure("SATS must be a whole number of sats")
+	}
+	sats, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || sats < 1 || sats > math.MaxInt64/1000 {
+		return "", nil, inputFailure("SATS must be a whole number of sats")
+	}
+	flags := flag.NewFlagSet("zap", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	comment := flags.String("comment", "", "zap comment")
+	eventID := flags.String("event", "", "version event id")
+	if flags.Parse(args[3:]) != nil || len(flags.Args()) != 0 {
+		return "", nil, usage
+	}
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["comment"] && strings.TrimSpace(*comment) == "" {
+		return "", nil, inputFailure("zap comment is empty; leave it out")
+	}
+	if set["event"] {
+		decoded, err := hex.DecodeString(*eventID)
+		if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != *eventID {
+			return "", nil, inputFailure("invalid event ID")
+		}
+	}
+	params, _ := json.Marshal(struct {
+		Address     string `json:"address"`
+		AmountMsats int64  `json:"amount_msats"`
+		Comment     string `json:"comment,omitempty"`
+		EventID     string `json:"event_id,omitempty"`
+	}{addr.Canonical, sats * 1000, *comment, *eventID})
+	return "napplet.zap", params, nil
+}
+
+// writeZapResult prints napplet.zap's result once it is an invoice for the
+// amount asked: only the invoice, so it can be piped to a wallet, or the
+// whole result with --json.
+func writeZapResult(w io.Writer, params, result json.RawMessage, jsonOutput bool) error {
+	var asked struct {
+		AmountMsats int64 `json:"amount_msats"`
+	}
+	var got struct {
+		Invoice     *string          `json:"invoice"`
+		AmountMsats *json.RawMessage `json:"amount_msats"`
+	}
+	var amount int64
+	if json.Unmarshal(params, &asked) != nil || len(result) == 0 || result[0] != '{' || json.Unmarshal(result, &got) != nil ||
+		got.Invoice == nil || got.AmountMsats == nil || len(*got.Invoice) > 4096 || !zapInvoiceShape.MatchString(*got.Invoice) ||
+		json.Unmarshal(*got.AmountMsats, &amount) != nil || amount != asked.AmountMsats {
+		return errors.New("invalid daemon response")
+	}
+	if jsonOutput {
+		_, err := w.Write(append(slices.Clone([]byte(result)), '\n'))
+		return err
+	}
+	_, err := io.WriteString(w, *got.Invoice+"\n")
+	return err
 }
 
 type inputFailure string
@@ -705,7 +794,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		flags.Visit(func(f *flag.Flag) { set = set || f.Name == "only" })
 		if set {
 			for _, name := range strings.Split(*only, ",") {
-				if (name != "reactions" && name != "comments" && name != "mentions") || slices.Contains(categories, name) {
+				if (name != "reactions" && name != "comments" && name != "mentions" && name != "zaps") || slices.Contains(categories, name) {
 					return "", nil, "", inputFailure("invalid social categories")
 				}
 				categories = append(categories, name)
@@ -718,14 +807,15 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{addr.Canonical, *refresh, categories})
 		return "napplet.social", params, socketPath, nil
 	}
-	if len(args) >= 2 && (args[0] == "reactions" || args[0] == "comments" || args[0] == "mentions") {
+	if len(args) >= 2 && (args[0] == "reactions" || args[0] == "comments" || args[0] == "mentions" || args[0] == "zaps") {
 		addr, err := commandAddress(args[1], false)
 		if err != nil {
 			return "", nil, "", err
 		}
 		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
-		// mentions has no id flag, so --event and --parent fail to parse
+		// mentions and zaps have no id flag, so --event and --parent fail
+		// to parse
 		idFlag, idField := "", ""
 		if args[0] == "reactions" {
 			idFlag, idField = "event", "event_id"
@@ -756,6 +846,13 @@ func command(args []string) (string, json.RawMessage, string, error) {
 	}
 	if len(args) >= 2 && (args[0] == "vote" || args[0] == "react" || args[0] == "comment" || args[0] == "unpublish" || args[0] == "share") {
 		method, params, err := socialActionCommand(args)
+		if err != nil {
+			return "", nil, "", err
+		}
+		return method, params, socketPath, nil
+	}
+	if len(args) >= 2 && args[0] == "zap" {
+		method, params, err := zapCommand(args)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -1522,6 +1619,9 @@ func writeHumanError(w io.Writer, err error) {
 		}
 		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == controlprotocol.ReasonSignerUnavailable {
 			fmt.Fprintln(w, "A signer is required: set one up with kwak signer.")
+		}
+		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == controlprotocol.ReasonNotZappable {
+			fmt.Fprintln(w, "The napplet's author has no lightning address that takes nostr zaps.")
 		}
 		if data, ok := remote.RPC.Data.(controlprotocol.PartialCleanupData); ok {
 			fmt.Fprintf(w, "Record removed for %s, but cleanup is incomplete.\n", displayValue(data.Address))

@@ -452,7 +452,7 @@ kept, and an author's own deletion removes their event for good.
 Social events are kept in the local event store (`eventstore` in the data
 directory), and each napplet's sync status in the kvstore (`kvstore`), within per-author and per-napplet limits (see the
 [control protocol](control-protocol.md)). Uninstalling a napplet removes its
-reactions, comments and mentions, except your own.
+reactions, comments, mentions and zaps, except your own.
 
 With a signer set up (`kwak signer`), you can also vote, react, comment, share
 and delete what you published:
@@ -477,6 +477,30 @@ your own reactions, comments or shares on that napplet.
 `published: 0` in the result means no relay took the event: it is kept
 locally, but other people will not see it until you publish again. Without a
 signer these commands fail with the `signer_unavailable` error below.
+
+**Zaps.** Kwakore also shows the lightning zaps (NIP-57) a napplet's author
+received for it, and gets you an invoice to zap it yourself:
+
+```console
+$ kwak social nostr:naddr1... --refresh --only zaps
+$ kwak zaps nostr:naddr1...
+$ kwak zap nostr:naddr1... 21 --comment "thanks"
+```
+
+A refresh looks up the lightning address in the author's profile and only
+counts receipts signed by the provider behind it, for exactly the amount the
+zap asked. `social` shows the zap count, the total and the top five zappers,
+and `zaps` lists the receipts newest first. When the author has no lightning
+address that takes nostr zaps, the zaps status is `unavailable`.
+
+`kwak zap ADDRESS SATS` needs a signer: it signs a zap request for SATS sats
+and prints the bolt11 invoice the author's provider returns, on one line.
+The daemon never pays and never publishes the request: pay the printed
+invoice with any lightning wallet, and the provider then publishes the
+receipt, which the next `kwak social ADDRESS --refresh --only zaps` shows.
+`--comment` adds a comment if the provider takes one, and `--json` prints the
+full result. An author who cannot be zapped gives the `not_zappable` error
+below.
 
 ## Napplet catalog
 
@@ -963,7 +987,8 @@ setting values, paths, relay URLs or keys; read the current values with
 | --- | --- |
 | `{"error":{"code":1004,"message":"Unavailable"}}` | no daemon answered: the socket is not enabled or started, `XDG_RUNTIME_DIR` is unsafe, or the start limit was hit (see `systemctl --user status kwakore.socket`) |
 | `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` | the daemon has no `DISPLAY` or `WAYLAND_DISPLAY` ([graphical session](#graphical-session)) |
-| `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` | `vote`, `react`, `comment`, `share` or `unpublish` without a signer; set one up with `kwak signer` |
+| `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` | `vote`, `react`, `comment`, `share`, `unpublish` or `zap` without a signer; set one up with `kwak signer` |
+| `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"not_zappable"}}}` | `zap` of a napplet whose author has no lightning address that takes nostr zaps |
 | `{"error":{"code":1002,"message":"Not found"}}` | the address is not installed (or, for `stop`, the window is gone) |
 | `{"error":{"code":1006,"message":"Invalid configuration"}}` | a `settings set` value or a reload failed validation; nothing changed |
 | `{"error":{"code":-32602,"message":"Invalid params"}}` | the command line itself is wrong: unknown command, bad option, bad secret source or launch token |

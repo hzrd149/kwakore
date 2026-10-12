@@ -12,7 +12,8 @@ func TestUnavailableReason(t *testing.T) {
 		"signer_unavailable":  true,
 		"":                    false,
 		"Signer_unavailable":  false,
-		"not_zappable":        false,
+		"not_zappable":        true,
+		"wallet_unavailable":  false,
 		"private":             false,
 	} {
 		if got := UnavailableReason(reason); got != want {
@@ -35,7 +36,9 @@ func TestProcessFrameUnavailableReasons(t *testing.T) {
 			`{"jsonrpc":"2.0","error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}},"id":1}`},
 		{"unknown reason", Unavailable, SessionUnavailableData{Reason: "private"},
 			`{"jsonrpc":"2.0","error":{"code":1004,"message":"Unavailable"},"id":1}`},
-		{"unreserved reason", Unavailable, SessionUnavailableData{Reason: "not_zappable"},
+		{"not zappable", Unavailable, SessionUnavailableData{Reason: "not_zappable"},
+			`{"jsonrpc":"2.0","error":{"code":1004,"message":"Unavailable","data":{"reason":"not_zappable"}},"id":1}`},
+		{"unreserved reason", Unavailable, SessionUnavailableData{Reason: "wallet_unavailable"},
 			`{"jsonrpc":"2.0","error":{"code":1004,"message":"Unavailable"},"id":1}`},
 		{"extra key", Unavailable, map[string]string{"reason": "signer_unavailable", "extra": "secret"},
 			`{"jsonrpc":"2.0","error":{"code":1004,"message":"Unavailable"},"id":1}`},

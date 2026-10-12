@@ -224,7 +224,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(historyErr)
 		}
 		return result, nil
-	case "napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions":
+	case "napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions", "napplet.zaps":
 		p, err := decodeSocialParams(params, method)
 		if err != nil {
 			return nil, err
@@ -252,8 +252,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			result, socialErr = backend.ServiceReactions(workCtx, p.address, p.eventID, p.offset, p.limit)
 		} else if method == "napplet.comments" {
 			result, socialErr = backend.ServiceComments(workCtx, p.address, p.eventID, p.offset, p.limit)
-		} else {
+		} else if method == "napplet.mentions" {
 			result, socialErr = backend.ServiceMentions(workCtx, p.address, p.offset, p.limit)
+		} else {
+			result, socialErr = backend.ServiceZaps(workCtx, p.address, p.offset, p.limit)
 		}
 		if socialErr != nil {
 			return nil, mutationError(socialErr)
@@ -292,6 +294,27 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		if actionErr != nil {
 			return nil, mutationError(actionErr)
+		}
+		return result, nil
+	case "napplet.zap":
+		p, err := decodeZapParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		// no operation lock: the backend serializes only the signing, and the
+		// HTTP calls to the author's provider must not stall installs
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, 45*time.Second)
+		defer cancelTimeout()
+		result, zapErr := backend.ServiceSocialZap(workCtx, p.address, p.amountMsats, p.comment, p.eventID)
+		if zapErr != nil {
+			return nil, mutationError(zapErr)
 		}
 		return result, nil
 	case "napplet.detail":
@@ -825,6 +848,10 @@ func mutationError(err error) *controlprotocol.Error {
 		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
 		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSignerUnavailable}
 		return rpcErr
+	case errors.Is(err, backend.ErrServiceNotZappable):
+		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonNotZappable}
+		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceInvalidPermission):
@@ -882,7 +909,8 @@ func decodeHistoryParams(params json.RawMessage) (string, bool, int, int, *contr
 }
 
 // socialParams are the params of napplet.social, napplet.reactions,
-// napplet.comments and napplet.mentions; eventID is event_id or parent_id.
+// napplet.comments, napplet.mentions and napplet.zaps; eventID is event_id
+// or parent_id.
 type socialParams struct {
 	address    string
 	refresh    bool
@@ -895,7 +923,7 @@ type socialParams struct {
 // decodeSocialParams reads the strict params of one social method: an
 // address, then refresh and categories for napplet.social, or a page for
 // the reads, with an optional event_id (reactions) or parent_id (comments);
-// napplet.mentions takes no id.
+// napplet.mentions and napplet.zaps take no id.
 func decodeSocialParams(params json.RawMessage, method string) (socialParams, *controlprotocol.Error) {
 	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
 	paged := method != "napplet.social"
@@ -1016,6 +1044,53 @@ func decodeSocialActionParams(params json.RawMessage, method string) (socialActi
 	if raw, ok := fields[idField]; ok {
 		if p.eventID, err = eventIDField(raw); err != nil {
 			return socialActionParams{}, err
+		}
+	}
+	return p, nil
+}
+
+// zapParams are napplet.zap's params.
+type zapParams struct {
+	address, comment, eventID string
+	amountMsats               int64
+}
+
+// decodeZapParams reads napplet.zap's params strictly: an address, a
+// required positive integer amount_msats (no string, fraction, exponent or
+// overflow), an optional non-null comment string and an optional event_id
+// of 64 lowercase hex. The backend enforces the provider's amount range and
+// comment limit.
+func decodeZapParams(params json.RawMessage) (zapParams, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	if err := controlprotocol.ValidateNamedParams(params, "address", "amount_msats", "comment", "event_id"); err != nil {
+		return zapParams{}, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return zapParams{}, invalid
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return zapParams{}, err
+	}
+	p := zapParams{address: address}
+	raw, ok := fields["amount_msats"]
+	if !ok {
+		return zapParams{}, invalid
+	}
+	raw = bytes.TrimSpace(raw)
+	if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &p.amountMsats) != nil || p.amountMsats < 1 {
+		return zapParams{}, invalid
+	}
+	if raw, ok := fields["comment"]; ok {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &p.comment) != nil {
+			return zapParams{}, invalid
+		}
+	}
+	if raw, ok := fields["event_id"]; ok {
+		if p.eventID, err = eventIDField(raw); err != nil {
+			return zapParams{}, err
 		}
 	}
 	return p, nil

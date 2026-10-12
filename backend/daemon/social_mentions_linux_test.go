@@ -64,9 +64,9 @@ func TestRPCSocialAcceptsMentionsCategory(t *testing.T) {
 		t.Fatalf("mentions category: %s", raw)
 	}
 	rpcInvalid(t, "napplet.social", []string{
-		`{"address":"` + address + `","categories":["zaps"]}`,
+		`{"address":"` + address + `","categories":["tips"]}`,
 		`{"address":"` + address + `","categories":["mentions","mentions"]}`,
-	}, "zaps")
+	}, "tips")
 }
 
 func TestRPCShareSignerUnavailable(t *testing.T) {

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"cmp"
+	"math"
 	"slices"
 
 	"fiatjaf.com/nostr"
@@ -153,9 +154,90 @@ func mentionItems(t socialTarget, mentions []nostr.Event) []ServiceMention {
 	return out
 }
 
+// socialZapsOf is t's verified receipts from provider newest first, none
+// without a provider. Receipts that embed the same zap request count once,
+// as the newest of them.
+func socialZapsOf(t socialTarget, receipts []nostr.Event, provider nostr.PubKey) []socialZap {
+	if provider == nostr.ZeroPK {
+		return nil
+	}
+	held := make([]nostr.Event, 0, len(receipts))
+	for _, evt := range receipts {
+		if evt.Kind == nostr.KindZap && socialMatches(evt, t) {
+			held = append(held, evt)
+		}
+	}
+	slices.SortFunc(held, socialOrder)
+	seen := map[nostr.ID]bool{}
+	var out []socialZap
+	for _, evt := range held {
+		z, ok := socialZapOf(evt, t, provider)
+		if !ok || seen[z.RequestID] {
+			continue
+		}
+		seen[z.RequestID] = true
+		out = append(out, z)
+	}
+	return out
+}
+
+// socialAddMsats adds without overflowing: a sum past MaxInt64 stays there.
+func socialAddMsats(a, b int64) int64 {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
+// zapSummary totals zaps and names the biggest senders: msats desc, then
+// count desc, then pubkey asc, at most socialZapTopLimit, never nil.
+func zapSummary(zaps []socialZap) ServiceSocialZapSummary {
+	summary := ServiceSocialZapSummary{Count: len(zaps), Top: []ServiceSocialZapper{}}
+	senders := map[nostr.PubKey]*ServiceSocialZapper{}
+	for _, z := range zaps {
+		summary.TotalMsats = socialAddMsats(summary.TotalMsats, z.Msats)
+		s, ok := senders[z.Sender]
+		if !ok {
+			s = &ServiceSocialZapper{Pubkey: z.Sender.Hex()}
+			senders[z.Sender] = s
+		}
+		s.Msats = socialAddMsats(s.Msats, z.Msats)
+		s.Count++
+	}
+	for _, s := range senders {
+		summary.Top = append(summary.Top, *s)
+	}
+	slices.SortFunc(summary.Top, func(a, b ServiceSocialZapper) int {
+		if a.Msats != b.Msats {
+			return cmp.Compare(b.Msats, a.Msats)
+		}
+		if a.Count != b.Count {
+			return cmp.Compare(b.Count, a.Count)
+		}
+		return cmp.Compare(a.Pubkey, b.Pubkey)
+	})
+	if len(summary.Top) > socialZapTopLimit {
+		summary.Top = summary.Top[:socialZapTopLimit]
+	}
+	return summary
+}
+
+// zapItems lists zaps in their order, comments made safe and capped.
+func zapItems(zaps []socialZap) []ServiceZap {
+	out := []ServiceZap{}
+	for _, z := range zaps {
+		comment, _ := socialText(z.Comment, socialZapCommentRunes)
+		out = append(out, ServiceZap{
+			ReceiptID: z.ReceiptID.Hex(), Sender: z.Sender.Hex(), AmountMsats: z.Msats,
+			Comment: comment, EventID: z.EventID, CreatedAt: int64(z.Receipt.CreatedAt),
+		})
+	}
+	return out
+}
+
 // socialSummary aggregates the live reactions and comments of t. Sync is
-// left for the caller, Mentions for socialAggregate; Own is nil without a
-// viewer.
+// left for the caller, Mentions and Zaps for socialAggregate; Own is nil
+// without a viewer.
 func socialSummary(t socialTarget, reactions, comments, deletions []nostr.Event, viewer *nostr.PubKey) ServiceSocialSummary {
 	reactions = socialLive(socialReactionsOf(t, reactions), deletions)
 	comments = socialLive(socialCommentsOf(t, comments), deletions)
@@ -164,6 +246,7 @@ func socialSummary(t socialTarget, reactions, comments, deletions []nostr.Event,
 		Sync:    map[string]ServiceSocialSync{},
 		Emoji:   []ServiceSocialEmoji{},
 		ByEvent: []ServiceSocialByEvent{},
+		Zaps:    ServiceSocialZapSummary{Top: []ServiceSocialZapper{}},
 	}
 
 	// votes, and their per-version buckets

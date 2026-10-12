@@ -22,7 +22,7 @@ func MethodNames() []string {
 		"signer.status", "signer.switch", "signer.pair.start", "signer.pair.wait", "signer.pair.cancel",
 		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.try", "napplet.windows", "napplet.stop",
 		"napplet.updates.check", "napplet.detail", "napplet.icon", "napplet.versions", "napplet.snapshots", "napplet.select",
-		"napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions", "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share",
+		"napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions", "napplet.zaps", "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share", "napplet.zap",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
 		"events.subscribe",
 	}
@@ -96,15 +96,18 @@ const (
 	ReasonSessionUnavailable = "session_unavailable"
 	// ReasonSignerUnavailable is a social action without a signer.
 	ReasonSignerUnavailable = "signer_unavailable"
+	// ReasonNotZappable is a zap target whose author has no lud16 or whose
+	// provider does not take nostr zaps.
+	ReasonNotZappable = "not_zappable"
 )
 
 // UnavailableReason says whether reason is in the closed list of reasons an
-// Unavailable error may carry. A new reason (such as a later not_zappable)
-// is one more case here plus the protocol docs; none is reserved ahead of
-// time, so the docs only list reasons the daemon can actually send.
+// Unavailable error may carry. A new reason is one more case here plus the
+// protocol docs; none is reserved ahead of time, so the docs only list
+// reasons the daemon can actually send.
 func UnavailableReason(reason string) bool {
 	switch reason {
-	case ReasonSessionUnavailable, ReasonSignerUnavailable:
+	case ReasonSessionUnavailable, ReasonSignerUnavailable, ReasonNotZappable:
 		return true
 	}
 	return false

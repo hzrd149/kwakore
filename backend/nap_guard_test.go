@@ -30,8 +30,9 @@ var napGuardBannedFuncs = map[string]bool{
 // napGuardAllowed are the few uses of a banned name outside the gate layer
 // that the guard lets through, keyed "file func name", each with its reason.
 var napGuardAllowed = map[string]string{
-	"nap_identity.go zapProvider resourceClient": "the LNURL-pay lookup for the " +
-		"user's own lightning address (lud16 from their kind 0), never a " +
+	"nap_identity.go lnurlpParams resourceClient": "the LNURL-pay lookup of a " +
+		"lightning address read from a kind 0: the user's own (NAP identity " +
+		"zap reads) or a napplet author's (socket zaps), never a " +
 		"napplet-chosen URL; consent for zap reads is MISC-03 (Phase 8)",
 }
 
@@ -155,7 +156,7 @@ func planted() {
 
 var resourceClient = newClient() // a declaration is not a use
 
-// zapProvider is allowed its resourceClient only in nap_identity.go
+// any allowance holds only in the file it names, never in this one
 func zapProvider() { resourceClient.Do(req) }
 `
 	fset := token.NewFileSet()
@@ -184,8 +185,8 @@ func zapProvider() { resourceClient.Do(req) }
 		}
 	}
 
-	// the same zapProvider in the file the allowance names passes
-	allowed, err := parser.ParseFile(fset, "nap_identity.go", "package backend\n\nfunc zapProvider() { resourceClient.Do(req) }\n", 0)
+	// the allowed function in the file the allowance names passes
+	allowed, err := parser.ParseFile(fset, "nap_identity.go", "package backend\n\nfunc lnurlpParams() { resourceClient.Do(req) }\n", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

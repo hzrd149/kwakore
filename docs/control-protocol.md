@@ -38,15 +38,17 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.detail` | `{address:string}` required | `Detail` |
 | `napplet.versions` | `{address:string,refresh?:boolean,offset?:integer,limit?:integer}` | `HistoryPage` |
 | `napplet.snapshots` | `{address:string,refresh?:boolean,offset?:integer,limit?:integer}` | `HistoryPage` |
-| `napplet.social` | `{address:string,refresh?:boolean,categories?:("reactions"\|"comments"\|"mentions")[]}`, `address` required | `{address:string,sync:{reactions:Sync,comments:Sync,mentions:Sync},votes:{up:integer,down:integer,score:integer},emoji:[{content:string,shortcode?:string,url?:string,count:integer},...],by_event:[{event_id:string,up:integer,down:integer,emoji:integer},...],comments:{count:integer,latest_at:integer\|null},mentions:{count:integer},own:{vote:"up"\|"down"\|"none",vote_event_id:string,reactions:[{id:string,content:string,event_id:string},...]}\|null}`, where `Sync` is `{status:"not_requested"\|"answered"\|"partial"\|"unavailable"\|"timeout",synced_at:integer\|null}` |
+| `napplet.social` | `{address:string,refresh?:boolean,categories?:("reactions"\|"comments"\|"mentions"\|"zaps")[]}`, `address` required | `{address:string,sync:{reactions:Sync,comments:Sync,mentions:Sync,zaps:Sync},votes:{up:integer,down:integer,score:integer},emoji:[{content:string,shortcode?:string,url?:string,count:integer},...],by_event:[{event_id:string,up:integer,down:integer,emoji:integer},...],comments:{count:integer,latest_at:integer\|null},mentions:{count:integer},zaps:{count:integer,total_msats:integer,top:[{pubkey:string,msats:integer,count:integer},...]},own:{vote:"up"\|"down"\|"none",vote_event_id:string,reactions:[{id:string,content:string,event_id:string},...]}\|null}`, where `Sync` is `{status:"not_requested"\|"answered"\|"partial"\|"unavailable"\|"timeout",synced_at:integer\|null}` |
 | `napplet.reactions` | `{address:string,event_id?:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{id:string,author:string,author_name?:string,content:string,shortcode?:string,url?:string,event_id:string,created_at:integer},...],total:integer,next_offset:integer\|null}` |
 | `napplet.comments` | `{address:string,parent_id?:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{id:string,author:string,author_name?:string,content:string,truncated:boolean,created_at:integer,parent_id:string,reply_count:integer,own:boolean},...],total:integer,next_offset:integer\|null}` |
 | `napplet.mentions` | `{address:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{id:string,author:string,author_name?:string,content:string,truncated:boolean,created_at:integer,quote:boolean},...],total:integer,next_offset:integer\|null}` |
+| `napplet.zaps` | `{address:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{receipt_id:string,sender:string,sender_name?:string,amount_msats:integer,comment:string,event_id:string,created_at:integer},...],total:integer,total_msats:integer,next_offset:integer\|null}` |
 | `napplet.vote` | `{address:string,vote:"up"\|"down"\|"none",event_id?:string}`, `address` and `vote` required; no `event_id` with `none` | `{address:string,outcome:"published"\|"unchanged",event_id?:string,deleted:string[],published:integer,failed:integer}` |
 | `napplet.react` | `{address:string,emoji:string,emoji_url?:string,event_id?:string}`, `address` and `emoji` required | `{address:string,outcome:"published",event_id:string,published:integer,failed:integer}` |
 | `napplet.comment` | `{address:string,content:string,parent_id?:string}`, `address` and `content` required | `{address:string,outcome:"published",event_id:string,published:integer,failed:integer}` |
 | `napplet.delete` | `{address:string,event_id:string}` required; `event_id` is one of the user's own reactions, comments or shares of the napplet | `{address:string,outcome:"published",deletion_id:string,published:integer,failed:integer}` |
 | `napplet.share` | `{address:string,content?:string}`, `address` required | `{address:string,outcome:"published",event_id:string,published:integer,failed:integer}` |
+| `napplet.zap` | `{address:string,amount_msats:integer,comment?:string,event_id?:string}`, `address` and `amount_msats` required | `{address:string,invoice:string,amount_msats:integer,recipient:string,zap_request_id:string}` |
 | `napplet.icon` | `{address:string}` required | `{sha256:string,mime:"image/png",width:integer,height:integer,data:string}` |
 | `napplet.windows` | none | `{items:[{window_id:string,address:string,name:string},...]}` for active napplet windows |
 | `napplet.install` | `{address:string,relays?:string[],event_id?:string}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled"\|"selected"\|"unchanged",installed_version:Version}` |
@@ -172,8 +174,9 @@ rules retain the existing address-based policy.
 `napplet.mentions` read what other people published about a napplet: NIP-25
 reactions (votes and emoji), NIP-22 comments and kind 1 notes that mention or
 quote it. They work for any canonical address, installed or not. These four
-read methods never publish anything; the actions below do. There are three
-categories, `reactions`, `comments` and `mentions`.
+read methods never publish anything; the actions below do. There are four
+categories, `reactions`, `comments`, `mentions` and `zaps`; zaps (and
+`napplet.zaps`) follow their own rules, described under "Napplet zaps".
 
 Reads use only data Kwakore already holds. `napplet.social` with
 `refresh:true` first asks relays: up to 12 of them, the author's NIP-65 inbox
@@ -349,6 +352,107 @@ the address as above. An unknown id, another person's event and one about
 another napplet (or no napplet) all give the same `Not found`. `deletion_id`
 is the kind 5.
 
+### Napplet zaps
+
+Zaps (NIP-57) pay a napplet's author for it. Kwakore reads and totals the
+zap receipts and asks for invoices, but it has no wallet: it never pays, and
+a client pays the bolt11 invoice `napplet.zap` returns with its own wallet.
+
+The provider lookup reads the `lud16` lightning address from the author's
+kind 0 and its LUD-16 LNURL-pay endpoint,
+`https://DOMAIN/.well-known/lnurlp/NAME`, over https to public addresses
+only, with at most three https redirects and a 64 KiB answer; the answer is
+cached for an hour. The author is zappable when the endpoint answers with
+`allowsNostr:true` and a valid `nostrPubkey`, the key that signs the
+author's receipts. A profile with only a `lud06` is not zappable.
+
+A refresh of the `zaps` category does that lookup (bounded at 15 seconds),
+then asks the refresh relays for `{kinds:[9735],authors:[PROVIDER],#a:[ADDRESS]}`
+(never for a snapshot) and `{kinds:[9735],authors:[PROVIDER],#e:[VERSION_IDS]}`;
+no filter carries an empty tag list. It records the provider with the
+address's sync status, and reads count only receipts signed by that recorded
+provider, so they never touch the network. When the author has no `lud16`,
+an invalid one, or a provider without nostr support, `sync.zaps` is
+`unavailable`, no receipt is asked for and the record is cleared, so nothing
+counts until the author is zappable again. A failed or timed-out lookup is
+also `unavailable` but keeps the record. Neither is an error.
+
+A receipt counts only when all of these hold. It is a kind 9735 signed by
+the recorded provider that names the napplet exactly with its own `a` (the
+address, not for a snapshot) or `e` (a known version) tag, with a valid id
+and signature, at most 200 tags, at most 8 KiB of content, `created_at` at
+most 15 minutes ahead and a `description` of at most 16 KiB. That
+`description` is a kind 9734 zap request with a valid id and signature,
+exactly one `p` tag (the napplet's author), at most one `e` and one `a`
+tag, and either an `a` equal to the address (not for a snapshot) or an `e`
+naming a known version. Its `bolt11` names a positive amount of at most 21
+million bitcoin, and every `amount` tag of the request equals that amount in
+millisats. When the request has an `lnurl` tag, it equals the author's lnurl
+(NIP-57 appendix F; compared case-insensitively). Receipts that fail a check
+are never stored or counted. Several receipts that embed the same zap
+request count once, as the newest.
+
+NIP-09 is never applied to receipts: a receipt is the provider's record of a
+payment, so a refresh asks for no kind 5 for them and ignores any it holds.
+Kwakore keeps at most 1000 receipts per address, dropping the oldest, with no
+per-sender cap, since one provider signs them all. Receipts also leave when
+their address is evicted from the status index, and when the napplet is
+uninstalled. The receipts of the user's own zaps (a request signed by the
+user) are never dropped by any of these.
+
+`napplet.social`'s `zaps` gives `count`, `total_msats` (a sum that stops at
+the largest integer instead of overflowing) and `top`, at most 5 senders by
+the zap request's pubkey, sorted by `msats`, then `count` (both descending),
+then `pubkey`; `top` is `[]` when there are none. `napplet.zaps` pages the
+receipts newest first with `offset:0`, `limit:100` by default (limit 1–500)
+and no id param. `receipt_id` is the receipt, `sender` the zap request's
+pubkey with an optional cached `sender_name`, `amount_msats` the invoice
+amount, `comment` the request's content, sanitized like comments and cut at
+280 characters, and `event_id` the version the request names, or `""`.
+`total_msats` sums every receipt, not only the page.
+
+`napplet.zap` asks the author's provider for an invoice of `amount_msats`
+that zaps the napplet. It needs the signer: without one it returns 1004
+`Unavailable` with `data:{"reason":"signer_unavailable"}` before any network
+request. It then looks the provider up as above. An author who is not
+zappable gives 1004 `Unavailable` with exactly
+`data:{"reason":"not_zappable"}`. The answer must be a pay request
+(`tag:"payRequest"`) with `1 <= minSendable <= maxSendable` and a callback
+that is an `https` URL with a host, no user information, no fragment and at
+most 2048 bytes; otherwise the result is `Unavailable` without data.
+`amount_msats` must lie within `[minSendable,maxSendable]`, and `comment`
+must have at most `commentAllowed` characters (any comment when the provider
+allows none), else `Invalid params`. `event_id`, when given, must name a
+known version (else `Not found`).
+
+It then signs one kind 9734 with the service signer, with exactly these
+tags, in order: `["relays",...]`, `["amount",AMOUNT_MSATS]`,
+`["lnurl",LNURL]`, `["p",AUTHOR]`, `["e",VERSION]` (the given `event_id`,
+else the installed version, else the newest archived one, else no `e`; a
+snapshot's own id), `["a",ADDRESS]` (not for a snapshot) and `["k",KIND]`.
+Its content is the comment. The relays are up to 3 of the user's read relays
+(the configured relays when there are none) and up to 3 public inbox relays
+of the author, else the discovery relays, at most 6. The zap request is
+never published or stored. Kwakore requests the callback with the provider's
+own query kept and `amount`, `nostr` (the signed request), `lnurl` and, only
+when the provider allows comments and one is given, `comment` appended. The
+answer's `pr` must be a bolt11 invoice whose amount equals `amount_msats`;
+an invoice for another amount, a provider `status:"ERROR"` or anything else
+gives `Unavailable` without data. The invoice's description hash is not
+checked against the request, because Kwakore has no bolt11 decoder; only
+its amount is. In the result, `invoice` is the lowercased bolt11, `recipient` the
+author's hex pubkey and `zap_request_id` the signed request. Once the
+client pays the invoice, the provider publishes the receipt to the
+request's relays, and a later `napplet.social` refresh of `zaps` shows it.
+Signing is bounded at 20 seconds and the server bounds the call at 45
+seconds; either gives `Timeout`. The call holds the one social action slot
+only while signing, so the provider requests never block other actions.
+
+Results and errors of the zap methods never contain the lightning address,
+the LNURL or callback URL, the provider's host or answer text, relay URLs,
+keys, signatures, raw tags or raw errors; the only lightning string on the
+wire is the bolt11 invoice.
+
 `napplet.icon` returns the verified icon of the napplet at a canonical address (the installed record, else the catalog entry, else the newest stored manifest). The icon is fetched by its manifest hash from the user's, the manifest's and the author's Blossom servers. The source must match the hash, decode as the declared `image/png`, `image/jpeg` or `image/webp`, be at most 1 MiB and at most 1024×1024 pixels; it is then re-encoded as PNG and cached, so a later call reads the cache. `sha256` is the manifest's icon hash (never a URL), `mime` is always `image/png`, `width` and `height` are the PNG's size, and `data` is its standard base64. An unknown address or a napplet without a usable icon tag yields `Not found`; a fetch, verify or decode failure yields `Unavailable`. Neither error carries a URL or path. No event announces a cached icon: the service caches an installed napplet's icon in the background, and clients call `napplet.icon` after `napplet.installed` or `napplet.updated`, which fills the cache if needed.
 
 `napplet.launch` accepts only a full canonical address already installed as a napplet. The response is a final opened outcome, not merely a spawned process. A child failure before its host page sends `nap.start` returns a fixed error and removes the window. With both `DISPLAY` and `WAYLAND_DISPLAY` empty, error 1004 carries exactly `data:{"reason":"session_unavailable"}` before any child starts. A stale display or unresponsive child is bounded by a 10-second host readiness wait and a 12-second daemon operation deadline. `window_id` is an opaque 32-character lowercase hex token, fresh for each service launch. `napplet.try` opens a napplet without installing it. An address already installed as a napplet opens exactly as `napplet.launch` would. Otherwise the daemon resolves the address as `napplet.install` does (with the same optional `relays` hints), downloads every file of the latest manifest into memory and checks each against its hash, and opens a trial window from that copy: nothing is written to the install directory, no desktop entry is made, and `napplet.installed` does not list it. Any file that fails to download or verify opens nothing and yields `Unavailable`. A trial makes no install offer when it closes; what it saved is kept only if the same version was installed while it ran, and is otherwise dropped. The downloads, bounded at 120 seconds, do not hold the daemon's operation lock, and the whole call is bounded at 150 seconds. A headless daemon returns the same `session_unavailable` error as `napplet.launch`, after the downloads and before any child starts. `napplet.stop` accepts that exact token, does not accept an internal napplet ID, and returns `Not found` for an unknown or already closed ID. The daemon confirms closure from the selected instance's `WindowClosed` signal; a timeout does not prove the window closed.
@@ -431,7 +535,7 @@ Events arrive in the order they happened, and their times never decrease. No eve
 
 ## Errors
 
-Errors use `{code:integer,message:string}` and, only for partial cleanup, headless launch or a social action without a signer as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
+Errors use `{code:integer,message:string}` and, only for partial cleanup, headless launch, a social action without a signer or a zap of an author who cannot be zapped as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
 
 | Code | Message | Meaning |
 | ---: | --- | --- |
@@ -443,7 +547,7 @@ Errors use `{code:integer,message:string}` and, only for partial cleanup, headle
 | 1001 | Unauthorized | Peer UID denied |
 | 1002 | Not found | Address or record missing |
 | 1003 | Busy | Mutation conflicts with current work |
-| 1004 | Unavailable | Daemon, discovery, storage, network, signer or window child unavailable; headless launch alone may carry `data:{"reason":"session_unavailable"}`, and `napplet.vote`, `napplet.react`, `napplet.comment`, `napplet.delete` and `napplet.share` without a signer carry `data:{"reason":"signer_unavailable"}` |
+| 1004 | Unavailable | Daemon, discovery, storage, network, signer or window child unavailable; headless launch alone may carry `data:{"reason":"session_unavailable"}`, `napplet.vote`, `napplet.react`, `napplet.comment`, `napplet.delete`, `napplet.share` and `napplet.zap` without a signer carry `data:{"reason":"signer_unavailable"}`, and `napplet.zap` of an author without a lightning address that takes nostr zaps carries `data:{"reason":"not_zappable"}` |
 | 1005 | No update | No newer version to install |
 | 1006 | Invalid configuration | Reload or setting validation failed |
 | 1007 | Closing | Shutdown has started |
@@ -507,15 +611,17 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `update ADDRESS` | `napplet.update` |
 | `updates [ADDRESS]` | `napplet.updates.check` |
 | `detail ADDRESS` | `napplet.detail` |
-| `social ADDRESS [--refresh] [--only reactions,comments,mentions]` | `napplet.social` (`--only` becomes `categories`, checked before dialing) |
+| `social ADDRESS [--refresh] [--only reactions,comments,mentions,zaps]` | `napplet.social` (`--only` becomes `categories`, checked before dialing) |
 | `reactions ADDRESS [--event ID] [--offset N] [--limit N]` | `napplet.reactions` (`--event` becomes `event_id`) |
 | `comments ADDRESS [--parent ID] [--offset N] [--limit N]` | `napplet.comments` (`--parent` becomes `parent_id`) |
 | `mentions ADDRESS [--offset N] [--limit N]` | `napplet.mentions` |
+| `zaps ADDRESS [--offset N] [--limit N]` | `napplet.zaps` |
 | `vote ADDRESS up\|down\|none [--event ID]` | `napplet.vote` (`--event` becomes `event_id`) |
 | `react ADDRESS EMOJI [--url URL] [--event ID]` | `napplet.react` (`--url` becomes `emoji_url`, `--event` `event_id`; `+`, `-` and empty are refused before dialing) |
 | `comment ADDRESS TEXT [--reply ID]` | `napplet.comment` (TEXT is sent verbatim as `content`; `--reply` becomes `parent_id`) |
 | `unpublish ADDRESS EVENT_ID` | `napplet.delete` |
 | `share ADDRESS [TEXT]` | `napplet.share` (TEXT is sent verbatim as `content`, never read as a flag; a blank TEXT is refused before dialing) |
+| `zap ADDRESS SATS [--comment TEXT] [--event ID]` | `napplet.zap` (SATS, a whole number of sats with no sign or leading zero, times 1000 becomes `amount_msats`; `--comment` becomes `comment` and a blank one is refused before dialing; `--event` becomes `event_id`; the result is checked to be a bolt11 invoice for the amount asked, then only the invoice is printed on one line, or the whole result with `--json`; `not_zappable` is accepted only for this command) |
 | `icon ADDRESS [--out FILE]` | `napplet.icon` (the result is validated, then the PNG is written to the absolute FILE with mode 0600, or to stdout when it is not a terminal; `--json` prints the result instead) |
 | `uninstall --yes ADDRESS` | `napplet.uninstall` |
 | `launch ADDRESS` | `napplet.launch` |
@@ -526,7 +632,7 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `permissions set ADDRESS PERMISSION allow\|deny [--subject NAME]` | `napplet.permissions.set` |
 | `permissions clear ADDRESS PERMISSION [--subject NAME]` | `napplet.permissions.clear` |
 
-Every `ADDRESS` (in `install`, `update`, `updates`, `detail`, `icon`, `social`, `reactions`, `comments`, `mentions`, `vote`, `react`, `comment`, `unpublish`, `share`, `uninstall`, `launch`, `try` and `permissions`) may be written as the canonical `KIND:PUBKEY_HEX:D` coordinate, a bare `naddr1…` or a `nostr:naddr1…` URI, and a kind 5129 snapshot also as `nevent1…` or `note1…` (bare or after `nostr:`). The scheme may use any letter case; the bech32 part must be all lowercase or all uppercase. The CLI decodes the form, checks it with the daemon's canonical rule and sends only the canonical address, so a canonical argument produces exactly the request it always did. An `nevent` that carries its author converts locally to `5129:<author>:<event id>`; one with a kind other than 5129 is refused. A `note1…` or an `nevent` without its author names only the event, so the CLI first resolves it with one cached `napplet.discover` lookup (`{query:<event id>,kind:5129,limit:2}`) on a connection of its own, and uses the address of the single item it returns when that address ends in the event id; anything else is refused with `unknown_snapshot`. `npub`, `nprofile`, `nsec` and `nrelay` are refused without being decoded or sent. Web links that contain an `naddr`, `nostr:` followed by a canonical coordinate, and surrounding whitespace are refused too. `install` and `try` forward up to 8 of the naddr's or nevent's valid `ws://`/`wss://` hints as `relays`, dropping the rest; the other commands send the address alone. A d tag with control, format, or line or paragraph separator characters is refused on the CLI, except by `uninstall --yes`, so such a record can always be removed; a d tag that is not valid UTF-8 is refused everywhere. `launch-token` is unchanged and takes only its token.
+Every `ADDRESS` (in `install`, `update`, `updates`, `detail`, `icon`, `social`, `reactions`, `comments`, `mentions`, `zaps`, `vote`, `react`, `comment`, `unpublish`, `share`, `zap`, `uninstall`, `launch`, `try` and `permissions`) may be written as the canonical `KIND:PUBKEY_HEX:D` coordinate, a bare `naddr1…` or a `nostr:naddr1…` URI, and a kind 5129 snapshot also as `nevent1…` or `note1…` (bare or after `nostr:`). The scheme may use any letter case; the bech32 part must be all lowercase or all uppercase. The CLI decodes the form, checks it with the daemon's canonical rule and sends only the canonical address, so a canonical argument produces exactly the request it always did. An `nevent` that carries its author converts locally to `5129:<author>:<event id>`; one with a kind other than 5129 is refused. A `note1…` or an `nevent` without its author names only the event, so the CLI first resolves it with one cached `napplet.discover` lookup (`{query:<event id>,kind:5129,limit:2}`) on a connection of its own, and uses the address of the single item it returns when that address ends in the event id; anything else is refused with `unknown_snapshot`. `npub`, `nprofile`, `nsec` and `nrelay` are refused without being decoded or sent. Web links that contain an `naddr`, `nostr:` followed by a canonical coordinate, and surrounding whitespace are refused too. `install` and `try` forward up to 8 of the naddr's or nevent's valid `ws://`/`wss://` hints as `relays`, dropping the rest; the other commands send the address alone. A d tag with control, format, or line or paragraph separator characters is refused on the CLI, except by `uninstall --yes`, so such a record can always be removed; a d tag that is not valid UTF-8 is refused everywhere. `launch-token` is unchanged and takes only its token.
 
 With `--json`, a refused `ADDRESS` fails before dialing and writes exactly `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":REASON,"accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` and a newline to stderr, where `REASON` is `invalid_address` (not an address in an accepted form), `unsupported_nip19` (another NIP-19 entity, or an nevent of another kind), `unsafe_identifier` (the d tag check above) or `unknown_snapshot` (the snapshot lookup above found no single match; this one is refused after the lookup, before the real request). The argument is never echoed, since it may be a secret key pasted by mistake.
 
