@@ -119,16 +119,14 @@ func authorNapps(pk nostr.PubKey, events []nostr.Event) []Napp {
 // ─── napplet.detail ──────────────────────────────────────────────
 
 // ServiceDetailResult is the public detail of one napplet address: its
-// descriptor plus install state and the versions known locally. It holds no
-// path, icon, server or blob URL.
+// descriptor (which carries kind and the required and optional domains)
+// plus install state and the versions known locally. It holds no path,
+// server or blob URL, and the icon appears only as its hash.
 type ServiceDetailResult struct {
 	ServiceDescriptor
-	Kind             int              `json:"kind"`
 	Installed        bool             `json:"installed"`
 	InstalledVersion *ServiceVersion  `json:"installed_version"`
 	UpdateAvailable  *ServiceVersion  `json:"update_available"`
-	RequiredDomains  []string         `json:"required_domains"`
-	OptionalDomains  []string         `json:"optional_domains"`
 	Versions         []ServiceVersion `json:"versions"`
 }
 
@@ -159,12 +157,7 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 		return ServiceDetailResult{}, ErrServiceNotFound
 	}
 
-	result := ServiceDetailResult{
-		ServiceDescriptor: serviceDescriptor(chosen),
-		Kind:              int(ptr.Kind),
-		RequiredDomains:   cloneDomains(chosen.RequiredDomains),
-		OptionalDomains:   cloneDomains(chosen.OptionalDomains),
-	}
+	result := ServiceDetailResult{ServiceDescriptor: serviceDescriptor(chosen)}
 	versions := make([]ServiceVersion, 0, 4+len(stored))
 	if installed != nil {
 		v := serviceVersion(*installed)
@@ -210,13 +203,6 @@ func serviceNappSources(address string, ptr nostr.EntityPointer) (installed, lis
 	discoverMu.Unlock()
 
 	return installed, listed, storedManifests(ptr)
-}
-
-func cloneDomains(domains []string) []string {
-	if len(domains) == 0 {
-		return []string{}
-	}
-	return append([]string(nil), domains...)
 }
 
 // uniqueVersions dedupes versions by event id and sorts them newest first,

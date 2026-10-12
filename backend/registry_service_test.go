@@ -48,11 +48,11 @@ func TestServiceDiscoveryCompletesAndFilters(t *testing.T) {
 	t.Cleanup(func() { subscribeDiscovery = old })
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	page, err := ServiceDiscover(ctx, "notes", true, 0, 100)
+	page, err := ServiceDiscover(ctx, ServiceDiscoverFilter{Query: "notes"}, true, 0, 100)
 	if err != nil || !page.Complete || page.FetchedAt == nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].Name != "Notes" {
 		t.Fatalf("refresh: %+v %v", page, err)
 	}
-	filtered, err := ServiceDiscover(ctx, "no match", false, 0, 100)
+	filtered, err := ServiceDiscover(ctx, ServiceDiscoverFilter{Query: "no match"}, false, 0, 100)
 	if err != nil || !filtered.Complete || filtered.FetchedAt == nil || filtered.Total != 0 {
 		t.Fatalf("cached filter: %+v %v", filtered, err)
 	}
@@ -64,11 +64,11 @@ func TestServiceDiscoveryEmptyCachedUnavailable(t *testing.T) {
 	stateMu.Lock()
 	state.Relays = []string{}
 	stateMu.Unlock()
-	page, err := ServiceDiscover(t.Context(), "", false, 0, 100)
+	page, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, false, 0, 100)
 	if err != nil || page.Complete || page.FetchedAt != nil || page.Total != 0 || page.Items == nil {
 		t.Fatalf("uncached: %+v %v", page, err)
 	}
-	if _, err := ServiceDiscover(t.Context(), "", true, 0, 100); !errors.Is(err, ErrDiscoveryUnavailable) {
+	if _, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, true, 0, 100); !errors.Is(err, ErrDiscoveryUnavailable) {
 		t.Fatalf("no relay error: %v", err)
 	}
 }
@@ -90,9 +90,12 @@ func TestServiceDiscoverySupersededRefresh(t *testing.T) {
 	}
 	t.Cleanup(func() { subscribeDiscovery = old })
 	firstErr := make(chan error, 1)
-	go func() { _, err := ServiceDiscover(t.Context(), "", true, 0, 100); firstErr <- err }()
+	go func() {
+		_, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, true, 0, 100)
+		firstErr <- err
+	}()
 	<-started
-	page, err := ServiceDiscover(t.Context(), "", true, 0, 100)
+	page, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, true, 0, 100)
 	if err != nil || !page.Complete || page.FetchedAt == nil || page.Total != 0 {
 		t.Fatalf("second refresh: %+v %v", page, err)
 	}
@@ -118,11 +121,11 @@ func TestServiceDiscoveryQueryPagination(t *testing.T) {
 	}
 	catalogFetched = &now
 	discoverMu.Unlock()
-	page, err := ServiceDiscover(t.Context(), "NOTES", false, 0, 1)
+	page, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: "NOTES"}, false, 0, 1)
 	if err != nil || page.Total != 2 || len(page.Items) != 1 || page.Items[0].Address != "35130:"+pk.Hex()+":a" || page.NextOffset == nil || *page.NextOffset != 1 {
 		t.Fatalf("first matching page: %+v %v", page, err)
 	}
-	page, err = ServiceDiscover(t.Context(), "notes", false, 1, 1)
+	page, err = ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: "notes"}, false, 1, 1)
 	if err != nil || page.Total != 2 || len(page.Items) != 1 || page.Items[0].Address != "35130:"+pk.Hex()+":z" || page.NextOffset != nil {
 		t.Fatalf("last matching page: %+v %v", page, err)
 	}
@@ -143,10 +146,10 @@ func TestServiceDiscoveryTimeoutKeepsCache(t *testing.T) {
 	t.Cleanup(func() { subscribeDiscovery = old })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
-	if _, err := ServiceDiscover(ctx, "", true, 0, 100); !errors.Is(err, ErrDiscoveryTimeout) {
+	if _, err := ServiceDiscover(ctx, ServiceDiscoverFilter{Query: ""}, true, 0, 100); !errors.Is(err, ErrDiscoveryTimeout) {
 		t.Fatalf("refresh timeout: %v", err)
 	}
-	page, err := ServiceDiscover(t.Context(), "", false, 0, 100)
+	page, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, false, 0, 100)
 	if err != nil || !page.Complete || page.Total != 1 || page.Items[0].Name != "Saved" {
 		t.Fatalf("cached catalog lost: %+v %v", page, err)
 	}
@@ -171,10 +174,10 @@ func TestServiceDiscoveryNoRelayAnsweredKeepsCache(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	// a refresh no relay answered is unavailable, not an empty catalog
-	if _, err := ServiceDiscover(ctx, "", true, 0, 100); !errors.Is(err, ErrDiscoveryUnavailable) {
+	if _, err := ServiceDiscover(ctx, ServiceDiscoverFilter{Query: ""}, true, 0, 100); !errors.Is(err, ErrDiscoveryUnavailable) {
 		t.Fatalf("unanswered refresh: %v", err)
 	}
-	page, err := ServiceDiscover(t.Context(), "", false, 0, 100)
+	page, err := ServiceDiscover(t.Context(), ServiceDiscoverFilter{Query: ""}, false, 0, 100)
 	if err != nil || !page.Complete || page.Total != 1 || page.Items[0].Name != "Saved" {
 		t.Fatalf("cached catalog lost: %+v %v", page, err)
 	}

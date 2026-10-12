@@ -307,9 +307,10 @@ func (n Napp) AuthorShortName() string {
 	return ""
 }
 
-// MatchesQuery says whether the napp matches a case-insensitive substring in
-// its name, description, author pubkey or author name, or is the napp a
-// napp address (naddr, nostr: link, coordinate) names.
+// MatchesQuery says whether the napp matches a case-insensitive substring
+// (q is already lowercased) in its name (the title), description, author
+// pubkey, author name, archetypes or intent ids, has q as its exact event
+// id, or is the napp a napp address (naddr, nostr: link, coordinate) names.
 func (n Napp) MatchesQuery(q string) bool {
 	if q == "" {
 		return true
@@ -317,6 +318,19 @@ func (n Napp) MatchesQuery(q string) bool {
 	// an address matches the napp it names and nothing else
 	if ptr, err := ParseNappAddress(q); err == nil {
 		return n.matchesAddress(ptr)
+	}
+	if n.EventID != "" && n.EventID == q {
+		return true
+	}
+	for _, role := range n.Roles {
+		if strings.Contains(strings.ToLower(role), q) {
+			return true
+		}
+	}
+	for _, c := range n.Conventions {
+		if strings.Contains(strings.ToLower(c.ID), q) {
+			return true
+		}
 	}
 	return strings.Contains(strings.ToLower(n.Name), q) ||
 		strings.Contains(strings.ToLower(n.Description), q) ||

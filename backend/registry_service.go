@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"fiatjaf.com/nostr"
 )
@@ -185,6 +186,11 @@ type ServiceVersion struct {
 }
 
 // ServiceDescriptor contains only catalog fields safe for local clients.
+// The manifest fields after Version are bounded and sanitized: tokens are
+// checked against their grammar, intent ids holding control or format
+// runes are dropped rather than altered, every list is capped, and the
+// icon appears only as its hash. Every list is non-nil, so it is [] on the
+// wire.
 type ServiceDescriptor struct {
 	Address           string         `json:"address"`
 	Name              string         `json:"name"`
@@ -196,6 +202,123 @@ type ServiceDescriptor struct {
 	UnavailableReason string         `json:"unavailable_reason,omitempty"`
 	Sources           []string       `json:"sources,omitempty"`
 	Version           ServiceVersion `json:"version"`
+
+	Kind            int             `json:"kind"`
+	Schema          string          `json:"schema"`
+	Icon            *ServiceIconRef `json:"icon"`
+	Archetypes      []string        `json:"archetypes"`
+	Intents         []ServiceIntent `json:"intents"`
+	RequiredDomains []string        `json:"required_domains"`
+	OptionalDomains []string        `json:"optional_domains"`
+	MissingDomains  []string        `json:"missing_domains"`
+	Compatible      bool            `json:"compatible"`
+	Lineage         *ServiceLineage `json:"lineage"`
+}
+
+// ServiceIconRef is a manifest's icon tag: its hash and declared type, never a
+// URL. napplet.icon serves the verified bytes.
+type ServiceIconRef struct {
+	Sha256 string `json:"sha256"`
+	Mime   string `json:"mime"`
+}
+
+// ServiceIntent is one advertised intent and its parameter names.
+type ServiceIntent struct {
+	ID     string   `json:"id"`
+	Params []string `json:"params"`
+}
+
+// ServiceLineage is a snapshot's a/A provenance: canonical 35129/15129
+// addresses, never resolved or trusted. A missing one is null.
+type ServiceLineage struct {
+	Parent *string `json:"parent"`
+	Root   *string `json:"root"`
+}
+
+// Descriptor bounds.
+const (
+	maxDescriptorTokens     = 32 // archetypes
+	maxDescriptorIntents    = 64
+	maxDescriptorParams     = 16
+	maxDescriptorDomains    = 64
+	maxDescriptorTokenBytes = 64
+	maxDescriptorIntentID   = 256
+)
+
+// wireSchema maps the internal manifest schema to its wire label. The
+// internal values are stored in state.json and never change: SchemaWebNapplet
+// ("web-napplet") is the current NIP-5D manifest, shown as "nip5d", and
+// SchemaNIP5D ("nip5d") the legacy path-tag manifest, shown as "legacy".
+func wireSchema(n Napp) string {
+	switch {
+	case !n.IsNapplet():
+		return "napp"
+	case n.NappletSchema == SchemaNIP5D:
+		return "legacy"
+	default:
+		return "nip5d"
+	}
+}
+
+// descriptorTokens keeps the members of list that are domain tokens of at
+// most maxDescriptorTokenBytes, in order, at most limit of them.
+func descriptorTokens(list []string, limit int) []string {
+	out := make([]string, 0, min(len(list), limit))
+	for _, s := range list {
+		if len(out) == limit {
+			break
+		}
+		if len(s) <= maxDescriptorTokenBytes && domainToken.MatchString(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// descriptorIntents keeps the conventions whose id is short, valid UTF-8
+// and free of control and format runes, with their well-formed params.
+func descriptorIntents(list []NappletConvention) []ServiceIntent {
+	out := make([]ServiceIntent, 0, min(len(list), maxDescriptorIntents))
+	for _, c := range list {
+		if len(out) == maxDescriptorIntents {
+			break
+		}
+		if c.ID == "" || len(c.ID) > maxDescriptorIntentID || !utf8.ValidString(c.ID) ||
+			serviceDisplayText(c.ID, maxDescriptorIntentID) != c.ID {
+			continue
+		}
+		params := make([]string, 0, min(len(c.Params), maxDescriptorParams))
+		for _, p := range c.Params {
+			if len(params) == maxDescriptorParams {
+				break
+			}
+			if len(p) <= maxDescriptorTokenBytes && conventionParam.MatchString(p) {
+				params = append(params, p)
+			}
+		}
+		out = append(out, ServiceIntent{ID: c.ID, Params: params})
+	}
+	return out
+}
+
+// descriptorLineage is a snapshot's lineage, each value checked again.
+func descriptorLineage(n Napp) *ServiceLineage {
+	if !n.IsSnapshot() {
+		return nil
+	}
+	var l ServiceLineage
+	if n.Parent != "" && validLineageAddress(n.Parent) {
+		p := n.Parent
+		l.Parent = &p
+	}
+	if n.Root != "" && validLineageAddress(n.Root) {
+		r := n.Root
+		l.Root = &r
+	}
+	if l.Parent == nil && l.Root == nil {
+		return nil
+	}
+	return &l
 }
 
 type ServicePage struct {
@@ -216,7 +339,38 @@ type ServiceDiscoveryPage struct {
 	Complete  bool       `json:"complete"`
 }
 
-func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, limit int) (ServiceDiscoveryPage, error) {
+// ServiceDiscoverFilter narrows napplet.discover. Query is the
+// case-insensitive search; every other field set is an exact match on the
+// built descriptor, and all of them must hold: Archetype a member of
+// archetypes, Intent an intents[].id, Domain a required or optional domain,
+// Compatible equal to compatible, and Kind (when non-zero) equal to kind.
+type ServiceDiscoverFilter struct {
+	Query      string
+	Archetype  string
+	Intent     string
+	Domain     string
+	Compatible *bool
+	Kind       int
+}
+
+// match says whether d passes every set field but Query.
+func (f ServiceDiscoverFilter) match(d ServiceDescriptor) bool {
+	if f.Archetype != "" && !slices.Contains(d.Archetypes, f.Archetype) {
+		return false
+	}
+	if f.Intent != "" && !slices.ContainsFunc(d.Intents, func(i ServiceIntent) bool { return i.ID == f.Intent }) {
+		return false
+	}
+	if f.Domain != "" && !slices.Contains(d.RequiredDomains, f.Domain) && !slices.Contains(d.OptionalDomains, f.Domain) {
+		return false
+	}
+	if f.Compatible != nil && d.Compatible != *f.Compatible {
+		return false
+	}
+	return f.Kind == 0 || d.Kind == f.Kind
+}
+
+func ServiceDiscover(ctx context.Context, filter ServiceDiscoverFilter, refresh bool, offset, limit int) (ServiceDiscoveryPage, error) {
 	if refresh {
 		if err := RefreshDiscovery(ctx); err != nil {
 			return ServiceDiscoveryPage{}, err
@@ -227,11 +381,14 @@ func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, li
 	fetched := catalogFetched
 	discoverMu.Unlock()
 	result := ServiceDiscoveryPage{FetchedAt: fetched, Complete: fetched != nil}
-	query = strings.ToLower(strings.TrimSpace(query))
+	query := strings.ToLower(strings.TrimSpace(filter.Query))
 	descriptors := make([]ServiceDescriptor, 0, len(items))
 	for _, n := range items {
-		if n.MatchesQuery(query) {
-			descriptors = append(descriptors, serviceDescriptor(n))
+		if !n.MatchesQuery(query) {
+			continue
+		}
+		if d := serviceDescriptor(n); filter.match(d) {
+			descriptors = append(descriptors, d)
 		}
 	}
 	sort.Slice(descriptors, func(i, j int) bool { return descriptors[i].Address < descriptors[j].Address })
@@ -299,12 +456,31 @@ func serviceDescriptor(n Napp) ServiceDescriptor {
 			authorName = metadata.ShortName()
 		}
 	}
+	var icon *ServiceIconRef
+	if hasNappletIcon(n) {
+		icon = &ServiceIconRef{Sha256: n.IconSha, Mime: n.IconMime}
+	}
+	// compatible reads the unfiltered list: a missing domain that is not
+	// shown is still missing
+	rawMissing := n.MissingDomains()
+	missing := descriptorTokens(rawMissing, maxDescriptorDomains)
 	return ServiceDescriptor{
 		Address: n.Address(), Name: serviceDisplayText(n.Name, 256), Description: serviceDisplayText(n.Description, 1024),
 		Author: n.Author.Hex(), AuthorName: serviceDisplayText(authorName, 128), Format: format,
 		Available: n.Unavailable == "", UnavailableReason: publicUnavailableReason(n.Unavailable),
 		Sources: append([]string(nil), n.Sources...),
 		Version: ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash},
+
+		Kind:            int(n.ManifestKind()),
+		Schema:          wireSchema(n),
+		Icon:            icon,
+		Archetypes:      descriptorTokens(n.Roles, maxDescriptorTokens),
+		Intents:         descriptorIntents(n.Conventions),
+		RequiredDomains: descriptorTokens(n.RequiredDomains, maxDescriptorDomains),
+		OptionalDomains: descriptorTokens(n.OptionalDomains, maxDescriptorDomains),
+		MissingDomains:  missing,
+		Compatible:      len(rawMissing) == 0,
+		Lineage:         descriptorLineage(n),
 	}
 }
 

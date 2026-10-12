@@ -119,6 +119,12 @@ func unavailableNapp(evt nostr.Event, reason string) Napp {
 	if isNappletKind(evt.Kind) {
 		n.Format = FormatNapplet
 		n.Kind = evt.Kind
+		// the schema the event was written in, so its descriptor is
+		// labelled right even though it is not valid
+		n.NappletSchema = SchemaWebNapplet
+		if evt.Tags.Find("path") != nil {
+			n.NappletSchema = SchemaNIP5D
+		}
 	}
 	return n
 }
