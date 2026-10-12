@@ -11,7 +11,7 @@
 - Timeline: 2026-10-06 → 2026-10-07 (2 days), 266 commits
 - Code (excluding `.planning/`): 286 files changed, +22,126 / -25,385
 - Audit: tech_debt, 23/23 requirements, 4/4 phases, 8/8 integration seams and flows ([v0.2-MILESTONE-AUDIT.md](milestones/v0.2-MILESTONE-AUDIT.md))
-- Archive: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md), [v0.2-REQUIREMENTS.md](milestones/v0.2-REQUIREMENTS.md), `milestones/v0.2-phases/`, `milestones/v0.2-quick/`
+- Archive: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md), [v0.2-REQUIREMENTS.md](milestones/v0.2-REQUIREMENTS.md), `milestones/v0.2-phases/`
 
 **Key accomplishments:**
 
@@ -40,7 +40,7 @@ Known verification overrides: 1 newly acknowledged, 12 carried forward from a pr
 
 - Timeline: 2026-10-02 → 2026-10-06 (5 days), 356 commits
 - Code (excluding `.planning/`): 249 files changed, +46,014 / -2,560
-- Archive: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md), [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md), `milestones/v0.1-phases/`, `milestones/v0.1-quick/`
+- Archive: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md), [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md), `milestones/v0.1-phases/`
 
 **Key accomplishments:**
 

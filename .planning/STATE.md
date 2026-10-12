@@ -170,16 +170,16 @@ None yet.
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 261007-htm | Make CLI output human friendly by default with optional --json | 2026-10-07 | ec2b210 | [261007-htm-the-cli-should-be-updated-to-be-human-fr](./quick/261007-htm-the-cli-should-be-updated-to-be-human-fr/) |
-| 261011-czi | Yes/no TUI install confirm and launch from Discover without installing | 2026-10-11 | d1ae23b | [261011-czi-simplify-tui-install-confirm-and-launch-](./quick/261011-czi-simplify-tui-install-confirm-and-launch-/) |
-| 261011-fuc | Default to napplet.soy and ditto.pub relays and Blossom servers | 2026-10-11 | 91629bf | [261011-fuc-use-napplet-soy-and-ditto-pub-default-re](./quick/261011-fuc-use-napplet-soy-and-ditto-pub-default-re/) |
-| 261011-i5x | Fix napplet windows closing on Wayland (DMABUF), log window program stderr and surface unexpected exits | 2026-10-11 | 384228a | [261011-i5x-wayland-dmabuf-window-crash-diagnostics](./quick/261011-i5x-wayland-dmabuf-window-crash-diagnostics/) |
-| 261011-kfc | Bound multi-relay requests: finish 15s after the first EOSE, 30s hard cap, offline relays no longer stall discovery or sync | 2026-10-11 | 054fcf8 | [261011-kfc-bound-multi-relay-requests-finish-15s-af](./quick/261011-kfc-bound-multi-relay-requests-finish-15s-af/) |
-| 261011-lzk | Sync installed napplets and their pinned versions across machines through an encrypted NIP-78 event named by the `sync_id` setting | 2026-10-11 | c411419 | [261011-lzk-sync-installed-napplets-list-via-nip-78-](./quick/261011-lzk-sync-installed-napplets-list-via-nip-78-/) |
-| 261012-cbz | Hide the Kwakore search-provider desktop entry (NoDisplay=true) and fix the settings.set protocol row | 2026-10-12 | 7653cfb | [261012-cbz-hide-the-kwakore-desktop-entry](./quick/261012-cbz-hide-the-kwakore-desktop-entry/) |
-| 261012-cdf | Control protocol: napplet.updates.check + update_available, events.subscribe push stream, napplet.detail, install_sync diagnostics, theme setting | 2026-10-12 | e2369d0 | [261012-cdf-rpc-update-checks-events-details-sync-st](./quick/261012-cdf-rpc-update-checks-events-details-sync-st/) |
+| # | Description | Date | Commit |
+|---|-------------|------|--------|
+| 261007-htm | Make CLI output human friendly by default with optional --json | 2026-10-07 | ec2b210 |
+| 261011-czi | Yes/no TUI install confirm and launch from Discover without installing | 2026-10-11 | d1ae23b |
+| 261011-fuc | Default to napplet.soy and ditto.pub relays and Blossom servers | 2026-10-11 | 91629bf |
+| 261011-i5x | Fix napplet windows closing on Wayland (DMABUF), log window program stderr and surface unexpected exits | 2026-10-11 | 384228a |
+| 261011-kfc | Bound multi-relay requests: finish 15s after the first EOSE, 30s hard cap, offline relays no longer stall discovery or sync | 2026-10-11 | 054fcf8 |
+| 261011-lzk | Sync installed napplets and their pinned versions across machines through an encrypted NIP-78 event named by the `sync_id` setting | 2026-10-11 | c411419 |
+| 261012-cbz | Hide the Kwakore search-provider desktop entry (NoDisplay=true) and fix the settings.set protocol row | 2026-10-12 | 7653cfb |
+| 261012-cdf | Control protocol: napplet.updates.check + update_available, events.subscribe push stream, napplet.detail, install_sync diagnostics, theme setting | 2026-10-12 | e2369d0 |
 
 ## Deferred Items
 
