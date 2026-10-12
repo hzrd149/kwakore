@@ -55,6 +55,9 @@ func TestCLISettingsCommands(t *testing.T) {
 		{[]string{"settings", "set", "sync_id", `laptops`}, "settings.set", `{"field":"sync_id","value":"laptops"}`},
 		{[]string{"settings", "set", "sync_id", ``}, "settings.set", `{"field":"sync_id","value":""}`},
 		{[]string{"settings", "clear", "sync_id"}, "settings.clear", `{"field":"sync_id"}`},
+		{[]string{"settings", "set", "theme", `dark`}, "settings.set", `{"field":"theme","value":"dark"}`},
+		{[]string{"settings", "set", "theme", `"dark"`}, "settings.set", `{"field":"theme","value":"dark"}`},
+		{[]string{"settings", "clear", "theme"}, "settings.clear", `{"field":"theme"}`},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			seen := make(chan string, 1)
@@ -109,6 +112,16 @@ func TestCLISyncIDRejectsBrokenJSONString(t *testing.T) {
 	for _, field := range []string{"relays", "gnome_search"} {
 		if _, _, _, err := command([]string{"settings", "set", field, `"laptops"`}); err == nil {
 			t.Fatalf("%s accepted a string", field)
+		}
+	}
+}
+
+func TestCLIThemeRejectsUnknownValues(t *testing.T) {
+	for _, arg := range []string{"blue", `"blue"`, "Dark", `""`, `["dark"]`, "5", `"dark`} {
+		_, _, _, err := command([]string{"settings", "set", "theme", arg})
+		var input inputFailure
+		if !errors.As(err, &input) {
+			t.Fatalf("theme %q: %v, want an input failure", arg, err)
 		}
 	}
 }
@@ -271,6 +284,9 @@ func TestCLIContract(t *testing.T) {
 		{"permissions clear", []string{"permissions", "clear", address, "dispatch", "--subject", "view"}, "napplet.permissions.clear", `{"address":"` + address + `","permission":"dispatch","subject":"view"}`},
 		{"update", []string{"update", address}, "napplet.update", `{"address":"` + address + `"}`},
 		{"uninstall", []string{"uninstall", "--yes", address}, "napplet.uninstall", `{"address":"` + address + `","confirm":true}`},
+		{"updates", []string{"updates"}, "napplet.updates.check", ""},
+		{"updates address", []string{"updates", address}, "napplet.updates.check", `{"address":"` + address + `"}`},
+		{"detail", []string{"detail", address}, "napplet.detail", `{"address":"` + address + `"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seen := make(chan []byte, 1)
@@ -429,6 +445,11 @@ func cliContractResult(method, address string) string {
 		return `{"address":"` + address + `","permission":"dispatch","subject":"view","decision":"deny"}`
 	case "napplet.permissions.clear":
 		return `{"address":"` + address + `","permission":"dispatch","subject":"view","cleared":true}`
+	case "napplet.updates.check":
+		version := `{"event_id":"` + strings.Repeat("e", 64) + `","created_at":10,"artifact_hash":""}`
+		return `{"items":[{"address":"` + address + `","installed_version":` + version + `,"available_version":` + version + `}],"complete":true}`
+	case "napplet.detail":
+		return `{"address":"` + address + `","name":"App","author":"` + strings.Repeat("a", 64) + `","format":"napplet","available":true,"version":{"event_id":"","created_at":0,"artifact_hash":""},"kind":35129,"installed":false,"installed_version":null,"update_available":null,"required_domains":[],"optional_domains":[],"versions":[]}`
 	}
 	return `{"method":"` + method + `"}`
 }
@@ -469,6 +490,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
+		{"updates"}, {"detail", address}, {"events"},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -483,6 +505,24 @@ func TestCLIContractCatalog(t *testing.T) {
 	slices.Sort(catalog)
 	if !slices.Equal(methods, catalog) {
 		t.Fatalf("CLI methods %v differ from protocol catalog %v", methods, catalog)
+	}
+}
+
+func TestCLIUpdatesAndDetailRejectBadArguments(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	for _, args := range [][]string{
+		{"updates", address, address},
+		{"updates", "bad"},
+		{"detail"},
+		{"detail", "bad"},
+		{"detail", address, "extra"},
+	} {
+		_, _, _, err := command(args)
+		var input inputFailure
+		var addrErr addressFailure
+		if err == nil || (!errors.As(err, &input) && !errors.As(err, &addrErr)) {
+			t.Fatalf("%v: %v, want a refusal before dialing", args, err)
+		}
 	}
 }
 
@@ -1299,6 +1339,9 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"signer", "pair", "start", "--help"}, "private pairing URI"},
 		{[]string{"help", "signer", "pair", "wait"}, "signer pair wait"},
 		{[]string{"--json", "--socket", "/tmp/unused.sock", "install", "--help"}, "install ADDRESS"},
+		{[]string{"updates", "--help"}, "never installed automatically"},
+		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
+		{[]string{"events", "--help"}, "events.overflow"},
 	} {
 		cmd := exec.Command(cli, tc.args...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")

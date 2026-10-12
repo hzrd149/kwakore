@@ -14,6 +14,7 @@ Service:
   tui                            Open the full-screen terminal manager
   status                         Show service health
   diagnostics                    Show health, settings, and recent errors
+  events [--type TYPE]...        Print service events as they happen
 
 Napplets:
   installed [--offset N] [--limit N]
@@ -23,6 +24,8 @@ Napplets:
                                  Search the napplet catalog
   install ADDRESS                Install a napplet
   update ADDRESS                 Update an installed napplet
+  updates [ADDRESS]              Check installed napplets for newer versions
+  detail ADDRESS                 Show a napplet's public details
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
   try ADDRESS                    Open a napplet without installing it
@@ -37,8 +40,8 @@ Settings and signer:
   settings get                   Show effective settings
   settings inspect               Show effective settings and their sources
   settings reload                Reload the configuration file
-  settings set FIELD JSON_VALUE  Set relays, blossom_servers, or a boolean
-                                 integration setting
+  settings set FIELD JSON_VALUE  Set relays, blossom_servers, sync_id, theme,
+                                 or a boolean integration setting
   settings clear FIELD           Clear a setting override
   signer status                  Show signer mode and connection state
   signer switch none             Disconnect the signer
@@ -121,8 +124,23 @@ Example: kwak --json status
 	"diagnostics": `Inspect service health and recent errors.
 
 Usage: kwak diagnostics
-Shows live health, effective settings, and recent error summaries.
+Shows live health, effective settings, recent error summaries, and the
+installed-list sync status (install_sync).
 Example: kwak diagnostics
+`,
+	"events": `Print service events as they happen.
+
+Usage: kwak events [--type TYPE]...
+  --type TYPE  Only this event type; repeat for more (default: all)
+TYPE: napplet.installed, napplet.uninstalled, napplet.updated,
+settings.changed, signer.changed, sync.completed, updates.available,
+window.closed, or window.opened.
+Prints one line per event: its time, its type and its fields. --json prints
+one JSON object per line. A reader that falls behind gets one
+events.overflow line counting the events it missed; re-read the state you
+follow then. Stops with an error when the service ends the stream, or with
+success when --timeout passes.
+Example: kwak --json events --type window.opened
 `,
 	"installed": `List installed napplets.
 
@@ -152,6 +170,28 @@ Example: kwak install nostr:naddr1...
 Usage: kwak update ADDRESS
 ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
 Example: kwak update nostr:naddr1...
+`,
+	"updates": `Check installed napplets for newer versions.
+
+Usage: kwak updates [ADDRESS]
+Asks the relays about every installed napplet, or only ADDRESS, and lists
+the ones with a newer valid version. kwak installed then shows them as
+update_available. Updates are never installed automatically; run
+'kwak update ADDRESS' to install one. The service also checks in the
+background a couple of minutes after it starts and every 6 hours.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+Example: kwak updates
+`,
+	"detail": `Show a napplet's public details.
+
+Usage: kwak detail ADDRESS
+Shows the name, author, kind, whether it is installed, the installed
+version, any update found, the network domains it declares and the
+versions known locally. Answers from local knowledge without asking
+relays; run 'kwak discover --refresh' or 'kwak updates' first for fresher
+data.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+Example: kwak detail nostr:naddr1...
 `,
 	"uninstall": `Remove an installed napplet and its desktop entry.
 
@@ -226,14 +266,15 @@ Usage:
   kwak settings set FIELD JSON_VALUE
   kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 Run 'kwak settings get|reload|set|clear --help' for details.
 `,
 	"settings get": `Show effective service settings.
 
 Usage: kwak settings get
 Shows relays, Blossom servers, discovery and desktop integration settings,
-the sync identifier for the installed napplet list, and signer mode.
+the sync identifier for the installed napplet list, the window theme, and
+signer mode.
 `,
 	"settings reload": `Reload the declarative configuration file.
 
@@ -244,20 +285,24 @@ Invalid configuration leaves the previous effective settings in place.
 
 Usage: kwak settings set FIELD JSON_VALUE
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 JSON_VALUE is an array of URLs for relays or blossom_servers, a boolean
 for discover_on_user_relays, desktop_entries, or gnome_search, or a string
-for sync_id (a bare word is taken as the string; an empty string turns sync
-off). Quote JSON in your shell.
+for sync_id (an empty string turns sync off) or theme (system, light or
+dark). For sync_id and theme a bare word is taken as the string. Quote JSON
+in your shell.
 Bare relay hosts gain wss://; bare Blossom hosts gain https://.
+The theme applies to open napplet windows at once; system follows the
+desktop's light/dark preference.
 Example: kwak settings set discover_on_user_relays false
 Example: kwak settings set sync_id laptops
+Example: kwak settings set theme dark
 `,
 	"settings clear": `Remove a setting override.
 
 Usage: kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 The declarative or built-in value becomes effective again.
 Example: kwak settings clear relays
 `,

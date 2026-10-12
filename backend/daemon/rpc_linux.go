@@ -36,6 +36,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		return nil, controlprotocol.FixedError(controlprotocol.Closing)
 	}
 	switch method {
+	case "events.subscribe":
+		// the subscription is the connection's: the handler streams it once
+		// this frame's response is written (events_linux.go)
+		return s.subscribeEvents(ctx, params)
 	case "signer.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -181,6 +185,40 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		defer done()
 		return backend.ServiceInstalled(offset, limit), nil
+	case "napplet.updates.check":
+		address, err := decodeOptionalAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, 75*time.Second)
+		defer cancelTimeout()
+		result, checkErr := backend.ServiceCheckUpdates(workCtx, address)
+		if checkErr != nil {
+			return nil, mutationError(checkErr)
+		}
+		return result, nil
+	case "napplet.detail":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		result, detailErr := backend.ServiceDetail(address)
+		if detailErr != nil {
+			return nil, mutationError(detailErr)
+		}
+		return result, nil
 	case "napplet.windows":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -470,6 +508,25 @@ func decodeAddressParams(params json.RawMessage) (string, *controlprotocol.Error
 	return addressField(fields)
 }
 
+// decodeOptionalAddressParams reads {address?}: an absent address is "",
+// a present one must be a canonical address string.
+func decodeOptionalAddressParams(params json.RawMessage) (string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address"); err != nil {
+		return "", err
+	}
+	if len(params) == 0 {
+		return "", nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	if _, ok := fields["address"]; !ok {
+		return "", nil
+	}
+	return addressField(fields)
+}
+
 // decodeInstallParams reads napplet.install's params: the canonical address
 // and optional relay hints, the usable ones an naddr carried. A client may
 // send anything, so the hints are checked again here: at most
@@ -712,7 +769,8 @@ func decodeSettingParams(params json.RawMessage) (string, any, *controlprotocol.
 		}
 		return field, value, nil
 	}
-	if field == "sync_id" {
+	// sync_id and theme are JSON strings; serviceconfig validates the value
+	if field == "sync_id" || field == "theme" {
 		var value string
 		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
 			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)

@@ -431,6 +431,8 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 	refreshInstalled()
 	if newer.IsNapplet() {
 		installSyncLocalChange(newer.Address())
+		emitServiceEvent(ServiceEvent{Type: EventNappletUpdated, Address: result.Address, PreviousVersion: serviceVersionPtr(result.PreviousVersion), InstalledVersion: serviceVersionPtr(result.InstalledVersion)})
+		noteUpdatesChanged()
 	}
 	log.Info().Str("napp", current.ID).Msg("update complete")
 	return result, nil

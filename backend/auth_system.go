@@ -154,7 +154,7 @@ func (s *ServiceSigner) SwitchSystem(ctx context.Context, socket string, persist
 		s.pendingCancel = nil
 	}
 	stopped := s.stopLocked(ctx)
-	s.status = SignerStatus{Mode: "system", ConnectionState: "disconnected"}
+	s.setStatusLocked(SignerStatus{Mode: "system", ConnectionState: "disconnected"})
 	if !stopped || !filepath.IsAbs(socket) || filepath.Clean(socket) != socket {
 		return s.status, errServiceSignerUnavailable
 	}
@@ -180,7 +180,7 @@ func (s *ServiceSigner) connectSystemLocked(k *systemKeyer, pk nostr.PubKey) {
 	_, cancel := context.WithCancel(context.Background())
 	s.keyer = &revocableKeyer{active: true, inner: k}
 	publishIdentity(s.keyer, pk, cancel)
-	s.status = SignerStatus{Mode: "system", PublicKey: pk.Hex(), ConnectionState: "connected"}
+	s.setStatusLocked(SignerStatus{Mode: "system", PublicKey: pk.Hex(), ConnectionState: "connected"})
 	pushIdentityChanged()
 }
 

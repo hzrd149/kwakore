@@ -1,6 +1,10 @@
 package backend
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/rs/zerolog"
+)
 
 // The launcher has one theme at a time and every napp tracks it. The colors
 // themselves belong to whoever draws the launcher (a Gio palette, a Compose
@@ -86,16 +90,19 @@ func SetTheme(name, varsJSON string) {
 
 	log.Info().Str("theme", name).Msg("theme changed")
 	notifyState()
-	go broadcastTheme()
+	// the push logs with the logger of the moment, read here rather than in
+	// the goroutine, which may outlive a service that a later Start replaces
+	// (the daemon tests open one service after another)
+	go broadcastTheme(log)
 }
 
 // broadcastTheme pushes the current theme into every running napp window.
-func broadcastTheme() {
+func broadcastTheme(logger zerolog.Logger) {
 	name, vars := Theme()
 	open := allInstances()
 	for _, ci := range open {
 		ci.send(WireMsg{T: "theme", Method: name, Params: vars})
 	}
-	log.Debug().Str("theme", name).Int("napps", len(open)).Msg("pushed theme to napps")
+	logger.Debug().Str("theme", name).Int("napps", len(open)).Msg("pushed theme to napps")
 	broadcastNappletTheme()
 }

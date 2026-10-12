@@ -117,6 +117,10 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			if m.override.SyncID == nil {
 				return nil
 			}
+		case "theme":
+			if m.override.Theme == nil {
+				return nil
+			}
 		}
 	}
 	next := cloneConfig(m.override)
@@ -152,6 +156,12 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 				return errors.New("sync_id: expected string")
 			}
 			next.SyncID = &v
+		case "theme":
+			v, ok := value.(string)
+			if !ok {
+				return errors.New("theme: expected string")
+			}
+			next.Theme = &v
 		case "signer":
 			v, ok := value.(Signer)
 			if !ok {
@@ -173,6 +183,8 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			next.GNOMESearch = nil
 		case "sync_id":
 			next.SyncID = nil
+		case "theme":
+			next.Theme = nil
 		}
 	}
 	if err := validateMerged(m.file, next); err != nil {
@@ -252,6 +264,10 @@ func cloneConfig(c Config) Config {
 	if c.SyncID != nil {
 		v := *c.SyncID
 		n.SyncID = &v
+	}
+	if c.Theme != nil {
+		v := *c.Theme
+		n.Theme = &v
 	}
 	if c.Signer != nil {
 		v := *c.Signer

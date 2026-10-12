@@ -361,6 +361,20 @@ on stdout and logs to stderr. A second daemon for the same data directory
 fails with `daemon already running for this user; inspect status or stop the
 existing instance`.
 
+**Updates.** Kwakore never updates a napplet on its own. It looks for newer
+versions in the background (about two minutes after it starts and every six
+hours), and `kwak updates` looks right away; `kwak installed` then shows the
+version found as `update available`. Install one with `kwak update ADDRESS`.
+`kwak detail ADDRESS` shows a napplet's public details (author, kind, install
+state, installed version, any update found, declared network domains and the
+versions known locally) without asking any relay.
+
+```console
+$ kwak updates
+$ kwak update nostr:naddr1...
+$ kwak detail nostr:naddr1...
+```
+
 ## Napplet catalog
 
 Napplets can call `await window.napplet.catalog.get()` to discover installed,
@@ -524,11 +538,12 @@ optional; reading, validating or inspecting missing files creates nothing.
   "discover_on_user_relays": true,
   "desktop_entries": true,
   "gnome_search": true,
+  "theme": "system",
   "signer": { "mode": "none" }
 }
 ```
 
-The first five values are the built-in defaults. `relays` accepts canonical
+The first six values are the built-in defaults. `relays` accepts canonical
 `wss://` URLs with a host. `blossom_servers` accepts canonical `http://` or
 `https://` URLs with a host. URL hosts must be lowercase; duplicate URLs, user
 information, queries and fragments are rejected, and relay URLs with a
@@ -549,6 +564,13 @@ printable ASCII characters without spaces; an empty string, like omitting it,
 turns sync off, so an override of `""` switches off an id set in
 `config.json`. An invalid value is rejected without repeating it in the error.
 
+`theme` is the napplet window theme: `system` (the default), `light` or
+`dark`. New windows start with it, and a change reaches open windows at once.
+`system` follows your desktop's light/dark preference, read from the XDG
+desktop portal (`org.freedesktop.appearance` `color-scheme`) and followed
+while the service runs; without a portal it is light. Any other value,
+including a different letter case, is rejected without repeating it.
+
 Both `config.json` and `settings-overrides.json` use the same strict parser:
 the root must be one JSON object of at most 1 MiB; unknown or duplicate
 fields, trailing JSON, wrong types, malformed URLs, explicit `null` and
@@ -564,7 +586,7 @@ field's file value, or its default when the file omits it. Empty arrays and
 
 **Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
 and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
-`discover_on_user_relays`, `desktop_entries`, `gnome_search`, or `sync_id`. They write only `settings-overrides.json`,
+`discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, or `theme`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
@@ -575,7 +597,15 @@ gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
 Explicit schemes are preserved. The daemon still validates canonical URLs,
 and direct edits to `config.json` must include schemes. `sync_id` takes a JSON
 string or a bare word: `kwak settings set sync_id laptops` and
-`kwak settings set sync_id '"laptops"'` are the same.
+`kwak settings set sync_id '"laptops"'` are the same, and `theme` works the
+same way. A theme change applies to every open napplet window at once, and
+`system` follows the desktop portal's light/dark preference (light without a
+portal):
+
+```console
+$ kwak settings set theme dark
+$ kwak settings clear theme
+```
 
 ```console
 $ kwak settings set relays '["wss://relay.example.com"]'
@@ -697,7 +727,12 @@ synced.
 - A pass runs at start, when the signer changes, when `sync_id` changes, a
   couple of seconds after a local install, update or uninstall, when another
   machine publishes a newer list, and every 30 minutes.
-- Failures appear only in the journal
+- `kwak diagnostics` shows an `install_sync` object: whether sync is on, the
+  times of the last pass and the last successful one, the result of the last
+  pass (`ok`, `failed`, `unreadable` or `skipped` when nobody is signed in) and
+  the number of napplets on the list. It is empty until the first pass since
+  the service started.
+- The details of a failure appear only in the journal
   (`journalctl --user -u kwakore.service`) and are retried on the next pass;
   a failed install or uninstall is never turned into the opposite change. A
   list that cannot be decrypted or read is left alone: nothing is installed,
@@ -751,6 +786,25 @@ files with the same parser and ownership checks and report
 `"observed_from":"files"`, with `null` for what only a live daemon knows. They
 take no lock and create nothing. On a helper install the daemon binary is
 `~/.local/lib/kwakore/current/kwakore`.
+
+**Following events.** `kwak events` stays connected and prints one line per
+service event as it happens: windows opening and closing, installs, updates
+and uninstalls, newly found updates, signer and settings changes, and the end
+of each installed-list sync pass. `--type` keeps only the named types, and
+`--json` prints one JSON object per line for scripts. A reader that falls
+behind gets one `events.overflow` line counting what it missed. The command
+ends with an error when the service stops.
+
+```console
+$ kwak events
+2026-10-12T09:00:00Z settings.changed fields=["theme"]
+$ kwak --json events --type window.opened
+{"type":"window.opened","time":"2026-10-12T09:00:05Z","window_id":"0123456789abcdef0123456789abcdef","address":"35129:aaaa…:notes","name":"Notes"}
+```
+
+Events carry names, addresses, versions and public signer status only, never
+setting values, paths, relay URLs or keys; read the current values with
+`kwak settings get`.
 
 **CLI errors.** By default, failures write a readable message to stderr. With `--json`, every failure writes one JSON object to stderr. Both modes write nothing to stdout and exit 1. Codes and messages are fixed (the full table is in the
 [protocol reference](control-protocol.md#errors)):

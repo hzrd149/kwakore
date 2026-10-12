@@ -84,6 +84,7 @@ let
     "desktop_entries"
     "gnome_search"
     "sync_id"
+    "theme"
     "signer"
   ];
   # the same fragments serviceconfig refuses in a config file
@@ -139,6 +140,7 @@ let
         desktop_entries
         gnome_search
         sync_id
+        theme
         ;
       signer =
         if signer == null then
@@ -171,7 +173,7 @@ let
       if secretLike name then
         "${describeSecret "programs.kwakore.settings" name}: secret field is forbidden; supply signer secrets with `kwakore signer` --secret-stdin or --secret-file"
       else
-        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id or signer"
+        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, theme or signer"
     ) extraKeys
     ++ map (
       name:
@@ -187,6 +189,14 @@ let
     ++ lib.optional (
       settings.sync_id != null && builtins.match "[!-~]{0,64}" settings.sync_id == null
     ) "programs.kwakore.settings.sync_id: use 1 to 64 printable ASCII characters without spaces"
+    ++ lib.optional (
+      settings.theme != null
+      && !(builtins.elem settings.theme [
+        "system"
+        "light"
+        "dark"
+      ])
+    ) "programs.kwakore.settings.theme: use system, light or dark"
     ++ lib.optional (
       signer != null && signer.mode == "bunker" && (signer.relay == null || !validRelay signer.relay)
     ) "programs.kwakore.settings.signer.relay: bunker needs a canonical wss:// relay URL"
@@ -314,6 +324,11 @@ in
               type = lib.types.nullOr lib.types.str;
               default = null;
               description = "Identifier of the NIP-78 event that syncs the installed napplet list across machines; empty turns sync off.";
+            };
+            theme = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Napplet window theme: system, light or dark.";
             };
             signer = lib.mkOption {
               default = null;

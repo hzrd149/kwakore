@@ -84,6 +84,9 @@ func run(args []string) error {
 	if err != nil || uid != uint32(os.Geteuid()) {
 		return errors.New("unauthorized server")
 	}
+	if method == "events.subscribe" {
+		return runEvents(conn, params, timeoutOverride, jsonOutput, os.Stdout)
+	}
 	deadline := 30 * time.Second
 	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "napplet.try" || method == "signer.pair.wait" {
 		deadline = 180 * time.Second
@@ -91,6 +94,10 @@ func run(args []string) error {
 	if method == "napplet.discover" {
 		// a refresh is bounded by the 30s relay cap plus a short drain
 		deadline = 45 * time.Second
+	}
+	if method == "napplet.updates.check" {
+		// the daemon bounds the relay lookups at 60s and the call at 75s
+		deadline = 90 * time.Second
 	}
 	if timeoutOverride > 0 {
 		deadline = timeoutOverride
@@ -477,6 +484,48 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{addr.Canonical, relays})
 		return "napplet." + args[0], params, socketPath, nil
 	}
+	if len(args) >= 1 && args[0] == "events" {
+		types, err := eventTypeArgs(args[1:])
+		if err != nil {
+			return "", nil, "", err
+		}
+		if len(types) == 0 {
+			return "events.subscribe", nil, socketPath, nil
+		}
+		params, _ := json.Marshal(struct {
+			Types []string `json:"types"`
+		}{types})
+		return "events.subscribe", params, socketPath, nil
+	}
+	if len(args) >= 1 && args[0] == "updates" {
+		switch len(args) {
+		case 1:
+			return "napplet.updates.check", nil, socketPath, nil
+		case 2:
+			addr, err := commandAddress(args[1], false)
+			if err != nil {
+				return "", nil, "", err
+			}
+			params, _ := json.Marshal(struct {
+				Address string `json:"address"`
+			}{addr.Canonical})
+			return "napplet.updates.check", params, socketPath, nil
+		}
+		return "", nil, "", inputFailure("usage: kwak updates [ADDRESS]")
+	}
+	if len(args) >= 1 && args[0] == "detail" {
+		if len(args) != 2 {
+			return "", nil, "", inputFailure("usage: kwak detail ADDRESS")
+		}
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{addr.Canonical})
+		return "napplet.detail", params, socketPath, nil
+	}
 	if len(args) == 2 && args[0] == "launch" {
 		addr, err := commandAddress(args[1], false)
 		if err != nil {
@@ -612,9 +661,9 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		case "set":
 			if len(args) == 4 && settingField(args[2]) {
 				value := json.RawMessage(args[3])
-				// a bare word is taken as the sync_id string, like the URL
-				// scheme normalization below
-				if args[2] == "sync_id" && !strings.HasPrefix(args[3], `"`) {
+				// a bare word is taken as the sync_id or theme string, like
+				// the URL scheme normalization below
+				if (args[2] == "sync_id" || args[2] == "theme") && !strings.HasPrefix(args[3], `"`) {
 					value, _ = json.Marshal(args[3])
 				}
 				if !validSettingValue(args[2], value) {
@@ -831,7 +880,7 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 }
 
 func settingField(field string) bool {
-	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" || field == "sync_id"
+	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" || field == "sync_id" || field == "theme"
 }
 
 func validSettingValue(field string, value json.RawMessage) bool {
@@ -845,6 +894,11 @@ func validSettingValue(field string, value json.RawMessage) bool {
 	if field == "sync_id" {
 		var v string
 		return len(value) > 0 && value[0] == '"' && json.Unmarshal(value, &v) == nil
+	}
+	if field == "theme" {
+		// a typo fails here, before dialing
+		var v string
+		return len(value) > 0 && value[0] == '"' && json.Unmarshal(value, &v) == nil && (v == "system" || v == "light" || v == "dark")
 	}
 	if len(value) == 0 || value[0] != '[' {
 		return false

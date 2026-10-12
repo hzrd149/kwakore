@@ -224,7 +224,21 @@ func ServiceDiscover(ctx context.Context, query string, refresh bool, offset, li
 	return result, nil
 }
 
-func ServiceInstalled(offset, limit int) ServicePage {
+// ServiceInstalledItem is an installed napplet's descriptor plus the newer
+// valid version the last update check found for it. UpdateAvailable is
+// always present on the wire, as a Version or null.
+type ServiceInstalledItem struct {
+	ServiceDescriptor
+	UpdateAvailable *ServiceVersion `json:"update_available"`
+}
+
+type ServiceInstalledPage struct {
+	Items      []ServiceInstalledItem `json:"items"`
+	Total      int                    `json:"total"`
+	NextOffset *int                   `json:"next_offset"`
+}
+
+func ServiceInstalled(offset, limit int) ServiceInstalledPage {
 	stateMu.Lock()
 	type storedDescriptor struct {
 		key  string
@@ -235,25 +249,28 @@ func ServiceInstalled(offset, limit int) ServicePage {
 		stored = append(stored, storedDescriptor{key: key, napp: n})
 	}
 	stateMu.Unlock()
-	type sortedDescriptor struct {
-		key        string
-		descriptor ServiceDescriptor
+	type sortedItem struct {
+		key  string
+		item ServiceInstalledItem
 	}
-	sorted := make([]sortedDescriptor, len(stored))
+	sorted := make([]sortedItem, len(stored))
 	for i, row := range stored {
-		sorted[i] = sortedDescriptor{key: row.key, descriptor: serviceDescriptor(row.napp)}
+		// the descriptor comes from the unstamped record, so available keeps
+		// its meaning; the update entry is read from a stamped copy
+		sorted[i] = sortedItem{key: row.key, item: ServiceInstalledItem{ServiceDescriptor: serviceDescriptor(row.napp), UpdateAvailable: serviceUpdateVersion(row.napp)}}
 	}
 	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].descriptor.Address == sorted[j].descriptor.Address {
+		if sorted[i].item.Address == sorted[j].item.Address {
 			return sorted[i].key < sorted[j].key
 		}
-		return sorted[i].descriptor.Address < sorted[j].descriptor.Address
+		return sorted[i].item.Address < sorted[j].item.Address
 	})
-	items := make([]ServiceDescriptor, len(sorted))
+	items := make([]ServiceInstalledItem, len(sorted))
 	for i, row := range sorted {
-		items[i] = row.descriptor
+		items[i] = row.item
 	}
-	return servicePage(items, offset, limit)
+	page, total, next := pageOf(items, offset, limit)
+	return ServiceInstalledPage{Items: page, Total: total, NextOffset: next}
 }
 
 func serviceDescriptor(n Napp) ServiceDescriptor {
@@ -304,23 +321,29 @@ func serviceDisplayText(raw string, limit int) string {
 }
 
 func servicePage(items []ServiceDescriptor, offset, limit int) ServicePage {
+	page, total, next := pageOf(items, offset, limit)
+	return ServicePage{Items: page, Total: total, NextOffset: next}
+}
+
+// pageOf is one page of sorted items: never nil, with the offset of the next
+// page when more remain.
+func pageOf[T any](items []T, offset, limit int) ([]T, int, *int) {
 	if offset < 0 {
 		offset = 0
 	}
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	result := ServicePage{Items: []ServiceDescriptor{}, Total: len(items)}
 	if offset >= len(items) {
-		return result
+		return []T{}, len(items), nil
 	}
 	end := offset + limit
 	if end < offset || end > len(items) {
 		end = len(items)
 	}
-	result.Items = items[offset:end]
+	var next *int
 	if end < len(items) {
-		result.NextOffset = &end
+		next = &end
 	}
-	return result
+	return items[offset:end], len(items), next
 }

@@ -33,15 +33,23 @@ func ServiceWindows() []ServiceWindow {
 	open := allInstances()
 	out := make([]ServiceWindow, 0, len(open))
 	for _, ci := range open {
-		id := ci.ID()
-		decoded, err := hex.DecodeString(id)
-		if err != nil || len(decoded) != 16 || hex.EncodeToString(decoded) != id || !ci.napp.IsNapplet() {
+		if !serviceWindowListed(ci) {
 			continue
 		}
-		out = append(out, ServiceWindow{WindowID: id, Address: ci.napp.Address(), Name: ci.napp.Label()})
+		out = append(out, ServiceWindow{WindowID: ci.ID(), Address: ci.napp.Address(), Name: ci.napp.Label()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].WindowID < out[j].WindowID })
 	return out
+}
+
+// serviceWindowListed says whether a window is visible to control clients:
+// a napplet window whose id is the 32-character lowercase hex token the
+// service hands out. napplet.windows lists exactly these, and only these
+// produce window events.
+func serviceWindowListed(ci *Instance) bool {
+	id := ci.ID()
+	decoded, err := hex.DecodeString(id)
+	return err == nil && len(decoded) == 16 && hex.EncodeToString(decoded) == id && ci.napp.IsNapplet()
 }
 
 // ServiceLaunch resolves only an installed canonical address. The host's

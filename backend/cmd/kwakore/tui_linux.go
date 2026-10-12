@@ -498,6 +498,10 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 			var current string
 			_ = json.Unmarshal(m.settings["sync_id"], &current)
 			m.prompt = &tuiPrompt{title: "Set sync_id (empty turns sync off)", action: "setting-string", address: it.address, value: current}
+		} else if it.address == "theme" {
+			var current string
+			_ = json.Unmarshal(m.settings["theme"], &current)
+			m.prompt = &tuiPrompt{title: "Set theme to system, light or dark (empty clears the override)", action: "setting-choice", address: it.address, value: current}
 		} else {
 			m.prompt = &tuiPrompt{title: "Set " + it.address + " to true or false", action: "setting-bool", address: it.address}
 		}
@@ -597,6 +601,16 @@ func (m tuiModel) promptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				b, _ := json.Marshal(value)
 				cmd = m.request("settings", "settings", "set", p.address, string(b))
+			}
+		case "setting-choice":
+			switch value {
+			case "":
+				cmd = m.request("settings", "settings", "clear", p.address)
+			case "system", "light", "dark":
+				b, _ := json.Marshal(value)
+				cmd = m.request("settings", "settings", "set", p.address, string(b))
+			default:
+				m.notice = "Enter system, light or dark"
 			}
 		case "signer-none":
 			if value == "yes" {
@@ -796,7 +810,7 @@ func (m *tuiModel) consume(x tuiResult) {
 		}
 		m.settings = raw
 		m.items = nil
-		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search", "sync_id"} {
+		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search", "sync_id", "theme"} {
 			m.items = append(m.items, tuiItem{label: field, address: field, detail: safeText(string(raw[field])) + "  (" + m.sources[field] + ")"})
 		}
 		m.notice = "Settings loaded"
