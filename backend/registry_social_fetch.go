@@ -20,7 +20,7 @@ import (
 
 // Fetching, keeping and pruning napplet social events. A refresh only runs
 // when a client asks for one (ServiceSocial with refresh), and asks a small
-// relay set for the reactions and comments that name the target, then for
+// relay set for the reactions, comments and mentions that name the target, then for
 // NIP-09 deletions of what is held. Everything it keeps passed the same
 // checks: a real id and signature, an exact tag match, sane size and time,
 // and for a reaction NIP-25's content rules. Relay URLs never leave this
@@ -73,15 +73,26 @@ const (
 	// socialIndexKey is the KV entry holding every address's sync status.
 	socialIndexKey = "kwakore:social:index"
 	// socialMemoTTL bounds how long a memoized aggregate is reused, since
-	// other paths may also write kind 7 and 1111 events to the store.
+	// other paths may also write kind 7, 1111 and 1 events to the store.
 	socialMemoTTL = 15 * time.Second
 )
 
 // socialLimits bound what a refresh fetches and what is kept. Tests shrink
 // them.
 var socialLimits = struct {
-	Reactions, Comments, AuthorComments, AuthorEmoji, IndexEntries, PerFilter int
-}{2000, 1000, 50, 20, 200, 500}
+	Reactions, Comments, Mentions               int
+	AuthorComments, AuthorEmoji, AuthorMentions int
+	IndexEntries, PerFilter                     int
+}{
+	Reactions:      2000,
+	Comments:       1000,
+	Mentions:       500,
+	AuthorComments: 50,
+	AuthorEmoji:    20,
+	AuthorMentions: 50,
+	IndexEntries:   200,
+	PerFilter:      500,
+}
 
 // socialRefreshFloor is how soon a category can be refreshed again; inside
 // it a refresh returns what is held.
@@ -97,11 +108,18 @@ var socialGeneration atomic.Uint64
 
 // socialKind is a category's event kind.
 func socialKind(category string) nostr.Kind {
-	if category == SocialComments {
+	switch category {
+	case SocialComments:
 		return nostr.KindComment
+	case SocialMentions:
+		return nostr.KindTextNote
 	}
 	return nostr.KindReaction
 }
+
+// socialKinds are the kinds held per address: reactions, comments and
+// mentions.
+var socialKinds = []nostr.Kind{nostr.KindReaction, nostr.KindComment, nostr.KindTextNote}
 
 // socialFilters are the relay filters of one category. A snapshot has no
 // address filter, and no filter ever carries an empty tag list, which some
@@ -113,8 +131,8 @@ func socialFilters(t socialTarget, category string) []nostr.Filter {
 	if !t.Snapshot && t.Address != "" {
 		filters = append(filters, nostr.Filter{Kinds: []nostr.Kind{kind}, Tags: nostr.TagMap{aName: {t.Address}}, Limit: socialLimits.PerFilter})
 	}
-	if len(t.VersionIDs) > 0 {
-		filters = append(filters, nostr.Filter{Kinds: []nostr.Kind{kind}, Tags: nostr.TagMap{eName: slices.Clone(t.VersionIDs)}, Limit: socialLimits.PerFilter})
+	if refs := socialRefValues(t, kind); len(refs) > 0 {
+		filters = append(filters, nostr.Filter{Kinds: []nostr.Kind{kind}, Tags: nostr.TagMap{eName: refs}, Limit: socialLimits.PerFilter})
 	}
 	return filters
 }
@@ -201,8 +219,11 @@ func socialHeld(t socialTarget, kind nostr.Kind) []nostr.Event {
 	if !t.Snapshot && len(t.Address) <= 100 {
 		queries = append(queries, nostr.TagMap{aName: {t.Address}})
 	}
-	if len(t.VersionIDs) > 0 {
-		queries = append(queries, nostr.TagMap{eName: slices.Clone(t.VersionIDs)})
+	// the index cannot hold an address over 100 bytes; the p fallback
+	// below finds those quotes instead
+	refs := slices.DeleteFunc(socialRefValues(t, kind), func(v string) bool { return len(v) > 100 })
+	if len(refs) > 0 {
+		queries = append(queries, nostr.TagMap{eName: refs})
 	}
 	if !t.Snapshot && len(t.Address) > 100 {
 		queries = append(queries, nostr.TagMap{"p": {t.Author.Hex()}})
@@ -502,26 +523,31 @@ func socialOwnKey() nostr.PubKey {
 	return pk
 }
 
-// socialEnforceCaps keeps at most AuthorEmoji emoji reactions and
-// AuthorComments comments per author, then at most Reactions reactions and
-// Comments comments for the address, dropping the oldest. The user's own
-// events are never dropped.
+// socialEnforceCaps keeps at most AuthorEmoji emoji reactions,
+// AuthorComments comments and AuthorMentions mentions per author, then at
+// most Reactions reactions, Comments comments and Mentions mentions for the
+// address, dropping the oldest. The user's own events are never dropped.
 func socialEnforceCaps(t socialTarget) {
 	own := socialOwnKey()
 	keep := func(evt nostr.Event) bool { return own != nostr.ZeroPK && evt.PubKey == own }
 	var drop []nostr.ID
-	for _, kind := range []nostr.Kind{nostr.KindReaction, nostr.KindComment} {
+	for _, kind := range socialKinds {
 		held := socialHeld(t, kind)
-		perAuthor := socialLimits.AuthorComments
-		total := socialLimits.Comments
-		if kind == nostr.KindReaction {
+		var perAuthor, total int
+		switch kind {
+		case nostr.KindReaction:
 			perAuthor, total = socialLimits.AuthorEmoji, socialLimits.Reactions
+		case nostr.KindComment:
+			perAuthor, total = socialLimits.AuthorComments, socialLimits.Comments
+		default:
+			perAuthor, total = socialLimits.AuthorMentions, socialLimits.Mentions
 		}
 		slices.SortFunc(held, socialOrder) // newest first
 		counts := map[nostr.PubKey]int{}
 		var kept []nostr.Event
 		for _, evt := range held {
-			capped := kind == nostr.KindComment || !isVoteContent(evt.Content)
+			// only a vote escapes the per-author cap; an empty note is capped
+			capped := kind != nostr.KindReaction || !isVoteContent(evt.Content)
 			if capped && !keep(evt) {
 				counts[evt.PubKey]++
 				if counts[evt.PubKey] > perAuthor {
@@ -550,12 +576,12 @@ func socialEnforceCaps(t socialTarget) {
 	}
 }
 
-// socialPruneEvents removes t's held reactions and comments except the
-// user's own. Tombstones stay: they only block a re-ingest.
+// socialPruneEvents removes t's held reactions, comments and mentions except
+// the user's own. Tombstones stay: they only block a re-ingest.
 func socialPruneEvents(t socialTarget) {
 	own := socialOwnKey()
 	changed := false
-	for _, kind := range []nostr.Kind{nostr.KindReaction, nostr.KindComment} {
+	for _, kind := range socialKinds {
 		for _, evt := range socialHeld(t, kind) {
 			if own != nostr.ZeroPK && evt.PubKey == own {
 				continue
@@ -755,8 +781,10 @@ func socialAggregate(t socialTarget) (ServiceSocialSummary, []nostr.Event) {
 	}
 	reactions := socialHeld(t, nostr.KindReaction)
 	comments := socialHeld(t, nostr.KindComment)
-	deletions := socialDeletions(append(slices.Clone(reactions), comments...))
+	mentions := socialHeld(t, nostr.KindTextNote)
+	deletions := socialDeletions(slices.Concat(reactions, comments, mentions))
 	summary := socialSummary(t, reactions, comments, deletions, nil)
+	summary.Mentions = mentionSummary(t, mentions, deletions)
 	live := socialLive(reactions, deletions)
 	socialMemo.Lock()
 	if len(socialMemo.entries) >= 64 {

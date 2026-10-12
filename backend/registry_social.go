@@ -26,16 +26,23 @@ import (
 // is not indexed at all, a 64-hex value is indexed by its first 8 bytes and
 // an a-shaped value keeps only 30 bytes of its d. An index hit is therefore
 // a candidate, never a match.
+//
+// A napplet is also mentioned by kind 1 notes, which name it with an "a"
+// tag (a mention) or a NIP-18 "q" tag (a quote). A "q" may name the address
+// as well as a version id; a snapshot is again named only by its id.
 
 // The social categories a client can ask a refresh for.
 const (
 	SocialReactions = "reactions"
 	SocialComments  = "comments"
+	SocialMentions  = "mentions"
 )
 
 const (
 	// socialCommentRunes caps comment text on the wire.
 	socialCommentRunes = 2000
+	// socialMentionRunes caps mention text on the wire.
+	socialMentionRunes = 2000
 	// socialAuthorNameRunes caps an author's cached display name.
 	socialAuthorNameRunes = 64
 	// socialReactionRunes caps reaction content on the wire; ingest already
@@ -54,7 +61,7 @@ var ErrServiceInvalidSocial = errors.New("invalid social parameters")
 // SocialCategories is every category a refresh can name, sorted. The daemon
 // validates params against it, so the two lists cannot drift.
 func SocialCategories() []string {
-	return []string{SocialComments, SocialReactions}
+	return []string{SocialComments, SocialMentions, SocialReactions}
 }
 
 // socialTarget is one canonical napplet address and the event ids that name
@@ -111,15 +118,47 @@ func newSocialTarget(address string) (socialTarget, error) {
 
 // socialTagNames are the address and event tag names that link evt's kind
 // to its target: lowercase for a reaction, the uppercase root scope for a
-// comment.
+// comment, and "a" and the NIP-18 quote "q" for a note.
 func socialTagNames(kind nostr.Kind) (string, string, bool) {
 	switch kind {
 	case nostr.KindReaction:
 		return "a", "e", true
 	case nostr.KindComment:
 		return "A", "E", true
+	case nostr.KindTextNote:
+		return "a", "q", true
 	}
 	return "", "", false
+}
+
+// socialRefValue says whether value, in kind's event tag, names t: a known
+// version id, or for a note's "q" also the address (never a snapshot's).
+func socialRefValue(t socialTarget, kind nostr.Kind, value string) bool {
+	if slices.Contains(t.VersionIDs, value) {
+		return true
+	}
+	return kind == nostr.KindTextNote && !t.Snapshot && t.Address != "" && value == t.Address
+}
+
+// socialRefValues are the values kind's event tag may carry to name t: the
+// tag list of its relay filter and local query.
+func socialRefValues(t socialTarget, kind nostr.Kind) []string {
+	values := slices.Clone(t.VersionIDs)
+	if kind == nostr.KindTextNote && !t.Snapshot && t.Address != "" {
+		values = append([]string{t.Address}, values...)
+	}
+	return values
+}
+
+// socialMentionQuote says whether a note quotes t: one of its "q" tags
+// names it.
+func socialMentionQuote(evt nostr.Event, t socialTarget) bool {
+	for _, tag := range evt.Tags {
+		if len(tag) >= 2 && tag[0] == "q" && socialRefValue(t, nostr.KindTextNote, tag[1]) {
+			return true
+		}
+	}
+	return false
 }
 
 // socialMatches says whether evt names t exactly.
@@ -135,7 +174,7 @@ func socialMatches(evt nostr.Event, t socialTarget) bool {
 		if tag[0] == aName && !t.Snapshot && tag[1] == t.Address {
 			return true
 		}
-		if tag[0] == eName && slices.Contains(t.VersionIDs, tag[1]) {
+		if tag[0] == eName && socialRefValue(t, evt.Kind, tag[1]) {
 			return true
 		}
 	}
@@ -203,7 +242,7 @@ func socialCategoriesParam(categories []string) ([]string, error) {
 	return slices.Clone(categories), nil
 }
 
-// ServiceSocial is the reactions and comments summary of a napplet address,
+// ServiceSocial is the reactions, comments and mentions summary of a napplet address,
 // installed or not, read from the local store. refresh first asks relays for
 // the named categories (all when none are named), within the refresh floor.
 func ServiceSocial(ctx context.Context, address string, refresh bool, categories []string) (ServiceSocialSummary, error) {
@@ -280,6 +319,19 @@ func ServiceComments(ctx context.Context, address, parentID string, offset, limi
 	return ServiceCommentPage{Items: items, Total: total, NextOffset: next}, nil
 }
 
+// ServiceMentions pages the kind 1 notes that mention or quote a napplet,
+// newest first.
+func ServiceMentions(ctx context.Context, address string, offset, limit int) (ServiceMentionPage, error) {
+	t, live, err := socialRead(ctx, address, "", nostr.KindTextNote)
+	if err != nil {
+		return ServiceMentionPage{}, err
+	}
+	items, total, next := pageOf(mentionItems(t, live), offset, limit)
+	items = slices.Clone(items)
+	socialAuthorNames(items, func(m *ServiceMention) (string, *string) { return m.Author, &m.AuthorName })
+	return ServiceMentionPage{Items: items, Total: total, NextOffset: next}, nil
+}
+
 // ─── wire types ─────────────────────────────────────────────────────────
 
 // ServiceSocialSync is one category's last refresh: a lookup_status value
@@ -314,6 +366,10 @@ type ServiceSocialCommentSummary struct {
 	LatestAt *int64 `json:"latest_at"`
 }
 
+type ServiceSocialMentionSummary struct {
+	Count int `json:"count"`
+}
+
 type ServiceSocialOwnReaction struct {
 	ID      string `json:"id"`
 	Content string `json:"content"`
@@ -334,6 +390,7 @@ type ServiceSocialSummary struct {
 	Emoji    []ServiceSocialEmoji         `json:"emoji"`
 	ByEvent  []ServiceSocialByEvent       `json:"by_event"`
 	Comments ServiceSocialCommentSummary  `json:"comments"`
+	Mentions ServiceSocialMentionSummary  `json:"mentions"`
 	// Own is null when no signer is set up.
 	Own *ServiceSocialOwn `json:"own"`
 }
@@ -369,6 +426,24 @@ type ServiceReactionPage struct {
 
 type ServiceCommentPage struct {
 	Items      []ServiceComment `json:"items"`
+	Total      int              `json:"total"`
+	NextOffset *int             `json:"next_offset"`
+}
+
+// ServiceMention is a kind 1 note about a napplet. Quote is true when the
+// note quotes it with a "q" tag, false for an "a" tag mention only.
+type ServiceMention struct {
+	ID         string `json:"id"`
+	Author     string `json:"author"`
+	AuthorName string `json:"author_name,omitempty"`
+	Content    string `json:"content"`
+	Truncated  bool   `json:"truncated"`
+	CreatedAt  int64  `json:"created_at"`
+	Quote      bool   `json:"quote"`
+}
+
+type ServiceMentionPage struct {
+	Items      []ServiceMention `json:"items"`
 	Total      int              `json:"total"`
 	NextOffset *int             `json:"next_offset"`
 }

@@ -427,39 +427,42 @@ after the new selection commits, the journal remains and launch returns `Busy`;
 restart the daemon to retry recovery before running that napplet. Its installed
 record shows which event was committed.
 
-**Reactions and comments.** Kwakore can show what people said about any
-napplet, installed or not: votes and emoji reactions (NIP-25) and comments
-(NIP-22).
+**Reactions, comments and mentions.** Kwakore can show what people said about
+any napplet, installed or not: votes and emoji reactions (NIP-25), comments
+(NIP-22) and notes that mention or quote it (kind 1, NIP-18).
 
 ```console
 $ kwak social nostr:naddr1... --refresh
 $ kwak reactions nostr:naddr1... --event EVENT_ID
 $ kwak comments nostr:naddr1... --parent COMMENT_ID
+$ kwak mentions nostr:naddr1...
 ```
 
-These three commands only read; they never publish. `social` summarizes votes,
-emoji, a per-version breakdown and the comment count, and with a signer your
-own vote and reactions. Without `--refresh` it shows what Kwakore already
-holds; `--refresh` asks the author's relays, the discovery relays and your read
-relays, at most once per 30 seconds per category, and `--only reactions` or
-`--only comments` narrows it. `reactions` and `comments` page through the held
-events, newest first; `comments --parent ID` lists the replies to one comment.
-Only events that name the napplet exactly are kept, and an author's own
-deletion removes their event for good.
+These four commands only read; they never publish. `social` summarizes votes,
+emoji, a per-version breakdown and the comment and mention counts, and with a
+signer your own vote and reactions. Without `--refresh` it shows what Kwakore
+already holds; `--refresh` asks the author's relays, the discovery relays and
+your read relays, at most once per 30 seconds per category, and `--only
+reactions`, `--only comments` or `--only mentions` narrows it. `reactions`,
+`comments` and `mentions` page through the held events, newest first;
+`comments --parent ID` lists the replies to one comment, and a mention says
+whether it quotes the napplet. Only events that name the napplet exactly are
+kept, and an author's own deletion removes their event for good.
 
 Social events are kept in the local event store (`eventstore` in the data
 directory), and each napplet's sync status in the kvstore (`kvstore`), within per-author and per-napplet limits (see the
 [control protocol](control-protocol.md)). Uninstalling a napplet removes its
-reactions and comments, except your own.
+reactions, comments and mentions, except your own.
 
-With a signer set up (`kwak signer`), you can also vote, react, comment and
-delete what you published:
+With a signer set up (`kwak signer`), you can also vote, react, comment, share
+and delete what you published:
 
 ```console
 $ kwak vote nostr:naddr1... up
 $ kwak react nostr:naddr1... :pepe: --url https://cdn.example/pepe.png
 $ kwak comment nostr:naddr1... "Works great"
 $ kwak comment nostr:naddr1... "Thanks!" --reply COMMENT_ID
+$ kwak share nostr:naddr1... "Try this napplet"
 $ kwak unpublish nostr:naddr1... EVENT_ID
 ```
 
@@ -468,7 +471,9 @@ napplet author's inbox relays (and, for a reply, the parent author's), and
 shows it in `kwak social` at once. `vote` takes `up`, `down` or `none`; a vote
 already in place publishes nothing, and a new vote withdraws your previous
 ones once a relay took it. `react` is for emoji; `+` and `-` are votes.
-`unpublish` deletes one of your own reactions or comments on that napplet.
+`share` publishes a note that quotes the napplet: your text, if any, followed
+by the napplet's `nostr:` link, tagging its author. `unpublish` deletes one of
+your own reactions, comments or shares on that napplet.
 `published: 0` in the result means no relay took the event: it is kept
 locally, but other people will not see it until you publish again. Without a
 signer these commands fail with the `signer_unavailable` error below.
@@ -958,7 +963,7 @@ setting values, paths, relay URLs or keys; read the current values with
 | --- | --- |
 | `{"error":{"code":1004,"message":"Unavailable"}}` | no daemon answered: the socket is not enabled or started, `XDG_RUNTIME_DIR` is unsafe, or the start limit was hit (see `systemctl --user status kwakore.socket`) |
 | `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` | the daemon has no `DISPLAY` or `WAYLAND_DISPLAY` ([graphical session](#graphical-session)) |
-| `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` | `vote`, `react`, `comment` or `unpublish` without a signer; set one up with `kwak signer` |
+| `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"signer_unavailable"}}}` | `vote`, `react`, `comment`, `share` or `unpublish` without a signer; set one up with `kwak signer` |
 | `{"error":{"code":1002,"message":"Not found"}}` | the address is not installed (or, for `stop`, the window is gone) |
 | `{"error":{"code":1006,"message":"Invalid configuration"}}` | a `settings set` value or a reload failed validation; nothing changed |
 | `{"error":{"code":-32602,"message":"Invalid params"}}` | the command line itself is wrong: unknown command, bad option, bad secret source or launch token |
