@@ -123,8 +123,39 @@ func socialCommentsOf(t socialTarget, events []nostr.Event) []nostr.Event {
 	return out
 }
 
+func socialMentionsOf(t socialTarget, events []nostr.Event) []nostr.Event {
+	out := make([]nostr.Event, 0, len(events))
+	for _, evt := range events {
+		if evt.Kind == nostr.KindTextNote && socialMatches(evt, t) {
+			out = append(out, evt)
+		}
+	}
+	return out
+}
+
+// mentionSummary counts t's live mentions.
+func mentionSummary(t socialTarget, mentions, deletions []nostr.Event) ServiceSocialMentionSummary {
+	return ServiceSocialMentionSummary{Count: len(socialLive(socialMentionsOf(t, mentions), deletions))}
+}
+
+// mentionItems lists t's mentions newest first. Pass live events.
+func mentionItems(t socialTarget, mentions []nostr.Event) []ServiceMention {
+	mentions = slices.Clone(socialMentionsOf(t, mentions))
+	slices.SortFunc(mentions, socialOrder)
+	out := []ServiceMention{}
+	for _, evt := range mentions {
+		text, truncated := socialText(evt.Content, socialMentionRunes)
+		out = append(out, ServiceMention{
+			ID: evt.ID.Hex(), Author: evt.PubKey.Hex(), Content: text, Truncated: truncated,
+			CreatedAt: int64(evt.CreatedAt), Quote: socialMentionQuote(evt, t),
+		})
+	}
+	return out
+}
+
 // socialSummary aggregates the live reactions and comments of t. Sync is
-// left for the caller; Own is nil without a viewer.
+// left for the caller, Mentions for socialAggregate; Own is nil without a
+// viewer.
 func socialSummary(t socialTarget, reactions, comments, deletions []nostr.Event, viewer *nostr.PubKey) ServiceSocialSummary {
 	reactions = socialLive(socialReactionsOf(t, reactions), deletions)
 	comments = socialLive(socialCommentsOf(t, comments), deletions)

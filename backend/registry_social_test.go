@@ -180,7 +180,7 @@ func TestSocialEmojiURL(t *testing.T) {
 
 func TestSocialCategoriesSorted(t *testing.T) {
 	got := SocialCategories()
-	if !slices.Equal(got, []string{SocialComments, SocialReactions}) || !slices.IsSorted(got) {
+	if !slices.Equal(got, []string{SocialComments, SocialMentions, SocialReactions}) || !slices.IsSorted(got) {
 		t.Fatalf("categories %v", got)
 	}
 }

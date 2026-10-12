@@ -27,7 +27,7 @@ func TestRPCSocialStrictParams(t *testing.T) {
 		"napplet.social": append(cloneParams(common),
 			`{`+addr+`,"refresh":null}`, `{`+addr+`,"refresh":"true"}`,
 			`{`+addr+`,"categories":null}`, `{`+addr+`,"categories":"reactions"}`,
-			`{`+addr+`,"categories":[]}`, `{`+addr+`,"categories":["mentions"]}`,
+			`{`+addr+`,"categories":[]}`, `{`+addr+`,"categories":["zaps"]}`,
 			`{`+addr+`,"categories":["reactions","reactions"]}`, `{`+addr+`,"categories":["reactions",null]}`,
 			`{`+addr+`,"categories":[1]}`,
 			`{`+addr+`,"offset":0}`, `{`+addr+`,"event_id":"`+strings.Repeat("a", 64)+`"}`,
@@ -52,7 +52,7 @@ func TestRPCSocialStrictParams(t *testing.T) {
 			if rpcErr == nil || rpcErr.Code != controlprotocol.InvalidParams {
 				t.Fatalf("%s %s: %+v %s", method, p, rpcErr, raw)
 			}
-			for _, echoed := range []string{"bad", "mentions", upper, short, nonHex, "extra"} {
+			for _, echoed := range []string{"bad", "zaps", upper, short, nonHex, "extra"} {
 				if strings.Contains(raw, echoed) {
 					t.Fatalf("%s %s echoed %q: %s", method, p, echoed, raw)
 				}
@@ -76,11 +76,12 @@ func TestRPCSocialUnknownAddress(t *testing.T) {
 	}
 	want := map[string]string{
 		"address":  `"` + address + `"`,
-		"sync":     `{"comments":{"status":"not_requested","synced_at":null},"reactions":{"status":"not_requested","synced_at":null}}`,
+		"sync":     `{"comments":{"status":"not_requested","synced_at":null},"mentions":{"status":"not_requested","synced_at":null},"reactions":{"status":"not_requested","synced_at":null}}`,
 		"votes":    `{"up":0,"down":0,"score":0}`,
 		"emoji":    `[]`,
 		"by_event": `[]`,
 		"comments": `{"count":0,"latest_at":null}`,
+		"mentions": `{"count":0}`,
 		"own":      `null`,
 	}
 	if len(summary) != len(want) {

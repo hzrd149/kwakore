@@ -400,11 +400,12 @@ func TestSocialRefreshSingleflightAndFloor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// one #a filter per category (no version ids, so no #e/#E), then one
-	// deletion chunk for the held reaction
+	// one #a filter per category (no version ids, so no #e/#E), plus the
+	// #q filter of mentions that names the address, then one deletion
+	// chunk for the held reaction
 	first := relay.reqs.Load()
-	if first != 3 {
-		t.Fatalf("%d relay queries for two concurrent refreshes, want 3", first)
+	if first != 5 {
+		t.Fatalf("%d relay queries for two concurrent refreshes, want 5", first)
 	}
 	summary, err := ServiceSocial(t.Context(), address, true, nil)
 	if err != nil {
@@ -506,7 +507,12 @@ func TestSocialFiltersNeverEmptyTagLists(t *testing.T) {
 	named := socialTarget{Address: nappletAddress(pk, "app"), Author: pk, Kind: KindNapplet, VersionIDs: []string{}}
 	for _, category := range SocialCategories() {
 		filters := socialFilters(named, category)
-		if len(filters) != 1 {
+		// a note may quote the address itself, so mentions also ask #q
+		want := 1
+		if category == SocialMentions {
+			want = 2
+		}
+		if len(filters) != want {
 			t.Fatalf("%s: %d filters without version ids", category, len(filters))
 		}
 		for _, f := range filters {
@@ -529,6 +535,10 @@ func TestSocialFiltersNeverEmptyTagLists(t *testing.T) {
 	comments := socialFilters(snapshot, SocialComments)
 	if len(comments) != 1 || len(comments[0].Tags["E"]) != 1 || comments[0].Tags["A"] != nil {
 		t.Fatalf("snapshot comment filters %+v", comments)
+	}
+	mentions := socialFilters(snapshot, SocialMentions)
+	if len(mentions) != 1 || !slices.Equal(mentions[0].Tags["q"], []string{id}) || mentions[0].Tags["a"] != nil {
+		t.Fatalf("snapshot mention filters %+v", mentions)
 	}
 }
 
@@ -628,7 +638,7 @@ func TestSocialServiceErrors(t *testing.T) {
 	if _, err := ServiceSocial(t.Context(), "bad", false, nil); !errors.Is(err, ErrServiceInvalidAddress) {
 		t.Fatalf("bad address: %v", err)
 	}
-	for _, categories := range [][]string{{"mentions"}, {SocialReactions, SocialReactions}, {""}} {
+	for _, categories := range [][]string{{"zaps"}, {SocialReactions, SocialReactions}, {""}} {
 		if _, err := ServiceSocial(t.Context(), address, false, categories); !errors.Is(err, ErrServiceInvalidSocial) {
 			t.Fatalf("%v: %v", categories, err)
 		}
