@@ -307,14 +307,17 @@ Example: kwak diagnostics
 Usage: kwak events [--type TYPE]...
   --type TYPE  Only this event type; repeat for more (default: all)
 TYPE: napplet.installed, napplet.uninstalled, napplet.updated,
-settings.changed, signer.changed, sync.completed, updates.available,
-window.closed, or window.opened.
+settings.changed, signer.changed, social.updated, sync.completed,
+updates.available, window.closed, or window.opened.
+social.updated names a napplet and the social categories whose data
+changed; re-read them with kwak social.
 Prints one line per event: its time, its type and its fields. --json prints
 one JSON object per line. A reader that falls behind gets one
 events.overflow line counting the events it missed; re-read the state you
 follow then. Stops with an error when the service ends the stream, or with
 success when --timeout passes.
 Example: kwak --json events --type window.opened
+Example: kwak events --type social.updated
 `,
 	"installed": `List installed napplets.
 

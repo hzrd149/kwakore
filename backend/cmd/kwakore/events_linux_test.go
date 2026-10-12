@@ -23,6 +23,10 @@ func TestCLIEventsCommand(t *testing.T) {
 	if err != nil || method != "events.subscribe" || string(params) != `{"types":["window.opened","window.closed"]}` {
 		t.Fatalf("events with types: %s %s %v", method, params, err)
 	}
+	method, params, _, err = command([]string{"events", "--type", "social.updated"})
+	if err != nil || method != "events.subscribe" || string(params) != `{"types":["social.updated"]}` {
+		t.Fatalf("events social.updated: %s %s %v", method, params, err)
+	}
 	for _, args := range [][]string{
 		{"events", "--type", "nope"},
 		{"events", "--type", "window.opened", "--type", "window.opened"},

@@ -449,6 +449,18 @@ reactions`, `--only comments` or `--only mentions` narrows it. `reactions`,
 whether it quotes the napplet. Only events that name the napplet exactly are
 kept, and an author's own deletion removes their event for good.
 
+You do not have to refresh installed napplets yourself. The service fetches
+an installed napplet's reactions, comments, mentions and zaps right after you
+install, update or select a version of it, and again every `social_refresh`
+(6 hours by default; see [configuration](#configuration)). The first of these
+periodic passes runs a few minutes after the service starts, and it takes one
+napplet at a time. `kwak settings set social_refresh 0` stops the periodic
+passes but keeps the fetch after an install. Napplets you have not installed
+are fetched only when you ask with `--refresh`. To see when data changes,
+follow `kwak events --type social.updated`: each event names the napplet and
+the categories that changed, and your own votes, reactions, comments, shares
+and deletions announce themselves the same way.
+
 Social events are kept in the local event store (`eventstore` in the data
 directory), and each napplet's sync status in the kvstore (`kvstore`), within per-author and per-napplet limits (see the
 [control protocol](control-protocol.md)). Uninstalling a napplet removes its
@@ -977,8 +989,9 @@ take no lock and create nothing. On a helper install the daemon binary is
 
 **Following events.** `kwak events` stays connected and prints one line per
 service event as it happens: windows opening and closing, installs, updates
-and uninstalls, newly found updates, signer and settings changes, and the end
-of each installed-list sync pass. `--type` keeps only the named types, and
+and uninstalls, newly found updates, signer and settings changes, changes to
+a napplet's reactions, comments, mentions or zaps (`social.updated`), and the
+end of each installed-list sync pass. `--type` keeps only the named types, and
 `--json` prints one JSON object per line for scripts. A reader that falls
 behind gets one `events.overflow` line counting what it missed. The command
 ends with an error when the service stops.

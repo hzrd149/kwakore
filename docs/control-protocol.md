@@ -193,6 +193,17 @@ refresh with the `lookup_status` vocabulary: `not_requested` (never asked,
 `synced_at:null`), `answered`, `partial`, `unavailable` (no relay to ask, or
 no usable answer) or `timeout`; `synced_at` is Unix seconds.
 
+The daemon also refreshes every category of each installed napplet on its
+own: once after an install, update or version selection, and again every
+`social_refresh` (default `6h`; `"0"` turns off only this periodic refresh,
+not the one after an install). The first periodic pass runs a few minutes
+after the service starts; it refreshes the installed napplets one at a time,
+and no pass runs while no relay is configured. These refreshes obey the same
+30-second floor, the one-refresh-per-address rule and the two-address limit.
+Napplets that are not installed are fetched only when a client asks. A client
+follows the changes with the `social.updated` event (see
+[events](#events)) instead of polling.
+
 An event is about the napplet only when it names it exactly. A reaction
 matches with an `a` tag equal to the canonical address or an `e` tag naming a
 known version; a comment matches with its root scope, an `A` tag equal to the

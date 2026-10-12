@@ -35,6 +35,15 @@ var windowProgramPath = linuxhost.DefaultProgramPath
 // launch test replaces it with a freshly built CLI.
 var nativeEntryCLIPath = linuxhost.DefaultCLIPath
 
+// startSocialRefresh starts the background social refresh and its install
+// hooks; socialRefreshChanged tells it social_refresh changed. Tests swap
+// them: TestMain makes startSocialRefresh a no-op so no daemon test fetches
+// social data from the default relays.
+var (
+	startSocialRefresh   = backend.StartServiceSocialRefresh
+	socialRefreshChanged = backend.SocialRefreshChanged
+)
+
 type Service struct {
 	mu                sync.Mutex
 	operationMu       sync.Mutex
@@ -66,6 +75,9 @@ type Service struct {
 	// updateCheckWait waits for the background update check worker, which
 	// also runs on workContext.
 	updateCheckWait func()
+	// socialRefreshWait waits for the background social refresh and the
+	// install hook refreshes it admitted, which also run on workContext.
+	socialRefreshWait func()
 	// systemDark is the desktop's light/dark preference the appearance
 	// watch last reported; themeMu serializes applyTheme.
 	systemDark     atomic.Bool
@@ -157,6 +169,9 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	s.installSyncWait = backend.StartInstallSync(workContext)
 	// updates are only ever looked for here; napplet.update applies them
 	s.updateCheckWait = backend.StartServiceUpdateChecks(workContext)
+	// background social refreshes, and the install, update and selection
+	// hooks that fetch social data, run only here
+	s.socialRefreshWait = startSocialRefresh(workContext)
 	return s, nil
 }
 
@@ -498,6 +513,9 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	if before.SyncID != after.SyncID {
 		backend.InstallSyncChanged()
 	}
+	if before.SocialRefresh != after.SocialRefresh {
+		socialRefreshChanged()
+	}
 	if before.Theme != after.Theme {
 		s.applyTheme()
 	}
@@ -602,6 +620,10 @@ func (s *Service) Close() {
 		}
 		if s.updateCheckWait != nil {
 			s.updateCheckWait()
+		}
+		// hook refreshes write the stores, so they end before closeBackend
+		if s.socialRefreshWait != nil {
+			s.socialRefreshWait()
 		}
 		s.appearanceWait.Wait()
 		if s.signer != nil {

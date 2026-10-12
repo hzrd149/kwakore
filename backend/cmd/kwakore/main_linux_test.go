@@ -1578,6 +1578,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
 		{[]string{"help", "icon"}, "kwak icon ADDRESS [--out FILE]"},
 		{[]string{"events", "--help"}, "events.overflow"},
+		{[]string{"events", "--help"}, "social.updated"},
 		{[]string{"help", "social"}, "--only"},
 		{[]string{"reactions", "--help"}, "--event ID"},
 		{[]string{"comments", "-h"}, "--parent ID"},
