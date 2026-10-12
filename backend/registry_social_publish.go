@@ -124,19 +124,9 @@ func socialAcquire(ctx context.Context) (release func(), err error) {
 // id or a bad signature is unavailable, and then nothing is stored or
 // published. Only the relay counts come back.
 func socialSignPublish(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, tmpl nostr.Event, targets []string) (nostr.Event, int, int, error) {
-	evt := tmpl
-	evt.Tags = slices.Clone(tmpl.Tags)
-	signCtx, cancel := context.WithTimeout(ctx, socialSignTimeout)
-	err := k.SignEvent(signCtx, &evt)
-	expired := signCtx.Err() != nil || ctx.Err() != nil
-	cancel()
-	if expired {
-		log.Warn().Uint16("kind", uint16(tmpl.Kind)).Msg("social event signing timed out")
-		return nostr.Event{}, 0, 0, ErrServiceTimeout
-	}
-	if err != nil || evt.PubKey != pk || !socialSameTemplate(evt, tmpl) || !evt.CheckID() || !evt.VerifySignature() {
-		log.Warn().Uint16("kind", uint16(tmpl.Kind)).Msg("social event was not signed")
-		return nostr.Event{}, 0, 0, ErrServiceUnavailable
+	evt, err := socialSign(ctx, k, pk, tmpl)
+	if err != nil {
+		return nostr.Event{}, 0, 0, err
 	}
 	pubCtx, cancel := context.WithTimeout(ctx, socialPublishTimeout)
 	result := publishSigned(pubCtx, evt, targets)
@@ -145,6 +135,27 @@ func socialSignPublish(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, tmpl
 	failed, _ := result["failed"].(int)
 	log.Info().Uint16("kind", uint16(evt.Kind)).Int("published", published).Int("failed", failed).Msg("social event published")
 	return evt, published, failed, nil
+}
+
+// socialSign signs tmpl with k. A signing past socialSignTimeout or ctx is
+// a timeout; another key, a changed template, a bad id or a bad signature
+// is unavailable.
+func socialSign(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, tmpl nostr.Event) (nostr.Event, error) {
+	evt := tmpl
+	evt.Tags = slices.Clone(tmpl.Tags)
+	signCtx, cancel := context.WithTimeout(ctx, socialSignTimeout)
+	err := k.SignEvent(signCtx, &evt)
+	expired := signCtx.Err() != nil || ctx.Err() != nil
+	cancel()
+	if expired {
+		log.Warn().Uint16("kind", uint16(tmpl.Kind)).Msg("social event signing timed out")
+		return nostr.Event{}, ErrServiceTimeout
+	}
+	if err != nil || evt.PubKey != pk || !socialSameTemplate(evt, tmpl) || !evt.CheckID() || !evt.VerifySignature() {
+		log.Warn().Uint16("kind", uint16(tmpl.Kind)).Msg("social event was not signed")
+		return nostr.Event{}, ErrServiceUnavailable
+	}
+	return evt, nil
 }
 
 // socialSameTemplate says whether the signer kept what it was asked to sign.

@@ -2,11 +2,17 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore"
@@ -30,7 +36,20 @@ const (
 	socialZapDescriptionMax = 16 << 10
 	// socialZapMaxMsats is 21 million bitcoin; no real zap is bigger.
 	socialZapMaxMsats int64 = 2_100_000_000_000_000_000
+	// socialZapRelaysPerSource caps the user's and the author's relays in a
+	// zap request's "relays" tag, and socialZapRelayMax the whole tag.
+	socialZapRelaysPerSource = 3
+	socialZapRelayMax        = 6
+	// socialZapCallbackMax caps the provider's callback url.
+	socialZapCallbackMax = 2048
+	// socialZapInvoiceMax caps the invoice a provider returns.
+	socialZapInvoiceMax = 4096
+	// socialZapAnswerMax caps the callback's answer.
+	socialZapAnswerMax = 64 << 10
 )
+
+// socialZapInvoiceRe is a lowercased bolt11 invoice's shape.
+var socialZapInvoiceRe = regexp.MustCompile(`^ln[0-9a-z]+$`)
 
 // socialZapLUD16 is the lightning address in author's kind 0, or "". Tests
 // replace it.
@@ -270,4 +289,233 @@ func ServiceZaps(ctx context.Context, address string, offset, limit int) (Servic
 	items = slices.Clone(items)
 	socialAuthorNames(items, func(z *ServiceZap) (string, *string) { return z.Sender, &z.SenderName })
 	return ServiceZapPage{Items: items, Total: total, TotalMsats: zapSummary(zaps).TotalMsats, NextOffset: next}, nil
+}
+
+// ─── the invoice request ────────────────────────────────────────────────
+
+// socialZapRelays is the zap request's "relays" tag, where the provider
+// publishes the receipt: up to three of the user's read relays (the
+// configured relays without any) and up to three public inbox relays of the
+// author, whose list is not to be trusted; the discovery relays when both
+// are empty, and at most six. Tests replace it.
+var socialZapRelays = func(ctx context.Context, t socialTarget) []string {
+	if sys == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	own := UserReadRelays()
+	if len(own) == 0 {
+		own = Relays()
+	}
+	own = normalizedUnique(own)
+	if len(own) > socialZapRelaysPerSource {
+		own = own[:socialZapRelaysPerSource]
+	}
+	_, read, _ := nip65Lists(ctx, t.Author)
+	relays := normalizedUnique(append(own, socialPublicRelays(ctx, read, socialZapRelaysPerSource)...))
+	if len(relays) == 0 {
+		relays = normalizedUnique(discoveryRelays())
+	}
+	if len(relays) > socialZapRelayMax {
+		relays = relays[:socialZapRelayMax]
+	}
+	return relays
+}
+
+// socialZapRequestEvent is the NIP-57 kind 9734 for a zap of amount msats
+// on t: relays, amount, lnurl, the author in "p", the version in "e" when
+// there is one, the address in "a" except for a snapshot, and the napplet
+// kind in "k". The comment is its content.
+func socialZapRequestEvent(t socialTarget, version string, relays []string, amount int64, lnurl, comment string, at nostr.Timestamp) nostr.Event {
+	tags := nostr.Tags{
+		append(nostr.Tag{"relays"}, relays...),
+		{"amount", strconv.FormatInt(amount, 10)},
+		{"lnurl", lnurl},
+		{"p", t.Author.Hex()},
+	}
+	if version != "" {
+		tags = append(tags, nostr.Tag{"e", version})
+	}
+	if !t.Snapshot {
+		tags = append(tags, nostr.Tag{"a", t.Address})
+	}
+	tags = append(tags, nostr.Tag{"k", socialKindTag(t.Kind)})
+	return nostr.Event{Kind: nostr.KindZapRequest, CreatedAt: at, Tags: tags, Content: comment}
+}
+
+// socialZapCallbackURL is the provider's callback with values appended
+// (LUD-06), its own query left byte for byte. ok is false unless the
+// callback is an https url with a host, no userinfo, no fragment and at
+// most 2048 bytes.
+func socialZapCallbackURL(callback string, values url.Values) (string, bool) {
+	if callback == "" || len(callback) > socialZapCallbackMax || strings.Contains(callback, "#") {
+		return "", false
+	}
+	u, err := url.Parse(callback)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return "", false
+	}
+	if len(values) == 0 {
+		return callback, true
+	}
+	sep := "?"
+	switch {
+	case u.RawQuery != "":
+		sep = "&"
+	case strings.HasSuffix(callback, "?"):
+		sep = ""
+	}
+	return callback + sep + values.Encode(), true
+}
+
+// socialZapInvoice asks the callback for an invoice and checks it is a
+// bolt11 for exactly amount msats. Nothing the provider says, nor the url,
+// is logged or returned.
+func socialZapInvoice(ctx context.Context, callbackURL string, amount int64) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, callbackURL, nil)
+	if err != nil {
+		return "", ErrServiceUnavailable
+	}
+	resp, err := resourceClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ErrServiceTimeout
+		}
+		log.Warn().Msg("zap invoice request failed")
+		return "", ErrServiceUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Warn().Int("status", resp.StatusCode).Msg("zap invoice request refused")
+		return "", ErrServiceUnavailable
+	}
+	var answer struct {
+		PR     string `json:"pr"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, socialZapAnswerMax)).Decode(&answer); err != nil {
+		if ctx.Err() != nil {
+			return "", ErrServiceTimeout
+		}
+		log.Warn().Msg("zap invoice answer unreadable")
+		return "", ErrServiceUnavailable
+	}
+	if strings.EqualFold(answer.Status, "ERROR") {
+		log.Warn().Msg("zap provider refused the invoice")
+		return "", ErrServiceUnavailable
+	}
+	pr := strings.ToLower(strings.TrimSpace(answer.PR))
+	if len(pr) > socialZapInvoiceMax || !socialZapInvoiceRe.MatchString(pr) {
+		log.Warn().Msg("zap provider returned no invoice")
+		return "", ErrServiceUnavailable
+	}
+	if msats, ok := bolt11Msats(pr); !ok || msats != amount {
+		log.Warn().Msg("zap invoice amount differs from the request")
+		return "", ErrServiceUnavailable
+	}
+	return pr, nil
+}
+
+// ServiceSocialZap asks the napplet author's lightning provider for an
+// invoice of amountMsats that zaps the napplet, on the version eventID
+// names (else the installed or newest known one). It signs a NIP-57 zap
+// request with the service signer and hands it to the provider's callback,
+// but never publishes or stores it, and the daemon never pays: the client
+// pays the returned bolt11 itself, and the provider then publishes the
+// receipt to the request's relays. Only the invoice's amount is checked,
+// not its description hash, since no bolt11 decoder is vendored. A profile
+// with only a lud06 is not zappable.
+func ServiceSocialZap(ctx context.Context, address string, amountMsats int64, comment, eventID string) (ServiceSocialZapResult, error) {
+	t, err := newSocialTarget(address)
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+	if amountMsats < 1 || amountMsats > socialZapMaxMsats || len(comment) > socialMaxContent ||
+		(eventID != "" && !hex64.MatchString(eventID)) {
+		return ServiceSocialZapResult{}, ErrServiceInvalidSocial
+	}
+	if sys == nil {
+		return ServiceSocialZapResult{}, ErrServiceUnavailable
+	}
+	if ctx.Err() != nil {
+		return ServiceSocialZapResult{}, ErrServiceTimeout
+	}
+	k, pk, err := socialSigner()
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+	version := ""
+	if eventID != "" || t.Snapshot {
+		if version, err = socialVersion(t, eventID); err != nil {
+			return ServiceSocialZapResult{}, err
+		}
+	} else if v, err := socialVersion(t, ""); err == nil {
+		version = v
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, socialZapLookupTimeout)
+	z, err := socialZapLookup(lookupCtx, t.Author)
+	cancel()
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+	info := z.info
+	if info.Tag != "payRequest" || info.MinSendable < 1 || info.MaxSendable < info.MinSendable {
+		log.Warn().Msg("zap provider answer is not a pay request")
+		return ServiceSocialZapResult{}, ErrServiceUnavailable
+	}
+	if _, ok := socialZapCallbackURL(info.Callback, nil); !ok {
+		log.Warn().Msg("zap provider callback refused")
+		return ServiceSocialZapResult{}, ErrServiceUnavailable
+	}
+	if amountMsats < info.MinSendable || amountMsats > info.MaxSendable || utf8.RuneCountInString(comment) > info.CommentAllowed {
+		return ServiceSocialZapResult{}, ErrServiceInvalidSocial
+	}
+	relays := socialZapRelays(ctx, t)
+	if len(relays) == 0 {
+		return ServiceSocialZapResult{}, ErrServiceUnavailable
+	}
+
+	tmpl := socialZapRequestEvent(t, version, relays, amountMsats, z.lnurl, comment, nostr.Now())
+	release, err := socialAcquire(ctx)
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+	signed, err := socialSign(ctx, k, pk, tmpl)
+	release()
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+
+	values := url.Values{}
+	values.Set("amount", strconv.FormatInt(amountMsats, 10))
+	values.Set("nostr", signed.String())
+	values.Set("lnurl", z.lnurl)
+	if info.CommentAllowed > 0 && comment != "" {
+		values.Set("comment", comment)
+	}
+	callback, ok := socialZapCallbackURL(info.Callback, values)
+	if !ok {
+		return ServiceSocialZapResult{}, ErrServiceUnavailable
+	}
+	invoice, err := socialZapInvoice(ctx, callback, amountMsats)
+	if err != nil {
+		return ServiceSocialZapResult{}, err
+	}
+	log.Info().Int64("msats", amountMsats).Msg("zap invoice ready")
+	return ServiceSocialZapResult{
+		Address: address, Invoice: invoice, AmountMsats: amountMsats,
+		Recipient: t.Author.Hex(), ZapRequestID: signed.ID.Hex(),
+	}, nil
+}
+
+// ServiceSocialZapResult is napplet.zap's result: the bolt11 to pay and the
+// id of the zap request it carries. It never names the provider.
+type ServiceSocialZapResult struct {
+	Address      string `json:"address"`
+	Invoice      string `json:"invoice"`
+	AmountMsats  int64  `json:"amount_msats"`
+	Recipient    string `json:"recipient"`
+	ZapRequestID string `json:"zap_request_id"`
 }

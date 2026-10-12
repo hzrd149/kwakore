@@ -825,6 +825,10 @@ func mutationError(err error) *controlprotocol.Error {
 		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
 		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonSignerUnavailable}
 		return rpcErr
+	case errors.Is(err, backend.ErrServiceNotZappable):
+		rpcErr := controlprotocol.FixedError(controlprotocol.Unavailable)
+		rpcErr.Data = controlprotocol.SessionUnavailableData{Reason: controlprotocol.ReasonNotZappable}
+		return rpcErr
 	case errors.Is(err, backend.ErrServiceInvalidAddress):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceInvalidPermission):
