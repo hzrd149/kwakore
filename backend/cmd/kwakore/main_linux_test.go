@@ -500,6 +500,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"updates"}, {"detail", address}, {"icon", address}, {"events"},
 		{"versions", address}, {"snapshots", address},
 		{"select", address, strings.Repeat("e", 64)},
+		{"social", address}, {"reactions", address}, {"comments", address},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -514,6 +515,63 @@ func TestCLIContractCatalog(t *testing.T) {
 	slices.Sort(catalog)
 	if !slices.Equal(methods, catalog) {
 		t.Fatalf("CLI methods %v differ from protocol catalog %v", methods, catalog)
+	}
+}
+
+func TestCLISocialCommands(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		args   []string
+		method string
+		params string
+	}{
+		{[]string{"social", address}, "napplet.social", `{"address":"` + address + `","refresh":false}`},
+		{[]string{"social", address, "--refresh", "--only", "reactions,comments"}, "napplet.social",
+			`{"address":"` + address + `","refresh":true,"categories":["reactions","comments"]}`},
+		{[]string{"social", address, "--only", "comments"}, "napplet.social",
+			`{"address":"` + address + `","refresh":false,"categories":["comments"]}`},
+		{[]string{"reactions", address}, "napplet.reactions", `{"address":"` + address + `","limit":100,"offset":0}`},
+		{[]string{"reactions", address, "--event", id, "--offset", "2", "--limit", "5"}, "napplet.reactions",
+			`{"address":"` + address + `","event_id":"` + id + `","limit":5,"offset":2}`},
+		{[]string{"comments", address, "--parent", id}, "napplet.comments",
+			`{"address":"` + address + `","limit":100,"offset":0,"parent_id":"` + id + `"}`},
+	} {
+		method, params, _, err := command(tc.args)
+		if err != nil || method != tc.method || string(params) != tc.params {
+			t.Fatalf("%v: %s %s %v", tc.args, method, params, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"social"}, {"social", "bad"}, {"social", address, "extra"},
+		{"social", address, "--only", ""}, {"social", address, "--only", "mentions"},
+		{"social", address, "--only", "reactions,reactions"}, {"social", address, "--only", "reactions,"},
+		{"social", address, "--refresh", "true"}, {"social", address, "--event", id},
+		{"reactions"}, {"reactions", address, "--event", strings.ToUpper(id)},
+		{"reactions", address, "--event", id[:63]}, {"reactions", address, "--event", strings.Repeat("g", 64)},
+		{"reactions", address, "--event", ""}, {"reactions", address, "--parent", id},
+		{"reactions", address, "--limit", "0"}, {"reactions", address, "--limit", "501"}, {"reactions", address, "--offset", "-1"},
+		{"comments", address, "--parent", "xyz"}, {"comments", address, "--event", id}, {"comments", address, "extra"},
+	} {
+		_, _, _, err := command(args)
+		var input inputFailure
+		var addrErr addressFailure
+		if err == nil || (!errors.As(err, &input) && !errors.As(err, &addrErr)) {
+			t.Fatalf("%v: %v, want a refusal before dialing", args, err)
+		}
+	}
+	if got := commandDeadline("napplet.social", 0); got != 75*time.Second {
+		t.Fatalf("social deadline %v", got)
+	}
+	for _, method := range []string{"napplet.reactions", "napplet.comments"} {
+		if got := commandDeadline(method, 0); got != 30*time.Second {
+			t.Fatalf("%s deadline %v", method, got)
+		}
+	}
+	for _, topic := range []string{"social", "reactions", "comments"} {
+		if text, ok := helpTopic([]string{"help", topic}); !ok || !strings.Contains(text, "Usage: kwak "+topic+" ADDRESS") {
+			t.Fatalf("missing help for %s", topic)
+		}
 	}
 }
 
@@ -1500,6 +1558,9 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
 		{[]string{"help", "icon"}, "kwak icon ADDRESS [--out FILE]"},
 		{[]string{"events", "--help"}, "events.overflow"},
+		{[]string{"help", "social"}, "--only"},
+		{[]string{"reactions", "--help"}, "--event ID"},
+		{[]string{"comments", "-h"}, "--parent ID"},
 	} {
 		cmd := exec.Command(cli, tc.args...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")

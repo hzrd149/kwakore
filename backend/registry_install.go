@@ -354,6 +354,7 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 	refreshInstalled()
 	if record.IsNapplet() {
 		pruneNappletIcons()
+		pruneNappletSocial(record.Address())
 		installSyncLocalChange(record.Address())
 	}
 	log.Info().Str("napp", id).Msg("uninstall complete")
