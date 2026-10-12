@@ -224,6 +224,39 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(historyErr)
 		}
 		return result, nil
+	case "napplet.social", "napplet.reactions", "napplet.comments":
+		p, err := decodeSocialParams(params, method)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		// a refresh asks relays; the page reads only touch the local store
+		deadline := 15 * time.Second
+		if method == "napplet.social" {
+			deadline = 60 * time.Second
+		}
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, deadline)
+		defer cancelTimeout()
+		// plain ifs: the protocol docs test reads every case label as a route
+		var result any
+		var socialErr error
+		if method == "napplet.social" {
+			result, socialErr = backend.ServiceSocial(workCtx, p.address, p.refresh, p.categories)
+		} else if method == "napplet.reactions" {
+			result, socialErr = backend.ServiceReactions(workCtx, p.address, p.eventID, p.offset, p.limit)
+		} else {
+			result, socialErr = backend.ServiceComments(workCtx, p.address, p.eventID, p.offset, p.limit)
+		}
+		if socialErr != nil {
+			return nil, mutationError(socialErr)
+		}
+		return result, nil
 	case "napplet.detail":
 		address, err := decodeAddressParams(params)
 		if err != nil {
@@ -755,6 +788,8 @@ func mutationError(err error) *controlprotocol.Error {
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceInvalidPermission):
 		return controlprotocol.FixedError(controlprotocol.InvalidParams)
+	case errors.Is(err, backend.ErrServiceInvalidSocial):
+		return controlprotocol.FixedError(controlprotocol.InvalidParams)
 	case errors.Is(err, backend.ErrServiceNotFound):
 		return controlprotocol.FixedError(controlprotocol.NotFound)
 	case errors.Is(err, backend.ErrServiceBusy):
@@ -803,6 +838,73 @@ func decodeHistoryParams(params json.RawMessage) (string, bool, int, int, *contr
 	}
 	offset, limit, err := decodePageFields(fields)
 	return address, refresh, offset, limit, err
+}
+
+// socialParams are the params of napplet.social, napplet.reactions and
+// napplet.comments; eventID is event_id or parent_id.
+type socialParams struct {
+	address    string
+	refresh    bool
+	categories []string
+	eventID    string
+	offset     int
+	limit      int
+}
+
+// decodeSocialParams reads the strict params of one social method: an
+// address, then refresh and categories for napplet.social, or an optional
+// event_id (reactions) or parent_id (comments) and a page for the reads.
+func decodeSocialParams(params json.RawMessage, method string) (socialParams, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	idField := ""
+	allowed := []string{"address", "refresh", "categories"}
+	if method == "napplet.reactions" {
+		idField = "event_id"
+	} else if method == "napplet.comments" {
+		idField = "parent_id"
+	}
+	if idField != "" {
+		allowed = []string{"address", idField, "offset", "limit"}
+	}
+	if err := controlprotocol.ValidateNamedParams(params, allowed...); err != nil {
+		return socialParams{}, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return socialParams{}, invalid
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return socialParams{}, err
+	}
+	p := socialParams{address: address, limit: 100}
+	if idField != "" {
+		if raw, ok := fields[idField]; ok {
+			if p.eventID, err = eventIDField(raw); err != nil {
+				return socialParams{}, err
+			}
+		}
+		if p.offset, p.limit, err = decodePageFields(fields); err != nil {
+			return socialParams{}, err
+		}
+		return p, nil
+	}
+	if raw, ok := fields["refresh"]; ok && !literalBool(raw, &p.refresh) {
+		return socialParams{}, invalid
+	}
+	if raw, ok := fields["categories"]; ok {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &p.categories) != nil || len(p.categories) == 0 {
+			return socialParams{}, invalid
+		}
+		known := backend.SocialCategories()
+		for i, c := range p.categories {
+			if !slices.Contains(known, c) || slices.Contains(p.categories[:i], c) {
+				return socialParams{}, invalid
+			}
+		}
+	}
+	return p, nil
 }
 
 func decodePageFields(fields map[string]json.RawMessage) (int, int, *controlprotocol.Error) {

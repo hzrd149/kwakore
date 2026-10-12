@@ -427,6 +427,31 @@ after the new selection commits, the journal remains and launch returns `Busy`;
 restart the daemon to retry recovery before running that napplet. Its installed
 record shows which event was committed.
 
+**Reactions and comments.** Kwakore can show what people said about any
+napplet, installed or not: votes and emoji reactions (NIP-25) and comments
+(NIP-22).
+
+```console
+$ kwak social nostr:naddr1... --refresh
+$ kwak reactions nostr:naddr1... --event EVENT_ID
+$ kwak comments nostr:naddr1... --parent COMMENT_ID
+```
+
+These commands only read; nothing is published. `social` summarizes votes,
+emoji, a per-version breakdown and the comment count, and with a signer your
+own vote and reactions. Without `--refresh` it shows what Kwakore already
+holds; `--refresh` asks the author's relays, the discovery relays and your read
+relays, at most once per 30 seconds per category, and `--only reactions` or
+`--only comments` narrows it. `reactions` and `comments` page through the held
+events, newest first; `comments --parent ID` lists the replies to one comment.
+Only events that name the napplet exactly are kept, and an author's own
+deletion removes their event for good.
+
+Social events are kept in the local event store (`eventstore` in the data
+directory), and each napplet's sync status in the kvstore (`kvstore`), within per-author and per-napplet limits (see the
+[control protocol](control-protocol.md)). Uninstalling a napplet removes its
+reactions and comments, except your own.
+
 ## Napplet catalog
 
 Napplets can call `await window.napplet.catalog.get()` to discover installed,

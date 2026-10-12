@@ -180,6 +180,9 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 	case "napplet.updates.check":
 		// the daemon bounds the relay lookups at 60s and the call at 75s
 		return 90 * time.Second
+	case "napplet.social":
+		// the daemon bounds a refresh at 60s
+		return 75 * time.Second
 	}
 	return 30 * time.Second
 }
@@ -564,6 +567,66 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			Offset  int    `json:"offset"`
 			Limit   int    `json:"limit"`
 		}{addr.Canonical, *refresh, *offset, *limit})
+		return "napplet." + args[0], params, socketPath, nil
+	}
+	if len(args) >= 2 && args[0] == "social" {
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		flags := flag.NewFlagSet("social", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		refresh := flags.Bool("refresh", false, "refresh from relays first")
+		only := flags.String("only", "", "categories to refresh, comma separated")
+		if flags.Parse(args[2:]) != nil || len(flags.Args()) != 0 {
+			return "", nil, "", inputFailure("invalid social parameters")
+		}
+		var categories []string
+		set := false
+		flags.Visit(func(f *flag.Flag) { set = set || f.Name == "only" })
+		if set {
+			for _, name := range strings.Split(*only, ",") {
+				if (name != "reactions" && name != "comments") || slices.Contains(categories, name) {
+					return "", nil, "", inputFailure("invalid social categories")
+				}
+				categories = append(categories, name)
+			}
+		}
+		params, _ := json.Marshal(struct {
+			Address    string   `json:"address"`
+			Refresh    bool     `json:"refresh"`
+			Categories []string `json:"categories,omitempty"`
+		}{addr.Canonical, *refresh, categories})
+		return "napplet.social", params, socketPath, nil
+	}
+	if len(args) >= 2 && (args[0] == "reactions" || args[0] == "comments") {
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		idFlag, idField := "event", "event_id"
+		if args[0] == "comments" {
+			idFlag, idField = "parent", "parent_id"
+		}
+		id := flags.String(idFlag, "", "event id")
+		offset := flags.Int("offset", 0, "page offset")
+		limit := flags.Int("limit", 100, "page size")
+		if flags.Parse(args[2:]) != nil || len(flags.Args()) != 0 || *offset < 0 || *limit < 1 || *limit > 500 {
+			return "", nil, "", inputFailure("invalid " + args[0] + " parameters")
+		}
+		fields := map[string]any{"address": addr.Canonical, "offset": *offset, "limit": *limit}
+		set := false
+		flags.Visit(func(f *flag.Flag) { set = set || f.Name == idFlag })
+		if set {
+			decoded, err := hex.DecodeString(*id)
+			if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != *id {
+				return "", nil, "", inputFailure("invalid event ID")
+			}
+			fields[idField] = *id
+		}
+		params, _ := json.Marshal(fields)
 		return "napplet." + args[0], params, socketPath, nil
 	}
 	if len(args) == 1 && args[0] == "windows" {

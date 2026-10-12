@@ -34,6 +34,10 @@ Napplets:
                                  Browse observed manifest versions
   snapshots ADDRESS [--refresh] [--offset N] [--limit N]
                                  Browse author snapshots and derivatives
+  social ADDRESS [--refresh] [--only reactions,comments]
+                                 Show reactions and comments
+  reactions ADDRESS [--event ID] List reactions
+  comments ADDRESS [--parent ID] List comments or replies
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
@@ -139,6 +143,36 @@ Usage: kwak snapshots ADDRESS [--refresh] [--offset N] [--limit N]
 Same-author snapshots and other-author derivatives are labeled separately.
 Lineage is provenance; snapshots do not replace the latest mutable version.
 Example: kwak snapshots nostr:naddr1... --refresh
+`,
+	"social": `Show a napplet's reactions and comments.
+
+Usage: kwak social ADDRESS [--refresh] [--only reactions,comments]
+  --refresh    Ask relays first: the author's, discovery and your read relays
+  --only LIST  Refresh only these categories (reactions, comments)
+Without --refresh, reads local data only. A category is asked at most once
+per 30 seconds. Votes are each person's latest +, empty (both up) or -
+reaction; other reactions are emoji, counted once per person. Works for any
+napplet, installed or not, and only reads: nothing is published.
+Example: kwak social nostr:naddr1... --refresh
+`,
+	"reactions": `List a napplet's reactions, newest first.
+
+Usage: kwak reactions ADDRESS [--event ID] [--offset N] [--limit N]
+  --event ID   Only reactions to this manifest version (64 hex event ID)
+  --offset N   Start at reaction N (default 0)
+  --limit N    Return 1–500 reactions (default 100)
+Reads local data only; kwak social ADDRESS --refresh fetches new ones.
+Example: kwak reactions nostr:naddr1... --event EVENT_ID
+`,
+	"comments": `List a napplet's comments, or the replies to one, newest first.
+
+Usage: kwak comments ADDRESS [--parent ID] [--offset N] [--limit N]
+  --parent ID  Replies to this comment (64 hex event ID)
+  --offset N   Start at comment N (default 0)
+  --limit N    Return 1–500 comments (default 100)
+Without --parent, lists top-level comments and replies whose parent is not
+held. Reads local data only; kwak social ADDRESS --refresh fetches new ones.
+Example: kwak comments nostr:naddr1... --parent COMMENT_ID
 `,
 	"windows": `List active napplet windows.
 
