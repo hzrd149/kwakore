@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-12 — Completed quick task 261012-cbz: hide the kwakore search entry from app menus
+Last activity: 2026-10-12 — Completed quick task 261012-cdf: control protocol update checks, event push, napplet details, sync status and theme
 
 ## Performance Metrics
 
@@ -179,6 +179,7 @@ None yet.
 | 261011-kfc | Bound multi-relay requests: finish 15s after the first EOSE, 30s hard cap, offline relays no longer stall discovery or sync | 2026-10-11 | 054fcf8 | [261011-kfc-bound-multi-relay-requests-finish-15s-af](./quick/261011-kfc-bound-multi-relay-requests-finish-15s-af/) |
 | 261011-lzk | Sync installed napplets and their pinned versions across machines through an encrypted NIP-78 event named by the `sync_id` setting | 2026-10-11 | c411419 | [261011-lzk-sync-installed-napplets-list-via-nip-78-](./quick/261011-lzk-sync-installed-napplets-list-via-nip-78-/) |
 | 261012-cbz | Hide the Kwakore search-provider desktop entry (NoDisplay=true) and fix the settings.set protocol row | 2026-10-12 | 7653cfb | [261012-cbz-hide-the-kwakore-desktop-entry](./quick/261012-cbz-hide-the-kwakore-desktop-entry/) |
+| 261012-cdf | Control protocol: napplet.updates.check + update_available, events.subscribe push stream, napplet.detail, install_sync diagnostics, theme setting | 2026-10-12 | e2369d0 | [261012-cdf-rpc-update-checks-events-details-sync-st](./quick/261012-cdf-rpc-update-checks-events-details-sync-st/) |
 
 ## Deferred Items
 
