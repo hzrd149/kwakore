@@ -26,14 +26,20 @@ import (
 //
 // Two manifest schemas are in use, and both are read:
 //
-//   - NIP-5D (nostr-protocol/nips#2303): kind 35129 (named) or 15129 (root),
-//     NIP-5A "path" tags, an aggregate "x" tag, "requires" and "archetype"
-//     tags. What every napplet published so far looks like.
-//   - naps WEB-NAPPLET.md: kind 35129 with one artifact "x" hash and no path
-//     tags, plus z/i/R/O tags.
+//   - The current NIP-5D manifest (nostr-protocol/nips#2303): kind 35129
+//     (named, one d tag), 15129 (root, no d) or 5129 (an immutable snapshot,
+//     no d), exactly one artifact "x" hash of /index.html, a plain-text
+//     content description and the optional title, server, source, icon,
+//     z/i (archetypes and intents), R/O (NAP domains) and, on snapshots
+//     only, a/A lineage tags. Napp.NappletSchema is SchemaWebNapplet, and
+//     the control protocol labels it "nip5d".
+//   - The legacy NIP-5A-shaped manifest of the first NIP-5D drafts: NIP-5A
+//     "path" tags, an aggregate "x" tag, "requires" and "archetype" tags.
+//     Napp.NappletSchema is SchemaNIP5D, and the control protocol labels it
+//     "legacy", with its requires tags read as required domains.
 //
-// An event's path tags tell the two apart: the NIP-5D manifest must have
-// them, the WEB-NAPPLET one must not.
+// An event's path tags tell the two apart: the legacy manifest must have
+// them, the current one must not.
 
 const (
 	// KindNapp is the napp manifest: a NIP-5A-style file tree.
@@ -42,9 +48,17 @@ const (
 	KindNapplet nostr.Kind = 35129
 	// KindRootNapplet is NIP-5D's root napplet: replaceable, one per author.
 	KindRootNapplet nostr.Kind = 15129
+	// KindSnapshotNapplet is NIP-5D's snapshot: a regular, immutable event,
+	// named by its event id (see Napp.Address) and never updated.
+	KindSnapshotNapplet nostr.Kind = 5129
 
-	// The two napplet manifest schemas (Napp.NappletSchema).
-	SchemaNIP5D      = "nip5d"
+	// SchemaNIP5D marks the legacy NIP-5A-shaped manifest (path tags, an
+	// aggregate x, requires). The value is stored in state.json and must
+	// not change; the control protocol shows it as "legacy".
+	SchemaNIP5D = "nip5d"
+	// SchemaWebNapplet marks the current NIP-5D manifest (one artifact x,
+	// z/i/R/O). The value is stored in state.json and must not change; the
+	// control protocol shows it as "nip5d".
 	SchemaWebNapplet = "web-napplet"
 
 	// FormatNapplet marks a Napp that is a napplet. Napps leave Format empty,
@@ -57,7 +71,12 @@ const (
 )
 
 // napKinds is every manifest kind the catalog follows.
-var napKinds = []nostr.Kind{KindNapp, KindNapplet, KindRootNapplet}
+var napKinds = []nostr.Kind{KindNapp, KindNapplet, KindRootNapplet, KindSnapshotNapplet}
+
+// isNappletKind says whether k is one of the three napplet manifest kinds.
+func isNappletKind(k nostr.Kind) bool {
+	return k == KindNapplet || k == KindRootNapplet || k == KindSnapshotNapplet
+}
 
 // addressable says whether a manifest kind carries a d tag (35130, 35129) or
 // is one per author (15129).
@@ -75,6 +94,10 @@ type NappletConvention struct {
 // IsNapplet says whether this is a napplet rather than a napp.
 func (n Napp) IsNapplet() bool { return n.Format == FormatNapplet }
 
+// IsSnapshot says whether this is a kind 5129 snapshot napplet: immutable,
+// named by its event id, never offered an update.
+func (n Napp) IsSnapshot() bool { return n.IsNapplet() && n.ManifestKind() == KindSnapshotNapplet }
+
 // Address is the napplet's stable identity, 35129:<pubkey>:<d> (15129:<pubkey>:
 // for a root napplet, or the napp's 35130 one). It is what NAP-INTENT names
 // handlers by, and for a napplet it is also its id: the kind and the full
@@ -82,7 +105,14 @@ func (n Napp) IsNapplet() bool { return n.Format == FormatNapplet }
 // named one has a non-empty d after it, and d is kept byte for byte, so no d
 // can name another napplet (a napp id, <pk16>~<d>, never contains a colon
 // before its "~", so the two id spaces cannot meet either).
+//
+// A snapshot (kind 5129) has no NIP-01 address: it is one immutable event,
+// so its identifier is 5129:<pubkey>:<event id hex>. The kind keeps it apart
+// from every other form, and the event id makes it unique.
 func (n Napp) Address() string {
+	if n.IsSnapshot() {
+		return fmt.Sprintf("%d:%s:%s", KindSnapshotNapplet, n.Author.Hex(), n.EventID)
+	}
 	return fmt.Sprintf("%d:%s:%s", n.ManifestKind(), n.Author.Hex(), n.D)
 }
 
@@ -105,11 +135,13 @@ func (n Napp) IndexHash() string {
 	return ""
 }
 
-// MissingDomains lists what a NIP-5D napplet "requires" that the launcher
-// does not implement; NIP-5D says to warn about those. (A WEB-NAPPLET's R
-// tags are discovery metadata only and must never cause a warning.)
+// MissingDomains lists the required NAP domains of a napplet that the
+// launcher does not implement: the R tags of the current manifest, or the
+// requires tags of a legacy one. NIP-5D says a shell missing an R domain
+// "SHOULD reject the napplet or warn"; Kwakore warns and never refuses
+// (decision 2). Optional (O) domains never count. Nil for a napp.
 func (n Napp) MissingDomains() []string {
-	if n.NappletSchema != SchemaNIP5D {
+	if !n.IsNapplet() {
 		return nil
 	}
 	var out []string
@@ -163,7 +195,7 @@ func unavailableReason(err error) string {
 // must not be listed at all: a napplet that fails validation (including the
 // legacy shapes the spec says to reject outright).
 func nappFromEvent(evt nostr.Event) (Napp, bool) {
-	if evt.Kind != KindNapplet && evt.Kind != KindRootNapplet {
+	if !isNappletKind(evt.Kind) {
 		return nappFromNappEvent(evt), true
 	}
 	n, err := nappletFromEvent(evt)
@@ -191,7 +223,7 @@ var nappletIconMimes = map[string]string{
 // nappletFromEvent reads a napplet manifest in whichever schema it is
 // written, after checking its id and signature.
 func nappletFromEvent(evt nostr.Event) (Napp, error) {
-	if evt.Kind != KindNapplet && evt.Kind != KindRootNapplet {
+	if !isNappletKind(evt.Kind) {
 		return Napp{}, fmt.Errorf("kind %d is not a napplet", evt.Kind)
 	}
 	if !evt.CheckID() || !evt.VerifySignature() {
@@ -200,34 +232,41 @@ func nappletFromEvent(evt nostr.Event) (Napp, error) {
 	if evt.Tags.Find("path") != nil {
 		return nip5dFromEvent(evt)
 	}
-	if evt.Kind != KindNapplet {
-		return Napp{}, invalidManifest(reasonFileList, errors.New("a root napplet needs path tags"))
-	}
 	return webNappletFromEvent(evt)
 }
 
-// webNappletFromEvent validates a kind:35129 event against WEB-NAPPLET.md.
-// Every MUST of that schema is enforced here, so nothing downstream needs to
-// second-guess the fields.
+// webNappletFromEvent validates an event of one of the three napplet kinds
+// against the current NIP-5D manifest. The required parts are strict: a
+// non-empty content description, exactly one lowercase-hex x, one d on 35129
+// and none on 15129 or 5129, at most one title, and well-formed R/O tags.
+// The optional advertisements (server, source, z, i, a/A) are read
+// leniently: a malformed or duplicate one is dropped and logged at debug,
+// and never invalidates an otherwise valid event.
 func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 	if strings.TrimSpace(evt.Content) == "" {
 		return Napp{}, invalidManifest(reasonRequiredTags, errors.New("empty content"))
 	}
 
 	var (
-		ds, xs, titles []string
-		n              = Napp{
+		ds, xs     []string
+		titleCount int
+		title      string
+		parents    []string
+		roots      []string
+		n          = Napp{
 			Format:        FormatNapplet,
 			NappletSchema: SchemaWebNapplet,
-			Kind:          KindNapplet,
+			Kind:          evt.Kind,
 			Author:        evt.PubKey,
 			CreatedAt:     evt.CreatedAt,
 			Description:   evt.Content,
 		}
 	)
-	// the "z" roles, kept in order, and whether each was seen (for the "i" check)
 	roles := map[string]bool{}
 	conventions := map[string]bool{}
+	ignore := func(what string) {
+		log.Debug().Str("event", evt.ID.Hex()).Msg("ignoring " + what + " in napplet manifest")
+	}
 
 	for _, tag := range evt.Tags {
 		if len(tag) == 0 {
@@ -235,7 +274,7 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 		}
 		switch tag[0] {
 		case "requires", "C":
-			// a NIP-5D marker without NIP-5D's path tags, or the unmerged
+			// a legacy marker without the legacy path tags, or the unmerged
 			// C-tag draft: neither shape is reinterpreted
 			return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("legacy %q tag", tag[0]))
 
@@ -250,14 +289,18 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 			}
 			xs = append(xs, tag[1])
 		case "title":
-			if len(tag) != 2 || strings.TrimSpace(tag[1]) == "" {
-				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed title tag"))
+			// 0-1: a second one rejects, a blank one is no title
+			titleCount++
+			if len(tag) == 2 && strings.TrimSpace(tag[1]) != "" {
+				title = tag[1]
 			}
-			titles = append(titles, tag[1])
 		case "server":
+			// 0+, a hint only: the user's servers and the author's list are
+			// asked too (Napp.BlossomServers)
 			origin, ok := httpsOrigin(tag)
 			if !ok {
-				return Napp{}, invalidManifest(reasonRequiredTags, errors.New("malformed server tag"))
+				ignore("a malformed server tag")
+				continue
 			}
 			if !slices.Contains(n.Servers, origin) {
 				n.Servers = append(n.Servers, origin)
@@ -269,25 +312,31 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 				n.IconSha, n.IconMime = tag[1], tag[2]
 			}
 		case "source":
-			if len(tag) == 2 && validWebNappletSource(tag[1]) {
+			// 0-1: the first valid one is kept
+			if len(n.Sources) == 0 && len(tag) == 2 && validWebNappletSource(tag[1]) {
 				n.Sources = append(n.Sources, tag[1])
 			}
 
 		case "z":
 			if len(tag) != 2 || !domainToken.MatchString(tag[1]) {
-				return Napp{}, invalidManifest(reasonConventions, errors.New("malformed z tag"))
+				ignore("a malformed z tag")
+				continue
 			}
-			if !roles[tag[1]] {
-				roles[tag[1]] = true
-				n.Roles = append(n.Roles, tag[1])
+			if roles[tag[1]] {
+				ignore("a duplicate z tag")
+				continue
 			}
+			roles[tag[1]] = true
+			n.Roles = append(n.Roles, tag[1])
 		case "i":
 			c, err := parseConvention(tag)
 			if err != nil {
-				return Napp{}, invalidManifest(reasonConventions, err)
+				ignore("a malformed i tag")
+				continue
 			}
 			if conventions[c.ID] {
-				return Napp{}, invalidManifest(reasonConventions, fmt.Errorf("convention %s listed twice", c.ID))
+				ignore("a duplicate i tag")
+				continue
 			}
 			conventions[c.ID] = true
 			n.Conventions = append(n.Conventions, c)
@@ -300,35 +349,61 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 			} else {
 				n.OptionalDomains = appendUniqueString(n.OptionalDomains, tag[1])
 			}
+
+		case "a", "A":
+			// lineage is provenance on a snapshot only; elsewhere it means
+			// nothing and is ignored
+			if evt.Kind != KindSnapshotNapplet || len(tag) < 2 {
+				continue
+			}
+			if tag[0] == "a" {
+				parents = append(parents, tag[1])
+			} else {
+				roots = append(roots, tag[1])
+			}
 		}
 	}
 
-	if len(ds) != 1 {
+	switch {
+	case evt.Kind == KindNapplet && len(ds) != 1:
 		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one d tag, got %d", len(ds)))
+	case evt.Kind != KindNapplet && len(ds) != 0:
+		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("kind %d must not have a d tag", evt.Kind))
 	}
 	if len(xs) != 1 {
 		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one x tag, got %d", len(xs)))
 	}
-	if len(titles) != 1 {
-		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want exactly one title tag, got %d", len(titles)))
-	}
-	if len(n.Servers) == 0 {
-		return Napp{}, invalidManifest(reasonRequiredTags, errors.New("no server tag"))
-	}
-	for _, c := range n.Conventions {
-		if !roles[conventionRole(c.ID)] {
-			return Napp{}, invalidManifest(reasonConventions, fmt.Errorf("convention %s has no matching z tag", c.ID))
-		}
+	if titleCount > 1 {
+		return Napp{}, invalidManifest(reasonRequiredTags, fmt.Errorf("want at most one title tag, got %d", titleCount))
 	}
 	// R wins over O
 	n.OptionalDomains = slices.DeleteFunc(n.OptionalDomains, func(d string) bool {
 		return slices.Contains(n.RequiredDomains, d)
 	})
+	// lineage MUST NOT affect verification: an unusable value, or two of
+	// one letter, only leaves that field empty
+	n.Parent = singleLineage(parents)
+	n.Root = singleLineage(roots)
+	if (len(parents) > 0 && n.Parent == "") || (len(roots) > 0 && n.Root == "") {
+		ignore("unusable lineage")
+	}
 
-	n.D = ds[0]
-	// a napplet's id is its NIP-01 address (see Napp.Address)
+	if len(ds) == 1 {
+		n.D = ds[0]
+	}
+	if evt.Kind == KindSnapshotNapplet {
+		// a snapshot is named by its event id (see Napp.Address)
+		n.EventID = evt.ID.Hex()
+	}
+	// a napplet's id is its address (see Napp.Address)
 	n.ID = n.Address()
-	n.Name = titles[0]
+	n.Name = title
+	if n.Name == "" {
+		n.Name = n.D
+	}
+	if n.Name == "" {
+		n.Name = "napplet"
+	}
 	n.ArtifactHash = xs[0]
 	// the one file, as a path: install, updates and the launch check all
 	// work on Paths, so the napplet rides the napp code unchanged
@@ -342,6 +417,26 @@ func webNappletFromEvent(evt nostr.Event) (Napp, error) {
 	}
 
 	return n, nil
+}
+
+// singleLineage is the one lineage address of a letter: "" when there is
+// none, more than one, or one validLineageAddress refuses.
+func singleLineage(values []string) string {
+	if len(values) != 1 || !validLineageAddress(values[0]) {
+		return ""
+	}
+	return values[0]
+}
+
+// validLineageAddress says whether s may be shown as a snapshot's parent or
+// root: a canonical 35129 or 15129 address with no control or format runes.
+// It is provenance only, never resolved or trusted.
+func validLineageAddress(s string) bool {
+	ptr, err := ParseCanonicalServiceAddress(s)
+	if err != nil || (ptr.Kind != KindNapplet && ptr.Kind != KindRootNapplet) {
+		return false
+	}
+	return serviceDisplayText(s, 4096) == s
 }
 
 // httpsOrigin accepts a server tag that is an absolute https origin with no

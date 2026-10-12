@@ -206,24 +206,21 @@ func TestUnavailableReasonCatalogue(t *testing.T) {
 		{"nip5d duplicate path", KindNapplet, nip5dTags("app", index, index), "", reasonFileList},
 		{"nip5d no index", KindNapplet, nip5dTags("app", asset), "", reasonFileList},
 		{"nip5d bad sha", KindNapplet, nip5dTags("app", NappPath{Path: "/index.html", Sha256: "nothex"}), "", reasonFileList},
-		{"root without paths", KindRootNapplet, validNappletTags(), "x", reasonFileList},
+		{"root with a d", KindRootNapplet, validNappletTags(), "x", reasonRequiredTags},
+		{"snapshot with a d", KindSnapshotNapplet, validNappletTags(), "x", reasonRequiredTags},
 		{"nip5d wrong aggregate", KindNapplet, append(nip5dTags("app", index), nostr.Tag{"x", strings.Repeat("0", 64), "aggregate"}), "", reasonHashes},
 		{"nip5d named without d", KindNapplet, nip5dTags("", index), "", reasonRequiredTags},
 
-		// WEB-NAPPLET required tags
+		// current NIP-5D required tags
 		{"two d", KindNapplet, web(plus(nostr.Tag{"d", "other"})), "x", reasonRequiredTags},
 		{"no x", KindNapplet, web(without("x")), "x", reasonRequiredTags},
 		{"two titles", KindNapplet, web(plus(nostr.Tag{"title", "Other"})), "x", reasonRequiredTags},
-		{"no server", KindNapplet, web(without("server")), "x", reasonRequiredTags},
 		{"empty content", KindNapplet, validNappletTags(), " ", reasonRequiredTags},
 		{"legacy requires", KindNapplet, web(plus(nostr.Tag{"requires", "relay"})), "x", reasonRequiredTags},
 
-		// WEB-NAPPLET conventions
-		{"malformed i", KindNapplet, web(plus(nostr.Tag{"i", "bogus"})), "x", reasonConventions},
-		{"convention twice", KindNapplet, web(plus(nostr.Tag{"i", "napplet:feed/open"})), "x", reasonConventions},
-		{"z not a token", KindNapplet, web(swap("z", nostr.Tag{"z", "Not A Token"})), "x", reasonConventions},
-		{"convention without z", KindNapplet, web(without("z")), "x", reasonConventions},
+		// current NIP-5D domains (malformed z and i tags are only dropped)
 		{"malformed R", KindNapplet, web(plus(nostr.Tag{"R", "Bad"})), "x", reasonConventions},
+		{"malformed O", KindNapplet, web(swap("O", nostr.Tag{"O", "Not A Token"})), "x", reasonConventions},
 	}
 	for _, c := range cases {
 		evt := signedEvent(t, c.kind, c.tags, c.content)
@@ -259,7 +256,7 @@ func TestUnavailableReasonNeverCarriesAuthorText(t *testing.T) {
 		t.Fatalf("Unavailable = %q, want %q", n.Unavailable, reasonFileList)
 	}
 
-	conv := signedEvent(t, KindNapplet, append(validNappletTags(), nostr.Tag{"i", "napplet:‮evil"}), "x")
+	conv := signedEvent(t, KindNapplet, append(validNappletTags(), nostr.Tag{"R", "‮evil"}), "x")
 	if got := nappFromLatest(conv).Unavailable; got != reasonConventions {
 		t.Fatalf("convention: Unavailable = %q, want %q", got, reasonConventions)
 	}

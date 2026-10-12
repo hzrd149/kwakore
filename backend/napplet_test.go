@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -115,22 +116,17 @@ func TestNappletFromEventRejects(t *testing.T) {
 		"uppercase x":             replace("x", nostr.Tag{"x", strings.ToUpper(testArtifact)}),
 		"short x":                 replace("x", nostr.Tag{"x", "abcd"}),
 		"x with extra":            replace("x", nostr.Tag{"x", testArtifact, "aggregate"}),
-		"no title":                replace("title", nil),
-		"no server":               replace("server", nil),
-		"http server":             replace("server", nostr.Tag{"server", "http://blossom.example.com"}),
-		"server with path":        replace("server", nostr.Tag{"server", "https://blossom.example.com/blobs"}),
-		"server with query":       replace("server", nostr.Tag{"server", "https://blossom.example.com?a=b"}),
-		"bad z":                   replace("z", nostr.Tag{"z", "Feed"}),
-		"z with extra":            replace("z", nostr.Tag{"z", "feed", "x"}),
-		"i without z":             replace("z", nil),
-		"i bad param":             replace("i", nostr.Tag{"i", "napplet:feed/open", "1bad"}),
-		"i dup param":             replace("i", nostr.Tag{"i", "napplet:feed/open", "a", "a"}),
-		"i with query":            replace("i", nostr.Tag{"i", "napplet:feed/open?x=1"}),
-		"i not napplet":           replace("i", nostr.Tag{"i", "https://feed/open"}),
-		"i listed twice":          with(nostr.Tag{"i", "napplet:feed/open"}),
+		"two titles":              with(nostr.Tag{"title", "Other"}),
 		"bad R":                   replace("R", nostr.Tag{"R", "NAP-RELAY"}),
 		"O with extra":            replace("O", nostr.Tag{"O", "theme", "x"}),
-		"tag with only a name ":   with(nostr.Tag{"z"}),
+	}
+	// a d tag belongs to the named kind only
+	for _, kind := range []nostr.Kind{KindRootNapplet, KindSnapshotNapplet} {
+		t.Run(fmt.Sprintf("d on %d", kind), func(t *testing.T) {
+			if _, err := nappletFromEvent(signedEvent(t, kind, validNappletTags(), "desc")); err == nil {
+				t.Fatal("accepted")
+			}
+		})
 	}
 	for name, tags := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -186,6 +182,216 @@ func TestNappletFromEventLenient(t *testing.T) {
 	}
 	if slices.Contains(n.OptionalDomains, "relay") {
 		t.Errorf("R did not win over O: %v", n.OptionalDomains)
+	}
+
+	// the advertisements are optional: a malformed or duplicate one is
+	// dropped and the event stays valid
+	replace := func(name string, tag nostr.Tag) nostr.Tags {
+		out := nostr.Tags{}
+		for _, t := range validNappletTags() {
+			if t[0] != name {
+				out = append(out, t)
+			}
+		}
+		if tag != nil {
+			out = append(out, tag)
+		}
+		return out
+	}
+	with := func(extra ...nostr.Tag) nostr.Tags { return append(validNappletTags(), extra...) }
+	feedOpen := []string{"napplet:feed/open"}
+	cases := []struct {
+		name    string
+		tags    nostr.Tags
+		check   func(Napp) bool
+		explain string
+	}{
+		{"no title", replace("title", nil), func(n Napp) bool { return n.Name == "feed-reader" }, "name falls back to d"},
+		{"no server", replace("server", nil), func(n Napp) bool { return len(n.Servers) == 0 }, "servers"},
+		{"http server", replace("server", nostr.Tag{"server", "http://blossom.example.com"}), func(n Napp) bool { return len(n.Servers) == 0 }, "servers"},
+		{"server with path", replace("server", nostr.Tag{"server", "https://blossom.example.com/blobs"}), func(n Napp) bool { return len(n.Servers) == 0 }, "servers"},
+		{"server with query", replace("server", nostr.Tag{"server", "https://blossom.example.com?a=b"}), func(n Napp) bool { return len(n.Servers) == 0 }, "servers"},
+		{"bad z", replace("z", nostr.Tag{"z", "Feed"}), func(n Napp) bool { return len(n.Roles) == 0 }, "roles"},
+		{"z with extra", replace("z", nostr.Tag{"z", "feed", "x"}), func(n Napp) bool { return len(n.Roles) == 0 }, "roles"},
+		{"z listed twice", with(nostr.Tag{"z", "feed"}), func(n Napp) bool { return slices.Equal(n.Roles, []string{"feed"}) }, "roles"},
+		{"i without z", replace("z", nil), func(n Napp) bool {
+			return len(n.Roles) == 0 && len(n.Conventions) == 1 && slices.Equal(n.Actions, feedOpen)
+		}, "an i without a z is kept"},
+		{"i bad param", replace("i", nostr.Tag{"i", "napplet:feed/open", "1bad"}), func(n Napp) bool { return len(n.Conventions) == 0 }, "conventions"},
+		{"i dup param", replace("i", nostr.Tag{"i", "napplet:feed/open", "a", "a"}), func(n Napp) bool { return len(n.Conventions) == 0 }, "conventions"},
+		{"i with query", replace("i", nostr.Tag{"i", "napplet:feed/open?x=1"}), func(n Napp) bool { return len(n.Conventions) == 0 }, "conventions"},
+		{"i not napplet", replace("i", nostr.Tag{"i", "https://feed/open"}), func(n Napp) bool { return len(n.Conventions) == 0 }, "conventions"},
+		{"i listed twice", with(nostr.Tag{"i", "napplet:feed/open"}), func(n Napp) bool {
+			return len(n.Conventions) == 1 && slices.Equal(n.Conventions[0].Params, []string{"filter", "relay"})
+		}, "the first i wins"},
+		{"tag with only a name", with(nostr.Tag{"z"}), func(n Napp) bool { return slices.Equal(n.Roles, []string{"feed"}) }, "roles"},
+		{"second source", with(nostr.Tag{"source", "https://github.com/a/b.git"}), func(n Napp) bool {
+			return slices.Equal(n.Sources, []string{"nostr://repo-ref"})
+		}, "only the first valid source is kept"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			evt := signedNapplet(t, c.tags, "desc")
+			n, err := nappletFromEvent(evt)
+			if err != nil {
+				t.Fatalf("rejected: %v", err)
+			}
+			if !c.check(n) {
+				t.Errorf("%s: %+v", c.explain, n)
+			}
+			if _, ok := nappFromEvent(evt); !ok {
+				t.Error("not listed by nappFromEvent")
+			}
+		})
+	}
+}
+
+// The PR's example manifest (nostr-protocol/nips#2303 at 020cb8b3), verbatim.
+func TestNappletManifestSpecExample(t *testing.T) {
+	tags := nostr.Tags{
+		{"d", "my-napplet"},
+		{"x", "186ea5fd14e88fd1ac49351759e7ab906fa94892002b60bf7f5a428f28ca1c99"},
+		{"z", "feed"},
+		{"i", "napplet:feed/open"},
+		{"i", "napplet:feed/edit", "filters", "relays"},
+		{"R", "relay"},
+		{"O", "theme"},
+		{"icon", "ae7a3bd1a3fa9d824d0e64a6f57fe6cb4dd80c423786b6a2ecb94d587c94c75a", "image/png"},
+		{"server", "https://blossom.example.com"},
+		{"title", "My Napplet"},
+		{"source", "https://github.com/example/my-napplet"},
+	}
+	content := "A feed viewer and editor hosted on Nostr"
+	evt := signedEvent(t, KindNapplet, tags, content)
+	n, err := nappletFromEvent(evt)
+	if err != nil {
+		t.Fatalf("example rejected: %v", err)
+	}
+	if n.NappletSchema != SchemaWebNapplet || n.Kind != KindNapplet || n.D != "my-napplet" ||
+		n.Name != "My Napplet" || n.Description != content {
+		t.Errorf("identity: %+v", n)
+	}
+	if n.ArtifactHash != "186ea5fd14e88fd1ac49351759e7ab906fa94892002b60bf7f5a428f28ca1c99" ||
+		!slices.Equal(n.Roles, []string{"feed"}) {
+		t.Errorf("artifact/roles: %q %v", n.ArtifactHash, n.Roles)
+	}
+	want := []NappletConvention{{ID: "napplet:feed/open"}, {ID: "napplet:feed/edit", Params: []string{"filters", "relays"}}}
+	if len(n.Conventions) != 2 || n.Conventions[0].ID != want[0].ID || len(n.Conventions[0].Params) != 0 ||
+		n.Conventions[1].ID != want[1].ID || !slices.Equal(n.Conventions[1].Params, want[1].Params) {
+		t.Errorf("conventions: %+v", n.Conventions)
+	}
+	if !slices.Equal(n.Actions, []string{"napplet:feed/open", "napplet:feed/edit"}) {
+		t.Errorf("actions: %v", n.Actions)
+	}
+	if !slices.Equal(n.RequiredDomains, []string{"relay"}) || !slices.Equal(n.OptionalDomains, []string{"theme"}) {
+		t.Errorf("domains: %v %v", n.RequiredDomains, n.OptionalDomains)
+	}
+	if n.IconSha != "ae7a3bd1a3fa9d824d0e64a6f57fe6cb4dd80c423786b6a2ecb94d587c94c75a" || n.IconMime != "image/png" {
+		t.Errorf("icon: %q %q", n.IconSha, n.IconMime)
+	}
+	if !slices.Equal(n.Servers, []string{"https://blossom.example.com"}) ||
+		!slices.Equal(n.Sources, []string{"https://github.com/example/my-napplet"}) {
+		t.Errorf("servers/sources: %v %v", n.Servers, n.Sources)
+	}
+	if len(n.MissingDomains()) != 0 {
+		t.Errorf("missing domains: %v", n.MissingDomains())
+	}
+}
+
+func TestNappletManifestKinds(t *testing.T) {
+	base := func(extra ...nostr.Tag) nostr.Tags {
+		return append(nostr.Tags{{"x", testArtifact}, {"title", "T"}}, extra...)
+	}
+	for _, c := range []struct {
+		kind  nostr.Kind
+		tags  nostr.Tags
+		valid bool
+	}{
+		{KindNapplet, base(nostr.Tag{"d", "app"}), true},
+		{KindNapplet, base(), false},
+		{KindNapplet, base(nostr.Tag{"d", "a"}, nostr.Tag{"d", "b"}), false},
+		{KindRootNapplet, base(), true},
+		{KindRootNapplet, base(nostr.Tag{"d", "app"}), false},
+		{KindSnapshotNapplet, base(), true},
+		{KindSnapshotNapplet, base(nostr.Tag{"d", "app"}), false},
+	} {
+		evt := signedEvent(t, c.kind, c.tags, "desc")
+		n, err := nappletFromEvent(evt)
+		if (err == nil) != c.valid {
+			t.Errorf("kind %d tags %v: err=%v, want valid=%v", c.kind, c.tags, err, c.valid)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		if n.Kind != c.kind || n.ManifestKind() != c.kind || n.NappletSchema != SchemaWebNapplet {
+			t.Errorf("kind %d: read as %d (%s)", c.kind, n.Kind, n.NappletSchema)
+		}
+		if _, ok := nappFromEvent(evt); !ok {
+			t.Errorf("kind %d: not listed", c.kind)
+		}
+	}
+	root := signedEvent(t, KindRootNapplet, base(), "desc")
+	n, err := nappletFromEvent(root)
+	if err != nil || n.Address() != "15129:"+root.PubKey.Hex()+":" || n.ID != n.Address() {
+		t.Errorf("root address: %q %v", n.Address(), err)
+	}
+}
+
+func TestNappletTitleAndServers(t *testing.T) {
+	x := nostr.Tag{"x", testArtifact}
+	for _, c := range []struct {
+		kind nostr.Kind
+		tags nostr.Tags
+		want string
+	}{
+		{KindNapplet, nostr.Tags{{"d", "app"}, x}, "app"},
+		{KindNapplet, nostr.Tags{{"d", "app"}, x, {"title", "  "}}, "app"},
+		{KindRootNapplet, nostr.Tags{x}, "napplet"},
+		{KindSnapshotNapplet, nostr.Tags{x, {"title", ""}}, "napplet"},
+		{KindSnapshotNapplet, nostr.Tags{x, {"title", "Snap"}}, "Snap"},
+	} {
+		n, err := nappletFromEvent(signedEvent(t, c.kind, c.tags, "desc"))
+		if err != nil || n.Name != c.want {
+			t.Errorf("kind %d %v: name %q err %v, want %q", c.kind, c.tags, n.Name, err, c.want)
+		}
+	}
+	if _, err := nappletFromEvent(signedEvent(t, KindNapplet, nostr.Tags{{"d", "app"}, x, {"title", "A"}, {"title", "B"}}, "desc")); err == nil {
+		t.Error("two titles accepted")
+	}
+	n, err := nappletFromEvent(signedEvent(t, KindNapplet, nostr.Tags{{"d", "app"}, x,
+		{"server", "ftp://bad"}, {"server", "https://good.example"}, {"server"}}, "desc"))
+	if err != nil || !slices.Equal(n.Servers, []string{"https://good.example"}) {
+		t.Errorf("servers: %v %v", n.Servers, err)
+	}
+}
+
+func TestMissingDomainsCoversR(t *testing.T) {
+	web := func(extra ...nostr.Tag) Napp {
+		tags := append(nostr.Tags{{"d", "app"}, {"x", testArtifact}}, extra...)
+		n, err := nappletFromEvent(signedEvent(t, KindNapplet, tags, "desc"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got := web(nostr.Tag{"R", "foo"}, nostr.Tag{"O", "bar"}).MissingDomains(); !slices.Equal(got, []string{"foo"}) {
+		t.Errorf("R foo, O bar: %v", got)
+	}
+	if got := web(nostr.Tag{"R", "relay"}).MissingDomains(); len(got) != 0 {
+		t.Errorf("R relay: %v", got)
+	}
+	if got := web(nostr.Tag{"R", "shell"}).MissingDomains(); len(got) != 0 {
+		t.Errorf("R shell: %v", got)
+	}
+	index := NappPath{Path: "/index.html", Sha256: testArtifact}
+	legacy, err := nappletFromEvent(signedEvent(t, KindNapplet, append(nip5dTags("app", index), nostr.Tag{"requires", "foo"}), ""))
+	if err != nil || !slices.Equal(legacy.MissingDomains(), []string{"foo"}) {
+		t.Errorf("legacy requires foo: %v %v", legacy.MissingDomains(), err)
+	}
+	napp := Napp{D: "x", RequiredDomains: []string{"foo"}}
+	if got := napp.MissingDomains(); got != nil {
+		t.Errorf("napp: %v", got)
 	}
 }
 

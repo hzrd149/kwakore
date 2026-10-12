@@ -335,7 +335,7 @@ func decodeSyncList(plaintext []byte) (map[string]syncPin, error) {
 // syncableAddress says whether address is a canonical napplet address.
 func syncableAddress(address string) bool {
 	ptr, err := ParseCanonicalServiceAddress(address)
-	return err == nil && (ptr.Kind == KindNapplet || ptr.Kind == KindRootNapplet)
+	return err == nil && isNappletKind(ptr.Kind)
 }
 
 // lowerHexID says whether s is a 64-character lowercase hex event id.
@@ -388,7 +388,11 @@ func openSyncList(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, id string
 // signature.
 func resolveSyncedPin(ctx context.Context, address, eventID string) (Napp, error) {
 	ptr, err := ParseCanonicalServiceAddress(address)
-	if err != nil || (ptr.Kind != KindNapplet && ptr.Kind != KindRootNapplet) || !lowerHexID(eventID) {
+	if err != nil || !isNappletKind(ptr.Kind) || !lowerHexID(eventID) {
+		return Napp{}, errSyncPinMismatch
+	}
+	// a snapshot's address already names its one event
+	if ptr.Kind == KindSnapshotNapplet && ptr.Identifier != eventID {
 		return Napp{}, errSyncPinMismatch
 	}
 	id, err := nostr.IDFromHex(eventID)

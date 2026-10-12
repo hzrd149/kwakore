@@ -255,12 +255,24 @@ func storedManifests(ptr nostr.EntityPointer) []Napp {
 		filter.Tags = nostr.TagMap{"d": []string{ptr.Identifier}}
 		maxEvents = serviceDetailVersions
 	}
+	if ptr.Kind == KindSnapshotNapplet {
+		// a snapshot is the one event its address names
+		id, err := nostr.IDFromHex(ptr.Identifier)
+		if err != nil {
+			return nil
+		}
+		filter = nostr.Filter{IDs: []nostr.ID{id}}
+		maxEvents = 1
+	}
 	var out []Napp
 	for evt := range sys.Store.QueryEvents(filter, maxEvents) {
 		if evt.Kind != ptr.Kind || evt.PubKey != ptr.PublicKey || !evt.CheckID() || !evt.VerifySignature() {
 			continue
 		}
 		if addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier {
+			continue
+		}
+		if ptr.Kind == KindSnapshotNapplet && evt.ID.Hex() != ptr.Identifier {
 			continue
 		}
 		n := nappFromLatest(evt)

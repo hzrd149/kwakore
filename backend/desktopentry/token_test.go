@@ -15,10 +15,17 @@ import (
 func tokenAddressCorpus() []string {
 	pk := nostr.KeyOne.Public().Hex()
 	naddr := nip19.EncodeNaddr(nostr.KeyOne.Public(), 35129, "d", nil)
+	id := strings.Repeat("0123456789abcdef", 4)
 	return []string{
 		"35129:" + pk + ":notes",
 		"35130:" + pk + ":napp",
 		"15129:" + pk + ":",
+		"5129:" + pk + ":" + id,
+		"5129:" + pk + ":",
+		"5129:" + pk + ":" + id[:63],
+		"5129:" + pk + ":" + strings.ToUpper(id),
+		"5129:" + pk + ":" + id[:63] + "g",
+		"05129:" + pk + ":" + id,
 		"35129:" + pk + ":with:colons",
 		"35129:" + pk + ":new\nline in the middle",
 		"35129:" + pk + ":tab\tand %f %u $(rm -rf ~) `id` \"quote\" 'single' \\back",
@@ -93,7 +100,7 @@ func TestTokenCanonicalMatchesService(t *testing.T) {
 			t.Fatalf("encoded invalid address %q", input)
 		}
 	}
-	if accepted < 8 {
+	if accepted < 9 {
 		t.Fatalf("corpus accepted only %d addresses", accepted)
 	}
 }

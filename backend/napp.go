@@ -96,6 +96,11 @@ type Napp struct {
 	Conventions     []NappletConvention `json:"conventions,omitempty"`
 	RequiredDomains []string            `json:"requiredDomains,omitempty"`
 	OptionalDomains []string            `json:"optionalDomains,omitempty"`
+	// Parent and Root are a snapshot's a and A lineage tags: canonical
+	// 35129/15129 addresses kept as provenance only, never resolved or
+	// trusted, and never part of verification.
+	Parent string `json:"parent,omitempty"`
+	Root   string `json:"root,omitempty"`
 
 	// EventID is the hex id of the manifest event this record was read
 	// from. Records from different lookups of one address are ordered by

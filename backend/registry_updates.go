@@ -27,7 +27,10 @@ func CheckForUpdates() {
 	stateMu.Lock()
 	napps := make([]Napp, 0, len(state.InstalledNapps))
 	for _, n := range state.InstalledNapps {
-		napps = append(napps, n)
+		// a snapshot is immutable: there is nothing newer to look for
+		if !n.IsSnapshot() {
+			napps = append(napps, n)
+		}
 	}
 	stateMu.Unlock()
 	if len(napps) == 0 {
@@ -80,6 +83,10 @@ func checkAllUpdates(napps []Napp) map[string]*Napp {
 // returns whichever relay answered first, not the NIP-01 winner. Tests swap
 // it to hand events in directly.
 var fetchManifestEvents = func(ctx context.Context, napps []Napp) []nostr.Event {
+	// snapshots are immutable and never looked up for updates: kept out of
+	// both the discovery grouping (where they would read as root napplets)
+	// and the per-napp outbox loop
+	napps = slices.DeleteFunc(slices.Clone(napps), Napp.IsSnapshot)
 	if sys == nil || len(napps) == 0 {
 		return nil
 	}
@@ -166,6 +173,10 @@ func updateStates(installed []Napp, events []nostr.Event) map[string]*Napp {
 	}
 	states := make(map[string]*Napp, len(installed))
 	for _, n := range installed {
+		if n.IsSnapshot() {
+			// immutable: never an update, never an unavailable entry
+			continue
+		}
 		evt, ok := winners[n.Address()]
 		if !ok {
 			continue
@@ -222,7 +233,7 @@ var (
 // or timed-out lookup, or no authentic event found leave the previous state
 // as it was and only reach the log.
 func launchUpdateCheck(n Napp) {
-	if !n.IsNapplet() {
+	if !n.IsNapplet() || n.IsSnapshot() {
 		return
 	}
 	if _, ok := InstalledNapp(n.ID); !ok || !updateCheckOnline() {
@@ -444,6 +455,10 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 // the relays are asked right now. A latest version that turns out invalid
 // marks the napp unavailable and gives nothing to install.
 func newerVersion(n Napp) *Napp {
+	if n.IsSnapshot() {
+		// a snapshot is immutable: nothing replaces it
+		return nil
+	}
 	if latest, ok := updateSet.Load().Load(n.ID); ok && latest.Unavailable == "" && nappNewer(latest, n) {
 		return &latest
 	}
@@ -491,6 +506,10 @@ var fetchServiceManifestEvents = func(ctx context.Context, n Napp) ([]nostr.Even
 }
 
 func newerVersionService(ctx context.Context, n Napp) (*Napp, error) {
+	if n.IsSnapshot() {
+		// a snapshot is immutable: no lookup, no update
+		return nil, ErrServiceNoUpdate
+	}
 	if cached, ok := updateSet.Load().Load(n.ID); ok {
 		if cached.Unavailable == "" && nappNewer(cached, n) {
 			return &cached, nil

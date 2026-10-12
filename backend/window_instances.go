@@ -882,9 +882,10 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	ci.attach(transport)
 	rememberWindow(ci)
 
-	// a NIP-5D napplet that asks for domains this launcher lacks still
-	// runs (NIP-5D: reject or warn), but the user is told what may not
-	// work. A trial is a launch too.
+	// a napplet whose R (or legacy requires) domains this launcher lacks
+	// still runs: NIP-5D says the shell "SHOULD reject the napplet or
+	// warn", and Kwakore warns and never refuses (decision 2). O domains
+	// never count. A trial is a launch too.
 	if napp.IsNapplet() && len(napp.MissingDomains()) > 0 {
 		raiseNappletRequires(napp)
 	}

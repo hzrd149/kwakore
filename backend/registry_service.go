@@ -13,13 +13,28 @@ import (
 	"fiatjaf.com/nostr"
 )
 
+// ParseCanonicalServiceAddress reads the one spelling the control protocol
+// accepts: "<kind>:<pubkey hex>:<identifier>" exactly as Napp.Address
+// writes it. The identifier is the d tag for 35130 and 35129, empty for a
+// root napplet (15129), and the 64 lowercase hex event id for a snapshot
+// (5129). desktopentry.CanonicalAddress is the CLI's copy of this rule.
 func ParseCanonicalServiceAddress(input string) (nostr.EntityPointer, error) {
 	if len(input) == 0 || len(input) > 4096 {
 		return nostr.EntityPointer{}, ErrServiceInvalidAddress
 	}
 	ptr, err := ParseNappAddress(input)
-	if err != nil || fmt.Sprintf("%d:%s:%s", ptr.Kind, ptr.PublicKey.Hex(), ptr.Identifier) != input || (!addressable(ptr.Kind) && ptr.Identifier != "") {
+	if err != nil || fmt.Sprintf("%d:%s:%s", ptr.Kind, ptr.PublicKey.Hex(), ptr.Identifier) != input {
 		return nostr.EntityPointer{}, ErrServiceInvalidAddress
+	}
+	switch ptr.Kind {
+	case KindRootNapplet:
+		if ptr.Identifier != "" {
+			return nostr.EntityPointer{}, ErrServiceInvalidAddress
+		}
+	case KindSnapshotNapplet:
+		if !hex64.MatchString(ptr.Identifier) {
+			return nostr.EntityPointer{}, ErrServiceInvalidAddress
+		}
 	}
 	return ptr, nil
 }

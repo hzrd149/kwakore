@@ -48,8 +48,9 @@ var naddrPattern = regexp.MustCompile(`naddr1[02-9ac-hj-np-z]{20,}`)
 // CanonicalAddress reports whether address is exactly what the service's
 // ParseCanonicalServiceAddress accepts: a kind the launcher runs written in
 // plain decimal, a lowercase hex x-only public key that is a valid curve
-// point, and a d tag that is present for the addressable kinds and absent
-// for the root napplet. The backend's equivalence test pins the two
+// point, and an identifier that is a d tag for the addressable kinds,
+// absent for the root napplet, and the 64 lowercase hex event id for a
+// kind 5129 snapshot. The backend's equivalence test pins the two
 // together; this copy exists so the CLI can refuse a bad token before it
 // dials without linking the whole backend.
 func CanonicalAddress(address string) error {
@@ -71,6 +72,11 @@ func CanonicalAddress(address string) error {
 		}
 	case "15129":
 		if identifier != "" {
+			return ErrInvalidAddress
+		}
+	case "5129":
+		id, err := hex.DecodeString(identifier)
+		if err != nil || len(id) != 32 || hex.EncodeToString(id) != identifier {
 			return ErrInvalidAddress
 		}
 	default:

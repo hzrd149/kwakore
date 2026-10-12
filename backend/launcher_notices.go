@@ -284,12 +284,13 @@ func noticeDomains(domains []string) string {
 	return strings.Join(unique[:maxNoticeDomains], ", ") + fmt.Sprintf(", +%d more", len(unique)-maxNoticeDomains)
 }
 
-// raiseNappletRequires warns that a NIP-5D napplet which just opened asks
-// for NAP domains Kwakore does not implement (D-15, REG-04). Every launch
-// raises it again in its address's slot, even after a dismissal. It never
-// raises the manager window: the napplet's own window just opened and
-// keeps the focus. A WEB-NAPPLET's R and O tags never get here, since
-// MissingDomains is empty for that schema.
+// raiseNappletRequires warns that a napplet which just opened requires NAP
+// domains Kwakore does not implement (D-15, REG-04): its R tags, or a legacy
+// manifest's requires tags. NIP-5D says the shell "SHOULD reject the
+// napplet or warn"; Kwakore warns and never refuses (decision 2), and O
+// domains never get here. Every launch raises it again in its address's
+// slot, even after a dismissal. It never raises the manager window: the
+// napplet's own window just opened and keeps the focus.
 func raiseNappletRequires(n Napp) {
 	missing := n.MissingDomains()
 	if len(missing) == 0 {
