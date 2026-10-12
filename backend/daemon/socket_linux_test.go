@@ -74,7 +74,7 @@ func TestSocketFrames(t *testing.T) {
 		handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
 			calls++
 			return map[string]int{"count": calls}, nil
-		})
+		}, nil, nil)
 	}()
 	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -116,7 +116,7 @@ func TestSocketFramesOversize(t *testing.T) {
 	go func() {
 		conn, err := listener.AcceptUnix()
 		if err == nil {
-			handleSocketConn(conn, func(string, json.RawMessage) (any, *controlprotocol.Error) { return nil, nil })
+			handleSocketConn(conn, func(string, json.RawMessage) (any, *controlprotocol.Error) { return nil, nil }, nil, nil)
 		}
 	}()
 	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
@@ -191,7 +191,7 @@ func TestSocketAccessRejectsForeignPeerBeforeDispatch(t *testing.T) {
 		defer close(done)
 		conn, err := listener.AcceptUnix()
 		if err == nil {
-			handleSocketConn(conn, func(string, json.RawMessage) (any, *controlprotocol.Error) { called.Add(1); return nil, nil })
+			handleSocketConn(conn, func(string, json.RawMessage) (any, *controlprotocol.Error) { called.Add(1); return nil, nil }, nil, nil)
 		}
 	}()
 	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})

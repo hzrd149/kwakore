@@ -214,7 +214,10 @@ func recordInstallSyncResult(id, result string, napplets int) {
 	if napplets >= 0 {
 		r.napplets = napplets
 	}
+	count := r.napplets
 	installSyncRecordMu.Unlock()
+	ok := result == installSyncOK
+	emitServiceEvent(ServiceEvent{Type: EventSyncCompleted, Result: result, OK: &ok, Napplets: &count})
 }
 
 // InstallSyncStatus is the current install-sync report. Before the first

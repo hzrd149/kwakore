@@ -322,8 +322,18 @@ func (l *Listener) serve(s *Service) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			go watchSocketPeer(conn, ctx, cancel)
+			stream := &connStream{}
+			defer func() {
+				// a subscription whose acknowledgement was never written
+				if sub := stream.subscription(); sub != nil && s.events != nil {
+					s.events.remove(sub)
+				}
+			}()
+			dispatchCtx := context.WithValue(ctx, connStreamKey{}, stream)
 			handleSocketConn(conn, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
-				return s.dispatchRPCContext(ctx, method, params)
+				return s.dispatchRPCContext(dispatchCtx, method, params)
+			}, stream, func(sub *eventSub) {
+				s.streamEvents(ctx, conn, sub)
 			})
 		}()
 	}
@@ -354,7 +364,12 @@ func watchSocketPeer(conn *net.UnixConn, ctx context.Context, cancel context.Can
 	}
 }
 
-func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch) {
+// handleSocketConn serves request frames on conn. Once a frame registered an
+// event subscription in stream (events.subscribe), and that frame's response
+// is written, the connection stops reading frames and carries the
+// subscriber's notifications through streamEvents until it ends. stream and
+// streamEvents may be nil.
+func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch, stream *connStream, streamEvents func(*eventSub)) {
 	defer conn.Close()
 	uid, err := socketPeerUID(conn)
 	if err != nil || uid != runtimeUID() {
@@ -373,11 +388,18 @@ func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch) {
 			return
 		}
 		response := controlprotocol.ProcessFrame(line, dispatch)
-		if response == nil {
-			continue
+		if response != nil {
+			if err := writeResponse(conn, response); err != nil {
+				return
+			}
 		}
-		if err := writeResponse(conn, response); err != nil {
-			return
+		if stream != nil && streamEvents != nil {
+			if sub := stream.subscription(); sub != nil {
+				// no further frames are read, so no idle read deadline
+				_ = conn.SetReadDeadline(time.Time{})
+				streamEvents(sub)
+				return
+			}
 		}
 	}
 }

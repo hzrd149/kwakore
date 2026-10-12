@@ -160,6 +160,11 @@ func addInstance(ci *Instance) {
 	instancesMu.Lock()
 	instances = append(instances, ci)
 	instancesMu.Unlock()
+	// the sink never blocks or calls the host, so this is safe under
+	// reclaimMu
+	if serviceWindowListed(ci) {
+		emitServiceEvent(ServiceEvent{Type: EventWindowOpened, WindowID: ci.ID(), Address: ci.napp.Address(), Name: serviceDisplayText(ci.napp.Label(), 256)})
+	}
 }
 
 func lookupInstance(instance string) *Instance {
@@ -588,6 +593,9 @@ func WindowClosed(instance string) {
 			}
 		}
 		instancesMu.Unlock()
+		if serviceWindowListed(ci) {
+			emitServiceEvent(ServiceEvent{Type: EventWindowClosed, WindowID: ci.ID(), Address: ci.napp.Address()})
+		}
 		ci.goneOnce.Do(func() { close(ci.gone) })
 		failed := ci.failedClosed.Load()
 		if ci.auxiliary || failed {

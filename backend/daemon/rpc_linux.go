@@ -36,6 +36,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		return nil, controlprotocol.FixedError(controlprotocol.Closing)
 	}
 	switch method {
+	case "events.subscribe":
+		// the subscription is the connection's: the handler streams it once
+		// this frame's response is written (events_linux.go)
+		return s.subscribeEvents(ctx, params)
 	case "signer.status":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err

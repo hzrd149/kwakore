@@ -787,6 +787,25 @@ files with the same parser and ownership checks and report
 take no lock and create nothing. On a helper install the daemon binary is
 `~/.local/lib/kwakore/current/kwakore`.
 
+**Following events.** `kwak events` stays connected and prints one line per
+service event as it happens: windows opening and closing, installs, updates
+and uninstalls, newly found updates, signer and settings changes, and the end
+of each installed-list sync pass. `--type` keeps only the named types, and
+`--json` prints one JSON object per line for scripts. A reader that falls
+behind gets one `events.overflow` line counting what it missed. The command
+ends with an error when the service stops.
+
+```console
+$ kwak events
+2026-10-12T09:00:00Z settings.changed fields=["theme"]
+$ kwak --json events --type window.opened
+{"type":"window.opened","time":"2026-10-12T09:00:05Z","window_id":"0123456789abcdef0123456789abcdef","address":"35129:aaaa…:notes","name":"Notes"}
+```
+
+Events carry names, addresses, versions and public signer status only, never
+setting values, paths, relay URLs or keys; read the current values with
+`kwak settings get`.
+
 **CLI errors.** By default, failures write a readable message to stderr. With `--json`, every failure writes one JSON object to stderr. Both modes write nothing to stdout and exit 1. Codes and messages are fixed (the full table is in the
 [protocol reference](control-protocol.md#errors)):
 

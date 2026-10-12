@@ -49,7 +49,7 @@ func TestProtocolDocsMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := regexp.MustCompile(`case "((?:service|settings|napplet|signer)\.[a-z.]+)"`).FindAllSubmatch(router, -1)
+	cases := regexp.MustCompile(`case "((?:service|settings|napplet|signer|events)\.[a-z.]+)"`).FindAllSubmatch(router, -1)
 	var routed []string
 	for _, match := range cases {
 		routed = append(routed, string(match[1]))
@@ -63,6 +63,26 @@ func TestProtocolDocsMethods(t *testing.T) {
 	for _, method := range catalog {
 		if !bytes.Contains(docs, []byte("`"+method+"`")) {
 			t.Errorf("documentation missing %s", method)
+		}
+	}
+}
+
+func TestEventTypes(t *testing.T) {
+	types := EventTypes()
+	want := []string{"napplet.installed", "napplet.uninstalled", "napplet.updated", "settings.changed", "signer.changed", "sync.completed", "updates.available", "window.closed", "window.opened"}
+	if !slices.Equal(types, want) || !slices.IsSorted(types) {
+		t.Fatalf("event types %v", types)
+	}
+	if slices.Contains(types, EventOverflow) {
+		t.Fatal("events.overflow is subscribable")
+	}
+	docs, err := os.ReadFile(filepath.Join("..", "..", "docs", "control-protocol.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range append(types, EventOverflow) {
+		if !bytes.Contains(docs, []byte("`"+typ+"`")) {
+			t.Errorf("documentation missing event %s", typ)
 		}
 	}
 }

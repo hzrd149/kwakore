@@ -23,7 +23,32 @@ func MethodNames() []string {
 		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.try", "napplet.windows", "napplet.stop",
 		"napplet.updates.check", "napplet.detail",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
+		"events.subscribe",
 	}
+}
+
+// EventMethod is the method of every notification a subscribed connection
+// carries after the events.subscribe acknowledgement.
+const EventMethod = "event"
+
+// EventOverflow tells a subscriber that events were dropped because it read
+// too slowly. It is always delivered and cannot be subscribed to.
+const EventOverflow = "events.overflow"
+
+// EventTypes is the sorted list of event types a client can subscribe to.
+func EventTypes() []string {
+	return []string{
+		"napplet.installed", "napplet.uninstalled", "napplet.updated",
+		"settings.changed", "signer.changed", "sync.completed",
+		"updates.available", "window.closed", "window.opened",
+	}
+}
+
+// Notification is a server-to-client JSON-RPC notification: it has no id.
+type Notification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params"`
 }
 
 const (

@@ -14,6 +14,7 @@ Service:
   tui                            Open the full-screen terminal manager
   status                         Show service health
   diagnostics                    Show health, settings, and recent errors
+  events [--type TYPE]...        Print service events as they happen
 
 Napplets:
   installed [--offset N] [--limit N]
@@ -126,6 +127,20 @@ Usage: kwak diagnostics
 Shows live health, effective settings, recent error summaries, and the
 installed-list sync status (install_sync).
 Example: kwak diagnostics
+`,
+	"events": `Print service events as they happen.
+
+Usage: kwak events [--type TYPE]...
+  --type TYPE  Only this event type; repeat for more (default: all)
+TYPE: napplet.installed, napplet.uninstalled, napplet.updated,
+settings.changed, signer.changed, sync.completed, updates.available,
+window.closed, or window.opened.
+Prints one line per event: its time, its type and its fields. --json prints
+one JSON object per line. A reader that falls behind gets one
+events.overflow line counting the events it missed; re-read the state you
+follow then. Stops with an error when the service ends the stream, or with
+success when --timeout passes.
+Example: kwak --json events --type window.opened
 `,
 	"installed": `List installed napplets.
 

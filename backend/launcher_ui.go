@@ -216,6 +216,8 @@ func mergeUpdateStates(changes map[string]*Napp) {
 	updateSet.Store(next)
 	updateSetMu.Unlock()
 	notifyState()
+	// no caller holds stateMu here, which noteUpdatesChanged reads
+	noteUpdatesChanged()
 }
 
 // mergeUpdateState is mergeUpdateStates for one id.

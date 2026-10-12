@@ -71,6 +71,8 @@ type Service struct {
 	systemDark     atomic.Bool
 	themeMu        sync.Mutex
 	appearanceWait sync.WaitGroup
+	// events fans service events out to events.subscribe connections
+	events *eventHub
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
@@ -130,7 +132,10 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 		return nil, err
 	}
 	workContext, cancelWork := context.WithCancel(context.Background())
-	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{}), searchHost: searchHost}
+	s := &Service{ready: true, start: time.Now(), version: version, manager: m, signer: &backend.ServiceSigner{}, credentials: credentials, closeBackend: closeBackend, lock: lock, workContext: workContext, cancelWork: cancelWork, closeDone: make(chan struct{}), searchHost: searchHost, events: newEventHub()}
+	// publish never blocks or calls back into the backend, as the sink
+	// contract requires
+	backend.SetServiceEventSink(s.events.publish)
 	// Native entry passes report failures as a fixed summary only: the
 	// joined error names files and paths and goes to the journal instead.
 	// A failure of the startup pass, which ran inside Start, is replayed
@@ -468,6 +473,27 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme {
 		return
 	}
+	// names only: the values may hold relay URLs, which events never carry
+	if s.events != nil {
+		var fields []string
+		for _, f := range []struct {
+			name    string
+			changed bool
+		}{
+			{"relays", !slices.Equal(before.Relays, after.Relays)},
+			{"blossom_servers", !slices.Equal(before.BlossomServers, after.BlossomServers)},
+			{"discover_on_user_relays", before.DiscoverOnUserRelays != after.DiscoverOnUserRelays},
+			{"desktop_entries", before.DesktopEntries != after.DesktopEntries},
+			{"gnome_search", before.GNOMESearch != after.GNOMESearch},
+			{"sync_id", before.SyncID != after.SyncID},
+			{"theme", before.Theme != after.Theme},
+		} {
+			if f.changed {
+				fields = append(fields, f.name)
+			}
+		}
+		s.events.publish(backend.ServiceEvent{Type: backend.EventSettingsChanged, Fields: fields})
+	}
 	if before.SyncID != after.SyncID {
 		backend.InstallSyncChanged()
 	}
@@ -567,6 +593,7 @@ func (s *Service) Close() {
 	s.mu.Unlock()
 	s.closeOnce.Do(func() {
 		s.work.Wait()
+		backend.SetServiceEventSink(nil)
 		// BeginShutdown cancelled workContext: the sync worker ends at once,
 		// and no pass races the signer teardown or closeBackend
 		if s.installSyncWait != nil {

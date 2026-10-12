@@ -84,6 +84,9 @@ func run(args []string) error {
 	if err != nil || uid != uint32(os.Geteuid()) {
 		return errors.New("unauthorized server")
 	}
+	if method == "events.subscribe" {
+		return runEvents(conn, params, timeoutOverride, jsonOutput, os.Stdout)
+	}
 	deadline := 30 * time.Second
 	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "napplet.try" || method == "signer.pair.wait" {
 		deadline = 180 * time.Second
@@ -480,6 +483,19 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			Relays  []string `json:"relays,omitempty"`
 		}{addr.Canonical, relays})
 		return "napplet." + args[0], params, socketPath, nil
+	}
+	if len(args) >= 1 && args[0] == "events" {
+		types, err := eventTypeArgs(args[1:])
+		if err != nil {
+			return "", nil, "", err
+		}
+		if len(types) == 0 {
+			return "events.subscribe", nil, socketPath, nil
+		}
+		params, _ := json.Marshal(struct {
+			Types []string `json:"types"`
+		}{types})
+		return "events.subscribe", params, socketPath, nil
 	}
 	if len(args) >= 1 && args[0] == "updates" {
 		switch len(args) {

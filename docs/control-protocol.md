@@ -10,7 +10,7 @@ Installed services are socket activated. The per-user `kwakore.socket` unit (`Li
 
 A daemon started without activation (in the foreground, for development) creates its real, current-user-owned `kwakore` child as `0700`, binds an owner-only `0600` socket itself and removes it on exit. A stale owned socket is removed only after a refused connection proves no listener is active. An active or foreign socket is never replaced. The daemon checks the connecting UID with `SO_PEERCRED` before dispatch. A foreign UID receives an `Unauthorized` JSON-RPC error with `id:null`, then the connection closes. Clients should also check the server UID, including when choosing an alternate socket path; the bundled CLI does so for both standard and `--socket` paths.
 
-One complete JSON value followed by `\n` is one frame. The server accepts at most 1 MiB of request JSON per line, excluding the newline, and emits at most 8 MiB of response JSON per line. It serves at most 64 concurrent connections; excess connections close. An idle connection has a 30-second read deadline for each frame and each response has a 30-second write deadline. A connection may send multiple frames and receive their responses in order. Keep request frames compact and under the cap; a frame over the cap receives `Invalid Request` and closes the connection.
+One complete JSON value followed by `\n` is one frame. The server accepts at most 1 MiB of request JSON per line, excluding the newline, and emits at most 8 MiB of response JSON per line. It serves at most 64 concurrent connections; excess connections close. An idle connection has a 30-second read deadline for each frame, except a connection that subscribed to events, which the server no longer reads (see [events](#events)), and each response has a 30-second write deadline. A connection may send multiple frames and receive their responses in order. Keep request frames compact and under the cap; a frame over the cap receives `Invalid Request` and closes the connection.
 
 Requests have `{"jsonrpc":"2.0","method":"service.status","params":{},"id":1}`. `params` is an optional **object** of named values; positional arrays, duplicate/unknown parameter names, and malformed values are rejected. Methods with no parameters accept an omitted `params` or `{}`. An `id` may be a string, integer, or `null`; a missing `id` is a notification, so the server dispatches a valid request and sends **no response**. Clients that need a result must supply an ID and match it on the reply. A response has exactly one of `result` and `error`, plus `jsonrpc:"2.0"` and the matching `id`. A parse or invalid-request error without a usable ID uses `id:null`. A top-level array is a batch of 1–64 requests; replies contain only non-notification responses in request order. An all-notification batch sends no line. An empty or oversized batch produces one `Invalid Request` error. A syntactically invalid frame produces `Parse error`.
 
@@ -46,6 +46,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.permissions.get` | `{address:string}` required | `{address:string,required_domains:string[],optional_domains:string[],saved_rules:SavedRule[]}` |
 | `napplet.permissions.set` | `{address:string,permission:Permission,decision:"allow"\|"deny",subject?:string}` | `{address:string,permission:Permission,subject:string,decision:"allow"\|"deny"}` |
 | `napplet.permissions.clear` | `{address:string,permission:Permission,subject?:string}` | `{address:string,permission:Permission,subject:string,cleared:boolean}` |
+| `events.subscribe` | `{types?:string[]}` | `{subscribed:true,types:string[]}`, then the connection carries event notifications (see [events](#events)) |
 
 `Health` is `{ready:boolean,version:string,uptime_seconds:number,config_status:"valid",storage_status:"open"\|"unhealthy"\|"closed",active_windows:integer}`. Readiness means initialized stores, valid active configuration, and acceptance of work; it does not imply a signer login or healthy relays. `Settings` is `{relays:string[],blossom_servers:string[],discover_on_user_relays:boolean,desktop_entries:boolean,gnome_search:boolean,sync_id:string,theme:"system"\|"light"\|"dark",signer:{mode:"none"\|"nsec"\|"bunker"\|"system",relay?:string,socket?:string}}`. Ordinary `settings.set` and `settings.clear` accept `relays`, `blossom_servers`, `discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, and `theme`; signer selection has its own method. `sync_id` is a JSON string: empty (sync off) or 1 to 64 printable ASCII characters without spaces. `theme` is a JSON string: `system` (the default), `light` or `dark`. It is the napplet window theme: new windows start with it and open windows switch at once. `system` follows the desktop's light/dark preference from the XDG desktop portal while the service runs, and is light without a portal. While `sync_id` is set, the service may install, update or uninstall napplets on its own to follow the synced list (see [syncing installed napplets](service.md#syncing-installed-napplets)). Relay values must be canonical `wss://` URLs; Blossom values must be canonical `http://` or `https://` URLs. URL hosts must be lowercase, and duplicates, credentials, query strings, fragments, and explicit JSON `null` are invalid. Empty arrays and `false` are valid values. Clearing reveals the declarative or built-in value. `DiagnosticError` is `{category:string,time:RFC3339 timestamp,detail:string}`; at most 32 fixed, sanitized summaries are retained. The optional warning is also sanitized.
 
@@ -78,6 +79,33 @@ and `version`. An invalid optional source tag is omitted; it does not make an
 otherwise valid legacy NIP-5D napplet unavailable. Artifact and signature
 validation still determine availability. A refresh drains events arriving
 alongside EOSE before committing its catalog snapshot.
+
+## Events
+
+`events.subscribe` turns its connection into an event stream, so a client can follow the service without polling. `types` names the event types to receive: 1 to 9 distinct types from the table below. Omitting it, or sending `[]`, subscribes to every type; an unknown or repeated type, `events.overflow`, `null` or any other shape yields `Invalid params`. The result echoes the subscribed types, sorted. A connection subscribes at most once: a second `events.subscribe` on it, for example later in the same batch, yields `Conflict`. At most 16 connections may subscribe at once; one more yields `Busy` and stays an ordinary connection.
+
+Once the frame holding the subscription has been answered, the server reads no further frames from that connection, which therefore has no idle read deadline, and writes one notification per event:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"window.opened","time":"2026-10-12T09:00:00Z","window_id":"0123456789abcdef0123456789abcdef","address":"35129:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:notes","name":"Notes"}}
+```
+
+A notification has no `id`. `params` always holds `type` and `time` (an RFC3339 timestamp) and only the fields of its type:
+
+| Type | Fields | When |
+| --- | --- | --- |
+| `window.opened` | `window_id`, `address`, `name` | a napplet window listed by `napplet.windows` opened |
+| `window.closed` | `window_id`, `address` | that window closed |
+| `napplet.installed` | `address`, `outcome` (`installed`, `updated` or `reinstalled`), `installed_version:Version` | an install, including one made by the installed-list sync |
+| `napplet.updated` | `address`, `previous_version:Version`, `installed_version:Version` | an update was applied |
+| `napplet.uninstalled` | `address`, `cleanup_complete:boolean` | a napplet's record was removed |
+| `updates.available` | `items:[{address,installed_version,available_version},...]` | the list of installed napplets with a newer valid version changed; `items` is the complete current list and may be `[]` |
+| `signer.changed` | `signer:SignerStatus` | the public signer status changed |
+| `settings.changed` | `fields:string[]` | settings changed through `settings.set`, `settings.clear` or `settings.reload`; it names the changed fields only, never their values, so read them with `settings.get` |
+| `sync.completed` | `result` (an `InstallSync` result category), `ok:boolean`, `napplets:integer` | an installed-list sync pass ended |
+| `events.overflow` | `dropped:integer` | always delivered, see below |
+
+Events arrive in the order they happened, and their times never decrease. No event carries a path, relay URL, key, secret or raw error. Each subscriber has a queue of 256 events. When a client reads too slowly and its queue fills, its further events are dropped and counted until the queued ones have been written; it then receives one `events.overflow` notification with the number dropped, and the stream goes on. After an overflow a client should re-read the state it follows with `napplet.installed`, `napplet.windows`, `signer.status`, `settings.get` and `service.diagnostics`. Each notification has the 30-second write deadline; a client that stops reading for longer is disconnected. The subscription ends when the client closes the connection, a write fails or the service shuts down; the server then closes the connection without a final notice. A subscription never delays shutdown.
 
 ## Errors
 
@@ -134,6 +162,7 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | --- | --- |
 | `status` | `service.status` |
 | `diagnostics` | `service.diagnostics` |
+| `events [--type TYPE]...` | `events.subscribe` (prints each event's `params` until the stream ends; see below) |
 | `settings get` | `settings.get` |
 | `settings inspect` | `settings.inspect` |
 | `settings reload` | `settings.reload` |
@@ -171,5 +200,7 @@ With `--json`, a refused `ADDRESS` fails before dialing and writes exactly `{"er
 Default client wait is 30 seconds for reads (including `detail`), settings, signer switch, launch, and stop, 45 seconds for `discover`, 90 seconds for `updates`, and 180 seconds for install, update, uninstall, try, and pairing wait. For nsec or bunker input, choose exactly one source: stdin or a current-user-owned regular `0600` file. The CLI opens a file without following a final symlink, reads at most 256 bytes for nsec or 2048 bytes for bunker, and sends the secret only in the write request. A positional secret or extra source is rejected before dialing. Avoid recording the write request or private pairing output in logs. `signer pair start` prints a pairing URI and a private-token notice (`--json` uses `pairing_uri` and `notice` fields); the URI is composed locally from validated public fields and the locally generated secret. With `--json`, other successful commands print exactly the validated JSON `result` value followed by one newline. By default, successful commands print labeled text and failures print readable messages. With `--json`, any parse, setup, dial, peer, wire, RPC, or timeout failure writes one JSON object `{"error":{"code":NUMBER,"message":"TEXT"}}`, with a fixed `data` object only for a refused address, a partial cleanup or a headless launch, and newline to stderr, writes nothing to stdout, and exits nonzero. Remote messages are mapped to fixed code text; the CLI revalidates the headless launch reason and signer response before printing. A **client-side** timeout uses code 1008 and says the operation outcome is unknown: disconnecting does not prove server cancellation. Recheck `signer status` after a signer switch timeout, or `status` and `installed` after other mutations, before retrying. `--timeout` does not change the daemon's own operation deadlines.
 
 The CLI validates permission and signer response fields and the matching request ID before printing.
+
+`kwak events` checks each `--type` against the event table before dialing and sends no `params` without one. Only the acknowledgement has the default 30-second wait; after it the CLI waits for events indefinitely. Each notification must have exactly `jsonrpc:"2.0"`, `method:"event"` and a `params` object with a string `type` and `time`, and no `id`; anything else ends it with `invalid daemon response`. By default it prints one line per event: the time, the type and the other fields as sorted `key=value` pairs, nested values as compact JSON. With `--json` it prints each `params` object on its own line. When the daemon closes the stream it exits 1 (`Unavailable` with `--json`); with `--timeout` it exits 0 once that time has passed after the acknowledgement.
 
 Native desktop entries run `kwak launch-token TOKEN` with `Terminal=true`, so the CLI's readable error (`Error: Unavailable` with a graphical-session hint) appears in that terminal. With `--json`, the equivalent error is `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` for a daemon without `DISPLAY` or `WAYLAND_DISPLAY`. The [service guide](service.md#native-desktop-entries) covers the entries, signer examples, error examples and journal diagnostics.

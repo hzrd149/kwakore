@@ -42,6 +42,18 @@ type revocableKeyer struct {
 
 var errServiceSignerUnavailable = errors.New("signer unavailable")
 
+// setStatusLocked records the public signer status, with s.mu held, and
+// emits signer.changed when it differs from the previous one. It must not
+// lock s.mu; the event sink never calls back into the signer.
+func (s *ServiceSigner) setStatusLocked(st SignerStatus) {
+	if s.status == st {
+		return
+	}
+	s.status = st
+	copied := st
+	emitServiceEvent(ServiceEvent{Type: EventSignerChanged, Signer: &copied})
+}
+
 func (k *revocableKeyer) revoke() { k.mu.Lock(); k.active = false; k.mu.Unlock() }
 func (k *revocableKeyer) GetPublicKey(ctx context.Context) (nostr.PubKey, error) {
 	k.mu.RLock()
@@ -136,7 +148,7 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 		s.pendingCancel = nil
 	}
 	stopped := s.stopLocked(ctx)
-	s.status = SignerStatus{Mode: mode, ConnectionState: "disconnected"}
+	s.setStatusLocked(SignerStatus{Mode: mode, ConnectionState: "disconnected"})
 	failed := errors.New("signer unavailable")
 	if !stopped {
 		return s.status, failed
@@ -175,7 +187,7 @@ func (s *ServiceSigner) Switch(ctx context.Context, mode, secret string, persist
 	}
 	s.keyer = &revocableKeyer{active: true, inner: k}
 	publishIdentity(s.keyer, pk, cancel)
-	s.status = SignerStatus{Mode: "nsec", PublicKey: pk.Hex(), ConnectionState: "connected"}
+	s.setStatusLocked(SignerStatus{Mode: "nsec", PublicKey: pk.Hex(), ConnectionState: "connected"})
 	pushIdentityChanged()
 	return s.status, nil
 }
@@ -211,7 +223,7 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 		s.pendingCancel()
 	}
 	stopped := s.stopLocked(ctx)
-	s.status = SignerStatus{Mode: "bunker", ConnectionState: "disconnected"}
+	s.setStatusLocked(SignerStatus{Mode: "bunker", ConnectionState: "disconnected"})
 	if !stopped {
 		status := s.status
 		s.mu.Unlock()
@@ -252,7 +264,7 @@ func (s *ServiceSigner) switchBunker(ctx context.Context, input string, clientKe
 	s.pendingCancel = nil
 	s.keyer = &revocableKeyer{active: true, inner: k}
 	publishIdentity(s.keyer, pk, cancel)
-	s.status = SignerStatus{Mode: "bunker", PublicKey: pk.Hex(), ConnectionState: "connected"}
+	s.setStatusLocked(SignerStatus{Mode: "bunker", PublicKey: pk.Hex(), ConnectionState: "connected"})
 	pushIdentityChanged()
 	if expected != 0 && s.pair != nil && s.pair.generation == expected && !s.pair.finished {
 		s.pair.status, s.pair.err, s.pair.finished, s.pair.secret = s.status, nil, true, ""
@@ -274,7 +286,7 @@ func (s *ServiceSigner) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	s.stopLocked(ctx)
-	s.status = SignerStatus{Mode: "none", ConnectionState: "disconnected"}
+	s.setStatusLocked(SignerStatus{Mode: "none", ConnectionState: "disconnected"})
 }
 
 func (s *ServiceSigner) stopLocked(ctx context.Context) bool {

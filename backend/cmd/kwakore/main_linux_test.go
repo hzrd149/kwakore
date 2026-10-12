@@ -490,7 +490,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
-		{"updates"}, {"detail", address},
+		{"updates"}, {"detail", address}, {"events"},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -1341,6 +1341,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"--json", "--socket", "/tmp/unused.sock", "install", "--help"}, "install ADDRESS"},
 		{[]string{"updates", "--help"}, "never installed automatically"},
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
+		{[]string{"events", "--help"}, "events.overflow"},
 	} {
 		cmd := exec.Command(cli, tc.args...)
 		cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR=")
