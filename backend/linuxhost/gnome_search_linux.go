@@ -90,7 +90,7 @@ func (h *Host) SetGNOMESearchIntegration(enabled bool) error {
 		return err
 	}
 	files := []struct{ path, content string }{
-		{desktop, "[Desktop Entry]\nType=Application\nName=Kwakore\nComment=Discover Nostr napplets\nExec=" + execLine + " discover\nTerminal=true\nCategories=Network;\n"},
+		{desktop, "[Desktop Entry]\nType=Application\nName=Kwakore\nComment=Discover Nostr napplets\nExec=" + execLine + " discover\nTerminal=true\nNoDisplay=true\nCategories=Network;\n"},
 		{provider, "[Shell Search Provider]\nDesktopId=" + searchDesktop + "\nBusName=" + searchBus + "\nObjectPath=" + searchPath + "\nVersion=2\n"},
 		{service, "[D-BUS Service]\nName=" + searchBus + "\nExec=" + execLine + " status\n"},
 	}

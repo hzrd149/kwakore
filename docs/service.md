@@ -465,6 +465,12 @@ napplets through GNOME Shell's SearchProvider2 interface. It refreshes the
 catalog in the background. Selecting a discovered result opens its temporary
 trial; selecting an installed result launches it.
 
+The provider's `org.kwakore.Search.desktop` entry is marked `NoDisplay=true`,
+because Kwakore is a background service with nothing to open from an app menu.
+Current GNOME Shell releases ignore a search provider whose entry is hidden, so
+on those releases this provider returns no results. Installed napplets are
+still found through their own desktop entries.
+
 Set `gnome_search` to `false` in `config.json`, or run
 `kwak settings set gnome_search false`, to remove per-user registration and
 return no search results. Restoring `true` enables search again. For a bundle

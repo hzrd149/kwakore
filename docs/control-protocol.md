@@ -25,7 +25,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `settings.get` | none | `Settings` |
 | `settings.inspect` | none | `{settings:Settings,sources:{FIELD:"default"|"config"|"override",...}}` for each non-secret setting and signer selection |
 | `settings.reload` | none | `{settings:Settings}` after re-reading declarative config; invalid reload keeps prior effective settings |
-| `settings.set` | `{field:string,value:array<string>\|boolean}` required | `{settings:Settings}` after persisting an override |
+| `settings.set` | `{field:string,value:array<string>\|boolean\|string}` required (`sync_id` takes a string) | `{settings:Settings}` after persisting an override |
 | `settings.clear` | `{field:string}` required | `{settings:Settings}` after removing one override |
 | `signer.status` | none | `SignerStatus` |
 | `signer.switch` | `{mode:"none"}`, `{mode:"nsec"\|"bunker",secret:string}` or `{mode:"system",socket?:string}` | final `SignerStatus` after the previous signer session ends |

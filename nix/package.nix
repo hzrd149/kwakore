@@ -168,6 +168,7 @@ Name=Kwakore
 Comment=Discover Nostr napplets
 Exec=kwak discover
 Terminal=true
+NoDisplay=true
 Categories=Network;
 EOF
     install -Dm444 /dev/stdin "$out/share/dbus-1/services/org.kwakore.SearchProvider.service" <<'EOF'

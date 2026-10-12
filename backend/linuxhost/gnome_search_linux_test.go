@@ -41,6 +41,10 @@ func TestGNOMESearchRegistrationAndRemoval(t *testing.T) {
 			t.Fatalf("%s: %v: %s", path, err, body)
 		}
 	}
+	// kwakore is a background service: its own entry stays out of app menus
+	if body, err := os.ReadFile(desktop); err != nil || !strings.Contains(string(body), "\nNoDisplay=true\n") {
+		t.Fatalf("search entry is not hidden: %v: %s", err, body)
+	}
 	if err := h.SetGNOMESearchIntegration(false); err != nil {
 		t.Fatal(err)
 	}
