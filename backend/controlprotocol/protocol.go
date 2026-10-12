@@ -40,8 +40,9 @@ const EventOverflow = "events.overflow"
 func EventTypes() []string {
 	return []string{
 		"napplet.installed", "napplet.uninstalled", "napplet.updated",
-		"settings.changed", "signer.changed", "sync.completed",
-		"updates.available", "window.closed", "window.opened",
+		"settings.changed", "signer.changed", "social.updated",
+		"sync.completed", "updates.available", "window.closed",
+		"window.opened",
 	}
 }
 

@@ -80,7 +80,7 @@ func assertPublicEvents(t *testing.T, events []ServiceEvent) {
 }
 
 func TestEventTypesMatchProtocol(t *testing.T) {
-	ours := []string{EventWindowOpened, EventWindowClosed, EventNappletInstalled, EventNappletUpdated, EventNappletUninstalled, EventUpdatesAvailable, EventSignerChanged, EventSettingsChanged, EventSyncCompleted}
+	ours := []string{EventWindowOpened, EventWindowClosed, EventNappletInstalled, EventNappletUpdated, EventNappletUninstalled, EventUpdatesAvailable, EventSignerChanged, EventSettingsChanged, EventSocialUpdated, EventSyncCompleted}
 	slices.Sort(ours)
 	if !slices.Equal(ours, controlprotocol.EventTypes()) || EventOverflow != controlprotocol.EventOverflow {
 		t.Fatalf("backend event types %v differ from the protocol's %v", ours, controlprotocol.EventTypes())

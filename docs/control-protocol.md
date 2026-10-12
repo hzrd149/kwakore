@@ -25,7 +25,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `settings.get` | none | `Settings` |
 | `settings.inspect` | none | `{settings:Settings,sources:{FIELD:"default"|"config"|"override",...}}` for each non-secret setting and signer selection |
 | `settings.reload` | none | `{settings:Settings}` after re-reading declarative config; invalid reload keeps prior effective settings |
-| `settings.set` | `{field:string,value:array<string>\|boolean\|string}` required (`sync_id` and `theme` take a string) | `{settings:Settings}` after persisting an override |
+| `settings.set` | `{field:string,value:array<string>\|boolean\|string}` required (`sync_id`, `theme` and `social_refresh` take a string) | `{settings:Settings}` after persisting an override |
 | `settings.clear` | `{field:string}` required | `{settings:Settings}` after removing one override |
 | `signer.status` | none | `SignerStatus` |
 | `signer.switch` | `{mode:"none"}`, `{mode:"nsec"\|"bunker",secret:string}` or `{mode:"system",socket?:string}` | final `SignerStatus` after the previous signer session ends |
@@ -63,7 +63,7 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.permissions.clear` | `{address:string,permission:Permission,subject?:string}` | `{address:string,permission:Permission,subject:string,cleared:boolean}` |
 | `events.subscribe` | `{types?:string[]}` | `{subscribed:true,types:string[]}`, then the connection carries event notifications (see [events](#events)) |
 
-`Health` is `{ready:boolean,version:string,uptime_seconds:number,config_status:"valid",storage_status:"open"\|"unhealthy"\|"closed",active_windows:integer}`. Readiness means initialized stores, valid active configuration, and acceptance of work; it does not imply a signer login or healthy relays. `Settings` is `{relays:string[],blossom_servers:string[],discover_on_user_relays:boolean,desktop_entries:boolean,gnome_search:boolean,sync_id:string,theme:"system"\|"light"\|"dark",signer:{mode:"none"\|"nsec"\|"bunker"\|"system",relay?:string,socket?:string}}`. Ordinary `settings.set` and `settings.clear` accept `relays`, `blossom_servers`, `discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, and `theme`; signer selection has its own method. `sync_id` is a JSON string: empty (sync off) or 1 to 64 printable ASCII characters without spaces. `theme` is a JSON string: `system` (the default), `light` or `dark`. It is the napplet window theme: new windows start with it and open windows switch at once. `system` follows the desktop's light/dark preference from the XDG desktop portal while the service runs, and is light without a portal. While `sync_id` is set, the service may install, update or uninstall napplets on its own to follow the synced list (see [syncing installed napplets](service.md#syncing-installed-napplets)). Relay values must be canonical `wss://` URLs; Blossom values must be canonical `http://` or `https://` URLs. URL hosts must be lowercase, and duplicates, credentials, query strings, fragments, and explicit JSON `null` are invalid. Empty arrays and `false` are valid values. Clearing reveals the declarative or built-in value. `DiagnosticError` is `{category:string,time:RFC3339 timestamp,detail:string}`; at most 32 fixed, sanitized summaries are retained. The optional warning is also sanitized.
+`Health` is `{ready:boolean,version:string,uptime_seconds:number,config_status:"valid",storage_status:"open"\|"unhealthy"\|"closed",active_windows:integer}`. Readiness means initialized stores, valid active configuration, and acceptance of work; it does not imply a signer login or healthy relays. `Settings` is `{relays:string[],blossom_servers:string[],discover_on_user_relays:boolean,desktop_entries:boolean,gnome_search:boolean,sync_id:string,theme:"system"\|"light"\|"dark",social_refresh:string,signer:{mode:"none"\|"nsec"\|"bunker"\|"system",relay?:string,socket?:string}}`. Ordinary `settings.set` and `settings.clear` accept `relays`, `blossom_servers`, `discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, `theme`, and `social_refresh`; signer selection has its own method. `sync_id` is a JSON string: empty (sync off) or 1 to 64 printable ASCII characters without spaces. `theme` is a JSON string: `system` (the default), `light` or `dark`. It is the napplet window theme: new windows start with it and open windows switch at once. `system` follows the desktop's light/dark preference from the XDG desktop portal while the service runs, and is light without a portal. `social_refresh` is a JSON string: `"0"` or a Go duration from `15m` to `168h` (digits with the units `ns`, `us`, `ms`, `s`, `m` and `h`, no sign, at most 32 bytes), default `6h`. It is how often installed napplets' social data is refreshed in the background; `"0"` turns only that periodic refresh off. While `sync_id` is set, the service may install, update or uninstall napplets on its own to follow the synced list (see [syncing installed napplets](service.md#syncing-installed-napplets)). Relay values must be canonical `wss://` URLs; Blossom values must be canonical `http://` or `https://` URLs. URL hosts must be lowercase, and duplicates, credentials, query strings, fragments, and explicit JSON `null` are invalid. Empty arrays and `false` are valid values. Clearing reveals the declarative or built-in value. `DiagnosticError` is `{category:string,time:RFC3339 timestamp,detail:string}`; at most 32 fixed, sanitized summaries are retained. The optional warning is also sanitized.
 
 `InstallSync` is `{enabled:boolean,last_attempt:RFC3339 timestamp|null,last_success:RFC3339 timestamp|null,last_result:"ok"|"failed"|"unreadable"|"skipped"|null,napplets:integer}`, the status of the installed-list sync. `enabled` is true while `sync_id` is set. The other fields describe the passes for the current `sync_id` since the service started: they are `null` (and `napplets` 0) before the first pass, and again after `sync_id` changes until a pass for the new value ends. `last_result` is one fixed category: `ok` (the list was merged and published, or already agreed), `failed` (an install or uninstall from the list failed, the list could not be signed, or no relay accepted it), `unreadable` (the synced list could not be decrypted), or `skipped` (no signer). `last_success` is the end of the last `ok` pass, and `napplets` the size of the merged list that pass worked on. Nothing else about a pass, such as an address, relay or error, is reported.
 
@@ -192,6 +192,17 @@ seconds and a page read at 15 seconds. `sync` reports each category's last
 refresh with the `lookup_status` vocabulary: `not_requested` (never asked,
 `synced_at:null`), `answered`, `partial`, `unavailable` (no relay to ask, or
 no usable answer) or `timeout`; `synced_at` is Unix seconds.
+
+The daemon also refreshes every category of each installed napplet on its
+own: once after an install, update or version selection, and again every
+`social_refresh` (default `6h`; `"0"` turns off only this periodic refresh,
+not the one after an install). The first periodic pass runs a few minutes
+after the service starts; it refreshes the installed napplets one at a time,
+and no pass runs while no relay is configured. These refreshes obey the same
+30-second floor, the one-refresh-per-address rule and the two-address limit.
+Napplets that are not installed are fetched only when a client asks. A client
+follows the changes with the `social.updated` event (see
+[events](#events)) instead of polling.
 
 An event is about the napplet only when it names it exactly. A reaction
 matches with an `a` tag equal to the canonical address or an `e` tag naming a
@@ -504,7 +515,7 @@ given because of them.
 
 ## Events
 
-`events.subscribe` turns its connection into an event stream, so a client can follow the service without polling. `types` names the event types to receive: 1 to 9 distinct types from the table below. Omitting it, or sending `[]`, subscribes to every type; an unknown or repeated type, `events.overflow`, `null` or any other shape yields `Invalid params`. The result echoes the subscribed types, sorted. A connection subscribes at most once: a second `events.subscribe` on it, for example later in the same batch, yields `Conflict`. At most 16 connections may subscribe at once; one more yields `Busy` and stays an ordinary connection.
+`events.subscribe` turns its connection into an event stream, so a client can follow the service without polling. `types` names the event types to receive: 1 to 10 distinct types from the table below. Omitting it, or sending `[]`, subscribes to every type; an unknown or repeated type, `events.overflow`, `null` or any other shape yields `Invalid params`. The result echoes the subscribed types, sorted. A connection subscribes at most once: a second `events.subscribe` on it, for example later in the same batch, yields `Conflict`. At most 16 connections may subscribe at once; one more yields `Busy` and stays an ordinary connection.
 
 Once the frame holding the subscription has been answered, the server reads no further frames from that connection, which therefore has no idle read deadline, and writes one notification per event:
 
@@ -523,6 +534,7 @@ A notification has no `id`. `params` always holds `type` and `time` (an RFC3339 
 | `napplet.uninstalled` | `address`, `cleanup_complete:boolean` | a napplet's record was removed |
 | `updates.available` | `items:[{address,installed_version,available_version},...]` | the list of installed napplets with a newer valid version changed; `items` is the complete current list and may be `[]` |
 | `signer.changed` | `signer:SignerStatus` | the public signer status changed |
+| `social.updated` | `address`, `fields:string[]` (the changed categories: `reactions`, `comments`, `mentions`, `zaps`) | a refresh (asked for, periodic, or after an install, update or selection) added or removed held events, or the user's own vote, reaction, comment, share or deletion changed them; a zap invoice emits nothing; re-read with `napplet.social` |
 | `settings.changed` | `fields:string[]` | settings changed through `settings.set`, `settings.clear` or `settings.reload`; it names the changed fields only, never their values, so read them with `settings.get` |
 | `sync.completed` | `result` (an `InstallSync` result category), `ok:boolean`, `napplets:integer` | an installed-list sync pass ended |
 | `events.overflow` | `dropped:integer` | always delivered, see below |

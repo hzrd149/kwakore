@@ -20,6 +20,7 @@ const (
 	EventUpdatesAvailable   = "updates.available"
 	EventSignerChanged      = "signer.changed"
 	EventSettingsChanged    = "settings.changed"
+	EventSocialUpdated      = "social.updated"
 	EventSyncCompleted      = "sync.completed"
 	EventOverflow           = "events.overflow"
 )
@@ -35,6 +36,7 @@ const (
 //	updates.available    items (the complete current list)
 //	signer.changed       signer
 //	settings.changed     fields (names only, never values)
+//	social.updated       address, fields (the categories whose held events changed)
 //	sync.completed       result, ok, napplets
 //	events.overflow      dropped
 //

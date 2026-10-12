@@ -61,6 +61,10 @@ func TestCLISettingsCommands(t *testing.T) {
 		{[]string{"settings", "set", "theme", `dark`}, "settings.set", `{"field":"theme","value":"dark"}`},
 		{[]string{"settings", "set", "theme", `"dark"`}, "settings.set", `{"field":"theme","value":"dark"}`},
 		{[]string{"settings", "clear", "theme"}, "settings.clear", `{"field":"theme"}`},
+		{[]string{"settings", "set", "social_refresh", `12h`}, "settings.set", `{"field":"social_refresh","value":"12h"}`},
+		{[]string{"settings", "set", "social_refresh", `0`}, "settings.set", `{"field":"social_refresh","value":"0"}`},
+		{[]string{"settings", "set", "social_refresh", `"0"`}, "settings.set", `{"field":"social_refresh","value":"0"}`},
+		{[]string{"settings", "clear", "social_refresh"}, "settings.clear", `{"field":"social_refresh"}`},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			seen := make(chan string, 1)
@@ -125,6 +129,16 @@ func TestCLIThemeRejectsUnknownValues(t *testing.T) {
 		var input inputFailure
 		if !errors.As(err, &input) {
 			t.Fatalf("theme %q: %v, want an input failure", arg, err)
+		}
+	}
+}
+
+func TestCLISocialRefreshRejectsBadValues(t *testing.T) {
+	for _, arg := range []string{"1m", "7d", `""`, `["6h"]`, "6", `"6h`, "-6h", "169h"} {
+		_, _, _, err := command([]string{"settings", "set", "social_refresh", arg})
+		var input inputFailure
+		if !errors.As(err, &input) {
+			t.Fatalf("social_refresh %q: %v, want an input failure", arg, err)
 		}
 	}
 }
@@ -1552,6 +1566,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"permissions", "set", "--help"}, "--subject NAME"},
 		{[]string{"settings"}, "settings set FIELD"},
 		{[]string{"settings", "set", "--help"}, "JSON_VALUE"},
+		{[]string{"settings", "set", "--help"}, "social_refresh"},
 		{[]string{"settings", "help"}, "settings set FIELD"},
 		{[]string{"signer"}, "signer pair start"},
 		{[]string{"signer", "pair", "help"}, "signer pair cancel"},
@@ -1563,6 +1578,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
 		{[]string{"help", "icon"}, "kwak icon ADDRESS [--out FILE]"},
 		{[]string{"events", "--help"}, "events.overflow"},
+		{[]string{"events", "--help"}, "social.updated"},
 		{[]string{"help", "social"}, "--only"},
 		{[]string{"reactions", "--help"}, "--event ID"},
 		{[]string{"comments", "-h"}, "--parent ID"},

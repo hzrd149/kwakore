@@ -410,6 +410,10 @@ func socialRefresh(ctx context.Context, t socialTarget, categories []string) err
 		return ctx.Err()
 	}
 
+	// what is held now, to tell after the refresh which categories changed
+	before := socialHeldIDs(t)
+	prevProvider := socialZapProviderOf(t.Address)
+
 	relays := socialRelays(ctx, t)
 	statuses := map[string]string{}
 	if len(relays) == 0 {
@@ -472,7 +476,34 @@ func socialRefresh(ctx context.Context, t socialTarget, categories []string) err
 	socialEnforceCaps(t)
 	socialRecordSync(t, statuses, zapProvider)
 	socialGeneration.Add(1)
+
+	// ingest, deletions, caps and evictions all show as a changed id set;
+	// a new zap provider changes what the held receipts count for
+	after := socialHeldIDs(t)
+	var changed []string
+	for _, category := range SocialCategories() {
+		if before[category] != after[category] ||
+			(category == SocialZaps && after[category] != "" && socialZapProviderOf(t.Address) != prevProvider) {
+			changed = append(changed, category)
+		}
+	}
+	socialUpdated(t.Address, changed...)
 	return ctx.Err()
+}
+
+// socialHeldIDs fingerprints what is held for t: per category, the sorted
+// hex ids of its held events, joined.
+func socialHeldIDs(t socialTarget) map[string]string {
+	out := make(map[string]string, len(SocialCategories()))
+	for _, category := range SocialCategories() {
+		var ids []string
+		for _, evt := range socialHeld(t, socialKind(category)) {
+			ids = append(ids, evt.ID.Hex())
+		}
+		slices.Sort(ids)
+		out[category] = strings.Join(ids, ",")
+	}
+	return out
 }
 
 // socialDeletionPass asks relays for kind 5s naming the held events of the
@@ -809,6 +840,33 @@ func socialRecordSync(t socialTarget, statuses map[string]string, zapProvider *s
 		if target, err := newSocialTarget(address); err == nil {
 			socialPruneEvents(target)
 		}
+	}
+}
+
+// socialMarkInstalled marks an installed address installed in the status
+// index, creating its entry when there is none. A hook calls it after its
+// refresh, which the floor may have skipped.
+func socialMarkInstalled(address string) {
+	if sys == nil || !socialInstalledAddresses()[address] {
+		return
+	}
+	socialIndexMu.Lock()
+	defer socialIndexMu.Unlock()
+	err := sys.KVStore.Update([]byte(socialIndexKey), func(raw []byte) ([]byte, error) {
+		index := socialIndexDecode(raw)
+		entry, ok := index[address]
+		if ok && entry.Installed {
+			return raw, nil
+		}
+		if !ok {
+			entry = socialIndexEntry{Categories: map[string]socialIndexCategory{}, Touched: time.Now().UnixNano()}
+		}
+		entry.Installed = true
+		index[address] = entry
+		return json.Marshal(index)
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("social index could not mark an installed napplet")
 	}
 }
 

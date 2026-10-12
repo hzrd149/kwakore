@@ -35,6 +35,15 @@ var windowProgramPath = linuxhost.DefaultProgramPath
 // launch test replaces it with a freshly built CLI.
 var nativeEntryCLIPath = linuxhost.DefaultCLIPath
 
+// startSocialRefresh starts the background social refresh and its install
+// hooks; socialRefreshChanged tells it social_refresh changed. Tests swap
+// them: TestMain makes startSocialRefresh a no-op so no daemon test fetches
+// social data from the default relays.
+var (
+	startSocialRefresh   = backend.StartServiceSocialRefresh
+	socialRefreshChanged = backend.SocialRefreshChanged
+)
+
 type Service struct {
 	mu                sync.Mutex
 	operationMu       sync.Mutex
@@ -66,6 +75,9 @@ type Service struct {
 	// updateCheckWait waits for the background update check worker, which
 	// also runs on workContext.
 	updateCheckWait func()
+	// socialRefreshWait waits for the background social refresh and the
+	// install hook refreshes it admitted, which also run on workContext.
+	socialRefreshWait func()
 	// systemDark is the desktop's light/dark preference the appearance
 	// watch last reported; themeMu serializes applyTheme.
 	systemDark     atomic.Bool
@@ -157,6 +169,9 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	s.installSyncWait = backend.StartInstallSync(workContext)
 	// updates are only ever looked for here; napplet.update applies them
 	s.updateCheckWait = backend.StartServiceUpdateChecks(workContext)
+	// background social refreshes, and the install, update and selection
+	// hooks that fetch social data, run only here
+	s.socialRefreshWait = startSocialRefresh(workContext)
 	return s, nil
 }
 
@@ -470,7 +485,7 @@ func (s *Service) ClearSetting(field string) error {
 
 func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	after := s.manager.Effective()
-	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme {
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme && before.SocialRefresh == after.SocialRefresh {
 		return
 	}
 	// names only: the values may hold relay URLs, which events never carry
@@ -487,6 +502,7 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 			{"gnome_search", before.GNOMESearch != after.GNOMESearch},
 			{"sync_id", before.SyncID != after.SyncID},
 			{"theme", before.Theme != after.Theme},
+			{"social_refresh", before.SocialRefresh != after.SocialRefresh},
 		} {
 			if f.changed {
 				fields = append(fields, f.name)
@@ -496,6 +512,9 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	}
 	if before.SyncID != after.SyncID {
 		backend.InstallSyncChanged()
+	}
+	if before.SocialRefresh != after.SocialRefresh {
+		socialRefreshChanged()
 	}
 	if before.Theme != after.Theme {
 		s.applyTheme()
@@ -558,7 +577,7 @@ func reloadWarning(path string, err error) string {
 		name = "[redacted]"
 	}
 	field := "file"
-	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "theme", "signer"} {
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "theme", "social_refresh", "signer"} {
 		if strings.Contains(err.Error(), name) {
 			field = name
 			break
@@ -601,6 +620,10 @@ func (s *Service) Close() {
 		}
 		if s.updateCheckWait != nil {
 			s.updateCheckWait()
+		}
+		// hook refreshes write the stores, so they end before closeBackend
+		if s.socialRefreshWait != nil {
+			s.socialRefreshWait()
 		}
 		s.appearanceWait.Wait()
 		if s.signer != nil {

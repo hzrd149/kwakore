@@ -121,6 +121,10 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			if m.override.Theme == nil {
 				return nil
 			}
+		case "social_refresh":
+			if m.override.SocialRefresh == nil {
+				return nil
+			}
 		}
 	}
 	next := cloneConfig(m.override)
@@ -162,6 +166,12 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 				return errors.New("theme: expected string")
 			}
 			next.Theme = &v
+		case "social_refresh":
+			v, ok := value.(string)
+			if !ok {
+				return errors.New("social_refresh: expected string")
+			}
+			next.SocialRefresh = &v
 		case "signer":
 			v, ok := value.(Signer)
 			if !ok {
@@ -185,6 +195,8 @@ func (m *Manager) change(field string, value any, clear, signerAllowed bool) err
 			next.SyncID = nil
 		case "theme":
 			next.Theme = nil
+		case "social_refresh":
+			next.SocialRefresh = nil
 		}
 	}
 	if err := validateMerged(m.file, next); err != nil {
@@ -268,6 +280,10 @@ func cloneConfig(c Config) Config {
 	if c.Theme != nil {
 		v := *c.Theme
 		n.Theme = &v
+	}
+	if c.SocialRefresh != nil {
+		v := *c.SocialRefresh
+		n.SocialRefresh = &v
 	}
 	if c.Signer != nil {
 		v := *c.Signer

@@ -235,6 +235,7 @@ func selectResolvedContext(ctx context.Context, next Napp, requireInstalled bool
 	mergeUpdateState(next.ID, nil)
 	refreshInstalled()
 	scheduleNappletIconCache(next)
+	scheduleNappletSocial(next)
 	installSyncLocalChange(next.Address())
 	event := ServiceEvent{Type: EventNappletUpdated, Address: next.Address(), Outcome: result.Outcome, PreviousVersion: result.PreviousVersion, InstalledVersion: serviceVersionPtr(result.InstalledVersion)}
 	event.Pinned, event.DataReset = &result.Pinned, &result.DataReset

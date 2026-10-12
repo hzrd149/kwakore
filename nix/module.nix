@@ -85,6 +85,7 @@ let
     "gnome_search"
     "sync_id"
     "theme"
+    "social_refresh"
     "signer"
   ];
   # the same fragments serviceconfig refuses in a config file
@@ -141,6 +142,7 @@ let
         gnome_search
         sync_id
         theme
+        social_refresh
         ;
       signer =
         if signer == null then
@@ -173,7 +175,7 @@ let
       if secretLike name then
         "${describeSecret "programs.kwakore.settings" name}: secret field is forbidden; supply signer secrets with `kwakore signer` --secret-stdin or --secret-file"
       else
-        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, theme or signer"
+        "programs.kwakore.settings.${name}: unknown setting; use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, theme, social_refresh or signer"
     ) extraKeys
     ++ map (
       name:
@@ -197,6 +199,12 @@ let
         "dark"
       ])
     ) "programs.kwakore.settings.theme: use system, light or dark"
+    # only the shape is checked here; the packaged `kwakore validate` that
+    # configHome runs enforces the 15m to 168h bounds
+    ++ lib.optional (
+      settings.social_refresh != null
+      && builtins.match "(0|([0-9]+([.][0-9]+)?(ns|us|ms|s|m|h))+)" settings.social_refresh == null
+    ) "programs.kwakore.settings.social_refresh: use 0 to turn the periodic refresh off, or a duration from 15m to 168h such as 6h"
     ++ lib.optional (
       signer != null && signer.mode == "bunker" && (signer.relay == null || !validRelay signer.relay)
     ) "programs.kwakore.settings.signer.relay: bunker needs a canonical wss:// relay URL"
@@ -329,6 +337,11 @@ in
               type = lib.types.nullOr lib.types.str;
               default = null;
               description = "Napplet window theme: system, light or dark.";
+            };
+            social_refresh = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "How often the daemon refreshes installed napplets' social data: a Go duration from 15m to 168h such as 6h (there is no day unit), or 0 to turn the periodic refresh off.";
             };
             signer = lib.mkOption {
               default = null;

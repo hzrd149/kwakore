@@ -1271,8 +1271,10 @@ func decodeSettingParams(params json.RawMessage) (string, any, *controlprotocol.
 		}
 		return field, value, nil
 	}
-	// sync_id and theme are JSON strings; serviceconfig validates the value
-	if field == "sync_id" || field == "theme" {
+	// sync_id, theme and social_refresh are JSON strings; serviceconfig
+	// validates the value. Keep this an if-chain: the docs test reads every
+	// case literal in this file as a route.
+	if field == "sync_id" || field == "theme" || field == "social_refresh" {
 		var value string
 		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
 			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)

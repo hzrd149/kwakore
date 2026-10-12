@@ -502,6 +502,10 @@ func (m tuiModel) activate() (tea.Model, tea.Cmd) {
 			var current string
 			_ = json.Unmarshal(m.settings["theme"], &current)
 			m.prompt = &tuiPrompt{title: "Set theme to system, light or dark (empty clears the override)", action: "setting-choice", address: it.address, value: current}
+		} else if it.address == "social_refresh" {
+			var current string
+			_ = json.Unmarshal(m.settings["social_refresh"], &current)
+			m.prompt = &tuiPrompt{title: "Set social_refresh: 0 turns it off, else 15m to 168h such as 6h (empty clears the override)", action: "setting-string", address: it.address, value: current}
 		} else {
 			m.prompt = &tuiPrompt{title: "Set " + it.address + " to true or false", action: "setting-bool", address: it.address}
 		}
@@ -810,7 +814,7 @@ func (m *tuiModel) consume(x tuiResult) {
 		}
 		m.settings = raw
 		m.items = nil
-		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search", "sync_id", "theme"} {
+		for _, field := range []string{"relays", "blossom_servers", "discover_on_user_relays", "desktop_entries", "gnome_search", "sync_id", "theme", "social_refresh"} {
 			m.items = append(m.items, tuiItem{label: field, address: field, detail: safeText(string(raw[field])) + "  (" + m.sources[field] + ")"})
 		}
 		m.notice = "Settings loaded"

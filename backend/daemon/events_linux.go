@@ -213,7 +213,7 @@ func (s *Service) subscribeEvents(ctx context.Context, params json.RawMessage) (
 }
 
 // decodeEventTypes reads {types?}: absent or [] subscribes to every type
-// (nil); otherwise 1 to 9 distinct subscribable types, returned sorted.
+// (nil); otherwise 1 to 10 distinct subscribable types, returned sorted.
 func decodeEventTypes(params json.RawMessage) ([]string, *controlprotocol.Error) {
 	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
 	if err := controlprotocol.ValidateNamedParams(params, "types"); err != nil {

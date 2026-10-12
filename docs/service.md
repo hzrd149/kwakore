@@ -449,6 +449,18 @@ reactions`, `--only comments` or `--only mentions` narrows it. `reactions`,
 whether it quotes the napplet. Only events that name the napplet exactly are
 kept, and an author's own deletion removes their event for good.
 
+You do not have to refresh installed napplets yourself. The service fetches
+an installed napplet's reactions, comments, mentions and zaps right after you
+install, update or select a version of it, and again every `social_refresh`
+(6 hours by default; see [configuration](#configuration)). The first of these
+periodic passes runs a few minutes after the service starts, and it takes one
+napplet at a time. `kwak settings set social_refresh 0` stops the periodic
+passes but keeps the fetch after an install. Napplets you have not installed
+are fetched only when you ask with `--refresh`. To see when data changes,
+follow `kwak events --type social.updated`: each event names the napplet and
+the categories that changed, and your own votes, reactions, comments, shares
+and deletions announce themselves the same way.
+
 Social events are kept in the local event store (`eventstore` in the data
 directory), and each napplet's sync status in the kvstore (`kvstore`), within per-author and per-napplet limits (see the
 [control protocol](control-protocol.md)). Uninstalling a napplet removes its
@@ -705,11 +717,12 @@ optional; reading, validating or inspecting missing files creates nothing.
   "desktop_entries": true,
   "gnome_search": true,
   "theme": "system",
+  "social_refresh": "6h",
   "signer": { "mode": "none" }
 }
 ```
 
-The first six values are the built-in defaults. `relays` accepts canonical
+The first seven values are the built-in defaults. `relays` accepts canonical
 `wss://` URLs with a host. `blossom_servers` accepts canonical `http://` or
 `https://` URLs with a host. URL hosts must be lowercase; duplicate URLs, user
 information, queries and fragments are rejected, and relay URLs with a
@@ -737,6 +750,17 @@ desktop portal (`org.freedesktop.appearance` `color-scheme`) and followed
 while the service runs; without a portal it is light. Any other value,
 including a different letter case, is rejected without repeating it.
 
+`social_refresh` is how often the daemon refreshes the reactions, comments,
+mentions and zaps of your installed napplets in the background (see
+**Reactions, comments and mentions** in
+[run and control the service](#run-and-control-the-service)). It is
+a Go duration made of digits and the units `ns`, `us`, `ms`, `s`, `m` and
+`h`, such as `6h` (the default), `90m` or `1h30m`, from `15m` to `168h`.
+Go has no day unit, so seven days is `168h`. `0` turns the periodic refresh
+off; an install, update or version selection still fetches that napplet's
+social data once. A sign, a `d` unit, a value out of range or any other
+spelling is rejected without repeating it.
+
 Both `config.json` and `settings-overrides.json` use the same strict parser:
 the root must be one JSON object of at most 1 MiB; unknown or duplicate
 fields, trailing JSON, wrong types, malformed URLs, explicit `null` and
@@ -752,7 +776,8 @@ field's file value, or its default when the file omits it. Empty arrays and
 
 **Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
 and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
-`discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, or `theme`. They write only `settings-overrides.json`,
+`discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, `theme`,
+or `social_refresh`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
@@ -763,8 +788,9 @@ gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
 Explicit schemes are preserved. The daemon still validates canonical URLs,
 and direct edits to `config.json` must include schemes. `sync_id` takes a JSON
 string or a bare word: `kwak settings set sync_id laptops` and
-`kwak settings set sync_id '"laptops"'` are the same, and `theme` works the
-same way. A theme change applies to every open napplet window at once, and
+`kwak settings set sync_id '"laptops"'` are the same, and `theme` and
+`social_refresh` work the same way (`kwak settings set social_refresh 12h`;
+a change applies to the refresh loop at once). A theme change applies to every open napplet window at once, and
 `system` follows the desktop portal's light/dark preference (light without a
 portal):
 
@@ -963,8 +989,9 @@ take no lock and create nothing. On a helper install the daemon binary is
 
 **Following events.** `kwak events` stays connected and prints one line per
 service event as it happens: windows opening and closing, installs, updates
-and uninstalls, newly found updates, signer and settings changes, and the end
-of each installed-list sync pass. `--type` keeps only the named types, and
+and uninstalls, newly found updates, signer and settings changes, changes to
+a napplet's reactions, comments, mentions or zaps (`social.updated`), and the
+end of each installed-list sync pass. `--type` keeps only the named types, and
 `--json` prints one JSON object per line for scripts. A reader that falls
 behind gets one `events.overflow` line counting what it missed. The command
 ends with an error when the service stops.

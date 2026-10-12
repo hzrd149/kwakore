@@ -15,15 +15,18 @@ import (
 
 func TestTUISettingsAndCatalogResults(t *testing.T) {
 	m := tuiModel{settings: map[string]json.RawMessage{}}
-	m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":["wss://relay.example"],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":false,"gnome_search":true,"sync_id":"laptops","theme":"dark"}}`)})
-	if len(m.items) != 7 || m.items[0].address != "relays" || !strings.Contains(m.items[0].detail, "relay.example") {
+	m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":["wss://relay.example"],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":false,"gnome_search":true,"sync_id":"laptops","theme":"dark","social_refresh":"12h"}}`)})
+	if len(m.items) != 8 || m.items[0].address != "relays" || !strings.Contains(m.items[0].detail, "relay.example") {
 		t.Fatalf("settings items: %+v", m.items)
 	}
 	if item := m.items[5]; item.address != "sync_id" || !strings.Contains(item.detail, "laptops") {
 		t.Fatalf("sync_id item: %+v", item)
 	}
-	if last := m.items[6]; last.address != "theme" || !strings.Contains(last.detail, "dark") {
-		t.Fatalf("theme item: %+v", last)
+	if item := m.items[6]; item.address != "theme" || !strings.Contains(item.detail, "dark") {
+		t.Fatalf("theme item: %+v", item)
+	}
+	if last := m.items[7]; last.address != "social_refresh" || !strings.Contains(last.detail, "12h") {
+		t.Fatalf("social_refresh item: %+v", last)
 	}
 	m.consume(tuiResult{kind: "installed", data: []byte(`{"items":[{"address":"35129:abc:notes","name":"Notes\u001b[2J","format":"napplet","available":true}],"next_offset":100}`)})
 	if len(m.items) != 1 || m.items[0].label != "Notes[2J" || !m.more {
@@ -246,6 +249,50 @@ func TestTUISyncIDPrompt(t *testing.T) {
 	}
 }
 
+func TestTUISocialRefreshPrompt(t *testing.T) {
+	var argv []string
+	tuiCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		argv = args
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { tuiCommand = exec.CommandContext })
+	open := func() tuiModel {
+		m := tuiModel{tab: 3, settings: map[string]json.RawMessage{}, height: 24, width: 80}
+		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"","theme":"system","social_refresh":"12h"}}`)})
+		// social_refresh is the last setting, after theme
+		if n := len(m.items); n < 2 || m.items[n-1].address != "social_refresh" || m.items[n-2].address != "theme" {
+			t.Fatalf("settings items = %+v", m.items)
+		}
+		m.cursor = len(m.items) - 1
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(tuiModel)
+		if m.prompt == nil || m.prompt.action != "setting-string" || m.prompt.address != "social_refresh" || m.prompt.value != "12h" {
+			t.Fatalf("social_refresh prompt: %+v", m.prompt)
+		}
+		return m
+	}
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{"", []string{"settings", "clear", "social_refresh"}},
+		{"30m", []string{"settings", "set", "social_refresh", `"30m"`}},
+		{"0", []string{"settings", "set", "social_refresh", `"0"`}},
+	} {
+		m := open()
+		m.prompt.value = tc.value
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatalf("%q: no request", tc.value)
+		}
+		argv = nil
+		cmd()
+		if len(argv) < len(tc.want) || !slices.Equal(argv[len(argv)-len(tc.want):], tc.want) {
+			t.Fatalf("%q ran %q, want %q", tc.value, argv, tc.want)
+		}
+	}
+}
+
 func TestTUIThemePrompt(t *testing.T) {
 	var argv []string
 	tuiCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -255,8 +302,8 @@ func TestTUIThemePrompt(t *testing.T) {
 	t.Cleanup(func() { tuiCommand = exec.CommandContext })
 	open := func() tuiModel {
 		m := tuiModel{tab: 3, settings: map[string]json.RawMessage{}, height: 24, width: 80}
-		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"","theme":"light"}}`)})
-		m.cursor = len(m.items) - 1
+		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"","theme":"light","social_refresh":"6h"}}`)})
+		m.cursor = slices.IndexFunc(m.items, func(it tuiItem) bool { return it.address == "theme" })
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(tuiModel)
 		if m.prompt == nil || m.prompt.action != "setting-choice" || m.prompt.address != "theme" || m.prompt.value != "light" {

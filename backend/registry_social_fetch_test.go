@@ -67,6 +67,13 @@ func socialRig(t *testing.T, urls ...string) {
 	t.Helper()
 	newUpdateRig(t)
 	withSystem(t)
+	socialSeams(t, urls...)
+}
+
+// socialSeams is socialRig's seam half, for a test that sets up its own
+// state and store first.
+func socialSeams(t *testing.T, urls ...string) {
+	t.Helper()
 	prevRelays, prevLimits, prevFloor, prevLUD16 := socialRelays, socialLimits, socialRefreshFloor, socialZapLUD16
 	socialRelays = func(context.Context, socialTarget) []string { return slices.Clone(urls) }
 	socialRefreshFloor = 0

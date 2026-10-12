@@ -185,6 +185,7 @@ let
       gnome_search = false;
       sync_id = "laptops";
       theme = "dark";
+      social_refresh = "12h";
       signer = {
         mode = "bunker";
         relay = "wss://bunker.example.com";
@@ -211,6 +212,7 @@ let
           gnome_search = false;
           sync_id = "laptops";
           theme = "dark";
+          social_refresh = "12h";
           signer = {
             mode = "bunker";
             relay = "wss://bunker.example.com";
@@ -338,7 +340,7 @@ let
     }
     {
       name = "an unknown setting is rejected";
-      ok = rejects { theme = "dark"; } "programs.kwakore.settings.theme: unknown setting";
+      ok = rejects { colour = "dark"; } "programs.kwakore.settings.colour: unknown setting";
     }
     {
       name = "a non-wss relay is rejected";
@@ -362,6 +364,10 @@ let
     {
       name = "an unknown theme is rejected";
       ok = rejects { theme = "blue"; } "programs.kwakore.settings.theme:";
+    }
+    {
+      name = "a social_refresh in days is rejected";
+      ok = rejects { social_refresh = "7d"; } "programs.kwakore.settings.social_refresh:";
     }
     {
       name = "a bunker signer without a relay is rejected";
