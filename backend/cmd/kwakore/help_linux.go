@@ -67,7 +67,8 @@ Settings and signer:
   settings inspect               Show effective settings and their sources
   settings reload                Reload the configuration file
   settings set FIELD JSON_VALUE  Set relays, blossom_servers, sync_id, theme,
-                                 or a boolean integration setting
+                                 social_refresh, or a boolean integration
+                                 setting
   settings clear FIELD           Clear a setting override
   signer status                  Show signer mode and connection state
   signer switch none             Disconnect the signer
@@ -475,15 +476,15 @@ Usage:
   kwak settings set FIELD JSON_VALUE
   kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, sync_id, or theme.
+       gnome_search, sync_id, theme, or social_refresh.
 Run 'kwak settings get|reload|set|clear --help' for details.
 `,
 	"settings get": `Show effective service settings.
 
 Usage: kwak settings get
 Shows relays, Blossom servers, discovery and desktop integration settings,
-the sync identifier for the installed napplet list, the window theme, and
-signer mode.
+the sync identifier for the installed napplet list, the window theme, how
+often installed napplets' social data is refreshed, and signer mode.
 `,
 	"settings reload": `Reload the declarative configuration file.
 
@@ -494,24 +495,27 @@ Invalid configuration leaves the previous effective settings in place.
 
 Usage: kwak settings set FIELD JSON_VALUE
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, sync_id, or theme.
+       gnome_search, sync_id, theme, or social_refresh.
 JSON_VALUE is an array of URLs for relays or blossom_servers, a boolean
 for discover_on_user_relays, desktop_entries, or gnome_search, or a string
-for sync_id (an empty string turns sync off) or theme (system, light or
-dark). For sync_id and theme a bare word is taken as the string. Quote JSON
-in your shell.
+for sync_id (an empty string turns sync off), theme (system, light or
+dark) or social_refresh (a duration from 15m to 168h such as 6h, or 0 to
+turn off the periodic social refresh). For sync_id, theme and
+social_refresh a bare word is taken as the string. Quote JSON in your
+shell.
 Bare relay hosts gain wss://; bare Blossom hosts gain https://.
 The theme applies to open napplet windows at once; system follows the
 desktop's light/dark preference.
 Example: kwak settings set discover_on_user_relays false
 Example: kwak settings set sync_id laptops
 Example: kwak settings set theme dark
+Example: kwak settings set social_refresh 12h
 `,
 	"settings clear": `Remove a setting override.
 
 Usage: kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, sync_id, or theme.
+       gnome_search, sync_id, theme, or social_refresh.
 The declarative or built-in value becomes effective again.
 Example: kwak settings clear relays
 `,

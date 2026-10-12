@@ -705,11 +705,12 @@ optional; reading, validating or inspecting missing files creates nothing.
   "desktop_entries": true,
   "gnome_search": true,
   "theme": "system",
+  "social_refresh": "6h",
   "signer": { "mode": "none" }
 }
 ```
 
-The first six values are the built-in defaults. `relays` accepts canonical
+The first seven values are the built-in defaults. `relays` accepts canonical
 `wss://` URLs with a host. `blossom_servers` accepts canonical `http://` or
 `https://` URLs with a host. URL hosts must be lowercase; duplicate URLs, user
 information, queries and fragments are rejected, and relay URLs with a
@@ -737,6 +738,17 @@ desktop portal (`org.freedesktop.appearance` `color-scheme`) and followed
 while the service runs; without a portal it is light. Any other value,
 including a different letter case, is rejected without repeating it.
 
+`social_refresh` is how often the daemon refreshes the reactions, comments,
+mentions and zaps of your installed napplets in the background (see
+**Reactions, comments and mentions** in
+[run and control the service](#run-and-control-the-service)). It is
+a Go duration made of digits and the units `ns`, `us`, `ms`, `s`, `m` and
+`h`, such as `6h` (the default), `90m` or `1h30m`, from `15m` to `168h`.
+Go has no day unit, so seven days is `168h`. `0` turns the periodic refresh
+off; an install, update or version selection still fetches that napplet's
+social data once. A sign, a `d` unit, a value out of range or any other
+spelling is rejected without repeating it.
+
 Both `config.json` and `settings-overrides.json` use the same strict parser:
 the root must be one JSON object of at most 1 MiB; unknown or duplicate
 fields, trailing JSON, wrong types, malformed URLs, explicit `null` and
@@ -752,7 +764,8 @@ field's file value, or its default when the file omits it. Empty arrays and
 
 **Changing settings while running.** `kwak settings set FIELD JSON_VALUE`
 and `kwak settings clear FIELD` change one of `relays`, `blossom_servers`,
-`discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, or `theme`. They write only `settings-overrides.json`,
+`discover_on_user_relays`, `desktop_entries`, `gnome_search`, `sync_id`, `theme`,
+or `social_refresh`. They write only `settings-overrides.json`,
 never `config.json`: the service validates the complete result first, then
 writes a `0600` temporary file, syncs it, renames it into place and syncs the
 directory. A failed write publishes nothing; if a write cannot be reconciled,
@@ -763,8 +776,9 @@ gain `wss://`, and Blossom hosts entered without a scheme gain `https://`.
 Explicit schemes are preserved. The daemon still validates canonical URLs,
 and direct edits to `config.json` must include schemes. `sync_id` takes a JSON
 string or a bare word: `kwak settings set sync_id laptops` and
-`kwak settings set sync_id '"laptops"'` are the same, and `theme` works the
-same way. A theme change applies to every open napplet window at once, and
+`kwak settings set sync_id '"laptops"'` are the same, and `theme` and
+`social_refresh` work the same way (`kwak settings set social_refresh 12h`;
+a change applies to the refresh loop at once). A theme change applies to every open napplet window at once, and
 `system` follows the desktop portal's light/dark preference (light without a
 portal):
 

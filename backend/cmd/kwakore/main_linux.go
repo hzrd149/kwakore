@@ -33,6 +33,7 @@ import (
 	"kwakore/backend/controlprotocol"
 	"kwakore/backend/desktopentry"
 	"kwakore/backend/napaddr"
+	"kwakore/backend/serviceconfig"
 )
 
 func run(args []string) error {
@@ -1165,9 +1166,9 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		case "set":
 			if len(args) == 4 && settingField(args[2]) {
 				value := json.RawMessage(args[3])
-				// a bare word is taken as the sync_id or theme string, like
-				// the URL scheme normalization below
-				if (args[2] == "sync_id" || args[2] == "theme") && !strings.HasPrefix(args[3], `"`) {
+				// a bare word is taken as the sync_id, theme or social_refresh
+				// string, like the URL scheme normalization below
+				if (args[2] == "sync_id" || args[2] == "theme" || args[2] == "social_refresh") && !strings.HasPrefix(args[3], `"`) {
 					value, _ = json.Marshal(args[3])
 				}
 				if !validSettingValue(args[2], value) {
@@ -1506,7 +1507,7 @@ func validPermissionResponse(method string, params, result json.RawMessage) bool
 }
 
 func settingField(field string) bool {
-	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" || field == "sync_id" || field == "theme"
+	return field == "relays" || field == "blossom_servers" || field == "discover_on_user_relays" || field == "desktop_entries" || field == "gnome_search" || field == "sync_id" || field == "theme" || field == "social_refresh"
 }
 
 func validSettingValue(field string, value json.RawMessage) bool {
@@ -1525,6 +1526,15 @@ func validSettingValue(field string, value json.RawMessage) bool {
 		// a typo fails here, before dialing
 		var v string
 		return len(value) > 0 && value[0] == '"' && json.Unmarshal(value, &v) == nil && (v == "system" || v == "light" || v == "dark")
+	}
+	if field == "social_refresh" {
+		// the daemon's own rule, so a typo fails here, before dialing
+		var v string
+		if len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &v) != nil {
+			return false
+		}
+		_, ok := serviceconfig.SocialRefreshInterval(v)
+		return ok
 	}
 	if len(value) == 0 || value[0] != '[' {
 		return false

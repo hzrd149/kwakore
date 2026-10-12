@@ -470,7 +470,7 @@ func (s *Service) ClearSetting(field string) error {
 
 func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	after := s.manager.Effective()
-	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme {
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme && before.SocialRefresh == after.SocialRefresh {
 		return
 	}
 	// names only: the values may hold relay URLs, which events never carry
@@ -487,6 +487,7 @@ func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 			{"gnome_search", before.GNOMESearch != after.GNOMESearch},
 			{"sync_id", before.SyncID != after.SyncID},
 			{"theme", before.Theme != after.Theme},
+			{"social_refresh", before.SocialRefresh != after.SocialRefresh},
 		} {
 			if f.changed {
 				fields = append(fields, f.name)
@@ -558,7 +559,7 @@ func reloadWarning(path string, err error) string {
 		name = "[redacted]"
 	}
 	field := "file"
-	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "theme", "signer"} {
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "theme", "social_refresh", "signer"} {
 		if strings.Contains(err.Error(), name) {
 			field = name
 			break

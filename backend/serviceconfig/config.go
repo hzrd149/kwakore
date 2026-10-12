@@ -10,8 +10,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxConfigBytes = 1 << 20
@@ -59,6 +61,7 @@ type Config struct {
 	GNOMESearch          *bool     `json:"gnome_search,omitempty"`
 	SyncID               *string   `json:"sync_id,omitempty"`
 	Theme                *string   `json:"theme,omitempty"`
+	SocialRefresh        *string   `json:"social_refresh,omitempty"`
 	Signer               *Signer   `json:"signer,omitempty"`
 }
 
@@ -79,12 +82,16 @@ type Effective struct {
 	SyncID string `json:"sync_id"`
 	// Theme is the napplet window theme: "system" follows the desktop's
 	// light/dark preference, "light" and "dark" force one.
-	Theme  string `json:"theme"`
-	Signer Signer `json:"signer"`
+	Theme string `json:"theme"`
+	// SocialRefresh is how often the daemon refreshes the social data
+	// (reactions, comments, mentions and zaps) of installed napplets, as a
+	// Go duration. "0" turns the periodic refresh off.
+	SocialRefresh string `json:"social_refresh"`
+	Signer        Signer `json:"signer"`
 }
 
 func Defaults() Effective {
-	return Effective{Relays: []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}, BlossomServers: []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Theme: "system", Signer: Signer{Mode: "none"}}
+	return Effective{Relays: []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}, BlossomServers: []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Theme: "system", SocialRefresh: "6h", Signer: Signer{Mode: "none"}}
 }
 
 func merge(file, override Config) Effective {
@@ -111,6 +118,9 @@ func merge(file, override Config) Effective {
 		if c.Theme != nil {
 			v.Theme = *c.Theme
 		}
+		if c.SocialRefresh != nil {
+			v.SocialRefresh = *c.SocialRefresh
+		}
 		if c.Signer != nil {
 			v.Signer = *c.Signer
 		}
@@ -120,7 +130,7 @@ func merge(file, override Config) Effective {
 
 func validateMerged(file, override Config) error {
 	v := merge(file, override)
-	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, SyncID: &v.SyncID, Theme: &v.Theme, Signer: &v.Signer})
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, SyncID: &v.SyncID, Theme: &v.Theme, SocialRefresh: &v.SocialRefresh, Signer: &v.Signer})
 }
 
 // errInvalidSyncID never repeats the rejected value, because settings errors
@@ -148,12 +158,54 @@ func ValidTheme(name string) bool {
 	return name == "system" || name == "light" || name == "dark"
 }
 
+// SocialRefreshMin and SocialRefreshMax bound a non-zero social_refresh.
+const (
+	SocialRefreshMin = 15 * time.Minute
+	SocialRefreshMax = 168 * time.Hour
+)
+
+// socialRefreshShape is the ASCII form a social_refresh value must have before
+// it reaches time.ParseDuration: "0", or one or more unsigned number and unit
+// pairs. It refuses signs, the "µs" spelling and units Go does not know (such
+// as d), so the accepted set does not lean on ParseDuration's leniency.
+var socialRefreshShape = regexp.MustCompile(`^(0|([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+)$`)
+
+// errInvalidSocialRefresh, like errInvalidSyncID, never repeats the rejected
+// value. It names no other setting, because reload warnings match field names.
+var errInvalidSocialRefresh = errors.New("social_refresh: use 0 to turn the periodic refresh off, or a duration from 15m to 168h such as 6h")
+
+// SocialRefreshInterval is the one social_refresh rule, used both by
+// validation and by the backend refresh loop. It reports the interval and
+// whether s is valid. A valid zero interval means the periodic refresh is
+// off; any other value must lie in [SocialRefreshMin, SocialRefreshMax].
+func SocialRefreshInterval(s string) (time.Duration, bool) {
+	if len(s) > 32 || !socialRefreshShape.MatchString(s) {
+		return 0, false
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, false
+	}
+	if d == 0 {
+		return 0, true
+	}
+	if d < SocialRefreshMin || d > SocialRefreshMax {
+		return 0, false
+	}
+	return d, true
+}
+
 func validate(c Config) error {
 	if c.SyncID != nil && !validSyncID(*c.SyncID) {
 		return errInvalidSyncID
 	}
 	if c.Theme != nil && !ValidTheme(*c.Theme) {
 		return errInvalidTheme
+	}
+	if c.SocialRefresh != nil {
+		if _, ok := SocialRefreshInterval(*c.SocialRefresh); !ok {
+			return errInvalidSocialRefresh
+		}
 	}
 	if c.Signer != nil {
 		s := *c.Signer
@@ -226,8 +278,8 @@ func read(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	for key := range raw {
-		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "sync_id" && key != "theme" && key != "signer" {
-			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, or theme", path, key)
+		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "sync_id" && key != "theme" && key != "social_refresh" && key != "signer" {
+			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, theme, or social_refresh", path, key)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
 			return Config{}, fmt.Errorf("%s: %s must not be null; omit the setting to use its default", path, key)
@@ -405,6 +457,7 @@ func (m *Manager) sourcesLocked() map[string]string {
 		"gnome_search":            {m.file.GNOMESearch != nil, m.override.GNOMESearch != nil},
 		"sync_id":                 {m.file.SyncID != nil, m.override.SyncID != nil},
 		"theme":                   {m.file.Theme != nil, m.override.Theme != nil},
+		"social_refresh":          {m.file.SocialRefresh != nil, m.override.SocialRefresh != nil},
 		"signer":                  {m.file.Signer != nil, m.override.Signer != nil},
 	}
 	out := make(map[string]string, len(fields))
@@ -494,5 +547,5 @@ func (m *Manager) fileSystemSignerSocketLocked() string {
 }
 
 func FieldName(name string) bool {
-	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search sync_id theme ", " "+name+" ")
+	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search sync_id theme social_refresh ", " "+name+" ")
 }
