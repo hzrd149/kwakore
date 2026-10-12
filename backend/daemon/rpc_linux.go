@@ -219,6 +219,25 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(detailErr)
 		}
 		return result, nil
+	case "napplet.icon":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, 15*time.Second)
+		defer cancelTimeout()
+		result, iconErr := backend.ServiceIcon(workCtx, address)
+		if iconErr != nil {
+			return nil, mutationError(iconErr)
+		}
+		return result, nil
 	case "napplet.windows":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err

@@ -37,11 +37,21 @@ var managedName = regexp.MustCompile(`^kwakore-napplet-[0-9a-f]{32}\.desktop$`)
 // Entry is one installed napplet as its desktop entry shows it. Title and
 // Description are author data: they are reduced to one display line each
 // and only ever written as the Name and Comment values.
+//
+// Icon is the absolute path of the napplet's verified, cached PNG icon, or
+// empty. It is written as the Icon value only when it is a clean absolute
+// path with no '%', control or format characters; anything else, an empty
+// value included, gets the generic genericIcon name instead.
 type Entry struct {
 	Address     string
 	Title       string
 	Description string
+	Icon        string
 }
+
+// genericIcon is the icon theme name an entry without a usable cached icon
+// shows.
+const genericIcon = "application-x-executable"
 
 var (
 	// ErrInvalidCLI is returned when the CLI path is not an absolute, clean,
@@ -99,6 +109,11 @@ func Render(cli string, e Entry) ([]byte, error) {
 	if comment := displayText(e.Description, maxDescriptionRunes); comment != "" && comment != name {
 		b.WriteString("Comment=" + escapeString(comment) + "\n")
 	}
+	icon := genericIcon
+	if e.Icon != "" && checkCLIText(e.Icon) == nil {
+		icon = escapeString(e.Icon)
+	}
+	b.WriteString("Icon=" + icon + "\n")
 	b.WriteString("Exec=" + escapeString(quoteExecArg(cli)) + " launch-token " + token + "\n")
 	b.WriteString("Terminal=true\n")
 	b.WriteString("Categories=Network;\n")

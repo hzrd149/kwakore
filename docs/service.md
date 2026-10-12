@@ -459,6 +459,19 @@ which for the helper is `~/.local/lib/kwakore/current/kwak`, so entries
 keep working across upgrades. With the NixOS module it is
 `/run/current-system/sw/bin/kwak` (see the NixOS notes).
 
+An entry shows the napplet's verified icon once the daemon has fetched it:
+after an install or update the daemon fetches the manifest's `icon` by its
+hash in the background, checks the hash and the declared image type, and
+keeps a re-encoded PNG in its icon cache, then rewrites the entry with an
+`Icon=` line naming that file. Until then, or when the napplet has no usable
+icon, the entry shows the generic application icon. A missing icon never
+stops an install or launch. `kwak icon ADDRESS --out icon.png` saves the same
+verified PNG:
+
+```console
+$ kwak icon nostr:naddr1... --out ~/icon.png
+```
+
 Entries set `Terminal=true`. Your desktop opens a terminal for the launch; on
 success the CLI prints the opened window and exits, and on failure the fixed
 readable error is printed in that terminal, such as the
@@ -516,6 +529,7 @@ shell's. `systemctl --user show-environment` shows it.
 | Service lock | `~/.local/share/kwakore/daemon.lock` | exists while or after a daemon ran; not proof one is running |
 | Control socket | `/run/user/UID/kwakore/daemon.sock` | `$XDG_RUNTIME_DIR/kwakore/daemon.sock`; directory `0700`, socket `0600` |
 | Desktop entries | `~/.local/share/applications/kwakore-napplet-<hash>.desktop` | `$XDG_DATA_HOME/applications/` |
+| Napplet icons | `~/.local/share/kwakore/icons/<sha256>.png` | verified, re-encoded PNG, owner-only `0600` in a `0700` directory; pruned when no installed napplet uses it |
 | User units (helper) | `~/.config/systemd/user/kwakore.{socket,service}` | `$XDG_CONFIG_HOME/systemd/user/`, or `$XDG_RUNTIME_DIR/systemd/user/` with `--runtime-units` |
 | Program files (helper) | `~/.local/lib/kwakore/current/` and `~/.local/bin/kwak` | `--prefix DIR` |
 

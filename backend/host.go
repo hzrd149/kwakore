@@ -204,6 +204,10 @@ type ShortcutFile struct {
 // and ID and Token are then empty. The Linux service host turns it into the
 // inert launch-token of a native desktop entry; it never uses LaunchToken,
 // whose input is an internal id.
+//
+// IconPath, also service-only, is the absolute path of the napplet's
+// verified icon in the daemon's icon cache (a PNG the daemon decoded and
+// re-encoded itself), or empty when none is cached.
 type AppShortcut struct {
 	ID          string
 	Token       string
@@ -211,6 +215,7 @@ type AppShortcut struct {
 	Name        string
 	Description string
 	Icon        []byte
+	IconPath    string
 }
 
 // Transport is one napp window, seen from the backend: a place to send wire

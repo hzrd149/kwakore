@@ -242,8 +242,11 @@ func TestEntryWrite(t *testing.T) {
 		gotKeys = append(gotKeys, k)
 	}
 	slices.Sort(gotKeys)
-	if want := []string{"Categories", "Comment", "Exec", "Name", "Terminal", "Type"}; !slices.Equal(gotKeys, want) {
+	if want := []string{"Categories", "Comment", "Exec", "Icon", "Name", "Terminal", "Type"}; !slices.Equal(gotKeys, want) {
 		t.Fatalf("keys %v, want %v", gotKeys, want)
+	}
+	if keys["Icon"] != genericIcon {
+		t.Fatalf("an entry without an icon shows %q", keys["Icon"])
 	}
 	if keys["Type"] != "Application" || keys["Terminal"] != "true" || keys["Categories"] != "Network;" {
 		t.Fatalf("fixed keys: %v", keys)
@@ -284,6 +287,42 @@ func TestEntryWrite(t *testing.T) {
 	}
 	if entries := filepath.Join(t.TempDir(), "long.desktop"); os.WriteFile(entries, out, 0600) == nil {
 		validate(t, entries)
+	}
+}
+
+// Only a clean absolute path without '%', control or format characters is
+// written as Icon=; anything else shows the generic icon.
+func TestRenderIcon(t *testing.T) {
+	cli := plainCLI(t)
+	sha := strings.Repeat("ab", 32)
+	good := "/home/u/.local/share/kwakore/icons/" + sha + ".png"
+	for icon, want := range map[string]string{
+		good:                               good,
+		"":                                 genericIcon,
+		"icons/" + sha + ".png":            genericIcon,
+		"/a/../b.png":                      genericIcon,
+		"/a/b\n.png":                       genericIcon,
+		"/a/b‮.png":                        genericIcon,
+		"/a/100%.png":                      genericIcon,
+		"/a/b.png\nExec=/bin/evil":         genericIcon,
+		"/home/u/icons/" + sha + ".png/./": genericIcon,
+	} {
+		out, err := Render(cli, Entry{Address: "35129:" + testPubkey + ":app", Title: "App", Icon: icon})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys := parseEntry(t, out)
+		if keys["Icon"] != want {
+			t.Errorf("icon %q rendered %q, want %q", icon, keys["Icon"], want)
+		}
+		if bytes.Count(out, []byte("Icon=")) != 1 {
+			t.Errorf("icon %q: %d Icon lines", icon, bytes.Count(out, []byte("Icon=")))
+		}
+		path := filepath.Join(t.TempDir(), "icon.desktop")
+		if err := os.WriteFile(path, out, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		validate(t, path)
 	}
 }
 

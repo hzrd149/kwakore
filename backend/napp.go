@@ -220,7 +220,7 @@ func (n Napp) nappletIconBlob(ctx context.Context) ([]byte, error) {
 	if n.IconSha == "" {
 		return nil, errNotFound("this napplet has no icon")
 	}
-	data, err := downloadBlob(ctx, n.BlossomServers(ctx), n.IconSha)
+	data, err := downloadBlobMax(ctx, n.BlossomServers(ctx), n.IconSha, nappletIconMaxBytes)
 	if err != nil {
 		return nil, err
 	}

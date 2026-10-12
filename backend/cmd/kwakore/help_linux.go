@@ -26,6 +26,7 @@ Napplets:
   update ADDRESS                 Update an installed napplet
   updates [ADDRESS]              Check installed napplets for newer versions
   detail ADDRESS                 Show a napplet's public details
+  icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
   try ADDRESS                    Open a napplet without installing it
@@ -192,6 +193,18 @@ relays; run 'kwak discover --refresh' or 'kwak updates' first for fresher
 data.
 ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
 Example: kwak detail nostr:naddr1...
+`,
+	"icon": `Save a napplet's verified icon as a PNG file.
+
+Usage: kwak icon ADDRESS [--out FILE]
+  --out FILE  Write the PNG to FILE (absolute path, owner-only mode 0600)
+Without --out the PNG goes to stdout, which must not be a terminal. The
+service fetches the icon by its manifest hash, checks the hash and the
+declared image type, and re-encodes it as PNG; a napplet without a usable
+icon gives Not found or Unavailable. --json prints the service's result
+(base64 data) instead of writing a file.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+Example: kwak icon nostr:naddr1... --out ~/icon.png
 `,
 	"uninstall": `Remove an installed napplet and its desktop entry.
 

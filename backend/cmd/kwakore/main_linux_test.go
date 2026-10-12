@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net"
 	"os"
@@ -287,6 +289,8 @@ func TestCLIContract(t *testing.T) {
 		{"updates", []string{"updates"}, "napplet.updates.check", ""},
 		{"updates address", []string{"updates", address}, "napplet.updates.check", `{"address":"` + address + `"}`},
 		{"detail", []string{"detail", address}, "napplet.detail", `{"address":"` + address + `"}`},
+		{"icon", []string{"icon", address}, "napplet.icon", `{"address":"` + address + `"}`},
+		{"icon out", []string{"icon", "--out", filepath.Join(root, "unused.png"), address}, "napplet.icon", `{"address":"` + address + `"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seen := make(chan []byte, 1)
@@ -448,6 +452,8 @@ func cliContractResult(method, address string) string {
 	case "napplet.updates.check":
 		version := `{"event_id":"` + strings.Repeat("e", 64) + `","created_at":10,"artifact_hash":""}`
 		return `{"items":[{"address":"` + address + `","installed_version":` + version + `,"available_version":` + version + `}],"complete":true}`
+	case "napplet.icon":
+		return testIconResult(1, 1, "image/png", base64.StdEncoding.EncodeToString(testPNG(1, 1)))
 	case "napplet.detail":
 		return `{"address":"` + address + `","name":"App","author":"` + strings.Repeat("a", 64) + `","format":"napplet","available":true,"version":{"event_id":"","created_at":0,"artifact_hash":""},"kind":35129,"installed":false,"installed_version":null,"update_available":null,"required_domains":[],"optional_domains":[],"versions":[]}`
 	}
@@ -490,7 +496,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
-		{"updates"}, {"detail", address}, {"events"},
+		{"updates"}, {"detail", address}, {"icon", address}, {"events"},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -1007,6 +1013,7 @@ func addressCommands(canonical string) []struct {
 		{[]string{"permissions", "get", "X"}, "napplet.permissions.get", `{"address":` + q + `}`},
 		{[]string{"permissions", "set", "X", "sign", "allow"}, "napplet.permissions.set", `{"address":` + q + `,"permission":"sign","decision":"allow"}`},
 		{[]string{"permissions", "clear", "X", "sign"}, "napplet.permissions.clear", `{"address":` + q + `,"permission":"sign"}`},
+		{[]string{"icon", "X"}, "napplet.icon", `{"address":` + q + `}`},
 	}
 }
 
@@ -1341,6 +1348,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"--json", "--socket", "/tmp/unused.sock", "install", "--help"}, "install ADDRESS"},
 		{[]string{"updates", "--help"}, "never installed automatically"},
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
+		{[]string{"help", "icon"}, "kwak icon ADDRESS [--out FILE]"},
 		{[]string{"events", "--help"}, "events.overflow"},
 	} {
 		cmd := exec.Command(cli, tc.args...)
@@ -1354,6 +1362,120 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 	for topic, help := range commandHelp {
 		if !strings.Contains(help, "Usage:") || !strings.Contains(help, "kwak "+topic) {
 			t.Errorf("incomplete help for %q", topic)
+		}
+	}
+}
+
+// ─── icon ────────────────────────────────────────────────────────────────
+
+// testPNG is a w×h PNG.
+func testPNG(w, h int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = 0x80
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// testIconResult is a napplet.icon result with the given fields.
+func testIconResult(w, h int, mime, data string) string {
+	return fmt.Sprintf(`{"sha256":%q,"mime":%q,"width":%d,"height":%d,"data":%q}`, strings.Repeat("c", 64), mime, w, h, data)
+}
+
+func TestCLIIconCommand(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	want := `{"address":"` + address + `"}`
+	for _, args := range [][]string{
+		{"icon", address},
+		{"icon", address, "--out", "/tmp/icon.png"},
+		{"icon", "--out", "/tmp/icon.png", address},
+	} {
+		method, params, _, err := command(args)
+		if err != nil || method != "napplet.icon" || string(params) != want {
+			t.Fatalf("%v: %s %s %v", args, method, params, err)
+		}
+	}
+	if out := iconOutPath([]string{"icon", "--out", "/tmp/icon.png", address}); out != "/tmp/icon.png" {
+		t.Fatalf("out path %q", out)
+	}
+	for _, args := range [][]string{
+		{"icon"},
+		{"icon", address, address},
+		{"icon", address, "--out"},
+		{"icon", "--out", "icon.png", address},
+		{"icon", "--out", "/tmp/../tmp/icon.png", address},
+		{"icon", address, "--size", "64"},
+		{"icon", address, "--out", "/tmp/a.png", "--out", "/tmp/b.png"},
+	} {
+		if _, _, _, err := command(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
+func TestCLIIconOutput(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	serve := func(result string) {
+		go func() {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = bufio.NewReader(conn).ReadBytes('\n')
+			_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + result + `}` + "\n"))
+		}()
+	}
+
+	icon := testPNG(3, 2)
+	file := filepath.Join(root, "icon.png")
+	serve(testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString(icon)))
+	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "icon", address, "--out", file)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("icon: stdout=%q stderr=%q err=%v", stdout.String(), stderr.String(), err)
+	}
+	got, err := os.ReadFile(file)
+	if err != nil || !bytes.Equal(got, icon) {
+		t.Fatalf("written icon differs: %v", err)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("icon file mode: %v %v", info.Mode(), err)
+	}
+
+	for name, result := range map[string]string{
+		"wrong mime":     testIconResult(3, 2, "image/jpeg", base64.StdEncoding.EncodeToString(icon)),
+		"zero width":     testIconResult(0, 2, "image/png", base64.StdEncoding.EncodeToString(icon)),
+		"invalid base64": testIconResult(3, 2, "image/png", "not*base64"),
+		"not a png":      testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString([]byte("GIF89a-not-png"))),
+		"size mismatch":  testIconResult(4, 2, "image/png", base64.StdEncoding.EncodeToString(icon)),
+		"extra field":    strings.TrimSuffix(testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString(icon)), "}") + `,"path":"/x"}`,
+	} {
+		bad := filepath.Join(root, "bad.png")
+		serve(result)
+		cmd := exec.Command(cli, "--socket", listener.Addr().String(), "icon", address, "--out", bad)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid daemon response") {
+			t.Fatalf("%s: stdout=%q stderr=%q err=%v", name, stdout.String(), stderr.String(), err)
+		}
+		if _, err := os.Stat(bad); !os.IsNotExist(err) {
+			t.Fatalf("%s: a file was written: %v", name, err)
 		}
 	}
 }

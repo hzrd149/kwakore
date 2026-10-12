@@ -6,11 +6,14 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/png"
 	"io"
 	"net"
 	"net/url"
@@ -183,6 +186,15 @@ func run(args []string) error {
 	}
 	if strings.HasPrefix(method, "napplet.permissions.") && !validPermissionResponse(method, params, result) {
 		return errors.New("invalid daemon response")
+	}
+	if method == "napplet.icon" {
+		pngData, ok := validIconResult(result)
+		if !ok {
+			return errors.New("invalid daemon response")
+		}
+		if !jsonOutput {
+			return writeIcon(pngData, iconOutPath(args))
+		}
 	}
 	if method == "signer.pair.start" {
 		start, ok := validPairStartResult(result)
@@ -526,6 +538,20 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{addr.Canonical})
 		return "napplet.detail", params, socketPath, nil
 	}
+	if len(args) >= 1 && args[0] == "icon" {
+		arg, _, err := iconArgs(args[1:])
+		if err != nil {
+			return "", nil, "", err
+		}
+		addr, err := commandAddress(arg, false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{addr.Canonical})
+		return "napplet.icon", params, socketPath, nil
+	}
 	if len(args) == 2 && args[0] == "launch" {
 		addr, err := commandAddress(args[1], false)
 		if err != nil {
@@ -679,6 +705,99 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}
 	}
 	return "", nil, "", inputFailure("unknown or incomplete command; run 'kwak help' for usage")
+}
+
+const iconUsage = "usage: kwak icon ADDRESS [--out FILE]"
+
+// iconArgs reads `icon ADDRESS [--out FILE]`, with --out before or after
+// the ADDRESS. FILE must be an absolute, clean path.
+func iconArgs(args []string) (address, out string, err error) {
+	var addresses []string
+	outSet := false
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--out":
+			if outSet || i+1 >= len(args) {
+				return "", "", inputFailure(iconUsage)
+			}
+			out, outSet = args[i+1], true
+			if !filepath.IsAbs(out) || filepath.Clean(out) != out {
+				return "", "", inputFailure("--out requires an absolute, clean path")
+			}
+			i++
+		case strings.HasPrefix(args[i], "-"):
+			return "", "", inputFailure(iconUsage)
+		default:
+			addresses = append(addresses, args[i])
+		}
+	}
+	if len(addresses) != 1 {
+		return "", "", inputFailure(iconUsage)
+	}
+	return addresses[0], out, nil
+}
+
+// iconOutPath is the --out FILE of an icon command, or "".
+func iconOutPath(args []string) string {
+	if len(args) == 0 || args[0] != "icon" {
+		return ""
+	}
+	_, out, err := iconArgs(args[1:])
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// validIconResult checks a napplet.icon result before anything is printed
+// or written, and returns the PNG it carries: an object of exactly sha256
+// (64 lowercase hex), mime "image/png", integer width and height of 1–1024
+// and data, standard base64 of bytes that decode as a PNG of that size.
+func validIconResult(result json.RawMessage) ([]byte, bool) {
+	if len(result) == 0 || result[0] != '{' || controlprotocol.ValidateNamedParams(result, "sha256", "mime", "width", "height", "data") != nil {
+		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil || len(fields) != 5 {
+		return nil, false
+	}
+	var sha, mime, data string
+	var width, height int
+	if json.Unmarshal(fields["sha256"], &sha) != nil || json.Unmarshal(fields["mime"], &mime) != nil ||
+		json.Unmarshal(fields["data"], &data) != nil ||
+		json.Unmarshal(fields["width"], &width) != nil || json.Unmarshal(fields["height"], &height) != nil {
+		return nil, false
+	}
+	decodedSha, err := hex.DecodeString(sha)
+	if err != nil || len(decodedSha) != 32 || hex.EncodeToString(decodedSha) != sha || mime != "image/png" ||
+		width < 1 || width > 1024 || height < 1 || height > 1024 {
+		return nil, false
+	}
+	pngData, err := base64.StdEncoding.Strict().DecodeString(data)
+	if err != nil || !bytes.HasPrefix(pngData, []byte("\x89PNG\r\n\x1a\n")) {
+		return nil, false
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(pngData))
+	if err != nil || format != "png" || cfg.Width != width || cfg.Height != height {
+		return nil, false
+	}
+	return pngData, true
+}
+
+// writeIcon writes a validated icon: to FILE (owner-only) with --out, or to
+// stdout when it is not a terminal.
+func writeIcon(pngData []byte, out string) error {
+	if out != "" {
+		if err := os.WriteFile(out, pngData, 0o600); err != nil {
+			return inputFailure("could not write the icon file")
+		}
+		return nil
+	}
+	if info, err := os.Stdout.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return inputFailure("icon output is binary; use --out FILE or redirect stdout")
+	}
+	_, err := os.Stdout.Write(pngData)
+	return err
 }
 
 func readSignerSecret(r io.Reader, limit int) (string, error) {

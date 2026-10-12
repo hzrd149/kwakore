@@ -145,30 +145,7 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 	if err != nil {
 		return ServiceDetailResult{}, err
 	}
-
-	var installed *Napp
-	stateMu.Lock()
-	for _, n := range state.InstalledNapps {
-		if n.Address() == address {
-			c := n
-			installed = &c
-			break
-		}
-	}
-	stateMu.Unlock()
-
-	var listed *Napp
-	discoverMu.Lock()
-	for _, n := range catalog {
-		if n.Address() == address {
-			c := n
-			listed = &c
-			break
-		}
-	}
-	discoverMu.Unlock()
-
-	stored := storedManifests(ptr)
+	installed, listed, stored := serviceNappSources(address, ptr)
 
 	var chosen Napp
 	switch {
@@ -206,6 +183,33 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 	}
 	result.Versions = uniqueVersions(versions)
 	return result, nil
+}
+
+// serviceNappSources is what the service knows locally about a canonical
+// address: the installed record, the cached catalog entry and the valid
+// manifests in the local event store, newest first. Any may be missing.
+func serviceNappSources(address string, ptr nostr.EntityPointer) (installed, listed *Napp, stored []Napp) {
+	stateMu.Lock()
+	for _, n := range state.InstalledNapps {
+		if n.Address() == address {
+			c := n
+			installed = &c
+			break
+		}
+	}
+	stateMu.Unlock()
+
+	discoverMu.Lock()
+	for _, n := range catalog {
+		if n.Address() == address {
+			c := n
+			listed = &c
+			break
+		}
+	}
+	discoverMu.Unlock()
+
+	return installed, listed, storedManifests(ptr)
 }
 
 func cloneDomains(domains []string) []string {

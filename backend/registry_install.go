@@ -190,6 +190,8 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 
 	refreshInstalled()
 	if n.IsNapplet() {
+		// best effort, after the commit: an icon never affects the install
+		scheduleNappletIconCache(n)
 		installSyncLocalChange(n.Address())
 		emitServiceEvent(ServiceEvent{Type: EventNappletInstalled, Address: result.Address, Outcome: result.Outcome, InstalledVersion: serviceVersionPtr(result.InstalledVersion)})
 		noteUpdatesChanged()
@@ -340,6 +342,7 @@ func uninstallNapp(id string) (ServiceUninstallResult, error) {
 
 	refreshInstalled()
 	if record.IsNapplet() {
+		pruneNappletIcons()
 		installSyncLocalChange(record.Address())
 	}
 	log.Info().Str("napp", id).Msg("uninstall complete")
@@ -1122,6 +1125,12 @@ func blobHostKey(host, port string) (string, bool) {
 // other one, the built-in defaults included, goes through the public-only
 // blobClient.
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
+	return downloadBlobMax(ctx, servers, sha, blobMaxBytes)
+}
+
+// downloadBlobMax is downloadBlob with its own byte limit, enforced while
+// the body is read: a server sending more is cut off and skipped.
+func downloadBlobMax(ctx context.Context, servers []string, sha string, limit int64) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	trusted := userBlobServers()
 	var lastErr error = errors.New("no servers")
@@ -1130,7 +1139,7 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 		if norm, err := nostr.NormalizeHTTPURL(srv); err == nil && trusted[norm] {
 			client = trustedBlobClient
 		}
-		data, err := fetchBlobFrom(ctx, client, srv, sha)
+		data, err := fetchBlobFrom(ctx, client, srv, sha, limit)
 		if err != nil {
 			log.Debug().Str("server", srv).Err(err).Msg("blob download failed, trying the next")
 			lastErr = err
@@ -1142,9 +1151,9 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 	return nil, fmt.Errorf("could not fetch/verify %s: %w", sha, lastErr)
 }
 
-// fetchBlobFrom is one server attempt: its own deadline, at most
-// blobMaxBytes, a 200 and the right sha256, or an error.
-func fetchBlobFrom(ctx context.Context, client *http.Client, srv, sha string) ([]byte, error) {
+// fetchBlobFrom is one server attempt: its own deadline, at most limit
+// bytes, a 200 and the right sha256, or an error.
+func fetchBlobFrom(ctx context.Context, client *http.Client, srv, sha string, limit int64) ([]byte, error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, blobAttemptTimeout)
 	defer cancel()
 
@@ -1160,15 +1169,15 @@ func fetchBlobFrom(ctx context.Context, client *http.Client, srv, sha string) ([
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(srv + ": status " + resp.Status)
 	}
-	if resp.ContentLength > blobMaxBytes {
-		return nil, fmt.Errorf("%s: blob of %d bytes is over the %d byte limit", srv, resp.ContentLength, blobMaxBytes)
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("%s: blob of %d bytes is over the %d byte limit", srv, resp.ContentLength, limit)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, blobMaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > blobMaxBytes {
-		return nil, fmt.Errorf("%s: blob is over the %d byte limit", srv, blobMaxBytes)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s: blob is over the %d byte limit", srv, limit)
 	}
 	sum := sha256.Sum256(data)
 	if hex.EncodeToString(sum[:]) != sha {
