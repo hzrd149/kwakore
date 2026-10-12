@@ -37,8 +37,8 @@ Settings and signer:
   settings get                   Show effective settings
   settings inspect               Show effective settings and their sources
   settings reload                Reload the configuration file
-  settings set FIELD JSON_VALUE  Set relays, blossom_servers, or a boolean
-                                 integration setting
+  settings set FIELD JSON_VALUE  Set relays, blossom_servers, sync_id, theme,
+                                 or a boolean integration setting
   settings clear FIELD           Clear a setting override
   signer status                  Show signer mode and connection state
   signer switch none             Disconnect the signer
@@ -121,7 +121,8 @@ Example: kwak --json status
 	"diagnostics": `Inspect service health and recent errors.
 
 Usage: kwak diagnostics
-Shows live health, effective settings, and recent error summaries.
+Shows live health, effective settings, recent error summaries, and the
+installed-list sync status (install_sync).
 Example: kwak diagnostics
 `,
 	"installed": `List installed napplets.
@@ -226,14 +227,15 @@ Usage:
   kwak settings set FIELD JSON_VALUE
   kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 Run 'kwak settings get|reload|set|clear --help' for details.
 `,
 	"settings get": `Show effective service settings.
 
 Usage: kwak settings get
 Shows relays, Blossom servers, discovery and desktop integration settings,
-the sync identifier for the installed napplet list, and signer mode.
+the sync identifier for the installed napplet list, the window theme, and
+signer mode.
 `,
 	"settings reload": `Reload the declarative configuration file.
 
@@ -244,20 +246,24 @@ Invalid configuration leaves the previous effective settings in place.
 
 Usage: kwak settings set FIELD JSON_VALUE
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 JSON_VALUE is an array of URLs for relays or blossom_servers, a boolean
 for discover_on_user_relays, desktop_entries, or gnome_search, or a string
-for sync_id (a bare word is taken as the string; an empty string turns sync
-off). Quote JSON in your shell.
+for sync_id (an empty string turns sync off) or theme (system, light or
+dark). For sync_id and theme a bare word is taken as the string. Quote JSON
+in your shell.
 Bare relay hosts gain wss://; bare Blossom hosts gain https://.
+The theme applies to open napplet windows at once; system follows the
+desktop's light/dark preference.
 Example: kwak settings set discover_on_user_relays false
 Example: kwak settings set sync_id laptops
+Example: kwak settings set theme dark
 `,
 	"settings clear": `Remove a setting override.
 
 Usage: kwak settings clear FIELD
 FIELD: relays, blossom_servers, discover_on_user_relays, desktop_entries,
-       gnome_search, or sync_id.
+       gnome_search, sync_id, or theme.
 The declarative or built-in value becomes effective again.
 Example: kwak settings clear relays
 `,

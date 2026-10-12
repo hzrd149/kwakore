@@ -58,6 +58,7 @@ type Config struct {
 	DesktopEntries       *bool     `json:"desktop_entries,omitempty"`
 	GNOMESearch          *bool     `json:"gnome_search,omitempty"`
 	SyncID               *string   `json:"sync_id,omitempty"`
+	Theme                *string   `json:"theme,omitempty"`
 	Signer               *Signer   `json:"signer,omitempty"`
 }
 
@@ -76,11 +77,14 @@ type Effective struct {
 	// SyncID names the NIP-78 event that syncs the installed napplet list
 	// across machines. Empty means sync is off.
 	SyncID string `json:"sync_id"`
+	// Theme is the napplet window theme: "system" follows the desktop's
+	// light/dark preference, "light" and "dark" force one.
+	Theme  string `json:"theme"`
 	Signer Signer `json:"signer"`
 }
 
 func Defaults() Effective {
-	return Effective{Relays: []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}, BlossomServers: []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Signer: Signer{Mode: "none"}}
+	return Effective{Relays: []string{"wss://relay.napplet.soy", "wss://relay.ditto.pub"}, BlossomServers: []string{"https://blossom.napplet.soy", "https://blossom.ditto.pub"}, DiscoverOnUserRelays: true, DesktopEntries: true, GNOMESearch: true, Theme: "system", Signer: Signer{Mode: "none"}}
 }
 
 func merge(file, override Config) Effective {
@@ -104,6 +108,9 @@ func merge(file, override Config) Effective {
 		if c.SyncID != nil {
 			v.SyncID = *c.SyncID
 		}
+		if c.Theme != nil {
+			v.Theme = *c.Theme
+		}
 		if c.Signer != nil {
 			v.Signer = *c.Signer
 		}
@@ -113,7 +120,7 @@ func merge(file, override Config) Effective {
 
 func validateMerged(file, override Config) error {
 	v := merge(file, override)
-	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, SyncID: &v.SyncID, Signer: &v.Signer})
+	return validate(Config{Relays: &v.Relays, BlossomServers: &v.BlossomServers, DiscoverOnUserRelays: &v.DiscoverOnUserRelays, DesktopEntries: &v.DesktopEntries, GNOMESearch: &v.GNOMESearch, SyncID: &v.SyncID, Theme: &v.Theme, Signer: &v.Signer})
 }
 
 // errInvalidSyncID never repeats the rejected value, because settings errors
@@ -133,9 +140,20 @@ func validSyncID(s string) bool {
 	return true
 }
 
+// errInvalidTheme, like errInvalidSyncID, never repeats the rejected value.
+var errInvalidTheme = errors.New("theme: use system, light or dark")
+
+// ValidTheme reports whether name is one of the supported theme settings.
+func ValidTheme(name string) bool {
+	return name == "system" || name == "light" || name == "dark"
+}
+
 func validate(c Config) error {
 	if c.SyncID != nil && !validSyncID(*c.SyncID) {
 		return errInvalidSyncID
+	}
+	if c.Theme != nil && !ValidTheme(*c.Theme) {
+		return errInvalidTheme
 	}
 	if c.Signer != nil {
 		s := *c.Signer
@@ -208,8 +226,8 @@ func read(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	for key := range raw {
-		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "sync_id" && key != "signer" {
-			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, or sync_id", path, key)
+		if key != "relays" && key != "blossom_servers" && key != "discover_on_user_relays" && key != "desktop_entries" && key != "gnome_search" && key != "sync_id" && key != "theme" && key != "signer" {
+			return Config{}, fmt.Errorf("%s: unknown setting %q; remove it or use relays, blossom_servers, discover_on_user_relays, desktop_entries, gnome_search, sync_id, or theme", path, key)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw[key]), []byte("null")) {
 			return Config{}, fmt.Errorf("%s: %s must not be null; omit the setting to use its default", path, key)
@@ -386,6 +404,7 @@ func (m *Manager) sourcesLocked() map[string]string {
 		"desktop_entries":         {m.file.DesktopEntries != nil, m.override.DesktopEntries != nil},
 		"gnome_search":            {m.file.GNOMESearch != nil, m.override.GNOMESearch != nil},
 		"sync_id":                 {m.file.SyncID != nil, m.override.SyncID != nil},
+		"theme":                   {m.file.Theme != nil, m.override.Theme != nil},
 		"signer":                  {m.file.Signer != nil, m.override.Signer != nil},
 	}
 	out := make(map[string]string, len(fields))
@@ -475,5 +494,5 @@ func (m *Manager) fileSystemSignerSocketLocked() string {
 }
 
 func FieldName(name string) bool {
-	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search sync_id ", " "+name+" ")
+	return strings.Contains(" relays blossom_servers discover_on_user_relays desktop_entries gnome_search sync_id theme ", " "+name+" ")
 }

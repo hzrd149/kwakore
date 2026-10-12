@@ -55,6 +55,9 @@ func TestCLISettingsCommands(t *testing.T) {
 		{[]string{"settings", "set", "sync_id", `laptops`}, "settings.set", `{"field":"sync_id","value":"laptops"}`},
 		{[]string{"settings", "set", "sync_id", ``}, "settings.set", `{"field":"sync_id","value":""}`},
 		{[]string{"settings", "clear", "sync_id"}, "settings.clear", `{"field":"sync_id"}`},
+		{[]string{"settings", "set", "theme", `dark`}, "settings.set", `{"field":"theme","value":"dark"}`},
+		{[]string{"settings", "set", "theme", `"dark"`}, "settings.set", `{"field":"theme","value":"dark"}`},
+		{[]string{"settings", "clear", "theme"}, "settings.clear", `{"field":"theme"}`},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			seen := make(chan string, 1)
@@ -109,6 +112,16 @@ func TestCLISyncIDRejectsBrokenJSONString(t *testing.T) {
 	for _, field := range []string{"relays", "gnome_search"} {
 		if _, _, _, err := command([]string{"settings", "set", field, `"laptops"`}); err == nil {
 			t.Fatalf("%s accepted a string", field)
+		}
+	}
+}
+
+func TestCLIThemeRejectsUnknownValues(t *testing.T) {
+	for _, arg := range []string{"blue", `"blue"`, "Dark", `""`, `["dark"]`, "5", `"dark`} {
+		_, _, _, err := command([]string{"settings", "set", "theme", arg})
+		var input inputFailure
+		if !errors.As(err, &input) {
+			t.Fatalf("theme %q: %v, want an input failure", arg, err)
 		}
 	}
 }

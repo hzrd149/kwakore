@@ -157,6 +157,94 @@ var (
 	installSyncTimerGen uint64
 )
 
+// ─── status ──────────────────────────────────────────────────────
+
+// The fixed result categories of a pass. Nothing else about a pass is
+// reported to a client.
+const (
+	// installSyncOK: the list was merged and published (or already agreed)
+	installSyncOK = "ok"
+	// installSyncFailed: an install or uninstall from the list failed, the
+	// list could not be sealed or signed, or no relay accepted it
+	installSyncFailed = "failed"
+	// installSyncUnreadable: the synced list could not be decrypted
+	installSyncUnreadable = "unreadable"
+	// installSyncSkipped: sync is on but nobody is signed in
+	installSyncSkipped = "skipped"
+)
+
+// InstallSyncReport is the install_sync object of service.diagnostics.
+// Every field is always present; nil encodes as null.
+type InstallSyncReport struct {
+	Enabled     bool       `json:"enabled"`
+	LastAttempt *time.Time `json:"last_attempt"`
+	LastSuccess *time.Time `json:"last_success"`
+	LastResult  *string    `json:"last_result"`
+	Napplets    int        `json:"napplets"`
+}
+
+// installSyncRecord is the in-memory record of the passes for one sync_id.
+// It is not persisted: the pass that runs at start fills it.
+var (
+	installSyncRecordMu sync.Mutex
+	installSyncRecord   struct {
+		id          string
+		lastAttempt time.Time
+		lastSuccess time.Time
+		result      string
+		napplets    int
+	}
+)
+
+// recordInstallSyncResult notes the end of a pass for sync id id. A
+// napplets value below 0 keeps the previous count. A record for another id
+// replaces the stored one whole.
+func recordInstallSyncResult(id, result string, napplets int) {
+	now := time.Now().UTC()
+	installSyncRecordMu.Lock()
+	r := &installSyncRecord
+	if r.id != id {
+		r.id, r.lastAttempt, r.lastSuccess, r.result, r.napplets = id, time.Time{}, time.Time{}, "", 0
+	}
+	r.lastAttempt = now
+	if result == installSyncOK {
+		r.lastSuccess = now
+	}
+	r.result = result
+	if napplets >= 0 {
+		r.napplets = napplets
+	}
+	installSyncRecordMu.Unlock()
+}
+
+// InstallSyncStatus is the current install-sync report. Before the first
+// pass for the current sync_id it has null times and result.
+func InstallSyncStatus() InstallSyncReport {
+	id := installSyncID()
+	report := InstallSyncReport{Enabled: id != ""}
+	if id == "" {
+		return report
+	}
+	installSyncRecordMu.Lock()
+	defer installSyncRecordMu.Unlock()
+	r := installSyncRecord
+	if r.id != id || r.result == "" {
+		return report
+	}
+	if !r.lastAttempt.IsZero() {
+		t := r.lastAttempt
+		report.LastAttempt = &t
+	}
+	if !r.lastSuccess.IsZero() {
+		t := r.lastSuccess
+		report.LastSuccess = &t
+	}
+	result := r.result
+	report.LastResult = &result
+	report.Napplets = r.napplets
+	return report
+}
+
 // installSyncLocalChange is called after an install, update or uninstall of
 // a napplet. It schedules a pass once the changes stop for
 // installSyncDebounce, unless sync is off or the change is the sync's own.

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -62,6 +63,11 @@ type Service struct {
 	// installSyncWait waits for the installed-list sync worker, which runs
 	// on workContext.
 	installSyncWait func()
+	// systemDark is the desktop's light/dark preference the appearance
+	// watch last reported; themeMu serializes applyTheme.
+	systemDark     atomic.Bool
+	themeMu        sync.Mutex
+	appearanceWait sync.WaitGroup
 }
 
 func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
@@ -137,6 +143,9 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	// requested signer cannot be restored. The private record never enters
 	// ordinary service configuration or diagnostics.
 	_ = s.reconcileSigner(context.Background())
+	// The theme setting is authoritative in service mode: nothing else
+	// calls SetTheme, and new windows read it at launch.
+	s.applyTheme()
 	s.installSyncWait = backend.StartInstallSync(workContext)
 	return s, nil
 }
@@ -451,11 +460,14 @@ func (s *Service) ClearSetting(field string) error {
 
 func (s *Service) notifySettingsChange(before serviceconfig.Effective) {
 	after := s.manager.Effective()
-	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID {
+	if slices.Equal(before.Relays, after.Relays) && slices.Equal(before.BlossomServers, after.BlossomServers) && before.DiscoverOnUserRelays == after.DiscoverOnUserRelays && before.DesktopEntries == after.DesktopEntries && before.GNOMESearch == after.GNOMESearch && before.SyncID == after.SyncID && before.Theme == after.Theme {
 		return
 	}
 	if before.SyncID != after.SyncID {
 		backend.InstallSyncChanged()
+	}
+	if before.Theme != after.Theme {
+		s.applyTheme()
 	}
 	discoveryChanged := !slices.Equal(before.Relays, after.Relays) || before.DiscoverOnUserRelays != after.DiscoverOnUserRelays
 	backend.ServiceSettingsChanged(discoveryChanged)
@@ -515,7 +527,7 @@ func reloadWarning(path string, err error) string {
 		name = "[redacted]"
 	}
 	field := "file"
-	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "signer"} {
+	for _, name := range []string{"relays", "blossom_servers", "discover_on_user_relays", "sync_id", "theme", "signer"} {
 		if strings.Contains(err.Error(), name) {
 			field = name
 			break
@@ -555,6 +567,7 @@ func (s *Service) Close() {
 		if s.installSyncWait != nil {
 			s.installSyncWait()
 		}
+		s.appearanceWait.Wait()
 		if s.signer != nil {
 			s.signer.Close()
 		}
@@ -599,6 +612,7 @@ func Run(ctx context.Context, paths serviceconfig.Paths, version string, ready f
 		return err
 	}
 	s.StartDesktopSearch()
+	s.StartAppearanceWatch()
 	ready(fmt.Sprintf("kwakore %s ready (config: %s)", version, paths.ConfigFile))
 	<-ctx.Done()
 	s.BeginShutdown()

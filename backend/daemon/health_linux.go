@@ -36,6 +36,8 @@ type Diagnostics struct {
 	Settings     serviceconfig.Effective `json:"settings"`
 	Warning      string                  `json:"warning,omitempty"`
 	RecentErrors []DiagnosticError       `json:"recent_errors"`
+	// InstallSync carries only fixed result categories and times.
+	InstallSync backend.InstallSyncReport `json:"install_sync"`
 }
 
 // FileReport is a read-only observation of configuration files. Nil live
@@ -108,7 +110,7 @@ func (s *Service) Diagnostics() Diagnostics {
 		errors[i] = s.recentErrors[(s.errorNext-s.errorCount+i+len(s.recentErrors))%len(s.recentErrors)]
 	}
 	s.mu.Unlock()
-	return Diagnostics{ObservedFrom: "live", Health: s.Health(), Settings: s.manager.Effective(), Warning: warning, RecentErrors: errors}
+	return Diagnostics{ObservedFrom: "live", Health: s.Health(), Settings: s.manager.Effective(), Warning: warning, RecentErrors: errors, InstallSync: backend.InstallSyncStatus()}
 }
 
 func (s *Service) recordError(category, detail string) {

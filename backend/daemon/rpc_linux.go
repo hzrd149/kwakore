@@ -712,7 +712,8 @@ func decodeSettingParams(params json.RawMessage) (string, any, *controlprotocol.
 		}
 		return field, value, nil
 	}
-	if field == "sync_id" {
+	// sync_id and theme are JSON strings; serviceconfig validates the value
+	if field == "sync_id" || field == "theme" {
 		var value string
 		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
 			return "", nil, controlprotocol.FixedError(controlprotocol.InvalidParams)

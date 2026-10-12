@@ -184,6 +184,7 @@ let
       desktop_entries = false;
       gnome_search = false;
       sync_id = "laptops";
+      theme = "dark";
       signer = {
         mode = "bunker";
         relay = "wss://bunker.example.com";
@@ -209,6 +210,7 @@ let
           desktop_entries = false;
           gnome_search = false;
           sync_id = "laptops";
+          theme = "dark";
           signer = {
             mode = "bunker";
             relay = "wss://bunker.example.com";
@@ -356,6 +358,10 @@ let
     {
       name = "a sync_id with a space is rejected";
       ok = rejects { sync_id = "has space"; } "programs.kwakore.settings.sync_id:";
+    }
+    {
+      name = "an unknown theme is rejected";
+      ok = rejects { theme = "blue"; } "programs.kwakore.settings.theme:";
     }
     {
       name = "a bunker signer without a relay is rejected";

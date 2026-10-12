@@ -489,15 +489,19 @@ func samePins(a, b map[string]syncPin) bool {
 // installSyncMu serializes passes.
 var installSyncMu sync.Mutex
 
-// runInstallSync is one sync pass. It only logs; nothing it does is
-// reported to a client.
+// runInstallSync is one sync pass. It logs the details and records only a
+// fixed result category for service.diagnostics (InstallSyncStatus).
 func runInstallSync(ctx context.Context) {
 	installSyncMu.Lock()
 	defer installSyncMu.Unlock()
 
 	id := installSyncID()
 	k, pk := identitySnapshot()
-	if id == "" || k == nil || pk == nostr.ZeroPK || sys == nil {
+	if id == "" {
+		return
+	}
+	if k == nil || pk == nostr.ZeroPK || sys == nil {
+		recordInstallSyncResult(id, installSyncSkipped, -1)
 		return
 	}
 
@@ -534,6 +538,7 @@ func runInstallSync(ctx context.Context) {
 				return
 			}
 			log.Warn().Str("event", evt.ID.Hex()).Err(err).Msg("install sync list unreadable, leaving it alone")
+			recordInstallSyncResult(id, installSyncUnreadable, -1)
 			return
 		}
 		remote, fresh = pins, true
@@ -641,6 +646,7 @@ func runInstallSync(ctx context.Context) {
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Warn().Err(err).Msg("install sync list not sealed")
+				recordInstallSyncResult(id, installSyncFailed, len(target))
 			}
 			return
 		}
@@ -658,6 +664,7 @@ func runInstallSync(ctx context.Context) {
 		if err != nil || out.PubKey != pk {
 			if ctx.Err() == nil {
 				log.Warn().Err(err).Msg("install sync list not signed")
+				recordInstallSyncResult(id, installSyncFailed, len(target))
 			}
 			return
 		}
@@ -685,6 +692,11 @@ func runInstallSync(ctx context.Context) {
 	state.Sync = &next
 	_ = saveState()
 	stateMu.Unlock()
+	result := installSyncOK
+	if len(failedInstall) > 0 || len(failedUninstall) > 0 || next.Pending {
+		result = installSyncFailed
+	}
+	recordInstallSyncResult(id, result, len(target))
 }
 
 func logInstallSyncFailure(address string, err error, msg string) {

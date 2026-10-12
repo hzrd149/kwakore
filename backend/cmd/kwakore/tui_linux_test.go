@@ -15,12 +15,15 @@ import (
 
 func TestTUISettingsAndCatalogResults(t *testing.T) {
 	m := tuiModel{settings: map[string]json.RawMessage{}}
-	m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":["wss://relay.example"],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":false,"gnome_search":true,"sync_id":"laptops"}}`)})
-	if len(m.items) != 6 || m.items[0].address != "relays" || !strings.Contains(m.items[0].detail, "relay.example") {
+	m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":["wss://relay.example"],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":false,"gnome_search":true,"sync_id":"laptops","theme":"dark"}}`)})
+	if len(m.items) != 7 || m.items[0].address != "relays" || !strings.Contains(m.items[0].detail, "relay.example") {
 		t.Fatalf("settings items: %+v", m.items)
 	}
-	if last := m.items[5]; last.address != "sync_id" || !strings.Contains(last.detail, "laptops") {
-		t.Fatalf("sync_id item: %+v", last)
+	if item := m.items[5]; item.address != "sync_id" || !strings.Contains(item.detail, "laptops") {
+		t.Fatalf("sync_id item: %+v", item)
+	}
+	if last := m.items[6]; last.address != "theme" || !strings.Contains(last.detail, "dark") {
+		t.Fatalf("theme item: %+v", last)
 	}
 	m.consume(tuiResult{kind: "installed", data: []byte(`{"items":[{"address":"35129:abc:notes","name":"Notes\u001b[2J","format":"napplet","available":true}],"next_offset":100}`)})
 	if len(m.items) != 1 || m.items[0].label != "Notes[2J" || !m.more {
@@ -212,8 +215,8 @@ func TestTUISyncIDPrompt(t *testing.T) {
 	t.Cleanup(func() { tuiCommand = exec.CommandContext })
 	open := func() tuiModel {
 		m := tuiModel{tab: 3, settings: map[string]json.RawMessage{}, height: 24, width: 80}
-		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"laptops"}}`)})
-		m.cursor = len(m.items) - 1
+		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"laptops","theme":"system"}}`)})
+		m.cursor = 5
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(tuiModel)
 		if m.prompt == nil || m.prompt.action != "setting-string" || m.prompt.address != "sync_id" || m.prompt.value != "laptops" {
@@ -240,5 +243,55 @@ func TestTUISyncIDPrompt(t *testing.T) {
 		if len(argv) < len(tc.want) || !slices.Equal(argv[len(argv)-len(tc.want):], tc.want) {
 			t.Fatalf("%q ran %q, want %q", tc.value, argv, tc.want)
 		}
+	}
+}
+
+func TestTUIThemePrompt(t *testing.T) {
+	var argv []string
+	tuiCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		argv = args
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { tuiCommand = exec.CommandContext })
+	open := func() tuiModel {
+		m := tuiModel{tab: 3, settings: map[string]json.RawMessage{}, height: 24, width: 80}
+		m.consume(tuiResult{kind: "settings", data: []byte(`{"settings":{"relays":[],"blossom_servers":[],"discover_on_user_relays":true,"desktop_entries":true,"gnome_search":true,"sync_id":"","theme":"light"}}`)})
+		m.cursor = len(m.items) - 1
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(tuiModel)
+		if m.prompt == nil || m.prompt.action != "setting-choice" || m.prompt.address != "theme" || m.prompt.value != "light" {
+			t.Fatalf("theme prompt: %+v", m.prompt)
+		}
+		return m
+	}
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{"", []string{"settings", "clear", "theme"}},
+		{"dark", []string{"settings", "set", "theme", `"dark"`}},
+		{"system", []string{"settings", "set", "theme", `"system"`}},
+	} {
+		m := open()
+		m.prompt.value = tc.value
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatalf("%q: no request", tc.value)
+		}
+		argv = nil
+		cmd()
+		if len(argv) < len(tc.want) || !slices.Equal(argv[len(argv)-len(tc.want):], tc.want) {
+			t.Fatalf("%q ran %q, want %q", tc.value, argv, tc.want)
+		}
+	}
+	// an unknown theme sends nothing and says why
+	m := open()
+	m.prompt.value = "blue"
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("an unknown theme sent a request")
+	}
+	if m = updated.(tuiModel); m.notice != "Enter system, light or dark" {
+		t.Fatalf("notice = %q", m.notice)
 	}
 }
