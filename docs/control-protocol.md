@@ -36,6 +36,8 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.installed` | `{offset?:integer,limit?:integer}` | `{items:InstalledItem[],total:integer,next_offset:integer\|null}`, where `InstalledItem` is a `Descriptor` plus `update_available:Version\|null` |
 | `napplet.updates.check` | `{address?:string}` | `{items:[{address:string,installed_version:Version,available_version:Version},...],complete:boolean}` |
 | `napplet.detail` | `{address:string}` required | `Detail` |
+| `napplet.versions` | `{address:string,refresh?:boolean,offset?:integer,limit?:integer}` | `HistoryPage` |
+| `napplet.snapshots` | `{address:string,refresh?:boolean,offset?:integer,limit?:integer}` | `HistoryPage` |
 | `napplet.icon` | `{address:string}` required | `{sha256:string,mime:"image/png",width:integer,height:integer,data:string}` |
 | `napplet.windows` | none | `{items:[{window_id:string,address:string,name:string},...]}` for active napplet windows |
 | `napplet.install` | `{address:string,relays?:string[]}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled",installed_version:Version}` |
@@ -65,7 +67,56 @@ Discovery searches the cached catalog case insensitively after trimming the quer
 
 `napplet.updates.check` looks for newer versions of installed napplets: every installed napplet, or only the one at `address`, which must be installed (`Not found` otherwise). It asks each napplet's relays the same way `napplet.update` does, eight napplets at a time, with every lookup bounded at 60 seconds together. It always asks, so what the relays say now replaces what an earlier check found. `items` lists, sorted by address, the checked napplets whose newest manifest is valid and newer than the installed one; a newest manifest that is invalid is never offered. `complete:false` means some napplet's relays did not answer; that napplet keeps the state an earlier check gave it. When no relay answers for any napplet the result is `Unavailable` and nothing changes. The service also runs this check in the background about two minutes after it starts and every six hours. Nothing is ever updated automatically: `napplet.update` installs a version, and it checks the version again first. Every `napplet.installed` item carries `update_available`: the newer valid version the last check found for that napplet, or `null`; its `available` field keeps describing the installed manifest. Kind 5129 snapshots are immutable: they are never checked or offered an update (a check of only a snapshot returns `{items:[],complete:true}`), and `napplet.update` on one returns `No update`.
 
-`napplet.detail` describes the napplet at a canonical address from local knowledge only, without contacting relays: the installed record, else the cached discovery catalog, else the newest valid manifest in the local event store; an address none of them knows yields `Not found`. `Detail` is a `Descriptor` plus `installed:boolean`, `installed_version:Version|null`, `update_available:Version|null` (as in `napplet.installed`) and `versions:Version[]`: the versions known locally (installed, offered update, catalog and stored manifests), newest first, at most 20. Its `kind`, `required_domains` and `optional_domains` (the manifest's declared NAP domains, `[]` when none) now come from the descriptor, with the same keys and values as before. It contains no file path, server or blob URL, and the icon appears only as its hash.
+`napplet.detail` describes the napplet at a canonical address from local knowledge only, without contacting relays: the installed record, else the cached discovery catalog, else the newest valid manifest in the archive or local event store; an address none of them knows yields `Not found`. `Detail` is a `Descriptor` plus `installed:boolean`, `installed_version:Version|null`, `update_available:Version|null` (as in `napplet.installed`) and `versions:Version[]`: the versions known locally (installed, offered update, catalog and stored manifests), newest first, at most 20. Use `napplet.versions` for paginated archived history. Its `kind`, `required_domains` and `optional_domains` (the manifest's declared NAP domains, `[]` when none) come from the descriptor. It contains no file path, server or blob URL, and the icon appears only as its hash.
+
+`napplet.versions` lists every authentic publication Kwakore has archived for
+the canonical address, including invalid manifests. `napplet.snapshots` lists
+kind 5129 events whose valid `a` or `A` lineage references that address; it
+requires a named (`35129`) or root (`15129`) napplet address. Same-author
+snapshots have `relation:"author_snapshot"`; other-author snapshots have
+`relation:"derivative"`. Lineage is provenance only: neither replaces the
+mutable address's latest head or gives permission to use its identity. A
+snapshot's own `napplet.versions` list contains its one immutable event with
+`relation:"snapshot"`. Ordinary publications have `relation:"publication"`.
+
+Both methods use `offset:0`, `limit:100` by default (limit 1–500). An unknown
+address returns an empty page and can be refreshed before installation. Without
+`refresh:true`, no relays are contacted. A refresh asks configured discovery
+relays and author outboxes, with up to 500 distinct events per query and a
+30-second overall lookup deadline. Snapshot refresh uses separate `#a` and `#A`
+queries. Events accumulate in the archive across queries and daemon restarts;
+refreshing never changes the installed version or deletes earlier observations.
+
+`HistoryPage` contains:
+
+- `items:HistoryItem[]`, `total:integer`, and `next_offset:integer|null`, ordered
+  by descending publication time and ascending event ID for ties.
+- `selected_version:Version|null` and `selected_manifest_available:boolean`.
+  An existing installation may lack its original signed event; its parsed record
+  is shown here without inventing an archived signed publication.
+- `latest_observed:HistoryItem|null`, independent of pagination. For a mutable
+  address this is the latest authentic publication, even if invalid; snapshot
+  listings keep that mutable head separate from snapshot timestamps.
+- `lookup_status:"not_requested"|"answered"|"partial"|"unavailable"|"timeout"`.
+  `answered` means every requested relay query reached EOSE; `partial` means
+  some answered or sent events, but others failed, timed out, or the response
+  limit was reached. `unavailable` means no usable relay answer;
+  `timeout` means the lookup deadline elapsed without answers or events.
+  Canceling the RPC itself uses the existing timeout error contract.
+- `history_complete:false`, always: relays may discard replaced events, so even
+  an answered refresh cannot establish a complete publication history.
+
+`HistoryItem` contains the `Version` fields (`event_id`, `created_at`,
+`artifact_hash`) plus `address`, full hex `author`, `kind`, `schema`, `name`,
+`valid:boolean`, optional fixed `reason`, `relation`, `selected:boolean`,
+`first_seen` and `last_seen` Unix seconds, `relays:string[]`, and
+`lineage:Lineage|null`. Artifact hashes and lineage may be absent/empty for an
+invalid manifest. Observation times describe when Kwakore recorded the event,
+not when it was published. Relay provenance is deduplicated, capped at 64 URLs,
+and excludes credentials. Full signed events are stored privately in
+`manifest-history.db`; responses expose neither the event body nor local paths.
+Downloaded artifact availability and switching to historical versions are not
+provided by these history methods.
 
 `napplet.icon` returns the verified icon of the napplet at a canonical address (the installed record, else the catalog entry, else the newest stored manifest). The icon is fetched by its manifest hash from the user's, the manifest's and the author's Blossom servers. The source must match the hash, decode as the declared `image/png`, `image/jpeg` or `image/webp`, be at most 1 MiB and at most 1024×1024 pixels; it is then re-encoded as PNG and cached, so a later call reads the cache. `sha256` is the manifest's icon hash (never a URL), `mime` is always `image/png`, `width` and `height` are the PNG's size, and `data` is its standard base64. An unknown address or a napplet without a usable icon tag yields `Not found`; a fetch, verify or decode failure yields `Unavailable`. Neither error carries a URL or path. No event announces a cached icon: the service caches an installed napplet's icon in the background, and clients call `napplet.icon` after `napplet.installed` or `napplet.updated`, which fills the cache if needed.
 

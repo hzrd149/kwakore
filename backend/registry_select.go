@@ -70,6 +70,8 @@ func (m latestByAddress) add(evt nostr.Event) bool {
 	if !isNapKind(evt.Kind) || !evt.CheckID() || !evt.VerifySignature() {
 		return false
 	}
+	// Keep losing and invalid publications too; selection is a separate view.
+	archiveManifest(evt, "")
 	addr := eventAddress(evt)
 	if cur, ok := m[addr]; ok && !newerEvent(evt, cur) {
 		return false

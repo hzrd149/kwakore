@@ -21,7 +21,7 @@ func MethodNames() []string {
 		"settings.get", "settings.inspect", "settings.reload", "settings.set", "settings.clear",
 		"signer.status", "signer.switch", "signer.pair.start", "signer.pair.wait", "signer.pair.cancel",
 		"napplet.discover", "napplet.installed", "napplet.install", "napplet.update", "napplet.uninstall", "napplet.launch", "napplet.try", "napplet.windows", "napplet.stop",
-		"napplet.updates.check", "napplet.detail", "napplet.icon",
+		"napplet.updates.check", "napplet.detail", "napplet.icon", "napplet.versions", "napplet.snapshots",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
 		"events.subscribe",
 	}

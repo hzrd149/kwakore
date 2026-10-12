@@ -498,6 +498,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
 		{"updates"}, {"detail", address}, {"icon", address}, {"events"},
+		{"versions", address}, {"snapshots", address},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {

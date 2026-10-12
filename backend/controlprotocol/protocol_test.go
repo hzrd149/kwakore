@@ -3,10 +3,13 @@ package controlprotocol
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -49,11 +52,28 @@ func TestProtocolDocsMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := regexp.MustCompile(`case "((?:service|settings|napplet|signer|events)\.[a-z.]+)"`).FindAllSubmatch(router, -1)
-	var routed []string
-	for _, match := range cases {
-		routed = append(routed, string(match[1]))
+	tree, err := parser.ParseFile(token.NewFileSet(), "rpc_linux.go", router, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var routed []string
+	ast.Inspect(tree, func(node ast.Node) bool {
+		clause, ok := node.(*ast.CaseClause)
+		if !ok {
+			return true
+		}
+		for _, expr := range clause.List {
+			if literal, ok := expr.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				name, _ := strconv.Unquote(literal.Value)
+				for _, prefix := range []string{"service.", "settings.", "napplet.", "signer.", "events."} {
+					if strings.HasPrefix(name, prefix) {
+						routed = append(routed, name)
+					}
+				}
+			}
+		}
+		return true
+	})
 	catalog := MethodNames()
 	slices.Sort(catalog)
 	slices.Sort(routed)
@@ -90,7 +110,9 @@ func TestEventTypes(t *testing.T) {
 func TestProtocolDocsMethodsPairing(t *testing.T) {
 	methods := MethodNames()
 	for _, want := range []string{"signer.pair.start", "signer.pair.wait", "signer.pair.cancel"} {
-		if !slices.Contains(methods, want) { t.Fatalf("pairing method %s missing from v1 catalog", want) }
+		if !slices.Contains(methods, want) {
+			t.Fatalf("pairing method %s missing from v1 catalog", want)
+		}
 	}
 }
 

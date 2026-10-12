@@ -129,6 +129,9 @@ var (
 	// fetchSyncedPin finds the manifest event with the pinned id: the local
 	// store first, then the author's write relays and the configured ones.
 	fetchSyncedPin = func(ctx context.Context, ptr nostr.EntityPointer, id nostr.ID) *nostr.Event {
+		if evt := archivedEvent(id); evt != nil {
+			return evt
+		}
 		if sys == nil {
 			return nil
 		}

@@ -207,6 +207,23 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(checkErr)
 		}
 		return result, nil
+	case "napplet.versions", "napplet.snapshots":
+		address, refresh, offset, limit, err := decodeHistoryParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, historyErr := backend.ServiceHistory(workCtx, address, method == "napplet.snapshots", refresh, offset, limit)
+		if historyErr != nil {
+			return nil, mutationError(historyErr)
+		}
+		return result, nil
 	case "napplet.detail":
 		address, err := decodeAddressParams(params)
 		if err != nil {
@@ -692,6 +709,27 @@ func decodePageParams(params json.RawMessage) (int, int, *controlprotocol.Error)
 		return 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
 	}
 	return decodePageFields(fields)
+}
+
+func decodeHistoryParams(params json.RawMessage) (string, bool, int, int, *controlprotocol.Error) {
+	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	if err := controlprotocol.ValidateNamedParams(params, "address", "refresh", "offset", "limit"); err != nil {
+		return "", false, 0, 0, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", false, 0, 0, invalid
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return "", false, 0, 0, err
+	}
+	refresh := false
+	if raw, ok := fields["refresh"]; ok && (bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &refresh) != nil) {
+		return "", false, 0, 0, invalid
+	}
+	offset, limit, err := decodePageFields(fields)
+	return address, refresh, offset, limit, err
 }
 
 func decodePageFields(fields map[string]json.RawMessage) (int, int, *controlprotocol.Error) {

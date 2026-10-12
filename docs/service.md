@@ -375,6 +375,30 @@ $ kwak update nostr:naddr1...
 $ kwak detail nostr:naddr1...
 ```
 
+**Version history and snapshots.** Kwakore keeps the original signed manifest
+events it encounters in a separate local archive. It retains older versions
+even when the normal event cache replaces them. Browse or refresh that history:
+
+```console
+$ kwak versions nostr:naddr1...
+$ kwak versions nostr:naddr1... --refresh --limit 20
+$ kwak snapshots nostr:naddr1... --refresh
+```
+
+The history shows the selected event, latest observed publication, manifest
+validity, and relay lookup status. `--offset` and `--limit` paginate the list;
+without `--refresh` it works offline. A refresh keeps the installed version
+unchanged. Relays may discard old replaceable events, so this is every version
+Kwakore found, not a guaranteed complete history. A failed or empty refresh
+keeps previously archived versions.
+
+Snapshots are immutable kind `5129` events. The snapshot list labels events
+signed by the napplet's author as author snapshots and events signed by others
+as derivatives. Their lineage references describe provenance and do not replace
+the latest mutable publication. Install a snapshot using the existing
+`kwak install nostr:nevent1...` command. Browsing history does not yet provide
+rollback or guarantee that historical artifact blobs remain downloadable.
+
 ## Napplet catalog
 
 Napplets can call `await window.napplet.catalog.get()` to discover installed,

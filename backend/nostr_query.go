@@ -53,10 +53,12 @@ var errRelayTimeout = errors.New("relay did not answer in time")
 
 // relayQuery is one bounded request to several relays.
 type relayQuery struct {
-	events   chan nostr.RelayEvent
-	done     chan struct{}
-	answered atomic.Bool
-	complete atomic.Bool
+	events          chan nostr.RelayEvent
+	done            chan struct{}
+	answered        atomic.Bool
+	complete        atomic.Bool
+	answeredTargets atomic.Int32
+	totalTargets    int
 }
 
 // Events delivers each event once, whichever relay sent it first. For a
@@ -76,6 +78,12 @@ func (q *relayQuery) Answered() bool { return q.answered.Load() }
 // Complete reports whether every relay sent EOSE or failed before the grace
 // or the cap ended the request. It is final once Done is closed.
 func (q *relayQuery) Complete() bool { return q.complete.Load() }
+
+// AllAnswered differs from Complete: a failed target completed, but did not
+// answer. Used by history refresh to report partial relay coverage honestly.
+func (q *relayQuery) AllAnswered() bool {
+	return q.totalTargets > 0 && int(q.answeredTargets.Load()) == q.totalTargets
+}
 
 func finishedQuery() *relayQuery {
 	q := &relayQuery{events: make(chan nostr.RelayEvent), done: make(chan struct{})}
@@ -100,7 +108,7 @@ func queryRelays(ctx context.Context, pool *nostr.Pool, limits relayLimits, targ
 		return finishedQuery()
 	}
 
-	q := &relayQuery{events: make(chan nostr.RelayEvent), done: make(chan struct{})}
+	q := &relayQuery{events: make(chan nostr.RelayEvent), done: make(chan struct{}), totalTargets: len(norm)}
 
 	seen := xsync.NewMapOf[nostr.ID, struct{}]()
 	opts := nostr.SubscriptionOptions{
@@ -196,6 +204,9 @@ func queryTarget(ctx context.Context, pool *nostr.Pool, q *relayQuery, df nostr.
 	report := func(ok bool) {
 		if !reported {
 			reported = true
+			if ok {
+				q.answeredTargets.Add(1)
+			}
 			finished <- ok // buffered for every target, never blocks
 		}
 	}

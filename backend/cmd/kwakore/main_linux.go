@@ -174,7 +174,7 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 	switch method {
 	case "napplet.install", "napplet.update", "napplet.uninstall", "napplet.try", "signer.pair.wait":
 		return 180 * time.Second
-	case "napplet.discover":
+	case "napplet.discover", "napplet.versions", "napplet.snapshots":
 		// a refresh is bounded by the 30s relay cap plus a short drain
 		return 45 * time.Second
 	case "napplet.updates.check":
@@ -544,6 +544,27 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			Limit  int `json:"limit"`
 		}{*offset, *limit})
 		return "napplet.installed", params, socketPath, nil
+	}
+	if len(args) >= 2 && (args[0] == "versions" || args[0] == "snapshots") {
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		refresh := flags.Bool("refresh", false, "refresh observed history from relays")
+		offset := flags.Int("offset", 0, "page offset")
+		limit := flags.Int("limit", 100, "page size")
+		if flags.Parse(args[2:]) != nil || len(flags.Args()) != 0 || *offset < 0 || *limit < 1 || *limit > 500 {
+			return "", nil, "", inputFailure("invalid history parameters")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+			Refresh bool   `json:"refresh"`
+			Offset  int    `json:"offset"`
+			Limit   int    `json:"limit"`
+		}{addr.Canonical, *refresh, *offset, *limit})
+		return "napplet." + args[0], params, socketPath, nil
 	}
 	if len(args) == 1 && args[0] == "windows" {
 		return "napplet.windows", nil, socketPath, nil

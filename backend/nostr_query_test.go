@@ -189,7 +189,7 @@ func TestRelayQueryAllEOSEReturnsAtOnce(t *testing.T) {
 	if len(ids) != 2 || !slices.Contains(ids, a.ID) || !slices.Contains(ids, b.ID) {
 		t.Fatalf("got %v, want exactly A and B", ids)
 	}
-	if !q.Answered() || !q.Complete() {
+	if !q.Answered() || !q.Complete() || !q.AllAnswered() {
 		t.Fatalf("answered %v complete %v, want both", q.Answered(), q.Complete())
 	}
 }
@@ -212,7 +212,7 @@ func TestRelayQueryGraceAfterFirstEOSE(t *testing.T) {
 	if ids := eventIDs(got); !slices.Equal(ids, []nostr.ID{a.ID}) {
 		t.Fatalf("got %v, want A", ids)
 	}
-	if !q.Answered() || q.Complete() {
+	if !q.Answered() || q.Complete() || q.AllAnswered() {
 		t.Fatalf("answered %v complete %v, want answered and not complete", q.Answered(), q.Complete())
 	}
 }

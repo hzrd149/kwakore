@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -229,12 +230,23 @@ func uniqueVersions(versions []ServiceVersion) []ServiceVersion {
 	return out
 }
 
-// storedManifests is the valid manifests of ptr's address in the local
-// event store, newest first. Each event must hash to its id, carry a valid
+// storedManifests is the valid manifests of ptr's address in the archive and
+// local event store, newest first. Each event must hash to its id, carry a valid
 // signature and match the author, kind and d of the address.
 func storedManifests(ptr nostr.EntityPointer) []Napp {
+	var out []Napp
+	if a := manifestHistory.Load(); a != nil {
+		if records, _, _, err := a.page(canonicalPointer(ptr), false, 0, serviceDetailVersions); err == nil {
+			for _, record := range records {
+				n := nappFromLatest(record.Event)
+				if n.Unavailable == "" {
+					out = append(out, n)
+				}
+			}
+		}
+	}
 	if sys == nil {
-		return nil
+		return out
 	}
 	// The store answers a filter naming a replaceable kind with its latest
 	// event alone, which may be the invalid one; the kind is therefore left
@@ -254,7 +266,6 @@ func storedManifests(ptr nostr.EntityPointer) []Napp {
 		filter = nostr.Filter{IDs: []nostr.ID{id}}
 		maxEvents = 1
 	}
-	var out []Napp
 	for evt := range sys.Store.QueryEvents(filter, maxEvents) {
 		if evt.Kind != ptr.Kind || evt.PubKey != ptr.PublicKey || !evt.CheckID() || !evt.VerifySignature() {
 			continue
@@ -266,10 +277,13 @@ func storedManifests(ptr nostr.EntityPointer) []Napp {
 			continue
 		}
 		n := nappFromLatest(evt)
+		archiveManifest(evt, "")
 		if n.Unavailable != "" {
 			continue
 		}
-		out = append(out, n)
+		if !slices.ContainsFunc(out, func(other Napp) bool { return other.EventID == n.EventID }) {
+			out = append(out, n)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt != out[j].CreatedAt {

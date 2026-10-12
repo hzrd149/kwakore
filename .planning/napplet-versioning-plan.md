@@ -1,6 +1,35 @@
 # Napplet versions, pins, updates, and snapshots
 
-Draft design, 2026-10-12. Planning only; no runtime changes yet.
+Draft design, 2026-10-12. Development has started; see progress below.
+
+## Development progress
+
+Reinvestigated after the manifest agent's commits `880184d`, `48713ab`,
+and `69d9c4a`. Current NIP-5D parsing, legacy compatibility, independent snapshot
+identities, icon caching, and public manifest fields have landed. The conformance
+snapshot still pins the older `24711d9c` text; deliberate re-pinning remains
+pending. Do not repeat the parser and snapshot-identity work.
+
+First implementation slice: a separate persistent signed-manifest archive,
+one-time backfill of locally retained events, ingestion before head selection,
+paginated `napplet.versions` and `napplet.snapshots` RPCs and CLI commands,
+bounded relay refresh with lookup status, invalid-head reporting, same-author
+snapshot/derivative distinction, and archive reads for detail/address/exact sync
+pin lookups. History does not move the installed selection. Existing data reset,
+latest-only updates, and newer-wins sync rules remain in effect.
+
+Remaining slices: exact-event install and intentional forward/backward selection,
+historical artifact retention and offline switching, journaled data reset for
+same-artifact selections and running windows, explicit pin policy, and a
+versioned sync contract that preserves deliberate rollback. Author snapshot
+publishing and saved-data retention remain outside scope.
+
+Validation for the history slice: backend `go vet ./... && go test ./...`;
+focused `go test -race . ./daemon -run 'History|InitSystemCloser' -count=1`;
+desktop generate/build/vet/tests; both module tidy checks; product identity scan;
+and `git diff --check`. Local relay tests exercise distinct relay heads,
+snapshot lineage queries, partial replies, and timeouts. No child/host-page
+behavior changed in this slice, so real-engine checks were not required.
 
 ## Goal and agreed behavior
 
@@ -54,8 +83,8 @@ selection key. Do not import NIP-5A nsite snapshot rules into NIP-5D snapshots.
   prevents deliberate rollback. Explicit selection needs different merge semantics.
 - `window_storage.go`: data isolated by full address and artifact hash; updates
   reclaim superseded scopes. Preserve isolation and implement the agreed reset.
-- `spec/CONFORMANCE.md`: kind 5129 explicitly out of scope today. Revise this
-  decision together with tests and spec pins.
+- `spec/CONFORMANCE.md`: kind 5129 support is now recorded in A13 as superseding
+  the former out-of-scope decision; the pinned spec text still needs migration.
 
 ## Model and invariants
 
@@ -182,7 +211,8 @@ sync and author-side snapshot publishing are outside the first delivery.
 
 ## Delivery sequence and acceptance
 
-1. **Spec and identity contract.** Pin the confirmed NIP-5D revision; document
+1. **Spec and identity contract.** Parser and snapshot identities landed in
+   `880184d`; the legacy shape remains supported. Pin the confirmed NIP-5D revision; document
    legacy parsing policy and scope of migration; implement strict current schema
    validation and snapshot target identity. Test absent/duplicate tags, malformed
    lineage, standalone snapshots, same-author multiple snapshots, and forged events.

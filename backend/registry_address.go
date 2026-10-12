@@ -149,7 +149,18 @@ func resolveNappPointer(ctx context.Context, ptr nostr.EntityPointer) (Napp, err
 // addressEvents gathers the manifest events at ptr from the local store and
 // the relays. It is a variable so tests can stand in for the relays.
 var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.Event, error) {
+	var events []nostr.Event
+	if a := manifestHistory.Load(); a != nil {
+		if records, _, _, err := a.page(canonicalPointer(ptr), false, 0, 1); err == nil {
+			for _, record := range records {
+				events = append(events, record.Event)
+			}
+		}
+	}
 	if sys == nil {
+		if len(events) > 0 {
+			return events, nil
+		}
 		return nil, errors.New("not started")
 	}
 	if ptr.Kind == KindSnapshotNapplet {
@@ -157,7 +168,6 @@ var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.
 			return nil, errors.New("snapshot address has no event id")
 		}
 	}
-	var events []nostr.Event
 	filter := addressFilter(ptr)
 	for evt := range sys.Store.QueryEvents(filter, 10) {
 		events = append(events, evt)

@@ -63,6 +63,13 @@ func TestInitSystemCloserReleasesEveryStore(t *testing.T) {
 		_, c, err := eventdb.Open(filepath.Join(dir, "eventstore"))
 		return c, err
 	})
+	reopens(t, "manifest history", func() (func(), error) {
+		a, err := openManifestArchive(dir)
+		if err != nil {
+			return nil, err
+		}
+		return func() { a.db.Close() }, nil
+	})
 
 	// Windows refuses to delete a file that is still open, which is what
 	// broke t.TempDir cleanup for every test on a real store

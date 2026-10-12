@@ -28,6 +28,10 @@ Napplets:
   update ADDRESS                 Update an installed napplet
   updates [ADDRESS]              Check installed napplets for newer versions
   detail ADDRESS                 Show a napplet's public details
+  versions ADDRESS [--refresh] [--offset N] [--limit N]
+                                 Browse observed manifest versions
+  snapshots ADDRESS [--refresh] [--offset N] [--limit N]
+                                 Browse author snapshots and derivatives
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
@@ -103,6 +107,27 @@ func lookupHelp(parts []string) string {
 // Each entry includes the exact invocation and its command-specific choices.
 // Keep these alongside cliHelp when adding or changing commands.
 var commandHelp = map[string]string{
+	"versions": `Browse a napplet's observed manifest versions.
+
+Usage: kwak versions ADDRESS [--refresh] [--offset N] [--limit N]
+  --refresh    Ask discovery and author relays, retaining every version found
+  --offset N   Start at record N (default 0)
+  --limit N    Return 1–500 records (default 100)
+Without --refresh, reads local history only. Shows the selected version,
+latest observed publication, validity, and lookup status. Relay history can
+have gaps: older replaceable events may have been discarded.
+Example: kwak versions nostr:naddr1... --refresh
+`,
+	"snapshots": `Browse snapshots referencing a named or root napplet.
+
+Usage: kwak snapshots ADDRESS [--refresh] [--offset N] [--limit N]
+  --refresh    Ask discovery and author relays for a/A lineage references
+  --offset N   Start at record N (default 0)
+  --limit N    Return 1–500 records (default 100)
+Same-author snapshots and other-author derivatives are labeled separately.
+Lineage is provenance; snapshots do not replace the latest mutable version.
+Example: kwak snapshots nostr:naddr1... --refresh
+`,
 	"windows": `List active napplet windows.
 
 Usage: kwak windows
