@@ -234,33 +234,40 @@ func socialSummary(t socialTarget, reactions, comments, deletions []nostr.Event,
 
 	// the viewer's own state
 	if viewer != nil {
-		own := &ServiceSocialOwn{Vote: "none", Reactions: []ServiceSocialOwnReaction{}}
-		if evt, ok := votes[*viewer]; ok {
-			own.Vote = "down"
-			if isUpVote(evt.Content) {
-				own.Vote = "up"
-			}
-			own.VoteEventID = evt.ID.Hex()
-		}
-		var mine []nostr.Event
-		for _, evt := range reactions {
-			if evt.PubKey == *viewer && !isVoteContent(evt.Content) {
-				mine = append(mine, evt)
-			}
-		}
-		slices.SortFunc(mine, socialOrder)
-		for _, evt := range mine {
-			if len(own.Reactions) == socialEmojiLimit {
-				break
-			}
-			text, _ := socialText(evt.Content, socialReactionRunes)
-			own.Reactions = append(own.Reactions, ServiceSocialOwnReaction{
-				ID: evt.ID.Hex(), Content: text, EventID: socialVersionOf(evt, t),
-			})
-		}
-		summary.Own = own
+		summary.Own = socialOwnState(t, reactions, *viewer)
 	}
 	return summary
+}
+
+// socialOwnState is the viewer's latest vote and their emoji reactions,
+// newest first. Pass live reactions.
+func socialOwnState(t socialTarget, reactions []nostr.Event, viewer nostr.PubKey) *ServiceSocialOwn {
+	reactions = socialReactionsOf(t, reactions)
+	own := &ServiceSocialOwn{Vote: "none", Reactions: []ServiceSocialOwnReaction{}}
+	if evt, ok := latestVotes(reactions)[viewer]; ok {
+		own.Vote = "down"
+		if isUpVote(evt.Content) {
+			own.Vote = "up"
+		}
+		own.VoteEventID = evt.ID.Hex()
+	}
+	var mine []nostr.Event
+	for _, evt := range reactions {
+		if evt.PubKey == viewer && !isVoteContent(evt.Content) {
+			mine = append(mine, evt)
+		}
+	}
+	slices.SortFunc(mine, socialOrder)
+	for _, evt := range mine {
+		if len(own.Reactions) == socialEmojiLimit {
+			break
+		}
+		text, _ := socialText(evt.Content, socialReactionRunes)
+		own.Reactions = append(own.Reactions, ServiceSocialOwnReaction{
+			ID: evt.ID.Hex(), Content: text, EventID: socialVersionOf(evt, t),
+		})
+	}
+	return own
 }
 
 // reactionItems lists t's reactions newest first, all of them when eventID

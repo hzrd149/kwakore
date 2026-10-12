@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"slices"
@@ -180,6 +181,97 @@ func socialEmojiURL(raw string) string {
 		return ""
 	}
 	return raw
+}
+
+// socialCategoriesParam is the categories a refresh names: all of them when
+// none are given, else a subset of SocialCategories with no repeats.
+func socialCategoriesParam(categories []string) ([]string, error) {
+	if len(categories) == 0 {
+		return SocialCategories(), nil
+	}
+	for i, c := range categories {
+		if !slices.Contains(SocialCategories(), c) || slices.Contains(categories[:i], c) {
+			return nil, ErrServiceInvalidSocial
+		}
+	}
+	return slices.Clone(categories), nil
+}
+
+// ServiceSocial is the reactions and comments summary of a napplet address,
+// installed or not, read from the local store. refresh first asks relays for
+// the named categories (all when none are named), within the refresh floor.
+func ServiceSocial(ctx context.Context, address string, refresh bool, categories []string) (ServiceSocialSummary, error) {
+	t, err := newSocialTarget(address)
+	if err != nil {
+		return ServiceSocialSummary{}, err
+	}
+	categories, err = socialCategoriesParam(categories)
+	if err != nil {
+		return ServiceSocialSummary{}, err
+	}
+	if sys == nil {
+		return ServiceSocialSummary{}, ErrServiceUnavailable
+	}
+	if ctx.Err() != nil {
+		return ServiceSocialSummary{}, ErrServiceTimeout
+	}
+	if refresh {
+		if err := socialRefresh(ctx, t, categories); err != nil || ctx.Err() != nil {
+			return ServiceSocialSummary{}, ErrServiceTimeout
+		}
+	}
+	summary, live := socialAggregate(t)
+	summary.Sync = socialSyncStatus(address)
+	if viewer := socialViewer(); viewer != nil {
+		summary.Own = socialOwnState(t, live, *viewer)
+	}
+	return summary, nil
+}
+
+// socialRead is the target and its live held events of kind, after the
+// shared checks of the paged reads.
+func socialRead(ctx context.Context, address, id string, kind nostr.Kind) (socialTarget, []nostr.Event, error) {
+	t, err := newSocialTarget(address)
+	if err != nil {
+		return socialTarget{}, nil, err
+	}
+	if id != "" && !hex64.MatchString(id) {
+		return socialTarget{}, nil, ErrServiceInvalidSocial
+	}
+	if sys == nil {
+		return socialTarget{}, nil, ErrServiceUnavailable
+	}
+	if ctx.Err() != nil {
+		return socialTarget{}, nil, ErrServiceTimeout
+	}
+	held := socialHeld(t, kind)
+	return t, socialLive(held, socialDeletions(held)), nil
+}
+
+// ServiceReactions pages a napplet's reactions newest first, all of them or
+// those on one version. An unknown version is an empty page.
+func ServiceReactions(ctx context.Context, address, eventID string, offset, limit int) (ServiceReactionPage, error) {
+	t, live, err := socialRead(ctx, address, eventID, nostr.KindReaction)
+	if err != nil {
+		return ServiceReactionPage{}, err
+	}
+	items, total, next := pageOf(reactionItems(t, live, eventID), offset, limit)
+	items = slices.Clone(items)
+	socialAuthorNames(items, func(r *ServiceReaction) (string, *string) { return r.Author, &r.AuthorName })
+	return ServiceReactionPage{Items: items, Total: total, NextOffset: next}, nil
+}
+
+// ServiceComments pages the top-level comments of a napplet, or the replies
+// to one comment, newest first. An unknown parent is an empty page.
+func ServiceComments(ctx context.Context, address, parentID string, offset, limit int) (ServiceCommentPage, error) {
+	t, live, err := socialRead(ctx, address, parentID, nostr.KindComment)
+	if err != nil {
+		return ServiceCommentPage{}, err
+	}
+	items, total, next := pageOf(commentItems(t, live, parentID, socialViewer()), offset, limit)
+	items = slices.Clone(items)
+	socialAuthorNames(items, func(c *ServiceComment) (string, *string) { return c.Author, &c.AuthorName })
+	return ServiceCommentPage{Items: items, Total: total, NextOffset: next}, nil
 }
 
 // ─── wire types ─────────────────────────────────────────────────────────
