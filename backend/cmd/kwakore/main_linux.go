@@ -183,6 +183,9 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 	case "napplet.social":
 		// the daemon bounds a refresh at 60s
 		return 75 * time.Second
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+		// the daemon bounds a social action at 60s
+		return 75 * time.Second
 	}
 	return 30 * time.Second
 }
@@ -258,8 +261,8 @@ func exchange(conn *net.UnixConn, method string, params json.RawMessage, deadlin
 				return nil, errors.New("invalid daemon response")
 			}
 			if raw, ok := fields["data"]; ok {
-				data, valid := parseSessionUnavailableData(raw)
-				if (method != "napplet.launch" && method != "napplet.try") || !valid {
+				data, valid := parseUnavailableData(raw)
+				if !valid || data.Reason != unavailableReason(method) {
 					return nil, errors.New("invalid daemon response")
 				}
 				fixed.Data = data
@@ -387,17 +390,116 @@ func parsePartialCleanupData(raw, params json.RawMessage) (controlprotocol.Parti
 	return data, true
 }
 
-func parseSessionUnavailableData(raw json.RawMessage) (controlprotocol.SessionUnavailableData, bool) {
+// parseUnavailableData is an Unavailable error's data: exactly one reason
+// key holding a reason controlprotocol.UnavailableReason accepts, spelled
+// plainly.
+func parseUnavailableData(raw json.RawMessage) (controlprotocol.SessionUnavailableData, bool) {
 	var data controlprotocol.SessionUnavailableData
 	if len(raw) == 0 || raw[0] != '{' || controlprotocol.ValidateNamedParams(raw, "reason") != nil {
 		return data, false
 	}
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil || len(fields) != 1 || !bytes.Equal(fields["reason"], []byte(`"session_unavailable"`)) {
+	var reason string
+	if json.Unmarshal(raw, &fields) != nil || len(fields) != 1 || json.Unmarshal(fields["reason"], &reason) != nil ||
+		!controlprotocol.UnavailableReason(reason) || !bytes.Equal(fields["reason"], []byte(`"`+reason+`"`)) {
 		return data, false
 	}
-	data.Reason = "session_unavailable"
+	data.Reason = reason
 	return data, true
+}
+
+// socialActionCommand maps the vote, react, comment and unpublish words
+// onto their methods. Positional arguments come first, then flags; ids are
+// 64 lowercase hex.
+func socialActionCommand(args []string) (string, json.RawMessage, error) {
+	addr, err := commandAddress(args[1], false)
+	if err != nil {
+		return "", nil, err
+	}
+	validID := func(id string) bool {
+		decoded, err := hex.DecodeString(id)
+		return err == nil && len(decoded) == 32 && hex.EncodeToString(decoded) == id
+	}
+	if args[0] == "unpublish" {
+		if len(args) != 3 {
+			return "", nil, inputFailure("usage: kwak unpublish ADDRESS EVENT_ID")
+		}
+		if !validID(args[2]) {
+			return "", nil, inputFailure("invalid event ID")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+			EventID string `json:"event_id"`
+		}{addr.Canonical, args[2]})
+		return "napplet.delete", params, nil
+	}
+	if len(args) < 3 {
+		return "", nil, inputFailure("invalid " + args[0] + " parameters")
+	}
+	value := args[2]
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	idFlag := "event"
+	if args[0] == "comment" {
+		idFlag = "reply"
+	}
+	id := flags.String(idFlag, "", "event id")
+	emojiURL := ""
+	if args[0] == "react" {
+		flags.StringVar(&emojiURL, "url", "", "emoji image url")
+	}
+	if flags.Parse(args[3:]) != nil || len(flags.Args()) != 0 {
+		return "", nil, inputFailure("invalid " + args[0] + " parameters")
+	}
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set[idFlag] && !validID(*id) {
+		return "", nil, inputFailure("invalid event ID")
+	}
+	switch args[0] {
+	case "vote":
+		if value != "up" && value != "down" && value != "none" {
+			return "", nil, inputFailure("vote must be up, down or none")
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+			Vote    string `json:"vote"`
+			EventID string `json:"event_id,omitempty"`
+		}{addr.Canonical, value, *id})
+		return "napplet.vote", params, nil
+	case "react":
+		if value == "" || value == "+" || value == "-" {
+			return "", nil, inputFailure("use kwak vote for + and -")
+		}
+		params, _ := json.Marshal(struct {
+			Address  string `json:"address"`
+			Emoji    string `json:"emoji"`
+			EmojiURL string `json:"emoji_url,omitempty"`
+			EventID  string `json:"event_id,omitempty"`
+		}{addr.Canonical, value, emojiURL, *id})
+		return "napplet.react", params, nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", nil, inputFailure("comment text is empty")
+	}
+	params, _ := json.Marshal(struct {
+		Address  string `json:"address"`
+		Content  string `json:"content"`
+		ParentID string `json:"parent_id,omitempty"`
+	}{addr.Canonical, value, *id})
+	return "napplet.comment", params, nil
+}
+
+// unavailableReason is the Unavailable reason method may carry: a launch
+// without a graphical session, or a social action without a signer.
+func unavailableReason(method string) string {
+	switch method {
+	case "napplet.launch", "napplet.try":
+		return controlprotocol.ReasonSessionUnavailable
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+		return controlprotocol.ReasonSignerUnavailable
+	}
+	return ""
 }
 
 type inputFailure string
@@ -628,6 +730,13 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}
 		params, _ := json.Marshal(fields)
 		return "napplet." + args[0], params, socketPath, nil
+	}
+	if len(args) >= 2 && (args[0] == "vote" || args[0] == "react" || args[0] == "comment" || args[0] == "unpublish") {
+		method, params, err := socialActionCommand(args)
+		if err != nil {
+			return "", nil, "", err
+		}
+		return method, params, socketPath, nil
 	}
 	if len(args) == 1 && args[0] == "windows" {
 		return "napplet.windows", nil, socketPath, nil
@@ -1385,8 +1494,11 @@ func writeHumanError(w io.Writer, err error) {
 		fmt.Fprintf(w, "Error: %s\n", err)
 	case errors.As(err, &remote):
 		fmt.Fprintf(w, "Error: %s\n", err)
-		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == "session_unavailable" {
+		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == controlprotocol.ReasonSessionUnavailable {
 			fmt.Fprintln(w, "A graphical session is required to launch a napplet.")
+		}
+		if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == controlprotocol.ReasonSignerUnavailable {
+			fmt.Fprintln(w, "A signer is required: set one up with kwak signer.")
 		}
 		if data, ok := remote.RPC.Data.(controlprotocol.PartialCleanupData); ok {
 			fmt.Fprintf(w, "Record removed for %s, but cleanup is incomplete.\n", displayValue(data.Address))
@@ -1412,7 +1524,7 @@ func writeCLIError(w io.Writer, err error) {
 			}
 		}
 		if rpcErr.Code == controlprotocol.Unavailable {
-			if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && data.Reason == "session_unavailable" {
+			if data, ok := remote.RPC.Data.(controlprotocol.SessionUnavailableData); ok && controlprotocol.UnavailableReason(data.Reason) {
 				rpcErr.Data = data
 			}
 		}

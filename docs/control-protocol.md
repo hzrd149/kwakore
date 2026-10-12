@@ -41,6 +41,10 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.social` | `{address:string,refresh?:boolean,categories?:("reactions"\|"comments")[]}`, `address` required | `{address:string,sync:{reactions:Sync,comments:Sync},votes:{up:integer,down:integer,score:integer},emoji:[{content:string,shortcode?:string,url?:string,count:integer},...],by_event:[{event_id:string,up:integer,down:integer,emoji:integer},...],comments:{count:integer,latest_at:integer\|null},own:{vote:"up"\|"down"\|"none",vote_event_id:string,reactions:[{id:string,content:string,event_id:string},...]}\|null}`, where `Sync` is `{status:"not_requested"\|"answered"\|"partial"\|"unavailable"\|"timeout",synced_at:integer\|null}` |
 | `napplet.reactions` | `{address:string,event_id?:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{id:string,author:string,author_name?:string,content:string,shortcode?:string,url?:string,event_id:string,created_at:integer},...],total:integer,next_offset:integer\|null}` |
 | `napplet.comments` | `{address:string,parent_id?:string,offset?:integer,limit?:integer}`, `address` required | `{items:[{id:string,author:string,author_name?:string,content:string,truncated:boolean,created_at:integer,parent_id:string,reply_count:integer,own:boolean},...],total:integer,next_offset:integer\|null}` |
+| `napplet.vote` | `{address:string,vote:"up"\|"down"\|"none",event_id?:string}`, `address` and `vote` required; no `event_id` with `none` | `{address:string,outcome:"published"\|"unchanged",event_id?:string,deleted:string[],published:integer,failed:integer}` |
+| `napplet.react` | `{address:string,emoji:string,emoji_url?:string,event_id?:string}`, `address` and `emoji` required | `{address:string,outcome:"published",event_id:string,published:integer,failed:integer}` |
+| `napplet.comment` | `{address:string,content:string,parent_id?:string}`, `address` and `content` required | `{address:string,outcome:"published",event_id:string,published:integer,failed:integer}` |
+| `napplet.delete` | `{address:string,event_id:string}` required | `{address:string,outcome:"published",deletion_id:string,published:integer,failed:integer}` |
 | `napplet.icon` | `{address:string}` required | `{sha256:string,mime:"image/png",width:integer,height:integer,data:string}` |
 | `napplet.windows` | none | `{items:[{window_id:string,address:string,name:string},...]}` for active napplet windows |
 | `napplet.install` | `{address:string,relays?:string[],event_id?:string}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled"\|"selected"\|"unchanged",installed_version:Version}` |
@@ -164,9 +168,9 @@ rules retain the existing address-based policy.
 
 `napplet.social`, `napplet.reactions` and `napplet.comments` read what other
 people published about a napplet: NIP-25 reactions (votes and emoji) and
-NIP-22 comments. They work for any canonical address, installed or not, and
-never publish anything. There are two categories, `reactions` and
-`comments`.
+NIP-22 comments. They work for any canonical address, installed or not.
+These three read methods never publish anything; the actions below do. There
+are two categories, `reactions` and `comments`.
 
 Reads use only data Kwakore already holds. `napplet.social` with
 `refresh:true` first asks relays: up to 12 of them, the author's NIP-65 inbox
@@ -243,6 +247,72 @@ comments. The user's own events are never removed by any of these limits.
 These results never contain relay URLs or relay hints, any URL other than a
 sanitized `https` emoji image, local paths, signatures, raw tags or raw
 errors.
+
+### Publishing reactions and comments
+
+`napplet.vote`, `napplet.react`, `napplet.comment` and `napplet.delete` act
+on a napplet with the service signer: each signs one event, publishes it and
+applies the change to the local data at once, so `napplet.social` and the
+pages show it without a refresh. Without a signer each returns 1004
+`Unavailable` with exactly `data:{"reason":"signer_unavailable"}`, before
+anything is signed. An event goes to the user's NIP-65 write relays (the
+configured relays when there are none), plus up to 4 public inbox relays of
+the napplet author and, for a reply, up to 4 of the parent comment's author.
+Signing is bounded at 20 seconds (a slower signer gives `Timeout` and nothing
+is published), publishing at 30 seconds, and the server bounds the call at 60
+seconds. One action runs at a time; actions never wait for installs or
+launches, nor block them. A signer answer for another key, or one that
+changes the event or does not verify, gives `Unavailable` and nothing is
+stored or published.
+
+Reaching no relay is not an error: the result says `published:0` and the
+event is kept locally (the next action or refresh does not resend it).
+`published` and `failed` count the target relays that accepted and refused
+or did not answer. Results never contain relay URLs, relay hints, keys,
+signatures or raw errors.
+
+A reaction (NIP-25 kind 7) has exactly these tags, in order: `["e",VERSION]`
+(with the author's first public outbox relay as a third element when one is
+known), `["p",AUTHOR]`, `["k",KIND]`, then `["a",ADDRESS]` except for a kind
+5129 snapshot, which has no address (a kind 15129 address keeps its trailing
+colon), then `["emoji",SHORTCODE,URL]` for a NIP-30 reaction. `VERSION` is
+`event_id` when it names a known version (else `Not found`), otherwise the
+installed event, otherwise the newest archived manifest. Without any known
+version the result is `Not found`, because NIP-25 requires the `e` tag.
+
+`napplet.vote` sets the user's vote. When the current vote (on that version,
+with `event_id`) already is `vote`, the outcome is `unchanged`, `event_id` is
+that vote reaction (absent for `none`) and nothing is published. Otherwise
+`up` or `down` publishes a `+` or `-` reaction and, only when it reached at
+least one relay, one kind 5 naming the user's previous vote reactions on the
+napplet (at most 10, newest first) with `["k","7"]`; `deleted` lists those
+withdrawn and they are removed locally. If the new vote reached no relay the
+previous ones stay, but the new vote, dated after them, is the
+current one locally. `none` publishes only that kind 5 and removes the
+previous votes locally even when it reached no relay. `published` and
+`failed` count the vote's relays, or for `none` the kind 5's.
+
+`napplet.react` publishes an emoji reaction. `emoji` may not be `+`, `-` or
+empty (use `napplet.vote`); it is at most 64 bytes with no whitespace,
+control or format characters. A `:shortcode:` needs `emoji_url`, an `https`
+URL with a host, no user information and at most 512 bytes; any other emoji
+must not have one.
+
+`napplet.comment` publishes a NIP-22 kind 1111 with non-blank `content` of
+at most 8 KiB, sent as given. Its root is `["A",ADDRESS]` (`["E",EVENT_ID]`
+for a snapshot), `["K",KIND]` and `["P",AUTHOR]`. A top-level comment then
+names the napplet as its parent: `["a",ADDRESS]` (not for a snapshot),
+`["e",VERSION]`, `["k",KIND]`, `["p",AUTHOR]`. A reply, with `parent_id`,
+names the parent comment instead: `["e",PARENT]`, `["k","1111"]`,
+`["p",PARENT_AUTHOR]`. The parent must be a comment on the same napplet that
+Kwakore holds and that its author has not deleted; any other id is `Not
+found`.
+
+`napplet.delete` withdraws one of the user's own reactions or comments on
+the napplet: it publishes a kind 5 with `["e",EVENT_ID]` and `["k",KIND]`,
+removes the event locally and keeps the kind 5 as its tombstone. An unknown
+id, another person's event and one about another napplet all give the same
+`Not found`. `deletion_id` is the kind 5.
 
 `napplet.icon` returns the verified icon of the napplet at a canonical address (the installed record, else the catalog entry, else the newest stored manifest). The icon is fetched by its manifest hash from the user's, the manifest's and the author's Blossom servers. The source must match the hash, decode as the declared `image/png`, `image/jpeg` or `image/webp`, be at most 1 MiB and at most 1024×1024 pixels; it is then re-encoded as PNG and cached, so a later call reads the cache. `sha256` is the manifest's icon hash (never a URL), `mime` is always `image/png`, `width` and `height` are the PNG's size, and `data` is its standard base64. An unknown address or a napplet without a usable icon tag yields `Not found`; a fetch, verify or decode failure yields `Unavailable`. Neither error carries a URL or path. No event announces a cached icon: the service caches an installed napplet's icon in the background, and clients call `napplet.icon` after `napplet.installed` or `napplet.updated`, which fills the cache if needed.
 
@@ -326,7 +396,7 @@ Events arrive in the order they happened, and their times never decrease. No eve
 
 ## Errors
 
-Errors use `{code:integer,message:string}` and, only for partial cleanup or headless launch as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
+Errors use `{code:integer,message:string}` and, only for partial cleanup, headless launch or a social action without a signer as described above, a safe `data` object. Error messages are fixed; paths, relay URLs, private keys, and raw internal errors are never returned. These are the wire codes and fixed messages:
 
 | Code | Message | Meaning |
 | ---: | --- | --- |
@@ -338,7 +408,7 @@ Errors use `{code:integer,message:string}` and, only for partial cleanup or head
 | 1001 | Unauthorized | Peer UID denied |
 | 1002 | Not found | Address or record missing |
 | 1003 | Busy | Mutation conflicts with current work |
-| 1004 | Unavailable | Daemon, discovery, storage, network, or window child unavailable; headless launch alone may carry `data:{"reason":"session_unavailable"}` |
+| 1004 | Unavailable | Daemon, discovery, storage, network, signer or window child unavailable; headless launch alone may carry `data:{"reason":"session_unavailable"}`, and `napplet.vote`, `napplet.react`, `napplet.comment` and `napplet.delete` without a signer carry `data:{"reason":"signer_unavailable"}` |
 | 1005 | No update | No newer version to install |
 | 1006 | Invalid configuration | Reload or setting validation failed |
 | 1007 | Closing | Shutdown has started |
@@ -405,6 +475,10 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `social ADDRESS [--refresh] [--only reactions,comments]` | `napplet.social` (`--only` becomes `categories`, checked before dialing) |
 | `reactions ADDRESS [--event ID] [--offset N] [--limit N]` | `napplet.reactions` (`--event` becomes `event_id`) |
 | `comments ADDRESS [--parent ID] [--offset N] [--limit N]` | `napplet.comments` (`--parent` becomes `parent_id`) |
+| `vote ADDRESS up\|down\|none [--event ID]` | `napplet.vote` (`--event` becomes `event_id`) |
+| `react ADDRESS EMOJI [--url URL] [--event ID]` | `napplet.react` (`--url` becomes `emoji_url`, `--event` `event_id`; `+`, `-` and empty are refused before dialing) |
+| `comment ADDRESS TEXT [--reply ID]` | `napplet.comment` (TEXT is sent verbatim as `content`; `--reply` becomes `parent_id`) |
+| `unpublish ADDRESS EVENT_ID` | `napplet.delete` |
 | `icon ADDRESS [--out FILE]` | `napplet.icon` (the result is validated, then the PNG is written to the absolute FILE with mode 0600, or to stdout when it is not a terminal; `--json` prints the result instead) |
 | `uninstall --yes ADDRESS` | `napplet.uninstall` |
 | `launch ADDRESS` | `napplet.launch` |
@@ -415,7 +489,7 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `permissions set ADDRESS PERMISSION allow\|deny [--subject NAME]` | `napplet.permissions.set` |
 | `permissions clear ADDRESS PERMISSION [--subject NAME]` | `napplet.permissions.clear` |
 
-Every `ADDRESS` (in `install`, `update`, `updates`, `detail`, `icon`, `social`, `reactions`, `comments`, `uninstall`, `launch`, `try` and `permissions`) may be written as the canonical `KIND:PUBKEY_HEX:D` coordinate, a bare `naddr1…` or a `nostr:naddr1…` URI, and a kind 5129 snapshot also as `nevent1…` or `note1…` (bare or after `nostr:`). The scheme may use any letter case; the bech32 part must be all lowercase or all uppercase. The CLI decodes the form, checks it with the daemon's canonical rule and sends only the canonical address, so a canonical argument produces exactly the request it always did. An `nevent` that carries its author converts locally to `5129:<author>:<event id>`; one with a kind other than 5129 is refused. A `note1…` or an `nevent` without its author names only the event, so the CLI first resolves it with one cached `napplet.discover` lookup (`{query:<event id>,kind:5129,limit:2}`) on a connection of its own, and uses the address of the single item it returns when that address ends in the event id; anything else is refused with `unknown_snapshot`. `npub`, `nprofile`, `nsec` and `nrelay` are refused without being decoded or sent. Web links that contain an `naddr`, `nostr:` followed by a canonical coordinate, and surrounding whitespace are refused too. `install` and `try` forward up to 8 of the naddr's or nevent's valid `ws://`/`wss://` hints as `relays`, dropping the rest; the other commands send the address alone. A d tag with control, format, or line or paragraph separator characters is refused on the CLI, except by `uninstall --yes`, so such a record can always be removed; a d tag that is not valid UTF-8 is refused everywhere. `launch-token` is unchanged and takes only its token.
+Every `ADDRESS` (in `install`, `update`, `updates`, `detail`, `icon`, `social`, `reactions`, `comments`, `vote`, `react`, `comment`, `unpublish`, `uninstall`, `launch`, `try` and `permissions`) may be written as the canonical `KIND:PUBKEY_HEX:D` coordinate, a bare `naddr1…` or a `nostr:naddr1…` URI, and a kind 5129 snapshot also as `nevent1…` or `note1…` (bare or after `nostr:`). The scheme may use any letter case; the bech32 part must be all lowercase or all uppercase. The CLI decodes the form, checks it with the daemon's canonical rule and sends only the canonical address, so a canonical argument produces exactly the request it always did. An `nevent` that carries its author converts locally to `5129:<author>:<event id>`; one with a kind other than 5129 is refused. A `note1…` or an `nevent` without its author names only the event, so the CLI first resolves it with one cached `napplet.discover` lookup (`{query:<event id>,kind:5129,limit:2}`) on a connection of its own, and uses the address of the single item it returns when that address ends in the event id; anything else is refused with `unknown_snapshot`. `npub`, `nprofile`, `nsec` and `nrelay` are refused without being decoded or sent. Web links that contain an `naddr`, `nostr:` followed by a canonical coordinate, and surrounding whitespace are refused too. `install` and `try` forward up to 8 of the naddr's or nevent's valid `ws://`/`wss://` hints as `relays`, dropping the rest; the other commands send the address alone. A d tag with control, format, or line or paragraph separator characters is refused on the CLI, except by `uninstall --yes`, so such a record can always be removed; a d tag that is not valid UTF-8 is refused everywhere. `launch-token` is unchanged and takes only its token.
 
 With `--json`, a refused `ADDRESS` fails before dialing and writes exactly `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":REASON,"accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` and a newline to stderr, where `REASON` is `invalid_address` (not an address in an accepted form), `unsupported_nip19` (another NIP-19 entity, or an nevent of another kind), `unsafe_identifier` (the d tag check above) or `unknown_snapshot` (the snapshot lookup above found no single match; this one is refused after the lookup, before the real request). The argument is never echoed, since it may be a secret key pasted by mistake.
 
