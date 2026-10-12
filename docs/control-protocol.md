@@ -504,7 +504,7 @@ given because of them.
 
 ## Events
 
-`events.subscribe` turns its connection into an event stream, so a client can follow the service without polling. `types` names the event types to receive: 1 to 9 distinct types from the table below. Omitting it, or sending `[]`, subscribes to every type; an unknown or repeated type, `events.overflow`, `null` or any other shape yields `Invalid params`. The result echoes the subscribed types, sorted. A connection subscribes at most once: a second `events.subscribe` on it, for example later in the same batch, yields `Conflict`. At most 16 connections may subscribe at once; one more yields `Busy` and stays an ordinary connection.
+`events.subscribe` turns its connection into an event stream, so a client can follow the service without polling. `types` names the event types to receive: 1 to 10 distinct types from the table below. Omitting it, or sending `[]`, subscribes to every type; an unknown or repeated type, `events.overflow`, `null` or any other shape yields `Invalid params`. The result echoes the subscribed types, sorted. A connection subscribes at most once: a second `events.subscribe` on it, for example later in the same batch, yields `Conflict`. At most 16 connections may subscribe at once; one more yields `Busy` and stays an ordinary connection.
 
 Once the frame holding the subscription has been answered, the server reads no further frames from that connection, which therefore has no idle read deadline, and writes one notification per event:
 
@@ -523,6 +523,7 @@ A notification has no `id`. `params` always holds `type` and `time` (an RFC3339 
 | `napplet.uninstalled` | `address`, `cleanup_complete:boolean` | a napplet's record was removed |
 | `updates.available` | `items:[{address,installed_version,available_version},...]` | the list of installed napplets with a newer valid version changed; `items` is the complete current list and may be `[]` |
 | `signer.changed` | `signer:SignerStatus` | the public signer status changed |
+| `social.updated` | `address`, `fields:string[]` (the changed categories: `reactions`, `comments`, `mentions`, `zaps`) | a refresh (asked for, periodic, or after an install, update or selection) added or removed held events, or the user's own vote, reaction, comment, share or deletion changed them; a zap invoice emits nothing; re-read with `napplet.social` |
 | `settings.changed` | `fields:string[]` | settings changed through `settings.set`, `settings.clear` or `settings.reload`; it names the changed fields only, never their values, so read them with `settings.get` |
 | `sync.completed` | `result` (an `InstallSync` result category), `ok:boolean`, `napplets:integer` | an installed-list sync pass ended |
 | `events.overflow` | `dropped:integer` | always delivered, see below |

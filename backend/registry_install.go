@@ -203,6 +203,7 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 	if n.IsNapplet() {
 		// best effort, after the commit: an icon never affects the install
 		scheduleNappletIconCache(n)
+		scheduleNappletSocial(n)
 		installSyncLocalChange(n.Address())
 		emitServiceEvent(ServiceEvent{Type: EventNappletInstalled, Address: result.Address, Outcome: result.Outcome, InstalledVersion: serviceVersionPtr(result.InstalledVersion)})
 		noteUpdatesChanged()

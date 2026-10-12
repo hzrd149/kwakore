@@ -450,6 +450,7 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 		// it; the new one is fetched in the background
 		pruneNappletIcons()
 		scheduleNappletIconCache(newer)
+		scheduleNappletSocial(newer)
 		installSyncLocalChange(newer.Address())
 		emitServiceEvent(ServiceEvent{Type: EventNappletUpdated, Address: result.Address, PreviousVersion: serviceVersionPtr(result.PreviousVersion), InstalledVersion: serviceVersionPtr(result.InstalledVersion)})
 		noteUpdatesChanged()

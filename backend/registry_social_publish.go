@@ -360,12 +360,17 @@ func socialAction(ctx context.Context) (nostr.Keyer, nostr.PubKey, func(), error
 // unchanged and nothing is published. Otherwise up and down publish a new
 // kind 7, and only once that reached a relay a kind 5 for the previous own
 // votes (at most ten); none publishes only that kind 5. The new vote shows
-// locally either way.
-func ServiceSocialVote(ctx context.Context, address, vote, eventID string) (ServiceSocialVoteResult, error) {
+// locally either way, and a published vote emits social.updated.
+func ServiceSocialVote(ctx context.Context, address, vote, eventID string) (res ServiceSocialVoteResult, err error) {
 	t, err := newSocialTarget(address)
 	if err != nil {
 		return ServiceSocialVoteResult{}, err
 	}
+	defer func() {
+		if err == nil && res.Outcome == "published" {
+			socialUpdated(t.Address, SocialReactions)
+		}
+	}()
 	if (vote != "up" && vote != "down" && vote != "none") ||
 		(eventID != "" && !hex64.MatchString(eventID)) || (vote == "none" && eventID != "") {
 		return ServiceSocialVoteResult{}, ErrServiceInvalidSocial
@@ -477,6 +482,7 @@ func ServiceSocialReact(ctx context.Context, address, emoji, emojiURL, eventID s
 		return ServiceSocialPublishResult{}, err
 	}
 	socialGeneration.Add(1)
+	socialUpdated(t.Address, SocialReactions)
 	return ServiceSocialPublishResult{Address: address, Outcome: "published", EventID: signed.ID.Hex(), Published: published, Failed: failed}, nil
 }
 
@@ -524,6 +530,7 @@ func ServiceSocialComment(ctx context.Context, address, content, parentID string
 		return ServiceSocialPublishResult{}, err
 	}
 	socialGeneration.Add(1)
+	socialUpdated(t.Address, SocialComments)
 	return ServiceSocialPublishResult{Address: address, Outcome: "published", EventID: signed.ID.Hex(), Published: published, Failed: failed}, nil
 }
 
@@ -561,6 +568,7 @@ func ServiceSocialShare(ctx context.Context, address, content string) (ServiceSo
 		return ServiceSocialPublishResult{}, err
 	}
 	socialGeneration.Add(1)
+	socialUpdated(t.Address, SocialMentions)
 	return ServiceSocialPublishResult{Address: address, Outcome: "published", EventID: signed.ID.Hex(), Published: published, Failed: failed}, nil
 }
 
@@ -604,6 +612,7 @@ func ServiceSocialDelete(ctx context.Context, address, eventID string) (ServiceS
 	}
 	socialRemoveLocal([]nostr.Event{*target})
 	socialGeneration.Add(1)
+	socialUpdated(t.Address, socialCategoryOf(target.Kind))
 	return ServiceSocialDeleteResult{Address: address, Outcome: "published", DeletionID: signed.ID.Hex(), Published: published, Failed: failed}, nil
 }
 
