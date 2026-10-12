@@ -699,7 +699,7 @@ func (h *Host) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
 	}
 	entries := make([]desktopentry.Entry, 0, len(shortcuts))
 	for _, s := range shortcuts {
-		entries = append(entries, desktopentry.Entry{Address: s.Address, Title: s.Name, Description: s.Description})
+		entries = append(entries, desktopentry.Entry{Address: s.Address, Title: s.Name, Description: s.Description, Icon: s.IconPath})
 	}
 	return desktopentry.Reconcile(dir, h.CLI, entries)
 }

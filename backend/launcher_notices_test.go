@@ -103,14 +103,26 @@ func TestRequiresNoticeOnLaunch(t *testing.T) {
 	}
 }
 
-func TestRequiresNoticeNeverForWebNapplet(t *testing.T) {
+// NIP-5D: a shell missing an R domain "SHOULD reject the napplet or warn".
+// Kwakore warns; O domains never do.
+func TestRequiresNoticeForCurrentSchemaR(t *testing.T) {
 	setupNoticeTest(t)
 	n := nip5dNapplet("web", "foo")
 	n.NappletSchema = SchemaWebNapplet
-	n.OptionalDomains = []string{"bar"}
 	launchForNotice(t, n)
-	if ids := liveNoticeIDs(); len(ids) != 0 {
-		t.Errorf("a WEB-NAPPLET's R/O tags raised %v", ids)
+	if open := runningForNapp(n.ID); len(open) != 1 {
+		t.Fatalf("open windows: %d", len(open))
+	}
+	if got := liveNotices(noticeNappletRequiresPrefix + n.Address()); len(got) != 1 {
+		t.Errorf("an R domain Kwakore lacks raised %v, want one notice", got)
+	}
+
+	optional := nip5dNapplet("optional")
+	optional.NappletSchema = SchemaWebNapplet
+	optional.OptionalDomains = []string{"bar"}
+	launchForNotice(t, optional)
+	if got := liveNotices(noticeNappletRequiresPrefix + optional.Address()); len(got) != 0 {
+		t.Errorf("an O domain raised %v", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -135,9 +136,26 @@ func serviceNativeEntries() ([]AppShortcut, error) {
 			Address:     address,
 			Name:        nativeEntryText(r.napp.Name, 256),
 			Description: nativeEntryText(r.napp.Description, 1024),
+			IconPath:    cachedIconPath(r.napp),
 		})
 	}
 	return shortcuts, errors.Join(errs...)
+}
+
+// cachedIconPath is the path of n's cached icon when it is a regular file in
+// the icon cache, else "": the entry then shows the generic icon.
+func cachedIconPath(n Napp) string {
+	if !hasNappletIcon(n) {
+		return ""
+	}
+	path, err := nappletIconPath(n.IconSha)
+	if err != nil {
+		return ""
+	}
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	return path
 }
 
 // nativeEntryText drops control and format runes from author text and caps
@@ -238,5 +256,8 @@ func publishServiceRegistry() {
 	ls.installed = installedNapps()
 	ls.sortDiscovery()
 	ls.mu.Unlock()
+	// icons cached lazily for napplets that were never installed (or were
+	// since removed) do not pile up across restarts
+	pruneNappletIcons()
 	_ = syncNativeEntries()
 }

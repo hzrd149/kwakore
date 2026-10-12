@@ -6,19 +6,25 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/png"
 	"io"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 	"kwakore/backend/controlprotocol"
@@ -49,6 +55,21 @@ func run(args []string) error {
 		return runTUI(socketOverride, timeoutOverride)
 	}
 	method, params, _, err := command(args)
+	var lookup snapshotLookup
+	if errors.As(err, &lookup) {
+		// a note1 or an author-less nevent names only the snapshot's event:
+		// its canonical address comes from one cached catalog lookup on a
+		// connection of its own, then the command is read again with it
+		address, lookupErr := resolveSnapshot(socketOverride, timeoutOverride, lookup.ID)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		resolved := slices.Clone(args)
+		if i := slices.Index(resolved, lookup.Arg); i >= 0 {
+			resolved[i] = address
+		}
+		method, params, _, err = command(resolved)
+	}
 	if err != nil {
 		return err
 	}
@@ -57,132 +78,29 @@ func run(args []string) error {
 	if len(args) > 0 && args[0] == "launch-token" && socketOverride != "" {
 		return inputFailure("launch-token uses the standard user socket")
 	}
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if socketOverride == "" && (runtimeDir == "" || !filepath.IsAbs(runtimeDir)) {
-		return errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
-	}
-	if socketOverride == "" {
-		info, err := os.Lstat(runtimeDir)
-		if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
-		}
-		owner, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || owner.Uid != uint32(os.Geteuid()) {
-			return errors.New("XDG_RUNTIME_DIR must be owned by the current user")
-		}
-	}
-	socketPath := socketOverride
-	if socketPath == "" {
-		socketPath = filepath.Join(runtimeDir, "kwakore", "daemon.sock")
-	}
-	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
+	conn, err := dialDaemon(socketOverride)
 	if err != nil {
-		return errors.New("daemon unavailable")
+		return err
 	}
 	defer conn.Close()
-	uid, err := serverPeerUID(conn)
-	if err != nil || uid != uint32(os.Geteuid()) {
-		return errors.New("unauthorized server")
-	}
 	if method == "events.subscribe" {
 		return runEvents(conn, params, timeoutOverride, jsonOutput, os.Stdout)
 	}
-	deadline := 30 * time.Second
-	if method == "napplet.install" || method == "napplet.update" || method == "napplet.uninstall" || method == "napplet.try" || method == "signer.pair.wait" {
-		deadline = 180 * time.Second
-	}
-	if method == "napplet.discover" {
-		// a refresh is bounded by the 30s relay cap plus a short drain
-		deadline = 45 * time.Second
-	}
-	if method == "napplet.updates.check" {
-		// the daemon bounds the relay lookups at 60s and the call at 75s
-		deadline = 90 * time.Second
-	}
-	if timeoutOverride > 0 {
-		deadline = timeoutOverride
-	}
-	_ = conn.SetDeadline(time.Now().Add(deadline))
-	request, err := json.Marshal(controlprotocol.Request{JSONRPC: "2.0", Method: method, Params: params, ID: json.RawMessage("1")})
+	result, err := exchange(conn, method, params, commandDeadline(method, timeoutOverride))
 	if err != nil {
-		return errors.New("invalid command parameters")
-	}
-	request = append(request, '\n')
-	if n, err := conn.Write(request); err != nil || n != len(request) {
-		if isTimeout(err) {
-			return timeoutFailure{}
-		}
-		return errors.New("daemon unavailable")
-	}
-	line, err := bufio.NewReader(io.LimitReader(conn, controlprotocol.MaxResponseLine+2)).ReadBytes('\n')
-	if len(line) > controlprotocol.MaxResponseLine+1 {
-		return errors.New("invalid daemon response")
-	}
-	if err != nil {
-		if isTimeout(err) {
-			return timeoutFailure{}
-		}
-		if len(line) != 0 {
-			return errors.New("invalid daemon response")
-		}
-		return errors.New("daemon unavailable")
-	}
-	if len(line) == 0 || line[len(line)-1] != '\n' {
-		return errors.New("invalid daemon response")
-	}
-	var response map[string]json.RawMessage
-	if json.Unmarshal(line, &response) != nil || response == nil ||
-		!bytes.Equal(response["jsonrpc"], []byte(`"2.0"`)) || !bytes.Equal(response["id"], []byte("1")) {
-		return errors.New("invalid daemon response")
-	}
-	result, hasResult := response["result"]
-	rpcError, hasError := response["error"]
-	if hasResult == hasError || len(response) != 3 {
-		return errors.New("invalid daemon response")
-	}
-	if hasError {
-		if strings.HasPrefix(method, "signer.") {
-			var fields map[string]json.RawMessage
-			if controlprotocol.ValidateNamedParams(rpcError, "code", "message") != nil || json.Unmarshal(rpcError, &fields) != nil || len(fields) != 2 || fields["code"] == nil || fields["message"] == nil {
-				return errors.New("invalid daemon response")
-			}
-		}
-		var remote controlprotocol.Error
-		if json.Unmarshal(rpcError, &remote) != nil || remote.Code == 0 || remote.Message == "" {
-			return errors.New("invalid daemon response")
-		}
-		fixed := controlprotocol.FixedError(remote.Code)
-		if remote.Code == controlprotocol.PartialCleanup {
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(rpcError, &fields) != nil {
-				return errors.New("invalid daemon response")
-			}
-			data, ok := parsePartialCleanupData(fields["data"], params)
-			if method != "napplet.uninstall" || !ok {
-				return errors.New("invalid daemon response")
-			}
-			fixed.Data = data
-		}
-		if remote.Code == controlprotocol.Unavailable {
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(rpcError, &fields) != nil {
-				return errors.New("invalid daemon response")
-			}
-			if raw, ok := fields["data"]; ok {
-				data, valid := parseSessionUnavailableData(raw)
-				if (method != "napplet.launch" && method != "napplet.try") || !valid {
-					return errors.New("invalid daemon response")
-				}
-				fixed.Data = data
-			}
-		}
-		return rpcFailure{RPC: *fixed}
-	}
-	if len(result) == 0 {
-		return errors.New("invalid daemon response")
+		return err
 	}
 	if strings.HasPrefix(method, "napplet.permissions.") && !validPermissionResponse(method, params, result) {
 		return errors.New("invalid daemon response")
+	}
+	if method == "napplet.icon" {
+		pngData, ok := validIconResult(result)
+		if !ok {
+			return errors.New("invalid daemon response")
+		}
+		if !jsonOutput {
+			return writeIcon(pngData, iconOutPath(args))
+		}
 	}
 	if method == "signer.pair.start" {
 		start, ok := validPairStartResult(result)
@@ -213,6 +131,185 @@ func run(args []string) error {
 }
 
 var serverPeerUID = peerUID
+
+// dialDaemon connects to the daemon's socket: the --socket path, or the
+// standard user socket under a private XDG_RUNTIME_DIR. The peer must run as
+// the current user.
+func dialDaemon(socketOverride string) (*net.UnixConn, error) {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if socketOverride == "" && (runtimeDir == "" || !filepath.IsAbs(runtimeDir)) {
+		return nil, errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
+	}
+	if socketOverride == "" {
+		info, err := os.Lstat(runtimeDir)
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("XDG_RUNTIME_DIR must name an absolute private 0700 directory")
+		}
+		owner, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || owner.Uid != uint32(os.Geteuid()) {
+			return nil, errors.New("XDG_RUNTIME_DIR must be owned by the current user")
+		}
+	}
+	socketPath := socketOverride
+	if socketPath == "" {
+		socketPath = filepath.Join(runtimeDir, "kwakore", "daemon.sock")
+	}
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		return nil, errors.New("daemon unavailable")
+	}
+	uid, err := serverPeerUID(conn)
+	if err != nil || uid != uint32(os.Geteuid()) {
+		conn.Close()
+		return nil, errors.New("unauthorized server")
+	}
+	return conn, nil
+}
+
+// commandDeadline is how long the CLI waits for a method's answer.
+func commandDeadline(method string, override time.Duration) time.Duration {
+	if override > 0 {
+		return override
+	}
+	switch method {
+	case "napplet.install", "napplet.update", "napplet.uninstall", "napplet.try", "signer.pair.wait":
+		return 180 * time.Second
+	case "napplet.discover":
+		// a refresh is bounded by the 30s relay cap plus a short drain
+		return 45 * time.Second
+	case "napplet.updates.check":
+		// the daemon bounds the relay lookups at 60s and the call at 75s
+		return 90 * time.Second
+	}
+	return 30 * time.Second
+}
+
+// exchange sends one request on conn and returns its result once the
+// response line is a well-formed answer to it. A remote error becomes an
+// rpcFailure with fixed text and only the data the method may carry.
+func exchange(conn *net.UnixConn, method string, params json.RawMessage, deadline time.Duration) (json.RawMessage, error) {
+	_ = conn.SetDeadline(time.Now().Add(deadline))
+	request, err := json.Marshal(controlprotocol.Request{JSONRPC: "2.0", Method: method, Params: params, ID: json.RawMessage("1")})
+	if err != nil {
+		return nil, errors.New("invalid command parameters")
+	}
+	request = append(request, '\n')
+	if n, err := conn.Write(request); err != nil || n != len(request) {
+		if isTimeout(err) {
+			return nil, timeoutFailure{}
+		}
+		return nil, errors.New("daemon unavailable")
+	}
+	line, err := bufio.NewReader(io.LimitReader(conn, controlprotocol.MaxResponseLine+2)).ReadBytes('\n')
+	if len(line) > controlprotocol.MaxResponseLine+1 {
+		return nil, errors.New("invalid daemon response")
+	}
+	if err != nil {
+		if isTimeout(err) {
+			return nil, timeoutFailure{}
+		}
+		if len(line) != 0 {
+			return nil, errors.New("invalid daemon response")
+		}
+		return nil, errors.New("daemon unavailable")
+	}
+	if len(line) == 0 || line[len(line)-1] != '\n' {
+		return nil, errors.New("invalid daemon response")
+	}
+	var response map[string]json.RawMessage
+	if json.Unmarshal(line, &response) != nil || response == nil ||
+		!bytes.Equal(response["jsonrpc"], []byte(`"2.0"`)) || !bytes.Equal(response["id"], []byte("1")) {
+		return nil, errors.New("invalid daemon response")
+	}
+	result, hasResult := response["result"]
+	rpcError, hasError := response["error"]
+	if hasResult == hasError || len(response) != 3 {
+		return nil, errors.New("invalid daemon response")
+	}
+	if hasError {
+		if strings.HasPrefix(method, "signer.") {
+			var fields map[string]json.RawMessage
+			if controlprotocol.ValidateNamedParams(rpcError, "code", "message") != nil || json.Unmarshal(rpcError, &fields) != nil || len(fields) != 2 || fields["code"] == nil || fields["message"] == nil {
+				return nil, errors.New("invalid daemon response")
+			}
+		}
+		var remote controlprotocol.Error
+		if json.Unmarshal(rpcError, &remote) != nil || remote.Code == 0 || remote.Message == "" {
+			return nil, errors.New("invalid daemon response")
+		}
+		fixed := controlprotocol.FixedError(remote.Code)
+		if remote.Code == controlprotocol.PartialCleanup {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rpcError, &fields) != nil {
+				return nil, errors.New("invalid daemon response")
+			}
+			data, ok := parsePartialCleanupData(fields["data"], params)
+			if method != "napplet.uninstall" || !ok {
+				return nil, errors.New("invalid daemon response")
+			}
+			fixed.Data = data
+		}
+		if remote.Code == controlprotocol.Unavailable {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rpcError, &fields) != nil {
+				return nil, errors.New("invalid daemon response")
+			}
+			if raw, ok := fields["data"]; ok {
+				data, valid := parseSessionUnavailableData(raw)
+				if (method != "napplet.launch" && method != "napplet.try") || !valid {
+					return nil, errors.New("invalid daemon response")
+				}
+				fixed.Data = data
+			}
+		}
+		return nil, rpcFailure{RPC: *fixed}
+	}
+	if len(result) == 0 {
+		return nil, errors.New("invalid daemon response")
+	}
+	return result, nil
+}
+
+// snapshotLookup is an ADDRESS that names only a snapshot's event (a note1
+// or an nevent without its author). ID is the event id hex and Arg the
+// argument as given; neither is ever printed.
+type snapshotLookup struct{ ID, Arg string }
+
+func (snapshotLookup) Error() string { return "snapshot address needs a lookup" }
+
+// resolveSnapshot finds the canonical address of the snapshot with event id
+// id through one cached napplet.discover lookup on its own connection. It
+// must name exactly one item, a canonical 5129 address ending in the id;
+// anything else is the address reason unknown_snapshot.
+func resolveSnapshot(socketOverride string, timeoutOverride time.Duration, id string) (string, error) {
+	conn, err := dialDaemon(socketOverride)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	params, _ := json.Marshal(struct {
+		Query string `json:"query"`
+		Kind  int    `json:"kind"`
+		Limit int    `json:"limit"`
+	}{id, 5129, 2})
+	result, err := exchange(conn, "napplet.discover", params, commandDeadline("napplet.discover", timeoutOverride))
+	if err != nil {
+		return "", err
+	}
+	var page struct {
+		Items []struct {
+			Address string `json:"address"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(result, &page) != nil || len(page.Items) != 1 {
+		return "", addressFailure("unknown_snapshot")
+	}
+	address := page.Items[0].Address
+	if desktopentry.CanonicalAddress(address) != nil || !strings.HasPrefix(address, "5129:") || !strings.HasSuffix(address, ":"+id) {
+		return "", addressFailure("unknown_snapshot")
+	}
+	return address, nil
+}
 
 func isTimeout(err error) bool {
 	var netErr net.Error
@@ -305,8 +402,9 @@ type inputFailure string
 func (e inputFailure) Error() string { return string(e) }
 
 // addressFailure is a refused ADDRESS argument. It holds one fixed reason
-// (invalid_address, unsupported_nip19 or unsafe_identifier) and never the
-// argument itself, which may be a secret key pasted by mistake.
+// (invalid_address, unsupported_nip19, unsafe_identifier or
+// unknown_snapshot) and never the argument itself, which may be a secret
+// key pasted by mistake.
 type addressFailure string
 
 func (e addressFailure) Error() string { return "invalid address: " + string(e) }
@@ -323,6 +421,9 @@ type addressErrorData struct {
 // uninstall does so such a record can always be removed.
 func commandAddress(arg string, allowUnsafeIdentifier bool) (napaddr.Address, error) {
 	addr, err := napaddr.Parse(arg)
+	if errors.Is(err, napaddr.ErrSnapshotLookup) {
+		return napaddr.Address{}, snapshotLookup{ID: addr.Identifier, Arg: arg}
+	}
 	if errors.Is(err, napaddr.ErrUnsupported) {
 		return napaddr.Address{}, addressFailure("unsupported_nip19")
 	}
@@ -454,15 +555,60 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		refresh := flags.Bool("refresh", false, "wait for relay refresh")
 		offset := flags.Int("offset", 0, "page offset")
 		limit := flags.Int("limit", 100, "page size")
+		archetype := flags.String("archetype", "", "archetype")
+		intent := flags.String("intent", "", "intent id")
+		domain := flags.String("domain", "", "required or optional NAP domain")
+		compatible := flags.Bool("compatible", false, "only napplets with no missing domain")
+		kind := flags.Int("kind", 0, "manifest kind")
 		if flags.Parse(args[1:]) != nil || len(flags.Args()) != 0 || len(*query) > 4096 || *offset < 0 || *limit < 1 || *limit > 500 {
 			return "", nil, "", inputFailure("invalid discover parameters")
 		}
-		params, _ := json.Marshal(struct {
-			Query   string `json:"query"`
-			Refresh bool   `json:"refresh"`
-			Offset  int    `json:"offset"`
-			Limit   int    `json:"limit"`
-		}{*query, *refresh, *offset, *limit})
+		// only the filters given are sent, so a plain discover sends
+		// exactly what it always did
+		set := map[string]bool{}
+		flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		var filter struct {
+			Query      string  `json:"query"`
+			Refresh    bool    `json:"refresh"`
+			Offset     int     `json:"offset"`
+			Limit      int     `json:"limit"`
+			Archetype  *string `json:"archetype,omitempty"`
+			Intent     *string `json:"intent,omitempty"`
+			Domain     *string `json:"domain,omitempty"`
+			Compatible *bool   `json:"compatible,omitempty"`
+			Kind       *int    `json:"kind,omitempty"`
+		}
+		filter.Query, filter.Refresh, filter.Offset, filter.Limit = *query, *refresh, *offset, *limit
+		if set["archetype"] {
+			if !discoverToken(*archetype) {
+				return "", nil, "", inputFailure("invalid discover parameters")
+			}
+			filter.Archetype = archetype
+		}
+		if set["domain"] {
+			if !discoverToken(*domain) {
+				return "", nil, "", inputFailure("invalid discover parameters")
+			}
+			filter.Domain = domain
+		}
+		if set["intent"] {
+			if !discoverIntent(*intent) {
+				return "", nil, "", inputFailure("invalid discover parameters")
+			}
+			filter.Intent = intent
+		}
+		if set["compatible"] {
+			filter.Compatible = compatible
+		}
+		if set["kind"] {
+			switch *kind {
+			case 5129, 15129, 35129, 35130:
+				filter.Kind = kind
+			default:
+				return "", nil, "", inputFailure("invalid discover parameters")
+			}
+		}
+		params, _ := json.Marshal(filter)
 		return "napplet.discover", params, socketPath, nil
 	}
 	if len(args) == 2 && (args[0] == "install" || args[0] == "update" || args[0] == "try") {
@@ -525,6 +671,20 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			Address string `json:"address"`
 		}{addr.Canonical})
 		return "napplet.detail", params, socketPath, nil
+	}
+	if len(args) >= 1 && args[0] == "icon" {
+		arg, _, err := iconArgs(args[1:])
+		if err != nil {
+			return "", nil, "", err
+		}
+		addr, err := commandAddress(arg, false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{addr.Canonical})
+		return "napplet.icon", params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "launch" {
 		addr, err := commandAddress(args[1], false)
@@ -679,6 +839,128 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}
 	}
 	return "", nil, "", inputFailure("unknown or incomplete command; run 'kwak help' for usage")
+}
+
+// discoverToken is the daemon's archetype and domain filter rule: a
+// lowercase token of at most 64 bytes.
+func discoverToken(s string) bool {
+	if s == "" || len(s) > 64 || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// discoverIntent is the daemon's intent filter rule: 1–256 bytes of valid
+// UTF-8 with no control or format characters.
+func discoverIntent(s string) bool {
+	if s == "" || len(s) > 256 || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
+}
+
+const iconUsage = "usage: kwak icon ADDRESS [--out FILE]"
+
+// iconArgs reads `icon ADDRESS [--out FILE]`, with --out before or after
+// the ADDRESS. FILE must be an absolute, clean path.
+func iconArgs(args []string) (address, out string, err error) {
+	var addresses []string
+	outSet := false
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--out":
+			if outSet || i+1 >= len(args) {
+				return "", "", inputFailure(iconUsage)
+			}
+			out, outSet = args[i+1], true
+			if !filepath.IsAbs(out) || filepath.Clean(out) != out {
+				return "", "", inputFailure("--out requires an absolute, clean path")
+			}
+			i++
+		case strings.HasPrefix(args[i], "-"):
+			return "", "", inputFailure(iconUsage)
+		default:
+			addresses = append(addresses, args[i])
+		}
+	}
+	if len(addresses) != 1 {
+		return "", "", inputFailure(iconUsage)
+	}
+	return addresses[0], out, nil
+}
+
+// iconOutPath is the --out FILE of an icon command, or "".
+func iconOutPath(args []string) string {
+	if len(args) == 0 || args[0] != "icon" {
+		return ""
+	}
+	_, out, err := iconArgs(args[1:])
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// validIconResult checks a napplet.icon result before anything is printed
+// or written, and returns the PNG it carries: an object of exactly sha256
+// (64 lowercase hex), mime "image/png", integer width and height of 1–1024
+// and data, standard base64 of bytes that decode as a PNG of that size.
+func validIconResult(result json.RawMessage) ([]byte, bool) {
+	if len(result) == 0 || result[0] != '{' || controlprotocol.ValidateNamedParams(result, "sha256", "mime", "width", "height", "data") != nil {
+		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(result, &fields) != nil || len(fields) != 5 {
+		return nil, false
+	}
+	var sha, mime, data string
+	var width, height int
+	if json.Unmarshal(fields["sha256"], &sha) != nil || json.Unmarshal(fields["mime"], &mime) != nil ||
+		json.Unmarshal(fields["data"], &data) != nil ||
+		json.Unmarshal(fields["width"], &width) != nil || json.Unmarshal(fields["height"], &height) != nil {
+		return nil, false
+	}
+	decodedSha, err := hex.DecodeString(sha)
+	if err != nil || len(decodedSha) != 32 || hex.EncodeToString(decodedSha) != sha || mime != "image/png" ||
+		width < 1 || width > 1024 || height < 1 || height > 1024 {
+		return nil, false
+	}
+	pngData, err := base64.StdEncoding.Strict().DecodeString(data)
+	if err != nil || !bytes.HasPrefix(pngData, []byte("\x89PNG\r\n\x1a\n")) {
+		return nil, false
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(pngData))
+	if err != nil || format != "png" || cfg.Width != width || cfg.Height != height {
+		return nil, false
+	}
+	return pngData, true
+}
+
+// writeIcon writes a validated icon: to FILE (owner-only) with --out, or to
+// stdout when it is not a terminal.
+func writeIcon(pngData []byte, out string) error {
+	if out != "" {
+		if err := os.WriteFile(out, pngData, 0o600); err != nil {
+			return inputFailure("could not write the icon file")
+		}
+		return nil
+	}
+	if info, err := os.Stdout.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return inputFailure("icon output is binary; use --out FILE or redirect stdout")
+	}
+	_, err := os.Stdout.Write(pngData)
+	return err
 }
 
 func readSignerSecret(r io.Reader, limit int) (string, error) {
@@ -983,7 +1265,7 @@ func writeHumanError(w io.Writer, err error) {
 	var input inputFailure
 	switch {
 	case errors.As(err, &address):
-		fmt.Fprintf(w, "Error: %s. Use KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...\n", err)
+		fmt.Fprintf(w, "Error: %s. Use KIND:PUBKEY_HEX:D, naddr1..., nostr:naddr1..., nevent1..., or note1...\n", err)
 	case errors.As(err, &input):
 		fmt.Fprintf(w, "Error: %s\n", err)
 	case errors.As(err, &remote):

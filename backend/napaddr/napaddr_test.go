@@ -153,13 +153,9 @@ func TestParseRejects(t *testing.T) {
 		}
 	}
 
-	var id nostr.ID
-	id[0] = 1
 	unsupported := map[string]string{
 		"npub":     nip19.EncodeNpub(testPK),
 		"nprofile": nip19.EncodeNprofile(testPK, []string{"wss://relay.example.com"}),
-		"note":     encodeRaw(t, "note", id[:]),
-		"nevent":   nip19.EncodeNevent(id, nil, testPK),
 		"nsec":     nip19.EncodeNsec(nostr.KeyOne),
 		"nrelay":   "nrelay1qqqqqqqq",
 		"broken":   "nsec1notevenbech32",
@@ -342,5 +338,75 @@ func TestParseMatchesBackend(t *testing.T) {
 	}
 	if accepted < 10 {
 		t.Fatalf("only %d inputs accepted", accepted)
+	}
+}
+
+// A snapshot (kind 5129) is named by its event: an nevent with its author
+// converts to the canonical address; a note or an author-less nevent needs
+// a lookup.
+func TestParseSnapshotNIP19(t *testing.T) {
+	var id nostr.ID
+	for i := range id {
+		id[i] = byte(i + 1)
+	}
+	idHex := id.Hex()
+	canonical := "5129:" + testHex + ":" + idHex
+	var relays []string
+	for i := range 10 {
+		relays = append(relays, fmt.Sprintf("wss://r%d.example", i))
+	}
+	relays = append([]string{"http://bad.example"}, relays...)
+	code := nip19.EncodeNevent(id, relays, testPK)
+	for _, input := range []string{code, "nostr:" + code, "NOSTR:" + code, strings.ToUpper(code), "nostr:" + strings.ToUpper(code)} {
+		addr, err := napaddr.Parse(input)
+		if err != nil || addr.Canonical != canonical || addr.Identifier != idHex {
+			t.Fatalf("%q: %+v %v", input, addr, err)
+		}
+		if len(addr.Relays) != napaddr.MaxRelayHints || addr.Relays[0] != "wss://r0.example" {
+			t.Fatalf("%q: hints %v", input, addr.Relays)
+		}
+		if _, err := backend.ParseCanonicalServiceAddress(addr.Canonical); err != nil {
+			t.Fatalf("service refused %q: %v", addr.Canonical, err)
+		}
+	}
+
+	// a kind TLV may say 5129 and nothing else
+	withKind := func(k uint32) string {
+		return encodeTLV(t, "nevent", tlv{0, id[:]}, tlv{2, testPK[:]}, tlv{3, kindBytes(k)})
+	}
+	if addr, err := napaddr.Parse(withKind(5129)); err != nil || addr.Canonical != canonical {
+		t.Errorf("kind 5129: %+v %v", addr, err)
+	}
+	if _, err := napaddr.Parse(withKind(1)); !errors.Is(err, napaddr.ErrUnsupported) {
+		t.Errorf("kind 1: %v", err)
+	}
+
+	// only the event id: the caller looks the snapshot up
+	for name, input := range map[string]string{
+		"nevent without author": nip19.EncodeNevent(id, []string{"wss://hint.example"}, nostr.ZeroPK),
+		"note":                  encodeRaw(t, "note", id[:]),
+		"nostr note":            "nostr:" + encodeRaw(t, "note", id[:]),
+	} {
+		addr, err := napaddr.Parse(input)
+		if !errors.Is(err, napaddr.ErrSnapshotLookup) || addr.Identifier != idHex || addr.Canonical != "" {
+			t.Errorf("%s: %+v %v", name, addr, err)
+		}
+	}
+
+	note := encodeRaw(t, "note", id[:])
+	for name, input := range map[string]string{
+		"bad checksum":     code[:len(code)-1] + string("qpzry9x8"[(strings.IndexByte("qpzry9x8", code[len(code)-1])+1)%8]),
+		"31-byte id":       encodeTLV(t, "nevent", tlv{0, id[:31]}, tlv{2, testPK[:]}),
+		"31-byte author":   encodeTLV(t, "nevent", tlv{0, id[:]}, tlv{2, testPK[:31]}),
+		"no id":            encodeTLV(t, "nevent", tlv{2, testPK[:]}),
+		"two ids":          encodeTLV(t, "nevent", tlv{0, id[:]}, tlv{0, id[:]}),
+		"truncated":        encodeRaw(t, "nevent", append(tlvBytes(tlv{0, id[:]}), 2, 10, 'x')),
+		"short note":       encodeRaw(t, "note", id[:31]),
+		"note bad check":   note[:len(note)-1] + string("qpzry9x8"[(strings.IndexByte("qpzry9x8", note[len(note)-1])+1)%8]),
+		"author not point": encodeTLV(t, "nevent", tlv{0, id[:]}, tlv{2, bytes.Repeat([]byte{0xff}, 32)}),
+	} {
+		if addr, err := napaddr.Parse(input); !errors.Is(err, napaddr.ErrInvalid) {
+			t.Errorf("%s: %+v %v", name, addr, err)
+		}
 	}
 }

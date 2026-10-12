@@ -21,11 +21,14 @@ Napplets:
                                  List installed napplets
   windows                        List active napplet windows
   discover [--query TEXT] [--refresh] [--offset N] [--limit N]
+           [--archetype NAME] [--intent ID] [--domain NAME]
+           [--compatible] [--kind N]
                                  Search the napplet catalog
-  install ADDRESS                Install a napplet
+  install ADDRESS               Install a napplet
   update ADDRESS                 Update an installed napplet
   updates [ADDRESS]              Check installed napplets for newer versions
   detail ADDRESS                 Show a napplet's public details
+  icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
   try ADDRESS                    Open a napplet without installing it
@@ -58,7 +61,8 @@ Options:
   --timeout DURATION             Wait up to a positive Go duration (e.g. 45s, 3m)
   -h, --help, help               Show this help
 
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 Global options go before COMMAND. The --json option preserves the control
 protocol's result format for scripts. The desktop-generated launch-token
 command is reserved for desktop entries.
@@ -152,23 +156,37 @@ Example: kwak installed --limit 20
 	"discover": `Search the napplet catalog.
 
 Usage: kwak discover [--query TEXT] [--refresh] [--offset N] [--limit N]
-  --query TEXT  Filter by text (default: all cached napplets)
-  --refresh     Refresh from relays before searching
-  --offset N    Start at record N (default 0)
-  --limit N     Return 1–500 records (default 100)
+                     [--archetype NAME] [--intent ID] [--domain NAME]
+                     [--compatible] [--kind N]
+  --query TEXT      Filter by text: name, description, author, archetypes,
+                    intents, or an exact event id (default: all cached)
+  --refresh         Refresh from relays before searching
+  --offset N        Start at record N (default 0)
+  --limit N         Return 1–500 records (default 100)
+  --archetype NAME  Only napplets with this archetype (z tag)
+  --intent ID       Only napplets advertising this intent id (i tag)
+  --domain NAME     Only napplets requiring or optionally using this NAP
+                    domain
+  --compatible      Only napplets with no missing required domain;
+                    --compatible=false lists only those with one
+  --kind N          Only manifests of kind 5129, 15129, 35129 or 35130
+The filters match exactly and combine: every one given must hold.
 Example: kwak discover --query notes --refresh
+Example: kwak discover --archetype feed --compatible
 `,
 	"install": `Install a napplet from its Nostr address.
 
 Usage: kwak install ADDRESS
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 An naddr's usable relay hints are used for this install only.
 Example: kwak install nostr:naddr1...
 `,
 	"update": `Update an installed napplet.
 
 Usage: kwak update ADDRESS
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 Example: kwak update nostr:naddr1...
 `,
 	"updates": `Check installed napplets for newer versions.
@@ -179,38 +197,57 @@ the ones with a newer valid version. kwak installed then shows them as
 update_available. Updates are never installed automatically; run
 'kwak update ADDRESS' to install one. The service also checks in the
 background a couple of minutes after it starts and every 6 hours.
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 Example: kwak updates
 `,
 	"detail": `Show a napplet's public details.
 
 Usage: kwak detail ADDRESS
-Shows the name, author, kind, whether it is installed, the installed
-version, any update found, the network domains it declares and the
-versions known locally. Answers from local knowledge without asking
+Shows the name, author, kind, manifest schema, icon hash, archetypes,
+intents, required, optional and missing NAP domains, compatibility, a
+snapshot's lineage, whether it is installed, the installed version, any
+update found and the versions known locally. Answers from local knowledge without asking
 relays; run 'kwak discover --refresh' or 'kwak updates' first for fresher
 data.
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 Example: kwak detail nostr:naddr1...
+`,
+	"icon": `Save a napplet's verified icon as a PNG file.
+
+Usage: kwak icon ADDRESS [--out FILE]
+  --out FILE  Write the PNG to FILE (absolute path, owner-only mode 0600)
+Without --out the PNG goes to stdout, which must not be a terminal. The
+service fetches the icon by its manifest hash, checks the hash and the
+declared image type, and re-encodes it as PNG; a napplet without a usable
+icon gives Not found or Unavailable. --json prints the service's result
+(base64 data) instead of writing a file.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
+Example: kwak icon nostr:naddr1... --out ~/icon.png
 `,
 	"uninstall": `Remove an installed napplet and its desktop entry.
 
 Usage: kwak uninstall --yes ADDRESS
   --yes  Confirm removal (required)
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 Example: kwak uninstall --yes nostr:naddr1...
 `,
 	"launch": `Open an installed napplet window.
 
 Usage: kwak launch ADDRESS
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 A graphical session is required. The result includes a WINDOW_ID for stop.
 Example: kwak launch nostr:naddr1...
 `,
 	"try": `Open a napplet without installing it.
 
 Usage: kwak try ADDRESS
-ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
+or nevent1... or note1... for a kind 5129 snapshot.
 An installed napplet opens as with launch. Otherwise its files are
 downloaded and verified into memory and nothing is installed; the data it
 saves is dropped when the window closes unless you install it meanwhile.

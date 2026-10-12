@@ -119,16 +119,14 @@ func authorNapps(pk nostr.PubKey, events []nostr.Event) []Napp {
 // ─── napplet.detail ──────────────────────────────────────────────
 
 // ServiceDetailResult is the public detail of one napplet address: its
-// descriptor plus install state and the versions known locally. It holds no
-// path, icon, server or blob URL.
+// descriptor (which carries kind and the required and optional domains)
+// plus install state and the versions known locally. It holds no path,
+// server or blob URL, and the icon appears only as its hash.
 type ServiceDetailResult struct {
 	ServiceDescriptor
-	Kind             int              `json:"kind"`
 	Installed        bool             `json:"installed"`
 	InstalledVersion *ServiceVersion  `json:"installed_version"`
 	UpdateAvailable  *ServiceVersion  `json:"update_available"`
-	RequiredDomains  []string         `json:"required_domains"`
-	OptionalDomains  []string         `json:"optional_domains"`
 	Versions         []ServiceVersion `json:"versions"`
 }
 
@@ -145,30 +143,7 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 	if err != nil {
 		return ServiceDetailResult{}, err
 	}
-
-	var installed *Napp
-	stateMu.Lock()
-	for _, n := range state.InstalledNapps {
-		if n.Address() == address {
-			c := n
-			installed = &c
-			break
-		}
-	}
-	stateMu.Unlock()
-
-	var listed *Napp
-	discoverMu.Lock()
-	for _, n := range catalog {
-		if n.Address() == address {
-			c := n
-			listed = &c
-			break
-		}
-	}
-	discoverMu.Unlock()
-
-	stored := storedManifests(ptr)
+	installed, listed, stored := serviceNappSources(address, ptr)
 
 	var chosen Napp
 	switch {
@@ -182,12 +157,7 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 		return ServiceDetailResult{}, ErrServiceNotFound
 	}
 
-	result := ServiceDetailResult{
-		ServiceDescriptor: serviceDescriptor(chosen),
-		Kind:              int(ptr.Kind),
-		RequiredDomains:   cloneDomains(chosen.RequiredDomains),
-		OptionalDomains:   cloneDomains(chosen.OptionalDomains),
-	}
+	result := ServiceDetailResult{ServiceDescriptor: serviceDescriptor(chosen)}
 	versions := make([]ServiceVersion, 0, 4+len(stored))
 	if installed != nil {
 		v := serviceVersion(*installed)
@@ -208,11 +178,31 @@ func ServiceDetail(address string) (ServiceDetailResult, error) {
 	return result, nil
 }
 
-func cloneDomains(domains []string) []string {
-	if len(domains) == 0 {
-		return []string{}
+// serviceNappSources is what the service knows locally about a canonical
+// address: the installed record, the cached catalog entry and the valid
+// manifests in the local event store, newest first. Any may be missing.
+func serviceNappSources(address string, ptr nostr.EntityPointer) (installed, listed *Napp, stored []Napp) {
+	stateMu.Lock()
+	for _, n := range state.InstalledNapps {
+		if n.Address() == address {
+			c := n
+			installed = &c
+			break
+		}
 	}
-	return append([]string(nil), domains...)
+	stateMu.Unlock()
+
+	discoverMu.Lock()
+	for _, n := range catalog {
+		if n.Address() == address {
+			c := n
+			listed = &c
+			break
+		}
+	}
+	discoverMu.Unlock()
+
+	return installed, listed, storedManifests(ptr)
 }
 
 // uniqueVersions dedupes versions by event id and sorts them newest first,
@@ -255,12 +245,24 @@ func storedManifests(ptr nostr.EntityPointer) []Napp {
 		filter.Tags = nostr.TagMap{"d": []string{ptr.Identifier}}
 		maxEvents = serviceDetailVersions
 	}
+	if ptr.Kind == KindSnapshotNapplet {
+		// a snapshot is the one event its address names
+		id, err := nostr.IDFromHex(ptr.Identifier)
+		if err != nil {
+			return nil
+		}
+		filter = nostr.Filter{IDs: []nostr.ID{id}}
+		maxEvents = 1
+	}
 	var out []Napp
 	for evt := range sys.Store.QueryEvents(filter, maxEvents) {
 		if evt.Kind != ptr.Kind || evt.PubKey != ptr.PublicKey || !evt.CheckID() || !evt.VerifySignature() {
 			continue
 		}
 		if addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier {
+			continue
+		}
+		if ptr.Kind == KindSnapshotNapplet && evt.ID.Hex() != ptr.Identifier {
 			continue
 		}
 		n := nappFromLatest(evt)

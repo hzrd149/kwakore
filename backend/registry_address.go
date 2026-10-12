@@ -51,6 +51,10 @@ func ParseNappAddress(input string) (nostr.EntityPointer, error) {
 	if addressable(ptr.Kind) && ptr.Identifier == "" {
 		return nostr.EntityPointer{}, errors.New("address has no d tag")
 	}
+	// a snapshot is named by its event id (see Napp.Address)
+	if ptr.Kind == KindSnapshotNapplet && !hex64.MatchString(ptr.Identifier) {
+		return nostr.EntityPointer{}, errors.New("snapshot address has no event id")
+	}
 	return ptr, nil
 }
 
@@ -62,9 +66,15 @@ func IsNappAddress(input string) bool {
 }
 
 // addressFilter is the query for the current manifest at ptr. A root
-// napplet (kind 15129) is replaceable, so it has no d tag to match.
+// napplet (kind 15129) is replaceable, so it has no d tag to match. A
+// snapshot (kind 5129) is one event, asked for by its id.
 func addressFilter(ptr nostr.EntityPointer) nostr.Filter {
 	f := nostr.Filter{Kinds: []nostr.Kind{ptr.Kind}, Authors: []nostr.PubKey{ptr.PublicKey}}
+	if ptr.Kind == KindSnapshotNapplet {
+		if id, err := nostr.IDFromHex(ptr.Identifier); err == nil {
+			f.IDs = []nostr.ID{id}
+		}
+	}
 	if addressable(ptr.Kind) {
 		f.Tags = nostr.TagMap{"d": []string{ptr.Identifier}}
 	}
@@ -76,13 +86,24 @@ func (n Napp) matchesAddress(ptr nostr.EntityPointer) bool {
 	if n.Author != ptr.PublicKey || n.ManifestKind() != ptr.Kind {
 		return false
 	}
+	if ptr.Kind == KindSnapshotNapplet {
+		return n.EventID != "" && n.EventID == ptr.Identifier
+	}
 	return !addressable(ptr.Kind) || n.D == ptr.Identifier
 }
 
-// Naddr is the napp's address as an naddr, for sharing it.
+// Naddr is the napp's address as an naddr, for sharing it: an nevent for a
+// snapshot, which has no NIP-01 address.
 func (n Napp) Naddr() string {
 	if n.Author == (nostr.PubKey{}) {
 		return ""
+	}
+	if n.IsSnapshot() {
+		id, err := nostr.IDFromHex(n.EventID)
+		if err != nil {
+			return ""
+		}
+		return nip19.EncodeNevent(id, nil, n.Author)
 	}
 	return nip19.EncodeNaddr(n.Author, n.ManifestKind(), n.D, nil)
 }
@@ -131,6 +152,11 @@ var addressEvents = func(ctx context.Context, ptr nostr.EntityPointer) ([]nostr.
 	if sys == nil {
 		return nil, errors.New("not started")
 	}
+	if ptr.Kind == KindSnapshotNapplet {
+		if _, err := nostr.IDFromHex(ptr.Identifier); err != nil {
+			return nil, errors.New("snapshot address has no event id")
+		}
+	}
 	var events []nostr.Event
 	filter := addressFilter(ptr)
 	for evt := range sys.Store.QueryEvents(filter, 10) {
@@ -169,7 +195,8 @@ func pickAddress(ptr nostr.EntityPointer, events []nostr.Event) (Napp, bool) {
 	latest := latestByAddress{}
 	for _, evt := range events {
 		if evt.PubKey != ptr.PublicKey || evt.Kind != ptr.Kind ||
-			(addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier) {
+			(addressable(ptr.Kind) && evt.Tags.GetD() != ptr.Identifier) ||
+			(ptr.Kind == KindSnapshotNapplet && evt.ID.Hex() != ptr.Identifier) {
 			continue
 		}
 		latest.add(evt)

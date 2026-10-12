@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net"
 	"os"
@@ -22,6 +24,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"github.com/btcsuite/btcd/btcutil/bech32"
 	"kwakore/backend/controlprotocol"
 	"kwakore/backend/desktopentry"
 )
@@ -287,6 +290,8 @@ func TestCLIContract(t *testing.T) {
 		{"updates", []string{"updates"}, "napplet.updates.check", ""},
 		{"updates address", []string{"updates", address}, "napplet.updates.check", `{"address":"` + address + `"}`},
 		{"detail", []string{"detail", address}, "napplet.detail", `{"address":"` + address + `"}`},
+		{"icon", []string{"icon", address}, "napplet.icon", `{"address":"` + address + `"}`},
+		{"icon out", []string{"icon", "--out", filepath.Join(root, "unused.png"), address}, "napplet.icon", `{"address":"` + address + `"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seen := make(chan []byte, 1)
@@ -448,6 +453,8 @@ func cliContractResult(method, address string) string {
 	case "napplet.updates.check":
 		version := `{"event_id":"` + strings.Repeat("e", 64) + `","created_at":10,"artifact_hash":""}`
 		return `{"items":[{"address":"` + address + `","installed_version":` + version + `,"available_version":` + version + `}],"complete":true}`
+	case "napplet.icon":
+		return testIconResult(1, 1, "image/png", base64.StdEncoding.EncodeToString(testPNG(1, 1)))
 	case "napplet.detail":
 		return `{"address":"` + address + `","name":"App","author":"` + strings.Repeat("a", 64) + `","format":"napplet","available":true,"version":{"event_id":"","created_at":0,"artifact_hash":""},"kind":35129,"installed":false,"installed_version":null,"update_available":null,"required_domains":[],"optional_domains":[],"versions":[]}`
 	}
@@ -490,7 +497,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"permissions", "get", address},
 		{"permissions", "set", address, "sign", "allow"},
 		{"permissions", "clear", address, "sign"},
-		{"updates"}, {"detail", address}, {"events"},
+		{"updates"}, {"detail", address}, {"icon", address}, {"events"},
 	}
 	methods := make([]string, 0, len(commands))
 	for _, args := range commands {
@@ -597,6 +604,122 @@ func TestCLIDiscoveryCommand(t *testing.T) {
 		if _, _, _, err := command(args); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
+	}
+
+	// the manifest filters are sent only when given
+	method, params, _, err = command([]string{"discover", "--archetype", "feed", "--intent", "napplet:feed/edit", "--domain", "relay", "--compatible", "--kind", "5129"})
+	if err != nil || method != "napplet.discover" ||
+		string(params) != `{"query":"","refresh":false,"offset":0,"limit":100,"archetype":"feed","intent":"napplet:feed/edit","domain":"relay","compatible":true,"kind":5129}` {
+		t.Fatalf("filters: %s %s %v", method, params, err)
+	}
+	if _, params, _, err := command([]string{"discover", "--compatible=false"}); err != nil ||
+		string(params) != `{"query":"","refresh":false,"offset":0,"limit":100,"compatible":false}` {
+		t.Fatalf("compatible=false: %s %v", params, err)
+	}
+	if _, params, _, err := command([]string{"discover"}); err != nil || string(params) != `{"query":"","refresh":false,"offset":0,"limit":100}` {
+		t.Fatalf("no filters: %s %v", params, err)
+	}
+	for _, args := range [][]string{
+		{"discover", "--kind", "1"},
+		{"discover", "--kind", "30023"},
+		{"discover", "--archetype", "Feed"},
+		{"discover", "--archetype", ""},
+		{"discover", "--domain", "NAP-RELAY"},
+		{"discover", "--intent", ""},
+		{"discover", "--intent", "napplet:feed/‮edit"},
+	} {
+		var input inputFailure
+		if _, _, _, err := command(args); !errors.As(err, &input) {
+			t.Fatalf("%v: %v, want an input failure", args, err)
+		}
+	}
+}
+
+// A note1 or an author-less nevent is resolved through one cached discover
+// lookup, then sent as its canonical address.
+func TestCLISnapshotLookup(t *testing.T) {
+	root := t.TempDir()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	pk := nostr.MustPubKeyFromHex(strings.Repeat("a", 64))
+	var id nostr.ID
+	for i := range id {
+		id[i] = byte(0x10 + i)
+	}
+	canonical := "5129:" + pk.Hex() + ":" + id.Hex()
+	other := "5129:" + pk.Hex() + ":" + strings.Repeat("0", 64)
+	bits5, err := bech32.ConvertBits(id[:], 8, 5, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := bech32.Encode("note", bits5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorless := nip19.EncodeNevent(id, nil, nostr.ZeroPK)
+
+	// serve answers each connection with the next result and records the
+	// requests
+	serve := func(results ...string) chan string {
+		seen := make(chan string, len(results))
+		go func() {
+			for _, result := range results {
+				conn, err := listener.AcceptUnix()
+				if err != nil {
+					close(seen)
+					return
+				}
+				line, _ := bufio.NewReader(conn).ReadBytes('\n')
+				seen <- string(line)
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + result + `}` + "\n"))
+				conn.Close()
+			}
+			close(seen)
+		}()
+		return seen
+	}
+	page := func(addresses ...string) string {
+		items := make([]string, 0, len(addresses))
+		for _, a := range addresses {
+			items = append(items, `{"address":"`+a+`"}`)
+		}
+		return `{"items":[` + strings.Join(items, ",") + `],"total":` + fmt.Sprint(len(items)) + `,"next_offset":null,"fetched_at":null,"complete":false}`
+	}
+	request := func(method, params string) string {
+		b, _ := json.Marshal(controlprotocol.Request{JSONRPC: "2.0", Method: method, Params: json.RawMessage(params), ID: json.RawMessage("1")})
+		return string(b) + "\n"
+	}
+
+	for _, input := range []string{note, authorless, "nostr:" + note} {
+		seen := serve(page(canonical), cliContractResult("napplet.detail", canonical))
+		if err := run([]string{"--json", "--socket", listener.Addr().String(), "detail", input}); err != nil {
+			t.Fatalf("%s: %v", input, err)
+		}
+		if got := <-seen; got != request("napplet.discover", `{"query":"`+id.Hex()+`","kind":5129,"limit":2}`) {
+			t.Fatalf("lookup request %q", got)
+		}
+		if got := <-seen; got != request("napplet.detail", `{"address":"`+canonical+`"}`) {
+			t.Fatalf("detail request %q", got)
+		}
+	}
+
+	for name, result := range map[string]string{
+		"none":       page(),
+		"two":        page(canonical, other),
+		"wrong id":   page(other),
+		"not a page": `{"items":"x"}`,
+	} {
+		seen := serve(result)
+		err := run([]string{"--socket", listener.Addr().String(), "detail", note})
+		var stderr bytes.Buffer
+		writeCLIError(&stderr, err)
+		if stderr.String() != fmt.Sprintf(addressErrorJSON, "unknown_snapshot") || strings.Contains(stderr.String(), note) {
+			t.Fatalf("%s: %v %q", name, err, stderr.String())
+		}
+		<-seen
 	}
 }
 
@@ -978,7 +1101,7 @@ func mustJSON(t *testing.T, v any) string {
 
 // ─── address forms ───────────────────────────────────────────────────────
 
-const addressErrorJSON = `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":%q,"accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` + "\n"
+const addressErrorJSON = `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":%q,"accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` + "\n"
 
 func testNaddr(t *testing.T, kind nostr.Kind, d string, relays []string) (canonical, naddr string) {
 	t.Helper()
@@ -1007,6 +1130,7 @@ func addressCommands(canonical string) []struct {
 		{[]string{"permissions", "get", "X"}, "napplet.permissions.get", `{"address":` + q + `}`},
 		{[]string{"permissions", "set", "X", "sign", "allow"}, "napplet.permissions.set", `{"address":` + q + `,"permission":"sign","decision":"allow"}`},
 		{[]string{"permissions", "clear", "X", "sign"}, "napplet.permissions.clear", `{"address":` + q + `,"permission":"sign"}`},
+		{[]string{"icon", "X"}, "napplet.icon", `{"address":` + q + `}`},
 	}
 }
 
@@ -1021,10 +1145,41 @@ func mustJSONString(s string) string {
 	return string(b)
 }
 
+// neventWithKind is an nevent for id by pk with a kind TLV.
+func neventWithKind(t *testing.T, id nostr.ID, pk nostr.PubKey, kind uint32) string {
+	t.Helper()
+	data := []byte{0, 32}
+	data = append(data, id[:]...)
+	data = append(data, 2, 32)
+	data = append(data, pk[:]...)
+	data = append(data, 3, 4, byte(kind>>24), byte(kind>>16), byte(kind>>8), byte(kind))
+	bits5, err := bech32.ConvertBits(data, 8, 5, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := bech32.Encode("nevent", bits5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
+}
+
+// testSnapshot is a snapshot's canonical address and its nevent with the
+// author.
+func testSnapshot() (canonical, nevent string) {
+	pk := nostr.MustPubKeyFromHex(strings.Repeat("a", 64))
+	var id nostr.ID
+	for i := range id {
+		id[i] = byte(0xa0 + i)
+	}
+	return "5129:" + pk.Hex() + ":" + id.Hex(), nip19.EncodeNevent(id, nil, pk)
+}
+
 func TestCLIAddressForms(t *testing.T) {
 	canonical, naddr := testNaddr(t, 35129, "n-143146b0d6f", nil)
 	root, rootNaddr := testNaddr(t, 15129, "", nil)
-	for _, pair := range [][2]string{{canonical, naddr}, {root, rootNaddr}} {
+	snapshot, nevent := testSnapshot()
+	for _, pair := range [][2]string{{canonical, naddr}, {root, rootNaddr}, {snapshot, nevent}} {
 		forms := []string{pair[0], pair[1], "nostr:" + pair[1], "NOSTR:" + pair[1], strings.ToUpper(pair[1]), "nostr:" + strings.ToUpper(pair[1])}
 		for _, tc := range addressCommands(pair[0]) {
 			for _, form := range forms {
@@ -1045,22 +1200,22 @@ func TestCLIAddressErrors(t *testing.T) {
 	_, tabNaddr := testNaddr(t, 35129, "a\tb", nil)
 	rloCanonical, _ := testNaddr(t, 35129, "a\u202eb", nil)
 	cases := map[string]struct{ input, reason string }{
-		"empty":       {"", "invalid_address"},
-		"garbage":     {"hello", "invalid_address"},
-		"oversized":   {strings.Repeat("a", 4097), "invalid_address"},
-		"mixed case":  {"N" + naddr[1:], "invalid_address"},
-		"web link":    {"https://njump.me/" + naddr, "invalid_address"},
-		"padded":      {" " + canonical, "invalid_address"},
-		"wrong kind":  {strings.Replace(canonical, "35129", "30023", 1), "invalid_address"},
-		"npub":        {nip19.EncodeNpub(pk), "unsupported_nip19"},
-		"nprofile":    {nip19.EncodeNprofile(pk, nil), "unsupported_nip19"},
-		"note":        {"note1" + strings.Repeat("q", 58), "unsupported_nip19"},
-		"nevent":      {nip19.EncodeNevent(id, nil, pk), "unsupported_nip19"},
-		"nsec":        {nip19.EncodeNsec(nostr.KeyOne), "unsupported_nip19"},
-		"nostr nsec":  {"nostr:" + strings.ToUpper(nip19.EncodeNsec(nostr.KeyOne)), "unsupported_nip19"},
-		"tab d":       {tabNaddr, "unsafe_identifier"},
-		"rlo d":       {rloCanonical, "unsafe_identifier"},
-		"nostr tab d": {"nostr:" + tabNaddr, "unsafe_identifier"},
+		"empty":         {"", "invalid_address"},
+		"garbage":       {"hello", "invalid_address"},
+		"oversized":     {strings.Repeat("a", 4097), "invalid_address"},
+		"mixed case":    {"N" + naddr[1:], "invalid_address"},
+		"web link":      {"https://njump.me/" + naddr, "invalid_address"},
+		"padded":        {" " + canonical, "invalid_address"},
+		"wrong kind":    {strings.Replace(canonical, "35129", "30023", 1), "invalid_address"},
+		"npub":          {nip19.EncodeNpub(pk), "unsupported_nip19"},
+		"nprofile":      {nip19.EncodeNprofile(pk, nil), "unsupported_nip19"},
+		"bad note":      {"note1" + strings.Repeat("q", 58), "invalid_address"},
+		"kind 1 nevent": {neventWithKind(t, id, pk, 1), "unsupported_nip19"},
+		"nsec":          {nip19.EncodeNsec(nostr.KeyOne), "unsupported_nip19"},
+		"nostr nsec":    {"nostr:" + strings.ToUpper(nip19.EncodeNsec(nostr.KeyOne)), "unsupported_nip19"},
+		"tab d":         {tabNaddr, "unsafe_identifier"},
+		"rlo d":         {rloCanonical, "unsafe_identifier"},
+		"nostr tab d":   {"nostr:" + tabNaddr, "unsafe_identifier"},
 	}
 	for name, tc := range cases {
 		for _, cmd := range addressCommands(canonical) {
@@ -1341,6 +1496,7 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 		{[]string{"--json", "--socket", "/tmp/unused.sock", "install", "--help"}, "install ADDRESS"},
 		{[]string{"updates", "--help"}, "never installed automatically"},
 		{[]string{"help", "detail"}, "kwak detail ADDRESS"},
+		{[]string{"help", "icon"}, "kwak icon ADDRESS [--out FILE]"},
 		{[]string{"events", "--help"}, "events.overflow"},
 	} {
 		cmd := exec.Command(cli, tc.args...)
@@ -1354,6 +1510,120 @@ func TestCLISubcommandHelpWithoutDaemon(t *testing.T) {
 	for topic, help := range commandHelp {
 		if !strings.Contains(help, "Usage:") || !strings.Contains(help, "kwak "+topic) {
 			t.Errorf("incomplete help for %q", topic)
+		}
+	}
+}
+
+// ─── icon ────────────────────────────────────────────────────────────────
+
+// testPNG is a w×h PNG.
+func testPNG(w, h int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = 0x80
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// testIconResult is a napplet.icon result with the given fields.
+func testIconResult(w, h int, mime, data string) string {
+	return fmt.Sprintf(`{"sha256":%q,"mime":%q,"width":%d,"height":%d,"data":%q}`, strings.Repeat("c", 64), mime, w, h, data)
+}
+
+func TestCLIIconCommand(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	want := `{"address":"` + address + `"}`
+	for _, args := range [][]string{
+		{"icon", address},
+		{"icon", address, "--out", "/tmp/icon.png"},
+		{"icon", "--out", "/tmp/icon.png", address},
+	} {
+		method, params, _, err := command(args)
+		if err != nil || method != "napplet.icon" || string(params) != want {
+			t.Fatalf("%v: %s %s %v", args, method, params, err)
+		}
+	}
+	if out := iconOutPath([]string{"icon", "--out", "/tmp/icon.png", address}); out != "/tmp/icon.png" {
+		t.Fatalf("out path %q", out)
+	}
+	for _, args := range [][]string{
+		{"icon"},
+		{"icon", address, address},
+		{"icon", address, "--out"},
+		{"icon", "--out", "icon.png", address},
+		{"icon", "--out", "/tmp/../tmp/icon.png", address},
+		{"icon", address, "--size", "64"},
+		{"icon", address, "--out", "/tmp/a.png", "--out", "/tmp/b.png"},
+	} {
+		if _, _, _, err := command(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
+func TestCLIIconOutput(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "kwakore")
+	if out, err := exec.Command("go", "build", "-o", cli, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v: %s", err, out)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "peer.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	serve := func(result string) {
+		go func() {
+			conn, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = bufio.NewReader(conn).ReadBytes('\n')
+			_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + result + `}` + "\n"))
+		}()
+	}
+
+	icon := testPNG(3, 2)
+	file := filepath.Join(root, "icon.png")
+	serve(testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString(icon)))
+	cmd := exec.Command(cli, "--socket", listener.Addr().String(), "icon", address, "--out", file)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("icon: stdout=%q stderr=%q err=%v", stdout.String(), stderr.String(), err)
+	}
+	got, err := os.ReadFile(file)
+	if err != nil || !bytes.Equal(got, icon) {
+		t.Fatalf("written icon differs: %v", err)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("icon file mode: %v %v", info.Mode(), err)
+	}
+
+	for name, result := range map[string]string{
+		"wrong mime":     testIconResult(3, 2, "image/jpeg", base64.StdEncoding.EncodeToString(icon)),
+		"zero width":     testIconResult(0, 2, "image/png", base64.StdEncoding.EncodeToString(icon)),
+		"invalid base64": testIconResult(3, 2, "image/png", "not*base64"),
+		"not a png":      testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString([]byte("GIF89a-not-png"))),
+		"size mismatch":  testIconResult(4, 2, "image/png", base64.StdEncoding.EncodeToString(icon)),
+		"extra field":    strings.TrimSuffix(testIconResult(3, 2, "image/png", base64.StdEncoding.EncodeToString(icon)), "}") + `,"path":"/x"}`,
+	} {
+		bad := filepath.Join(root, "bad.png")
+		serve(result)
+		cmd := exec.Command(cli, "--socket", listener.Addr().String(), "icon", address, "--out", bad)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid daemon response") {
+			t.Fatalf("%s: stdout=%q stderr=%q err=%v", name, stdout.String(), stderr.String(), err)
+		}
+		if _, err := os.Stat(bad); !os.IsNotExist(err) {
+			t.Fatalf("%s: a file was written: %v", name, err)
 		}
 	}
 }

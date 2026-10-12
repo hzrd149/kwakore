@@ -32,7 +32,12 @@ func isNapKind(k nostr.Kind) bool {
 // <kind>:<pubkey hex>:<d>. A root napplet (15129) is one per author, so a d
 // tag it happens to carry is ignored and never splits or merges root
 // napplets. For addressable kinds d is the first d tag, the one relays index.
+// A snapshot (5129) is one immutable event, so it is its own address:
+// 5129:<pubkey hex>:<event id hex>, as Napp.Address writes it.
 func eventAddress(evt nostr.Event) string {
+	if evt.Kind == KindSnapshotNapplet {
+		return fmt.Sprintf("%d:%s:%s", evt.Kind, evt.PubKey.Hex(), evt.ID.Hex())
+	}
 	d := ""
 	if addressable(evt.Kind) {
 		d = evt.Tags.GetD()
@@ -77,7 +82,7 @@ func (m latestByAddress) add(evt nostr.Event) bool {
 // validated: when it is invalid the result is an unavailable entry, never
 // an older valid version of the same address.
 func nappFromLatest(evt nostr.Event) Napp {
-	if evt.Kind != KindNapplet && evt.Kind != KindRootNapplet {
+	if !isNappletKind(evt.Kind) {
 		n := nappFromNappEvent(evt)
 		n.EventID = evt.ID.Hex()
 		return n
@@ -111,9 +116,15 @@ func unavailableNapp(evt nostr.Event, reason string) Napp {
 	if addressable(evt.Kind) {
 		n.D = evt.Tags.GetD()
 	}
-	if evt.Kind == KindNapplet || evt.Kind == KindRootNapplet {
+	if isNappletKind(evt.Kind) {
 		n.Format = FormatNapplet
 		n.Kind = evt.Kind
+		// the schema the event was written in, so its descriptor is
+		// labelled right even though it is not valid
+		n.NappletSchema = SchemaWebNapplet
+		if evt.Tags.Find("path") != nil {
+			n.NappletSchema = SchemaNIP5D
+		}
 	}
 	return n
 }

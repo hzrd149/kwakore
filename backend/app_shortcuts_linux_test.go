@@ -37,9 +37,47 @@ func (h *nativeEntryHost) SyncAppShortcuts(shortcuts []AppShortcut) error {
 	h.mu.Unlock()
 	entries := make([]desktopentry.Entry, 0, len(shortcuts))
 	for _, s := range shortcuts {
-		entries = append(entries, desktopentry.Entry{Address: s.Address, Title: s.Name, Description: s.Description})
+		entries = append(entries, desktopentry.Entry{Address: s.Address, Title: s.Name, Description: s.Description, Icon: s.IconPath})
 	}
 	return desktopentry.Reconcile(h.dir, h.cli, entries)
+}
+
+// An installed napplet whose verified icon is cached shows it; any other
+// shows the generic icon.
+func TestServiceNativeEntryIcon(t *testing.T) {
+	h := newNativeEntryRig(t)
+	withIcon := testNativeNapplet("with-icon", "With icon")
+	withIcon.IconSha, withIcon.IconMime = strings.Repeat("ab", 32), "image/png"
+	without := testNativeNapplet("without-icon", "Without icon")
+	uncached := testNativeNapplet("uncached-icon", "Uncached icon")
+	uncached.IconSha, uncached.IconMime = strings.Repeat("cd", 32), "image/png"
+	recordInstalled(t, withIcon, without, uncached)
+
+	path, err := nappletIconPath(withIcon.IconSha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, testPNG(t, 2, 2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncNativeEntries(); err != nil {
+		t.Fatal(err)
+	}
+	for n, want := range map[*Napp]string{&withIcon: "Icon=" + path + "\n", &without: "Icon=application-x-executable\n", &uncached: "Icon=application-x-executable\n"} {
+		data, err := os.ReadFile(filepath.Join(h.dir, desktopentry.FileName(n.Address())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s: entry lacks %q:\n%s", n.D, want, data)
+		}
+	}
+	if !filepath.IsAbs(path) || !strings.HasPrefix(path, dataDir) {
+		t.Errorf("icon path %q is not in the data directory", path)
+	}
 }
 
 func (h *nativeEntryHost) passCount() int {

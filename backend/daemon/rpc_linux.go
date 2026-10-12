@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"kwakore/backend"
 	"kwakore/backend/controlprotocol"
@@ -219,6 +222,25 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(detailErr)
 		}
 		return result, nil
+	case "napplet.icon":
+		address, err := decodeAddressParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		workCtx, cancelTimeout := context.WithTimeout(workCtx, 15*time.Second)
+		defer cancelTimeout()
+		result, iconErr := backend.ServiceIcon(workCtx, address)
+		if iconErr != nil {
+			return nil, mutationError(iconErr)
+		}
+		return result, nil
 	case "napplet.windows":
 		if err := controlprotocol.ValidateNamedParams(params); err != nil {
 			return nil, err
@@ -335,7 +357,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		return result, nil
 	case "napplet.discover":
-		query, refresh, offset, limit, err := decodeDiscoveryParams(params)
+		filter, refresh, offset, limit, err := decodeDiscoveryParams(params)
 		if err != nil {
 			return nil, err
 		}
@@ -346,7 +368,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		defer done()
 		workCtx, cancel := s.registryContext(ctx)
 		defer cancel()
-		result, discoverErr := backend.ServiceDiscover(workCtx, query, refresh, offset, limit)
+		result, discoverErr := backend.ServiceDiscover(workCtx, filter, refresh, offset, limit)
 		if discoverErr != nil {
 			switch {
 			case errors.Is(discoverErr, backend.ErrDiscoveryUnavailable):
@@ -687,34 +709,112 @@ func decodePageFields(fields map[string]json.RawMessage) (int, int, *controlprot
 	return offset, limit, nil
 }
 
-func decodeDiscoveryParams(params json.RawMessage) (string, bool, int, int, *controlprotocol.Error) {
-	if err := controlprotocol.ValidateNamedParams(params, "query", "refresh", "offset", "limit"); err != nil {
-		return "", false, 0, 0, err
+// discoverToken is the archetype and domain grammar of a discover filter.
+var discoverToken = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+func decodeDiscoveryParams(params json.RawMessage) (backend.ServiceDiscoverFilter, bool, int, int, *controlprotocol.Error) {
+	var filter backend.ServiceDiscoverFilter
+	invalid := func() (backend.ServiceDiscoverFilter, bool, int, int, *controlprotocol.Error) {
+		return backend.ServiceDiscoverFilter{}, false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	if err := controlprotocol.ValidateNamedParams(params, "query", "refresh", "offset", "limit", "archetype", "intent", "domain", "compatible", "kind"); err != nil {
+		return backend.ServiceDiscoverFilter{}, false, 0, 0, err
 	}
 	if len(params) == 0 {
-		return "", false, 0, 100, nil
+		return filter, false, 0, 100, nil
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(params, &fields) != nil {
-		return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		return invalid()
 	}
 	offset, limit, pageErr := decodePageFields(fields)
 	if pageErr != nil {
-		return "", false, 0, 0, pageErr
+		return backend.ServiceDiscoverFilter{}, false, 0, 0, pageErr
 	}
-	var query string
 	if raw, ok := fields["query"]; ok {
-		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &query) != nil || len(query) > 4096 {
-			return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &filter.Query) != nil || len(filter.Query) > 4096 {
+			return invalid()
 		}
 	}
 	var refresh bool
 	if raw, ok := fields["refresh"]; ok {
-		if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &refresh) != nil || (len(raw) > 0 && raw[0] != 't' && raw[0] != 'f') {
-			return "", false, 0, 0, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		if !literalBool(raw, &refresh) {
+			return invalid()
 		}
 	}
-	return query, refresh, offset, limit, nil
+	for name, dst := range map[string]*string{"archetype": &filter.Archetype, "domain": &filter.Domain} {
+		if raw, ok := fields[name]; ok {
+			if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, dst) != nil || len(*dst) > 64 || !discoverToken.MatchString(*dst) {
+				return invalid()
+			}
+		}
+	}
+	if raw, ok := fields["intent"]; ok {
+		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &filter.Intent) != nil || !validIntentFilter(filter.Intent) {
+			return invalid()
+		}
+	}
+	if raw, ok := fields["compatible"]; ok {
+		var compatible bool
+		if !literalBool(raw, &compatible) {
+			return invalid()
+		}
+		filter.Compatible = &compatible
+	}
+	if raw, ok := fields["kind"]; ok {
+		kind, ok := discoverKind(raw)
+		if !ok {
+			return invalid()
+		}
+		filter.Kind = kind
+	}
+	return filter, refresh, offset, limit, nil
+}
+
+// literalBool reads a JSON true or false and nothing else.
+func literalBool(raw json.RawMessage, dst *bool) bool {
+	raw = bytes.TrimSpace(raw)
+	switch {
+	case bytes.Equal(raw, []byte("true")):
+		*dst = true
+	case bytes.Equal(raw, []byte("false")):
+		*dst = false
+	default:
+		return false
+	}
+	return true
+}
+
+// validIntentFilter accepts 1–256 bytes of valid UTF-8 with no control or
+// format runes.
+func validIntentFilter(s string) bool {
+	if s == "" || len(s) > 256 || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// discoverKind reads a plain JSON integer naming a manifest kind the
+// catalog holds: no fraction, exponent or string form.
+func discoverKind(raw json.RawMessage) (int, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] < '0' || raw[0] > '9' || bytes.ContainsAny(raw, ".eE") {
+		return 0, false
+	}
+	var kind int
+	if json.Unmarshal(raw, &kind) != nil {
+		return 0, false
+	}
+	switch kind {
+	case 5129, 15129, 35129, 35130:
+		return kind, true
+	}
+	return 0, false
 }
 
 type settingsResult struct {

@@ -9,6 +9,12 @@
 // ParseCanonicalServiceAddress). An naddr's relay hints are filtered and
 // returned beside the address for the one request that may carry them.
 //
+// A kind 5129 snapshot has no naddr: it is named by its event, so an
+// nevent1… (or note1…) is read too. An nevent that carries its author
+// converts to the canonical "5129:<author hex>:<event id hex>" here; a
+// note1 or an nevent without an author names only the event, and Parse
+// returns ErrSnapshotLookup with the event id for the caller to resolve.
+//
 // The package is a leaf. It imports only the standard library,
 // kwakore/backend/desktopentry and the bech32 codec, so the CLI does not
 // link the backend root (relay pool, stores) or the nostr library.
@@ -31,17 +37,26 @@ import (
 
 // AcceptedForms names the address forms Parse reads, for error messages.
 // It is ASCII only so a JSON encoder writes it unescaped.
-var AcceptedForms = []string{"KIND:PUBKEY_HEX:D", "naddr1...", "nostr:naddr1..."}
+var AcceptedForms = []string{"KIND:PUBKEY_HEX:D", "naddr1...", "nostr:naddr1...", "nevent1...", "note1..."}
 
 var (
 	// ErrInvalid is returned for anything that is not an address of a napp
 	// or napplet in one of the accepted forms.
 	ErrInvalid = errors.New("invalid napplet address")
 	// ErrUnsupported is returned for a NIP-19 entity that cannot name a
-	// napplet (npub, nprofile, note, nevent, nsec, nrelay). Such input is
-	// recognized by its prefix and never decoded.
+	// napplet (npub, nprofile, nsec, nrelay, or an nevent of another kind).
+	// The first four are recognized by their prefix and never decoded.
 	ErrUnsupported = errors.New("unsupported nip-19 entity")
+	// ErrSnapshotLookup is returned with an Address holding only the event
+	// id (and an nevent's relay hints) for a note1 or an nevent without an
+	// author: the snapshot's author, and so its canonical address, must be
+	// looked up first.
+	ErrSnapshotLookup = errors.New("snapshot address needs a lookup")
 )
+
+// snapshotKind is the kind of a snapshot napplet, the only kind an nevent
+// may name here.
+const snapshotKind = 5129
 
 const (
 	// MaxRelayHints is the most relay hints kept from one naddr.
@@ -53,16 +68,19 @@ const (
 
 // Address is a parsed napplet address.
 type Address struct {
-	// Canonical is "<kind>:<lowercase pubkey hex>:<d>".
+	// Canonical is "<kind>:<lowercase pubkey hex>:<d>", or empty with
+	// ErrSnapshotLookup.
 	Canonical string
-	// Identifier is the d tag, empty for a root napplet.
+	// Identifier is the d tag, empty for a root napplet, and the event id
+	// hex for a snapshot.
 	Identifier string
-	// Relays are the naddr's usable relay hints, nil for a canonical input.
+	// Relays are the naddr's or nevent's usable relay hints, nil for a
+	// canonical input.
 	Relays []string
 }
 
 // unsupportedPrefixes are the NIP-19 entities that never name a napplet.
-var unsupportedPrefixes = []string{"npub1", "nprofile1", "note1", "nevent1", "nsec1", "nrelay1"}
+var unsupportedPrefixes = []string{"npub1", "nprofile1", "nsec1", "nrelay1"}
 
 const (
 	tlvIdentifier = 0
@@ -72,7 +90,8 @@ const (
 )
 
 // Parse reads a canonical coordinate, a bare naddr or a nostr: URI holding
-// an naddr. The scheme is matched in any letter case; the bech32 part must
+// an naddr, or a snapshot's nevent or note (bare or as a nostr: URI; see
+// the package comment and ErrSnapshotLookup). The scheme is matched in any letter case; the bech32 part must
 // be all lowercase or all uppercase. Web links, surrounding whitespace and
 // anything else are ErrInvalid. Relay hints never make an naddr invalid:
 // the ones that fail ValidRelayHint are dropped.
@@ -96,7 +115,12 @@ func Parse(input string) (Address, error) {
 			return Address{}, ErrUnsupported
 		}
 	}
-	if !strings.HasPrefix(lower, "naddr1") {
+	switch {
+	case strings.HasPrefix(lower, "nevent1"):
+		return parseNevent(code)
+	case strings.HasPrefix(lower, "note1"):
+		return parseNote(code)
+	case !strings.HasPrefix(lower, "naddr1"):
 		return Address{}, ErrInvalid
 	}
 
@@ -150,7 +174,11 @@ func Parse(input string) (Address, error) {
 	if !utf8.ValidString(canonical) || desktopentry.CanonicalAddress(canonical) != nil {
 		return Address{}, ErrInvalid
 	}
+	return Address{Canonical: canonical, Identifier: identifier, Relays: relayHints(relays)}, nil
+}
 
+// relayHints keeps the usable, distinct hints, at most MaxRelayHints.
+func relayHints(relays []string) []string {
 	var hints []string
 	for _, r := range relays {
 		if len(hints) == MaxRelayHints {
@@ -161,7 +189,88 @@ func Parse(input string) (Address, error) {
 		}
 		hints = append(hints, r)
 	}
-	return Address{Canonical: canonical, Identifier: identifier, Relays: hints}, nil
+	return hints
+}
+
+// decodeBech32 decodes code under hrp into bytes.
+func decodeBech32(code, hrp string) ([]byte, bool) {
+	got, data5, err := bech32.DecodeNoLimit(code)
+	if err != nil || got != hrp {
+		return nil, false
+	}
+	data, err := bech32.ConvertBits(data5, 5, 8, false)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// parseNevent reads an nevent naming a snapshot: an event id, optional
+// relay hints, an optional author and an optional kind, which must be 5129
+// when present. With the author it is converted to the canonical address;
+// without one only the id is known (ErrSnapshotLookup).
+func parseNevent(code string) (Address, error) {
+	data, ok := decodeBech32(code, "nevent")
+	if !ok {
+		return Address{}, ErrInvalid
+	}
+	var (
+		id, author             []byte
+		kind                   uint32
+		hasID, hasAuth, hasKnd bool
+		relays                 []string
+	)
+	for len(data) > 0 {
+		if len(data) < 2 || len(data) < 2+int(data[1]) {
+			return Address{}, ErrInvalid
+		}
+		typ, value := data[0], data[2:2+int(data[1])]
+		data = data[2+int(data[1]):]
+		switch typ {
+		case 0:
+			if hasID || len(value) != 32 {
+				return Address{}, ErrInvalid
+			}
+			id, hasID = value, true
+		case tlvRelay:
+			relays = append(relays, string(value))
+		case tlvAuthor:
+			if hasAuth || len(value) != 32 {
+				return Address{}, ErrInvalid
+			}
+			author, hasAuth = value, true
+		case tlvKind:
+			if hasKnd || len(value) != 4 {
+				return Address{}, ErrInvalid
+			}
+			kind, hasKnd = binary.BigEndian.Uint32(value), true
+		}
+	}
+	if !hasID {
+		return Address{}, ErrInvalid
+	}
+	if hasKnd && kind != snapshotKind {
+		return Address{}, ErrUnsupported
+	}
+	idHex := hex.EncodeToString(id)
+	hints := relayHints(relays)
+	if !hasAuth {
+		return Address{Identifier: idHex, Relays: hints}, ErrSnapshotLookup
+	}
+	canonical := fmt.Sprintf("%d:%s:%s", snapshotKind, hex.EncodeToString(author), idHex)
+	if desktopentry.CanonicalAddress(canonical) != nil {
+		return Address{}, ErrInvalid
+	}
+	return Address{Canonical: canonical, Identifier: idHex, Relays: hints}, nil
+}
+
+// parseNote reads a note1, which names only an event id (ErrSnapshotLookup).
+func parseNote(code string) (Address, error) {
+	data, ok := decodeBech32(code, "note")
+	if !ok || len(data) != 32 {
+		return Address{}, ErrInvalid
+	}
+	return Address{Identifier: hex.EncodeToString(data)}, ErrSnapshotLookup
 }
 
 // ValidRelayHint says whether s is a usable relay hint: a ws:// or wss://

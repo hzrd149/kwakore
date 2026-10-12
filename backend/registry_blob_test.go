@@ -189,7 +189,7 @@ func TestTrustedBlobRedirectsStayGuarded(t *testing.T) {
 	toPrivate, toMine := redirectTo(private), redirectTo(mine)
 	setUserBlobServers(t, toPrivate.URL, toMine.URL, mine.URL)
 
-	_, err := fetchBlobFrom(t.Context(), trustedBlobClient, toPrivate.URL, hash)
+	_, err := fetchBlobFrom(t.Context(), trustedBlobClient, toPrivate.URL, hash, blobMaxBytes)
 	if !errors.Is(err, netguard.ErrPrivateAddress) {
 		t.Fatalf("redirect to an unconfigured private host: %v, want the private-address error", err)
 	}
@@ -200,7 +200,7 @@ func TestTrustedBlobRedirectsStayGuarded(t *testing.T) {
 		t.Fatalf("downloadBlob followed the redirect: %v, %d requests", err, private.hits.Load())
 	}
 
-	got, err := fetchBlobFrom(t.Context(), trustedBlobClient, toMine.URL, hash)
+	got, err := fetchBlobFrom(t.Context(), trustedBlobClient, toMine.URL, hash, blobMaxBytes)
 	if err != nil || !bytes.Equal(got, blob) {
 		t.Fatalf("redirect to another configured server: %q, %v", got, err)
 	}
@@ -254,13 +254,13 @@ func TestBlobDownloadSizeCap(t *testing.T) {
 	setUserBlobServers(t, declared.URL, streaming.URL, right.URL)
 
 	t.Run("declared", func(t *testing.T) {
-		_, err := fetchBlobFrom(t.Context(), trustedBlobClient, declared.URL, hash)
+		_, err := fetchBlobFrom(t.Context(), trustedBlobClient, declared.URL, hash, blobMaxBytes)
 		if err == nil {
 			t.Fatal("an over-limit Content-Length was accepted")
 		}
 	})
 	t.Run("streamed", func(t *testing.T) {
-		_, err := fetchBlobFrom(t.Context(), trustedBlobClient, streaming.URL, hash)
+		_, err := fetchBlobFrom(t.Context(), trustedBlobClient, streaming.URL, hash, blobMaxBytes)
 		if err == nil {
 			t.Fatal("an over-limit streamed body was accepted")
 		}
@@ -302,11 +302,11 @@ func TestBlobDownloadRedirectLimits(t *testing.T) {
 	four := chain(4)
 	setUserBlobServers(t, three.URL, four.URL, final.URL)
 
-	if got, err := fetchBlobFrom(t.Context(), trustedBlobClient, three.URL, hash); err != nil || !bytes.Equal(got, blob) {
+	if got, err := fetchBlobFrom(t.Context(), trustedBlobClient, three.URL, hash, blobMaxBytes); err != nil || !bytes.Equal(got, blob) {
 		t.Fatalf("three redirects: %q, %v", got, err)
 	}
 	before := final.hits.Load()
-	if _, err := fetchBlobFrom(t.Context(), trustedBlobClient, four.URL, hash); err == nil {
+	if _, err := fetchBlobFrom(t.Context(), trustedBlobClient, four.URL, hash, blobMaxBytes); err == nil {
 		t.Fatal("four chained redirects were followed")
 	}
 	if final.hits.Load() != before {

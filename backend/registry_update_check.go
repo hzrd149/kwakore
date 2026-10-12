@@ -8,6 +8,7 @@ package backend
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -120,6 +121,8 @@ func ServiceCheckUpdates(ctx context.Context, address string) (ServiceUpdateChec
 		}
 		targets = match
 	}
+	// snapshots are immutable: never checked, never offered an update
+	targets = slices.DeleteFunc(targets, Napp.IsSnapshot)
 	if len(targets) == 0 {
 		return ServiceUpdateCheckResult{Items: []ServiceUpdateItem{}, Complete: true}, nil
 	}

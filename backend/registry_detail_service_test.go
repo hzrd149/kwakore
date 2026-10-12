@@ -28,7 +28,7 @@ func TestServiceDetailInstalledNapplet(t *testing.T) {
 	sk := nostr.Generate()
 	A1, A2 := validNapplet(t, sk, "a", "v1", 10), validNapplet(t, sk, "a", "v2", 20)
 	a := installedFrom(t, A1)
-	a.RequiredDomains = []string{"relay.example"}
+	a.RequiredDomains = []string{"relay-example"}
 	installRecord(t, a)
 
 	d, err := ServiceDetail(a.Address())
@@ -38,16 +38,23 @@ func TestServiceDetailInstalledNapplet(t *testing.T) {
 	if !d.Installed || d.InstalledVersion == nil || d.InstalledVersion.EventID != A1.ID.Hex() || d.UpdateAvailable != nil || d.Kind != int(KindNapplet) {
 		t.Fatalf("detail %+v", d)
 	}
-	if len(d.RequiredDomains) != 1 || d.RequiredDomains[0] != "relay.example" || d.OptionalDomains == nil || len(d.OptionalDomains) != 0 {
+	if len(d.RequiredDomains) != 1 || d.RequiredDomains[0] != "relay-example" || d.OptionalDomains == nil || len(d.OptionalDomains) != 0 {
 		t.Fatalf("domains %v %v", d.RequiredDomains, d.OptionalDomains)
 	}
 	wire, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"update_available":null`, `"optional_domains":[]`, `"installed":true`} {
+	for _, want := range []string{`"update_available":null`, `"optional_domains":[]`, `"installed":true`,
+		`"required_domains":["relay-example"]`, `"kind":35129`, `"schema":"legacy"`, `"missing_domains":["relay-example"]`, `"compatible":false`} {
 		if !strings.Contains(string(wire), want) {
 			t.Fatalf("wire lacks %s: %s", want, wire)
+		}
+	}
+	// the descriptor supplies kind and the domains; each key appears once
+	for _, key := range []string{`"kind":`, `"required_domains":`, `"optional_domains":`} {
+		if n := strings.Count(string(wire), key); n != 1 {
+			t.Fatalf("%s appears %d times: %s", key, n, wire)
 		}
 	}
 

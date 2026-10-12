@@ -198,7 +198,7 @@ If you installed manually, remove its files and units directly:
 
 ```sh
 kwak installed                 # optional: list napplets, then
-kwak uninstall --yes ADDRESS   # remove each one and its desktop entry (canonical or naddr1…)
+kwak uninstall --yes ADDRESS   # remove each one and its desktop entry (canonical, naddr1… or a snapshot's nevent1…)
 systemctl --user stop kwakore.socket kwakore.service
 systemctl --user disable kwakore.socket
 rm "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/kwakore.socket" \
@@ -393,6 +393,31 @@ for structured values. The current `@napplet/shim` 0.30.0 lacks this draft
 binding, so Kwakore installs it in its trusted preamble without changing the
 vendored shim.
 
+### Napplet manifests
+
+Kwakore reads the current NIP-5D napplet manifest in all three kinds: 35129
+(a named napplet, with a `d` tag), 15129 (one root napplet per author) and
+5129 (a snapshot). Older manifests written in the NIP-5A shape, with `path`
+tags and `requires`, are still read and are labelled `legacy` in
+descriptors; their `requires` tags are shown as required domains.
+
+A snapshot is one immutable event. It is addressed as
+`5129:PUBKEY:EVENT_ID`, or by its `nevent1…` or `note1…`, and it is never
+checked for updates or updated. Its `a` and `A` tags (the parent and root
+napplet it came from) are shown as `lineage` but never followed or trusted.
+
+Descriptors from `kwak discover`, `kwak installed` and `kwak detail` show
+the manifest's archetypes, intents, icon hash and NAP domains. A napplet
+whose required (`R`) domains Kwakore does not implement is listed with them
+in `missing_domains` and `compatible: false`; it still launches, with a
+warning, and optional (`O`) domains never count. `kwak discover
+--compatible` lists only napplets with nothing missing:
+
+```console
+$ kwak discover --archetype feed --compatible
+$ kwak detail nevent1...
+```
+
 ## Graphical session
 
 The daemon opens windows with the `DISPLAY` and `WAYLAND_DISPLAY` it was
@@ -459,6 +484,19 @@ which for the helper is `~/.local/lib/kwakore/current/kwak`, so entries
 keep working across upgrades. With the NixOS module it is
 `/run/current-system/sw/bin/kwak` (see the NixOS notes).
 
+An entry shows the napplet's verified icon once the daemon has fetched it:
+after an install or update the daemon fetches the manifest's `icon` by its
+hash in the background, checks the hash and the declared image type, and
+keeps a re-encoded PNG in its icon cache, then rewrites the entry with an
+`Icon=` line naming that file. Until then, or when the napplet has no usable
+icon, the entry shows the generic application icon. A missing icon never
+stops an install or launch. `kwak icon ADDRESS --out icon.png` saves the same
+verified PNG:
+
+```console
+$ kwak icon nostr:naddr1... --out ~/icon.png
+```
+
 Entries set `Terminal=true`. Your desktop opens a terminal for the launch; on
 success the CLI prints the opened window and exits, and on failure the fixed
 readable error is printed in that terminal, such as the
@@ -516,6 +554,7 @@ shell's. `systemctl --user show-environment` shows it.
 | Service lock | `~/.local/share/kwakore/daemon.lock` | exists while or after a daemon ran; not proof one is running |
 | Control socket | `/run/user/UID/kwakore/daemon.sock` | `$XDG_RUNTIME_DIR/kwakore/daemon.sock`; directory `0700`, socket `0600` |
 | Desktop entries | `~/.local/share/applications/kwakore-napplet-<hash>.desktop` | `$XDG_DATA_HOME/applications/` |
+| Napplet icons | `~/.local/share/kwakore/icons/<sha256>.png` | verified, re-encoded PNG, owner-only `0600` in a `0700` directory; pruned when no installed napplet uses it |
 | User units (helper) | `~/.config/systemd/user/kwakore.{socket,service}` | `$XDG_CONFIG_HOME/systemd/user/`, or `$XDG_RUNTIME_DIR/systemd/user/` with `--runtime-units` |
 | Program files (helper) | `~/.local/lib/kwakore/current/` and `~/.local/bin/kwak` | `--prefix DIR` |
 
@@ -816,25 +855,33 @@ setting values, paths, relay URLs or keys; read the current values with
 | `{"error":{"code":1002,"message":"Not found"}}` | the address is not installed (or, for `stop`, the window is gone) |
 | `{"error":{"code":1006,"message":"Invalid configuration"}}` | a `settings set` value or a reload failed validation; nothing changed |
 | `{"error":{"code":-32602,"message":"Invalid params"}}` | the command line itself is wrong: unknown command, bad option, bad secret source or launch token |
-| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"invalid_address","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the ADDRESS is not an address in an accepted form ([napplet addresses](#napplet-addresses)) |
-| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsupported_nip19","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the ADDRESS is an `npub`, `nprofile`, `note`, `nevent`, `nsec` or `nrelay`, which cannot name a napplet; it was not sent anywhere |
-| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsafe_identifier","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1..."]}}}` | the napplet's d tag holds control, format or line separator characters; only `uninstall --yes` accepts it |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"invalid_address","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` | the ADDRESS is not an address in an accepted form ([napplet addresses](#napplet-addresses)) |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsupported_nip19","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` | the ADDRESS is an `npub`, `nprofile`, `nsec` or `nrelay`, or an `nevent` of a kind other than 5129, which cannot name a napplet; it was not sent anywhere |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unsafe_identifier","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` | the napplet's d tag holds control, format or line separator characters; only `uninstall --yes` accepts it |
+| `{"error":{"code":-32602,"message":"Invalid params","data":{"reason":"unknown_snapshot","accepted":["KIND:PUBKEY_HEX:D","naddr1...","nostr:naddr1...","nevent1...","note1..."]}}}` | a `note1…` or author-less `nevent1…` matched no single snapshot in the cached catalog; run `kwak discover --refresh` or use the canonical address |
 | `{"error":{"code":1008,"message":"client timeout; operation outcome unknown; check service, signer, or installed state"}}` | the CLI stopped waiting; check `status`, `signer status` or `installed` before retrying |
 
 <a id="napplet-addresses"></a>**Napplet addresses.** Every `ADDRESS`
-argument (`install`, `update`, `uninstall`, `launch`, `try`, `permissions`) may be:
+argument (`install`, `update`, `updates`, `detail`, `icon`, `uninstall`,
+`launch`, `try`, `permissions`) may be:
 
 - the canonical coordinate `<kind>:<64 lowercase hex public key>:<d tag>`,
-  as `kwak installed` and `kwak discover` print it;
+  as `kwak installed` and `kwak discover` print it (for a kind 5129
+  snapshot, `5129:<public key>:<event id>`);
 - a bare `naddr1…`;
-- a `nostr:naddr1…` link.
+- a `nostr:naddr1…` link;
+- for a snapshot, an `nevent1…` or `note1…` (bare or as a `nostr:` link).
 
-The `nostr:` scheme may use any letter case; the `naddr` itself must be all
+The `nostr:` scheme may use any letter case; the code itself must be all
 lowercase or all uppercase. The CLI decodes it and sends only the canonical
-coordinate, so results always show the canonical form. Other NIP-19 codes
-(`npub`, `nprofile`, `note`, `nevent`, `nsec`, `nrelay`) are refused without
-being decoded or sent, and web links or text with spaces around the address
-are refused too; the error never repeats what you typed.
+coordinate, so results always show the canonical form. An `nevent` that
+carries its author converts directly. A `note1…`, or an `nevent` without its
+author, names only the event, so the CLI first looks it up in the daemon's
+cached catalog (one `napplet.discover` request) and refuses it with
+`unknown_snapshot` unless exactly one snapshot matches. Other NIP-19 codes
+(`npub`, `nprofile`, `nsec`, `nrelay`, or an `nevent` of another kind) are
+refused without being sent, and web links or text with spaces around the
+address are refused too; the error never repeats what you typed.
 
 ```sh
 kwak install nostr:naddr1…    # install from a shared link
@@ -909,7 +956,9 @@ and needs operator action.
   schema always get its defaults.
 - Launcher notices, such as the warning that a napplet requires a NAP domain
   Kwakore does not offer, are kept in the daemon's state but are not shown
-  anywhere or exposed through the socket. The napplet still opens.
+  anywhere or exposed through the socket. The napplet still opens. The
+  missing domains themselves are visible in every descriptor as
+  `missing_domains` and `compatible`.
 - The install helper installs and upgrades only; removal is
   [manual](#removing-kwakore).
 - Nothing is migrated from Verdana: there are no compatibility names for its

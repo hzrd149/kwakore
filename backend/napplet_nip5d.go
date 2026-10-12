@@ -164,7 +164,11 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 		n.Name = "napplet"
 	}
 	// the id is the NIP-01 address: 15129:<pk>: for the root napplet, whose
-	// d is empty, and 35129:<pk>:<d> with a non-empty d for a named one
+	// d is empty, and 35129:<pk>:<d> with a non-empty d for a named one; a
+	// snapshot is named by its event id instead (see Napp.Address)
+	if evt.Kind == KindSnapshotNapplet {
+		n.EventID = evt.ID.Hex()
+	}
 	n.ID = n.Address()
 	return n, nil
 }
