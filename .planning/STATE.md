@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-12 — Completed quick task 261012-cdf: control protocol update checks, event push, napplet details, sync status and theme
+Last activity: 2026-10-12 — Completed quick task 261012-gsk: full NIP-5D napplet manifest support (snapshots, icons, descriptor fields, discover filters)
 
 ## Performance Metrics
 
@@ -180,6 +180,7 @@ None yet.
 | 261011-lzk | Sync installed napplets and their pinned versions across machines through an encrypted NIP-78 event named by the `sync_id` setting | 2026-10-11 | c411419 |
 | 261012-cbz | Hide the Kwakore search-provider desktop entry (NoDisplay=true) and fix the settings.set protocol row | 2026-10-12 | 7653cfb |
 | 261012-cdf | Control protocol: napplet.updates.check + update_available, events.subscribe push stream, napplet.detail, install_sync diagnostics, theme setting | 2026-10-12 | e2369d0 |
+| 261012-gsk | Full NIP-5D manifest support: kinds 5129/15129/35129, spec-conformant parsing, snapshots by event id, R missing-domain warnings, verified icon cache + napplet.icon, full descriptor fields and discover filters | 2026-10-12 | 69d9c4a |
 
 ## Deferred Items
 
