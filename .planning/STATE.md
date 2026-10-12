@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-12 — Completed quick task 261012-mka: napplet social phase 4 (zaps)
+Last activity: 2026-10-12 — Completed quick task 261012-nj7: napplet social phase 5 (periodic refresh, social_refresh setting, social.updated event)
 
 ## Performance Metrics
 
@@ -185,6 +185,7 @@ None yet.
 | 261012-l5j | Napplet social phase 2: napplet.vote, napplet.react, napplet.comment, napplet.delete signed with the service signer; signer_unavailable reason on unavailable errors; publishSigned stops ReplaceEvent wiping regular kinds; kwak vote/react/comment/unpublish | 2026-10-12 | caae9b0 |
 | 261012-lvx | Napplet social phase 3: mentions category (kind 1 by a/q tag), napplet.mentions, napplet.share (naddr/nevent link, q/p/a tags), kind 1 deletable; kwak mentions/share | 2026-10-12 | 63658dc |
 | 261012-mka | Napplet social phase 4: verified zap receipts (zaps category, totals, top zappers), napplet.zaps, napplet.zap returns a bolt11 invoice (no wallet), not_zappable reason; kwak zaps/zap | 2026-10-12 | f0ed2ad |
+| 261012-nj7 | Napplet social phase 5: social_refresh setting (default 6h, 0 off), periodic refresh of installed napplets, install/update/selection hooks, social.updated event | 2026-10-12 | d6a5746 |
 
 ## Deferred Items
 
