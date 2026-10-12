@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-07)
 Phase: Milestone v0.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-10-12 — Completed quick task 261012-gsk: full NIP-5D napplet manifest support (snapshots, icons, descriptor fields, discover filters)
+Last activity: 2026-10-12 — Completed quick task 261012-kcd: napplet social phase 1 (read reactions and comments)
 
 ## Performance Metrics
 
@@ -181,6 +181,7 @@ None yet.
 | 261012-cbz | Hide the Kwakore search-provider desktop entry (NoDisplay=true) and fix the settings.set protocol row | 2026-10-12 | 7653cfb |
 | 261012-cdf | Control protocol: napplet.updates.check + update_available, events.subscribe push stream, napplet.detail, install_sync diagnostics, theme setting | 2026-10-12 | e2369d0 |
 | 261012-gsk | Full NIP-5D manifest support: kinds 5129/15129/35129, spec-conformant parsing, snapshots by event id, R missing-domain warnings, verified icon cache + napplet.icon, full descriptor fields and discover filters | 2026-10-12 | 69d9c4a |
+| 261012-kcd | Napplet social phase 1: napplet.social, napplet.reactions, napplet.comments; relay fetch with NIP-09 deletions, status index, caps, prune on uninstall; kwak social/reactions/comments | 2026-10-12 | 381576a |
 
 ## Deferred Items
 
