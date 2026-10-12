@@ -361,6 +361,20 @@ on stdout and logs to stderr. A second daemon for the same data directory
 fails with `daemon already running for this user; inspect status or stop the
 existing instance`.
 
+**Updates.** Kwakore never updates a napplet on its own. It looks for newer
+versions in the background (about two minutes after it starts and every six
+hours), and `kwak updates` looks right away; `kwak installed` then shows the
+version found as `update available`. Install one with `kwak update ADDRESS`.
+`kwak detail ADDRESS` shows a napplet's public details (author, kind, install
+state, installed version, any update found, declared network domains and the
+versions known locally) without asking any relay.
+
+```console
+$ kwak updates
+$ kwak update nostr:naddr1...
+$ kwak detail nostr:naddr1...
+```
+
 ## Napplet catalog
 
 Napplets can call `await window.napplet.catalog.get()` to discover installed,

@@ -1032,7 +1032,13 @@ func TestRPCSettingsNotificationChangesBackend(t *testing.T) {
 
 func rpcService(t *testing.T) (*Service, *bufio.Reader, *net.UnixConn, serviceconfig.Paths) {
 	t.Helper()
-	paths := daemonPaths(t)
+	return rpcServiceAt(t, daemonPaths(t))
+}
+
+// rpcServiceAt is rpcService on paths a test prepared, such as a seeded
+// state.json.
+func rpcServiceAt(t *testing.T, paths serviceconfig.Paths) (*Service, *bufio.Reader, *net.UnixConn, serviceconfig.Paths) {
+	t.Helper()
 	service, err := Open(paths, "test")
 	if err != nil {
 		t.Fatal(err)

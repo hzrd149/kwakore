@@ -23,6 +23,8 @@ Napplets:
                                  Search the napplet catalog
   install ADDRESS                Install a napplet
   update ADDRESS                 Update an installed napplet
+  updates [ADDRESS]              Check installed napplets for newer versions
+  detail ADDRESS                 Show a napplet's public details
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
   try ADDRESS                    Open a napplet without installing it
@@ -153,6 +155,28 @@ Example: kwak install nostr:naddr1...
 Usage: kwak update ADDRESS
 ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
 Example: kwak update nostr:naddr1...
+`,
+	"updates": `Check installed napplets for newer versions.
+
+Usage: kwak updates [ADDRESS]
+Asks the relays about every installed napplet, or only ADDRESS, and lists
+the ones with a newer valid version. kwak installed then shows them as
+update_available. Updates are never installed automatically; run
+'kwak update ADDRESS' to install one. The service also checks in the
+background a couple of minutes after it starts and every 6 hours.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+Example: kwak updates
+`,
+	"detail": `Show a napplet's public details.
+
+Usage: kwak detail ADDRESS
+Shows the name, author, kind, whether it is installed, the installed
+version, any update found, the network domains it declares and the
+versions known locally. Answers from local knowledge without asking
+relays; run 'kwak discover --refresh' or 'kwak updates' first for fresher
+data.
+ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...
+Example: kwak detail nostr:naddr1...
 `,
 	"uninstall": `Remove an installed napplet and its desktop entry.
 

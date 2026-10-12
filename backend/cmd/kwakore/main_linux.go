@@ -92,6 +92,10 @@ func run(args []string) error {
 		// a refresh is bounded by the 30s relay cap plus a short drain
 		deadline = 45 * time.Second
 	}
+	if method == "napplet.updates.check" {
+		// the daemon bounds the relay lookups at 60s and the call at 75s
+		deadline = 90 * time.Second
+	}
 	if timeoutOverride > 0 {
 		deadline = timeoutOverride
 	}
@@ -476,6 +480,35 @@ func command(args []string) (string, json.RawMessage, string, error) {
 			Relays  []string `json:"relays,omitempty"`
 		}{addr.Canonical, relays})
 		return "napplet." + args[0], params, socketPath, nil
+	}
+	if len(args) >= 1 && args[0] == "updates" {
+		switch len(args) {
+		case 1:
+			return "napplet.updates.check", nil, socketPath, nil
+		case 2:
+			addr, err := commandAddress(args[1], false)
+			if err != nil {
+				return "", nil, "", err
+			}
+			params, _ := json.Marshal(struct {
+				Address string `json:"address"`
+			}{addr.Canonical})
+			return "napplet.updates.check", params, socketPath, nil
+		}
+		return "", nil, "", inputFailure("usage: kwak updates [ADDRESS]")
+	}
+	if len(args) >= 1 && args[0] == "detail" {
+		if len(args) != 2 {
+			return "", nil, "", inputFailure("usage: kwak detail ADDRESS")
+		}
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+		}{addr.Canonical})
+		return "napplet.detail", params, socketPath, nil
 	}
 	if len(args) == 2 && args[0] == "launch" {
 		addr, err := commandAddress(args[1], false)

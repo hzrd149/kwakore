@@ -63,6 +63,9 @@ type Service struct {
 	// installSyncWait waits for the installed-list sync worker, which runs
 	// on workContext.
 	installSyncWait func()
+	// updateCheckWait waits for the background update check worker, which
+	// also runs on workContext.
+	updateCheckWait func()
 	// systemDark is the desktop's light/dark preference the appearance
 	// watch last reported; themeMu serializes applyTheme.
 	systemDark     atomic.Bool
@@ -147,6 +150,8 @@ func Open(paths serviceconfig.Paths, version string) (_ *Service, err error) {
 	// calls SetTheme, and new windows read it at launch.
 	s.applyTheme()
 	s.installSyncWait = backend.StartInstallSync(workContext)
+	// updates are only ever looked for here; napplet.update applies them
+	s.updateCheckWait = backend.StartServiceUpdateChecks(workContext)
 	return s, nil
 }
 
@@ -566,6 +571,9 @@ func (s *Service) Close() {
 		// and no pass races the signer teardown or closeBackend
 		if s.installSyncWait != nil {
 			s.installSyncWait()
+		}
+		if s.updateCheckWait != nil {
+			s.updateCheckWait()
 		}
 		s.appearanceWait.Wait()
 		if s.signer != nil {
