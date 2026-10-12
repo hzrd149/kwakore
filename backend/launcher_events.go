@@ -49,6 +49,8 @@ type ServiceEvent struct {
 	Outcome          string               `json:"outcome,omitempty"`
 	PreviousVersion  *ServiceVersion      `json:"previous_version,omitempty"`
 	InstalledVersion *ServiceVersion      `json:"installed_version,omitempty"`
+	Pinned           *bool                `json:"pinned,omitempty"`
+	DataReset        *bool                `json:"data_reset,omitempty"`
 	CleanupComplete  *bool                `json:"cleanup_complete,omitempty"`
 	Items            *[]ServiceUpdateItem `json:"items,omitempty"`
 	Signer           *SignerStatus        `json:"signer,omitempty"`

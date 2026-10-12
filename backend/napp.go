@@ -106,6 +106,11 @@ type Napp struct {
 	// from. Records from different lookups of one address are ordered by
 	// CreatedAt and then the lowest EventID (NIP-01, see registry_select.go).
 	EventID string `json:"eventId,omitempty"`
+	// Explicit user selections have an independent logical revision. Publication
+	// time cannot order them: a later choice may deliberately select older code.
+	Pinned            bool   `json:"pinned,omitempty"`
+	SelectionRevision uint64 `json:"selectionRevision,omitempty"`
+	SelectionID       string `json:"selectionId,omitempty"`
 	// Unavailable is set when the NIP-01 latest event of the address is
 	// invalid. It holds one fixed catalogue phrase (napplet.go), never
 	// validator text, which can embed author input. Such a record can be

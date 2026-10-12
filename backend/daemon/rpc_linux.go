@@ -398,7 +398,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		return result, nil
 	case "napplet.install":
-		address, relays, err := decodeInstallParams(params)
+		address, relays, eventID, err := decodeVersionInstallParams(params)
 		if err != nil {
 			return nil, err
 		}
@@ -409,9 +409,32 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		defer done()
 		workCtx, cancel := s.registryContext(ctx)
 		defer cancel()
-		result, installErr := backend.ServiceInstall(workCtx, address, relays)
+		var result backend.ServiceInstallResult
+		var installErr error
+		if eventID != "" {
+			result, installErr = backend.ServiceInstallVersion(workCtx, address, eventID, relays)
+		} else {
+			result, installErr = backend.ServiceInstall(workCtx, address, relays)
+		}
 		if installErr != nil {
 			return nil, mutationError(installErr)
+		}
+		return result, nil
+	case "napplet.select":
+		address, eventID, err := decodeSelectionParams(params)
+		if err != nil {
+			return nil, err
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		workCtx, cancel := s.registryContext(ctx)
+		defer cancel()
+		result, selectErr := backend.ServiceSelect(workCtx, address, eventID)
+		if selectErr != nil {
+			return nil, mutationError(selectErr)
 		}
 		return result, nil
 	case "napplet.update":
@@ -601,6 +624,56 @@ func decodeInstallParams(params json.RawMessage) (string, []string, *controlprot
 		relays = nil
 	}
 	return address, relays, nil
+}
+
+func eventIDField(raw json.RawMessage) (string, *controlprotocol.Error) {
+	var id string
+	if json.Unmarshal(raw, &id) != nil || len(id) != 64 {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	decoded, err := hex.DecodeString(id)
+	if err != nil || hex.EncodeToString(decoded) != id {
+		return "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	return id, nil
+}
+
+func decodeVersionInstallParams(params json.RawMessage) (string, []string, string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address", "relays", "event_id"); err != nil {
+		return "", nil, "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", nil, "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	var eventID string
+	if raw, ok := fields["event_id"]; ok {
+		var err *controlprotocol.Error
+		eventID, err = eventIDField(raw)
+		if err != nil {
+			return "", nil, "", err
+		}
+		delete(fields, "event_id")
+	}
+	base, _ := json.Marshal(fields)
+	address, relays, err := decodeInstallParams(base)
+	return address, relays, eventID, err
+}
+
+func decodeSelectionParams(params json.RawMessage) (string, string, *controlprotocol.Error) {
+	if err := controlprotocol.ValidateNamedParams(params, "address", "event_id"); err != nil {
+		return "", "", err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return "", "", controlprotocol.FixedError(controlprotocol.InvalidParams)
+	}
+	address, err := addressField(fields)
+	if err != nil {
+		return "", "", err
+	}
+	id, err := eventIDField(fields["event_id"])
+	return address, id, err
 }
 
 // addressField is the canonical address in decoded params, shared by every

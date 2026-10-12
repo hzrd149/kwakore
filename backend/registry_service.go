@@ -109,6 +109,8 @@ func serviceMutationError(ctx context.Context, err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, ErrServiceNotFound), errors.Is(err, ErrServiceInvalidAddress), errors.Is(err, ErrServiceConflict), errors.Is(err, ErrServiceTimeout), errors.Is(err, ErrServiceBusy):
+		return err
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return ErrServiceTimeout
 	case errors.Is(err, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
@@ -147,6 +149,10 @@ func ServiceInstall(ctx context.Context, address string, relays []string) (Servi
 	}
 	if n.Unavailable != "" {
 		return ServiceInstallResult{}, ErrServiceUnavailable
+	}
+	if current, ok := InstalledNapp(n.ID); ok && current.Pinned {
+		r, err := selectResolvedContext(ctx, n, true, nil, false)
+		return ServiceInstallResult{Address: r.Address, Outcome: r.Outcome, InstalledVersion: r.InstalledVersion}, serviceMutationError(ctx, err)
 	}
 	result, err := InstallNappContext(ctx, n)
 	return result, serviceMutationError(ctx, err)
@@ -202,6 +208,7 @@ type ServiceDescriptor struct {
 	UnavailableReason string         `json:"unavailable_reason,omitempty"`
 	Sources           []string       `json:"sources,omitempty"`
 	Version           ServiceVersion `json:"version"`
+	Pinned            bool           `json:"pinned"`
 
 	Kind            int             `json:"kind"`
 	Schema          string          `json:"schema"`
@@ -470,6 +477,7 @@ func serviceDescriptor(n Napp) ServiceDescriptor {
 		Available: n.Unavailable == "", UnavailableReason: publicUnavailableReason(n.Unavailable),
 		Sources: append([]string(nil), n.Sources...),
 		Version: ServiceVersion{EventID: n.EventID, CreatedAt: int64(n.CreatedAt), ArtifactHash: n.ArtifactHash},
+		Pinned:  n.Pinned || n.IsSnapshot(),
 
 		Kind:            int(n.ManifestKind()),
 		Schema:          wireSchema(n),

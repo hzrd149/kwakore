@@ -18,10 +18,18 @@ snapshot/derivative distinction, and archive reads for detail/address/exact sync
 pin lookups. History does not move the installed selection. Existing data reset,
 latest-only updates, and newer-wins sync rules remain in effect.
 
-Remaining slices: exact-event install and intentional forward/backward selection,
-historical artifact retention and offline switching, journaled data reset for
-same-artifact selections and running windows, explicit pin policy, and a
-versioned sync contract that preserves deliberate rollback. Author snapshot
+Second implementation slice: exact-event install and intentional forward/backward
+selection, verified artifact retention and offline switching, journaled data reset
+for same-artifact selections, open-window refusal, explicit persistent pins, and
+version 2 encrypted sync ordered by logical selection revision and random tie
+breaker. Missing explicit pins never fall back to latest; version 1 regressions
+cannot undo version 2 choices or removals. User choices use the existing scope
+keys and reset both prior and target data after the state token commits. Launch
+is blocked while recovery is pending. Selecting the same established pin is a
+no-op. Permission scope policy remains unchanged.
+
+Remaining: deliberate spec re-pinning/conformance review, explicit cache-pruning
+controls, and any further pin-policy controls such as unpinning. Author snapshot
 publishing and saved-data retention remain outside scope.
 
 Validation for the history slice: backend `go vet ./... && go test ./...`;
@@ -30,6 +38,16 @@ desktop generate/build/vet/tests; both module tidy checks; product identity scan
 and `git diff --check`. Local relay tests exercise distinct relay heads,
 snapshot lineage queries, partial replies, and timeouts. No child/host-page
 behavior changed in this slice, so real-engine checks were not required.
+
+Validation for the selection slice: backend and desktop vet/tests; focused race
+tests for selection, exact-install RPCs, sync rollback, and a user choice made
+during a sync pass; module tidy checks; product identity and diff checks. All
+seven child `TestWebKit` tests and `TestRPCRealChildGraphical` passed under Xvfb.
+The daemon graphical test needed Xvfb `-ac` because the child environment does
+not forward XAUTHORITY; the default authenticated Xvfb run could not create a
+window. Download failure, blocked state commit, post-commit reset failure and
+recovery, same-artifact reset, stale storage writers, and corrupted artifact
+cache are covered by focused regressions.
 
 ## Goal and agreed behavior
 

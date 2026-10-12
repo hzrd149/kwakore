@@ -172,7 +172,7 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 		return override
 	}
 	switch method {
-	case "napplet.install", "napplet.update", "napplet.uninstall", "napplet.try", "signer.pair.wait":
+	case "napplet.install", "napplet.update", "napplet.select", "napplet.uninstall", "napplet.try", "signer.pair.wait":
 		return 180 * time.Second
 	case "napplet.discover", "napplet.versions", "napplet.snapshots":
 		// a refresh is bounded by the 30s relay cap plus a short drain
@@ -631,6 +631,37 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}
 		params, _ := json.Marshal(filter)
 		return "napplet.discover", params, socketPath, nil
+	}
+	if len(args) >= 2 && (args[0] == "select" || args[0] == "install" && len(args) > 2) {
+		addr, err := commandAddress(args[1], false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		var id string
+		if args[0] == "select" {
+			if len(args) != 3 {
+				return "", nil, "", inputFailure("select requires ADDRESS and EVENT_ID")
+			}
+			id = args[2]
+		} else {
+			flags := flag.NewFlagSet("install", flag.ContinueOnError)
+			flags.SetOutput(io.Discard)
+			eventID := flags.String("event", "", "exact manifest event ID")
+			if flags.Parse(args[2:]) != nil || len(flags.Args()) != 0 {
+				return "", nil, "", inputFailure("invalid install parameters")
+			}
+			id = *eventID
+		}
+		decoded, err := hex.DecodeString(id)
+		if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != id {
+			return "", nil, "", inputFailure("invalid manifest event ID")
+		}
+		params := map[string]any{"address": addr.Canonical, "event_id": id}
+		if args[0] == "install" && len(addr.Relays) > 0 {
+			params["relays"] = addr.Relays
+		}
+		raw, _ := json.Marshal(params)
+		return "napplet." + args[0], raw, socketPath, nil
 	}
 	if len(args) == 2 && (args[0] == "install" || args[0] == "update" || args[0] == "try") {
 		addr, err := commandAddress(args[1], false)

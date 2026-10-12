@@ -28,6 +28,7 @@ type mutationIntent struct {
 	Staging        string `json:"staging,omitempty"`
 	Old            string `json:"old,omitempty"`
 	PendingReclaim bool   `json:"pending_reclaim,omitempty"`
+	ResetData      bool   `json:"reset_data,omitempty"`
 }
 
 func mutationPath(id string) string {
@@ -58,7 +59,7 @@ func validMutationName(name, base string) bool {
 func validateMutation(m mutationIntent, filename string) error {
 	base, err := nappBaseDir(m.ID)
 	if err != nil || m.ID == "" || m.Version != 1 || len(m.ID) > 4096 || len(m.Token) != 32 ||
-		(m.Operation != "install" && m.Operation != "update" && m.Operation != "uninstall") ||
+		(m.Operation != "install" && m.Operation != "update" && m.Operation != "uninstall" && m.Operation != "select") ||
 		m.Base != filepath.Base(base) || filename != mutationPath(m.ID) ||
 		(m.Staging != "" && (!validMutationName(m.Staging, m.Base) || !strings.HasPrefix(m.Staging, m.Base+stagingInfix))) ||
 		(m.Old != "" && (!validMutationName(m.Old, m.Base) || !strings.HasPrefix(m.Old, m.Base+oldInfix))) {
@@ -80,6 +81,9 @@ func validateMutation(m mutationIntent, filename string) error {
 	}
 	if m.Operation == "uninstall" && (!m.HadPrior || m.Prior == nil) {
 		return errors.New("uninstall intent lacks prior record")
+	}
+	if m.ResetData && (m.Operation != "select" || !m.HadPrior || m.PriorEvent == m.NewEvent || !m.Prior.IsNapplet()) {
+		return errors.New("invalid selection reset intent")
 	}
 	return nil
 }
@@ -240,6 +244,11 @@ func reconcileMutation(m mutationIntent) error {
 		if !exists {
 			return errors.New("committed install directory missing")
 		}
+		if m.ResetData {
+			if err := resetSelectionDataLocked(*m.Prior, record); err != nil {
+				return err
+			}
+		}
 		if err := removeMutationDir(m.Old); err != nil {
 			return err
 		}
@@ -357,6 +366,7 @@ func commitInstallMutation(id, operation, staging, base string, next Napp, clear
 		m.HadPrior = true
 		m.PriorEvent = previous.EventID
 		m.Prior = &previous
+		m.ResetData = operation == "select" && previous.EventID != next.EventID
 		if exists, err := dirExists(m.Base); err != nil {
 			return previous, had, err
 		} else if exists {

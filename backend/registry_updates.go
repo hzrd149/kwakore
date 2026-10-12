@@ -356,6 +356,10 @@ func applyUpdate(current, newer Napp) {
 }
 
 func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdateResult, error) {
+	if current.Pinned {
+		r, err := selectResolvedContext(ctx, newer, true, nil, true)
+		return ServiceUpdateResult{Address: r.Address, Outcome: "updated", PreviousVersion: serviceVersion(current), InstalledVersion: r.InstalledVersion}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return ServiceUpdateResult{}, err
 	}
@@ -379,6 +383,7 @@ func applyUpdateContext(ctx context.Context, current, newer Napp) (ServiceUpdate
 	if err != nil {
 		return ServiceUpdateResult{}, err
 	}
+	retainInstalledArtifacts(current, base)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 

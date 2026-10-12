@@ -397,7 +397,35 @@ signed by the napplet's author as author snapshots and events signed by others
 as derivatives. Their lineage references describe provenance and do not replace
 the latest mutable publication. Install a snapshot using the existing
 `kwak install nostr:nevent1...` command. Browsing history does not yet provide
-rollback or guarantee that historical artifact blobs remain downloadable.
+rollback by itself or guarantee that remote historical blobs remain downloadable.
+
+**Pins and version selection.** Use an event ID from `kwak versions` to select
+an exact signed publication:
+
+```console
+$ kwak install nostr:naddr1... --event EVENT_ID
+$ kwak select nostr:naddr1... EVENT_ID
+```
+
+`install --event` also works before installation; `select` requires an installed
+napplet and permits moving forward or backward. Close that napplet's windows
+first; a switch with an open window returns `Busy`. Switching to a different
+event resets saved data and settings, including a republication with unchanged
+code. Returning to an older version restores its code and starts with fresh
+data. Selecting the same established pin is a no-op.
+
+`detail`, `installed`, and history show the pin policy. Pins still report newer
+publications, and `kwak update ADDRESS` explicitly advances the pin. Verified
+code is retained locally so downloaded versions can be selected offline;
+`cached` in history reports cache presence and all bytes are verified again
+when used. A missing blob still requires an available Blossom server. Uninstall
+removes the active installation and its saved data; history and cached code
+remain. Automatic cache pruning is not implemented yet.
+
+A failed download or state commit keeps the old code and data. If cleanup fails
+after the new selection commits, the journal remains and launch returns `Busy`;
+restart the daemon to retry recovery before running that napplet. Its installed
+record shows which event was committed.
 
 ## Napplet catalog
 
@@ -782,9 +810,17 @@ synced.
 - Installing, updating or uninstalling a napplet on one machine does the same
   on the others. An uninstall is mirrored, and it closes that napplet's open
   windows on the other machines like any uninstall.
-- Nothing is ever downgraded. When the list pins an older version than the
-  one installed here, the newer local version is kept and published, so the
-  other machines move up to it.
+- Ordinary legacy entries keep the newer publication. Explicit pins from
+  `install --event` and `select` carry a separate selection revision, so an
+  intentional rollback propagates even when its event is older. A missing exact
+  pinned event never silently installs the latest version instead.
+- Explicit selections upgrade the encrypted list to version 2. Upgrade every
+  participating machine for this behavior: older clients reject the new list.
+  Once upgraded, a legacy version 1 publication cannot change or remove an
+  explicit pin; Kwakore republishes the version 2 list. Concurrent explicit
+  choices converge deterministically, and a version 2 deletion beats a
+  concurrent selection. A pinned switch waits until its windows are closed on
+  each machine; failed attempts are retried.
 - The first time sync is turned on, the local and remote lists are merged:
   napplets from both sides are installed and nothing is removed.
 - A pass runs at start, when the signer changes, when `sync_id` changes, a

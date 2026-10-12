@@ -12,9 +12,10 @@ package backend
 // remote is the list on the relays. An address dropped on either side since
 // the base is dropped (D-mirror: a remote removal uninstalls the napplet here
 // too, and a removal beats a concurrent update). Where both sides have an
-// address, the newer pin wins, and a pin whose age is unknown never beats
-// the local one, so nothing is ever downgraded (D-no-downgrade): a newer
-// local version is kept and republished. With no base (first enable) the
+// address, legacy entries use publication ordering. Explicit pinned selections
+// use independent logical revisions and random tie breakers, so deliberate
+// rollback propagates. A missing explicit event never falls back to latest.
+// With no base (first enable) the
 // merge is a union and removes nothing.
 //
 // What is persisted, beside the base, is the last remote list known to be on
@@ -56,8 +57,11 @@ const (
 
 // syncEntry is one napplet in the encrypted list.
 type syncEntry struct {
-	Address string `json:"address"`
-	EventID string `json:"event_id"`
+	Address     string `json:"address"`
+	EventID     string `json:"event_id"`
+	Pinned      bool   `json:"pinned,omitempty"`
+	Revision    uint64 `json:"selection_revision,omitempty"`
+	SelectionID string `json:"selection_id,omitempty"`
 }
 
 // syncList is the plaintext of the encrypted list.
@@ -68,13 +72,17 @@ type syncList struct {
 
 // syncPin is one address's pinned version. CreatedAt 0 means unknown.
 type syncPin struct {
-	EventID   string
-	CreatedAt nostr.Timestamp
+	EventID     string
+	CreatedAt   nostr.Timestamp
+	Pinned      bool
+	Revision    uint64
+	SelectionID string
 }
 
 // installSyncState is what a pass persists in state.json. The base resets
 // when the sync_id or the signed-in account changes.
 type installSyncState struct {
+	Version   int             `json:"version,omitempty"`
 	ID        string          `json:"id"`
 	Pubkey    string          `json:"pubkey"`
 	EventID   string          `json:"event_id,omitempty"`
@@ -244,6 +252,15 @@ func lastInstallSyncPublished() string {
 // syncPinNewer says whether a is a newer version than b. A pin whose age is
 // unknown is never newer, nor older: the local one then stays.
 func syncPinNewer(a, b syncPin) bool {
+	if a.Revision != 0 || b.Revision != 0 {
+		if a.Revision != b.Revision {
+			return a.Revision > b.Revision
+		}
+		if a.SelectionID != b.SelectionID {
+			return a.SelectionID > b.SelectionID
+		}
+		return a.EventID > b.EventID
+	}
 	if a.CreatedAt == 0 || b.CreatedAt == 0 {
 		return false
 	}
@@ -283,9 +300,22 @@ func mergeSyncLists(base, local, remote map[string]syncPin) map[string]syncPin {
 
 // ─── the encrypted event ─────────────────────────────────────────
 
-// encodeSyncList is the v1 plaintext, sorted by address.
+// Explicit selections use v2. Legacy lists remain v1 until upgraded.
 func encodeSyncList(pins map[string]syncPin) ([]byte, error) {
-	list := syncList{V: 1, Napplets: syncEntries(pins)}
+	return encodeSyncListVersion(pins, syncListVersion(pins))
+}
+
+func syncListVersion(pins map[string]syncPin) int {
+	for _, pin := range pins {
+		if pin.Revision > 0 {
+			return 2
+		}
+	}
+	return 1
+}
+
+func encodeSyncListVersion(pins map[string]syncPin, version int) ([]byte, error) {
+	list := syncList{V: version, Napplets: syncEntries(pins)}
 	return json.Marshal(list)
 }
 
@@ -293,7 +323,7 @@ func encodeSyncList(pins map[string]syncPin) ([]byte, error) {
 func syncEntries(pins map[string]syncPin) []syncEntry {
 	entries := make([]syncEntry, 0, len(pins))
 	for a, p := range pins {
-		entries = append(entries, syncEntry{Address: a, EventID: p.EventID})
+		entries = append(entries, syncEntry{Address: a, EventID: p.EventID, Pinned: p.Pinned, Revision: p.Revision, SelectionID: p.SelectionID})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Address < entries[j].Address })
 	return entries
@@ -303,36 +333,49 @@ func syncEntries(pins map[string]syncPin) []syncEntry {
 func syncPins(entries []syncEntry) map[string]syncPin {
 	pins := make(map[string]syncPin, len(entries))
 	for _, e := range entries {
-		pins[e.Address] = syncPin{EventID: e.EventID}
+		pins[e.Address] = syncPin{EventID: e.EventID, Pinned: e.Pinned, Revision: e.Revision, SelectionID: e.SelectionID}
 	}
 	return pins
 }
 
-// decodeSyncList reads a v1 plaintext strictly: one bad entry rejects the
+// decodeSyncList reads a v1 or v2 plaintext: one bad entry rejects the
 // whole list. Unknown fields are ignored.
 func decodeSyncList(plaintext []byte) (map[string]syncPin, error) {
+	pins, _, err := decodeSyncListVersion(plaintext)
+	return pins, err
+}
+
+func decodeSyncListVersion(plaintext []byte) (map[string]syncPin, int, error) {
 	var raw struct {
 		V        int             `json:"v"`
 		Napplets json.RawMessage `json:"napplets"`
 	}
-	if err := json.Unmarshal(plaintext, &raw); err != nil || raw.V != 1 || len(raw.Napplets) == 0 || raw.Napplets[0] != '[' {
-		return nil, errSyncListInvalid
+	if err := json.Unmarshal(plaintext, &raw); err != nil || (raw.V != 1 && raw.V != 2) || len(raw.Napplets) == 0 || raw.Napplets[0] != '[' {
+		return nil, 0, errSyncListInvalid
 	}
 	var entries []syncEntry
 	if err := json.Unmarshal(raw.Napplets, &entries); err != nil || len(entries) > installSyncMaxEntries {
-		return nil, errSyncListInvalid
+		return nil, 0, errSyncListInvalid
 	}
 	pins := make(map[string]syncPin, len(entries))
 	for _, e := range entries {
 		if !syncableAddress(e.Address) || !lowerHexID(e.EventID) {
-			return nil, errSyncListInvalid
+			return nil, 0, errSyncListInvalid
 		}
 		if _, dup := pins[e.Address]; dup {
-			return nil, errSyncListInvalid
+			return nil, 0, errSyncListInvalid
 		}
-		pins[e.Address] = syncPin{EventID: e.EventID}
+		if (e.Revision == 0 && (e.Pinned || e.SelectionID != "")) ||
+			(e.Revision > 0 && (raw.V != 2 || !e.Pinned || e.Revision > maxSelectionRevision || !hex32.MatchString(e.SelectionID))) {
+			return nil, 0, errSyncListInvalid
+		}
+		ptr, _ := ParseCanonicalServiceAddress(e.Address)
+		if ptr.Kind == KindSnapshotNapplet && ptr.Identifier != e.EventID {
+			return nil, 0, errSyncListInvalid
+		}
+		pins[e.Address] = syncPin{EventID: e.EventID, Pinned: e.Pinned, Revision: e.Revision, SelectionID: e.SelectionID}
 	}
-	return pins, nil
+	return pins, raw.V, nil
 }
 
 // syncableAddress says whether address is a canonical napplet address.
@@ -357,7 +400,11 @@ func lowerHexID(s string) bool {
 
 // sealSyncList encrypts the list to the user's own key.
 func sealSyncList(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, pins map[string]syncPin) (string, error) {
-	plaintext, err := encodeSyncList(pins)
+	return sealSyncListVersion(ctx, k, pk, pins, syncListVersion(pins))
+}
+
+func sealSyncListVersion(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, pins map[string]syncPin, version int) (string, error) {
+	plaintext, err := encodeSyncListVersion(pins, version)
 	if err != nil {
 		return "", err
 	}
@@ -372,16 +419,21 @@ func sealSyncList(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, pins map[
 // openSyncList checks that evt is the user's own list event for id and
 // decrypts and decodes it.
 func openSyncList(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, id string, evt nostr.Event) (map[string]syncPin, error) {
+	pins, _, err := openSyncListVersion(ctx, k, pk, id, evt)
+	return pins, err
+}
+
+func openSyncListVersion(ctx context.Context, k nostr.Keyer, pk nostr.PubKey, id string, evt nostr.Event) (map[string]syncPin, int, error) {
 	if evt.Kind != installSyncKind || evt.PubKey != pk || evt.Tags.GetD() != id || !evt.CheckID() || !evt.VerifySignature() {
-		return nil, errSyncListInvalid
+		return nil, 0, errSyncListInvalid
 	}
 	ctx, cancel := context.WithTimeout(ctx, installSyncSignerTimeout)
 	defer cancel()
 	plaintext, err := k.Decrypt(ctx, evt.Content, pk)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return decodeSyncList([]byte(plaintext))
+	return decodeSyncListVersion([]byte(plaintext))
 }
 
 // ─── pins ────────────────────────────────────────────────────────
@@ -473,7 +525,7 @@ func localSyncPins() map[string]syncPin {
 		if !syncableAddress(a) {
 			continue
 		}
-		pins[a] = syncPin{EventID: n.EventID, CreatedAt: n.CreatedAt}
+		pins[a] = selectionPin(n)
 	}
 	return pins
 }
@@ -484,11 +536,25 @@ func samePins(a, b map[string]syncPin) bool {
 		return false
 	}
 	for addr, p := range a {
-		if q, ok := b[addr]; !ok || q.EventID != p.EventID {
+		if q, ok := b[addr]; !ok || !samePinSelection(q, p) {
 			return false
 		}
 	}
 	return true
+}
+
+func samePinSelection(a, b syncPin) bool {
+	return a.EventID == b.EventID && a.Pinned == b.Pinned && a.Revision == b.Revision && a.SelectionID == b.SelectionID
+}
+
+var installSyncSelection = func(ctx context.Context, address string, pin syncPin) error {
+	n, err := resolveSyncedPin(ctx, address, pin.EventID)
+	if err != nil {
+		// An explicit pin must never fall back to a different publication.
+		return err
+	}
+	_, err = selectResolvedContext(ctx, n, false, &pin, false)
+	return serviceMutationError(ctx, err)
 }
 
 // ─── one pass ────────────────────────────────────────────────────
@@ -524,6 +590,8 @@ func runInstallSync(ctx context.Context) {
 		// a new list or another account: nothing agreed on yet
 		st = installSyncState{ID: id, Pubkey: pk.Hex()}
 	}
+	local := localSyncPins()
+	version := max(1, st.Version, syncListVersion(local))
 
 	// the remote list
 	evt := fetchInstallSyncEvent(ctx, pk, id)
@@ -539,7 +607,7 @@ func runInstallSync(ctx context.Context) {
 		// already merged, or a stale copy
 		remote = syncPins(st.Remote)
 	default:
-		pins, err := openSyncList(ctx, k, pk, id, *evt)
+		pins, remoteVersion, err := openSyncListVersion(ctx, k, pk, id, *evt)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -548,18 +616,26 @@ func runInstallSync(ctx context.Context) {
 			recordInstallSyncResult(id, installSyncUnreadable, -1)
 			return
 		}
-		remote, fresh = pins, true
+		if version == 2 && remoteVersion == 1 {
+			// Old clients reject v2 but may republish a v1 list. Once an
+			// explicit choice exists, that list must not undo it or its deletion.
+			remote = syncPins(st.Remote)
+			remoteMissing = true
+		} else {
+			remote, fresh = pins, true
+			version = max(version, remoteVersion)
+		}
 	}
 
 	// the ages of the pins that differ from the local ones decide the merge
-	local := localSyncPins()
 	for a, r := range remote {
 		l, ok := local[a]
 		if !ok {
 			continue
 		}
 		if r.EventID == l.EventID {
-			remote[a] = l
+			r.CreatedAt = l.CreatedAt
+			remote[a] = r
 			continue
 		}
 		if n, err := resolveSyncedPin(ctx, a, r.EventID); err == nil {
@@ -575,7 +651,8 @@ func runInstallSync(ctx context.Context) {
 	failedUninstall := map[string]bool{}
 	attempted := false
 	for _, e := range syncEntries(target) {
-		if l, ok := local[e.Address]; ok && l.EventID == e.EventID {
+		pin := target[e.Address]
+		if l, ok := local[e.Address]; ok && samePinSelection(l, pin) {
 			continue
 		}
 		if ctx.Err() != nil {
@@ -583,7 +660,12 @@ func runInstallSync(ctx context.Context) {
 		}
 		attempted = true
 		markInstallSyncApplying(e.Address)
-		err := installSyncPin(ctx, e.Address, e.EventID)
+		var err error
+		if pin.Revision > 0 {
+			err = installSyncSelection(ctx, e.Address, pin)
+		} else {
+			err = installSyncPin(ctx, e.Address, e.EventID)
+		}
 		doneInstallSyncApplying(e.Address)
 		if err != nil {
 			failedInstall[e.Address] = true
@@ -609,6 +691,15 @@ func runInstallSync(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	// A user may have selected a newer revision while downloads were in
+	// flight. Publish the current explicit choice rather than a stale target.
+	for address, pin := range localSyncPins() {
+		if prior, ok := target[address]; ok && pin.Revision > 0 && syncPinNewer(pin, prior) {
+			target[address] = pin
+			delete(failedInstall, address)
+		}
+	}
+	version = max(version, syncListVersion(target))
 
 	// the base the next pass merges against: a failed install of something
 	// new is left out, so the remote pin installs again; a failed update or
@@ -628,7 +719,7 @@ func runInstallSync(ctx context.Context) {
 		base[a] = local[a]
 	}
 
-	next := installSyncState{ID: id, Pubkey: pk.Hex(), Remote: syncEntries(remote), Base: syncEntries(base)}
+	next := installSyncState{Version: version, ID: id, Pubkey: pk.Hex(), Remote: syncEntries(remote), Base: syncEntries(base)}
 	if evt != nil && (fresh || evt.ID.Hex() == st.EventID) {
 		next.EventID, next.CreatedAt = evt.ID.Hex(), evt.CreatedAt
 	} else {
@@ -649,7 +740,7 @@ func runInstallSync(ctx context.Context) {
 				return
 			}
 		}
-		content, err := sealSyncList(ctx, k, pk, publishList)
+		content, err := sealSyncListVersion(ctx, k, pk, publishList, version)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Warn().Err(err).Msg("install sync list not sealed")

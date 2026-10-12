@@ -49,7 +49,7 @@ func TestServiceDescriptorManifestFields(t *testing.T) {
 		`"description":"A feed viewer and editor hosted on Nostr","author":"` + pk + `","format":"napplet",` +
 		`"available":true,"sources":["https://github.com/example/my-napplet"],` +
 		`"version":{"event_id":"` + evt.ID.Hex() + `","created_at":1700000000,"artifact_hash":"186ea5fd14e88fd1ac49351759e7ab906fa94892002b60bf7f5a428f28ca1c99"},` +
-		`"kind":35129,"schema":"nip5d",` +
+		`"pinned":false,"kind":35129,"schema":"nip5d",` +
 		`"icon":{"sha256":"ae7a3bd1a3fa9d824d0e64a6f57fe6cb4dd80c423786b6a2ecb94d587c94c75a","mime":"image/png"},` +
 		`"archetypes":["feed"],` +
 		`"intents":[{"id":"napplet:feed/open","params":[]},{"id":"napplet:feed/edit","params":["filters","relays"]}],` +

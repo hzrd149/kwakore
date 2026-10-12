@@ -22,6 +22,7 @@ type ServiceHistoryItem struct {
 	Reason    string          `json:"reason,omitempty"`
 	Relation  string          `json:"relation"`
 	Selected  bool            `json:"selected"`
+	Cached    bool            `json:"cached"`
 	FirstSeen int64           `json:"first_seen"`
 	LastSeen  int64           `json:"last_seen"`
 	Relays    []string        `json:"relays"`
@@ -33,6 +34,7 @@ type ServiceHistoryPage struct {
 	Total                     int                  `json:"total"`
 	NextOffset                *int                 `json:"next_offset"`
 	SelectedVersion           *ServiceVersion      `json:"selected_version"`
+	Pinned                    bool                 `json:"pinned"`
 	SelectedManifestAvailable bool                 `json:"selected_manifest_available"`
 	LatestObserved            *ServiceHistoryItem  `json:"latest_observed"`
 	LookupStatus              string               `json:"lookup_status"`
@@ -164,6 +166,7 @@ func ServiceHistory(ctx context.Context, address string, snapshots, refresh bool
 			selectedID = n.EventID
 			v := serviceVersion(n)
 			result.SelectedVersion = &v
+			result.Pinned = n.Pinned || n.IsSnapshot()
 			break
 		}
 	}
@@ -225,6 +228,7 @@ func historyItem(record archivedManifest, author nostr.PubKey, selected string) 
 		Author: record.Event.PubKey.Hex(), Kind: int(record.Event.Kind), Schema: d.Schema,
 		Name: d.Name, Valid: n.Unavailable == "", Reason: n.Unavailable,
 		Relation: "publication", Selected: record.Event.ID.Hex() == selected,
+		Cached:    hasCachedArtifacts(n),
 		FirstSeen: record.FirstSeen, LastSeen: record.LastSeen,
 		Relays: append([]string{}, record.Relays...), Lineage: descriptorLineage(n),
 	}

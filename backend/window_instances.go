@@ -794,6 +794,10 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 	unlockReclaim := func() {}
 	if installedNapplet {
 		reclaimMu.Lock()
+		if mutationExists(id) {
+			reclaimMu.Unlock()
+			return nil, errBusy
+		}
 		stateMu.Lock()
 		current, ok := state.InstalledNapps[id]
 		present := ok && installFiles()

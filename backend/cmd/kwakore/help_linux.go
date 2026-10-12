@@ -24,7 +24,9 @@ Napplets:
            [--archetype NAME] [--intent ID] [--domain NAME]
            [--compatible] [--kind N]
                                  Search the napplet catalog
-  install ADDRESS               Install a napplet
+  install ADDRESS [--event EVENT_ID]
+                                 Install the latest or pin an exact version
+  select ADDRESS EVENT_ID        Select an exact version, including rollback
   update ADDRESS                 Update an installed napplet
   updates [ADDRESS]              Check installed napplets for newer versions
   detail ADDRESS                 Show a napplet's public details
@@ -107,6 +109,16 @@ func lookupHelp(parts []string) string {
 // Each entry includes the exact invocation and its command-specific choices.
 // Keep these alongside cliHelp when adding or changing commands.
 var commandHelp = map[string]string{
+	"select": `Select and pin an exact installed napplet version.
+
+Usage: kwak select ADDRESS EVENT_ID
+EVENT_ID must be the full lowercase hex ID of an authentic publication at
+the same address. Use kwak versions ADDRESS to find known event IDs.
+Moving to a different event resets saved data and settings. Close the
+napplet's windows first; otherwise selection returns Busy. Selecting the
+same established pin is a no-op. Verified cached code works offline.
+Example: kwak select nostr:naddr1... EVENT_ID
+`,
 	"versions": `Browse a napplet's observed manifest versions.
 
 Usage: kwak versions ADDRESS [--refresh] [--offset N] [--limit N]
@@ -201,10 +213,13 @@ Example: kwak discover --archetype feed --compatible
 `,
 	"install": `Install a napplet from its Nostr address.
 
-Usage: kwak install ADDRESS
+Usage: kwak install ADDRESS [--event EVENT_ID]
 ADDRESS accepts KIND:PUBKEY_HEX:D, naddr1..., or nostr:naddr1...,
 or nevent1... or note1... for a kind 5129 snapshot.
 An naddr's usable relay hints are used for this install only.
+--event pins the exact signed publication, including historical versions.
+Moving an existing install to a different event resets its data and settings;
+close its windows first. Snapshots remain separate immutable installations.
 Example: kwak install nostr:naddr1...
 `,
 	"update": `Update an installed napplet.

@@ -118,6 +118,14 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 	// checked before the download, which it would waste, and again when
 	// the record is written
 	stateMu.Lock()
+	current := state.InstalledNapps[n.ID]
+	if current.Pinned {
+		stateMu.Unlock()
+		if current.EventID == n.EventID {
+			return ServiceInstallResult{Address: current.Address(), Outcome: "unchanged", InstalledVersion: serviceVersion(current)}, nil
+		}
+		return ServiceInstallResult{}, errOlderVersion
+	}
 	older := olderThanInstalledLocked(n)
 	stateMu.Unlock()
 	if older {
@@ -130,6 +138,9 @@ func InstallNappContext(ctx context.Context, n Napp) (ServiceInstallResult, erro
 	if err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		return ServiceInstallResult{}, err
+	}
+	if current.ID != "" {
+		retainInstalledArtifacts(current, base)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
@@ -948,12 +959,18 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	if err != nil {
 		return err
 	}
-	data, err := downloadBlob(ctx, servers, p.Sha256)
+	data := readCachedArtifact(p.Sha256)
+	if data == nil {
+		data, err = downloadBlob(ctx, servers, p.Sha256)
+	}
 	if err != nil {
 		// the file, not the hash: an install or update that failed has to
 		// say which of the napp's files nobody could serve (in the log;
 		// the launcher line is errFilesFailed's fixed text)
 		return fmt.Errorf("%w: %s: %w", errFilesFailed, p.Path, err)
+	}
+	if err := cacheArtifact(p.Sha256, data); err != nil {
+		return fmt.Errorf("%w: could not retain artifact: %w", errFilesFailed, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)

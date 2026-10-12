@@ -40,7 +40,8 @@ All page offsets count records after sorting by canonical `address` ascending. I
 | `napplet.snapshots` | `{address:string,refresh?:boolean,offset?:integer,limit?:integer}` | `HistoryPage` |
 | `napplet.icon` | `{address:string}` required | `{sha256:string,mime:"image/png",width:integer,height:integer,data:string}` |
 | `napplet.windows` | none | `{items:[{window_id:string,address:string,name:string},...]}` for active napplet windows |
-| `napplet.install` | `{address:string,relays?:string[]}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled",installed_version:Version}` |
+| `napplet.install` | `{address:string,relays?:string[],event_id?:string}`, `address` required | `{address:string,outcome:"installed"\|"updated"\|"reinstalled"\|"selected"\|"unchanged",installed_version:Version}` |
+| `napplet.select` | `{address:string,event_id:string}` required | `{address:string,outcome:"selected"\|"unchanged",direction:"forward"\|"backward"\|"unchanged",previous_version:Version,installed_version:Version,pinned:true,data_reset:boolean}` |
 | `napplet.update` | `{address:string}` required | `{address:string,outcome:"updated",previous_version:Version,installed_version:Version}` |
 | `napplet.uninstall` | `{address:string,confirm:true}` required | `{address:string,outcome:"removed",previous_version:Version,cleanup_complete:true}` |
 | `napplet.launch` | `{address:string}` required | `{address:string,window_id:string,outcome:"opened"}` after the checked child reports host-page `nap.start` |
@@ -94,6 +95,8 @@ refreshing never changes the installed version or deletes earlier observations.
 - `selected_version:Version|null` and `selected_manifest_available:boolean`.
   An existing installation may lack its original signed event; its parsed record
   is shown here without inventing an archived signed publication.
+  `pinned:boolean` reports the installed selection policy (snapshots are
+  inherently pinned).
 - `latest_observed:HistoryItem|null`, independent of pagination. For a mutable
   address this is the latest authentic publication, even if invalid; snapshot
   listings keep that mutable head separate from snapshot timestamps.
@@ -115,8 +118,44 @@ invalid manifest. Observation times describe when Kwakore recorded the event,
 not when it was published. Relay provenance is deduplicated, capped at 64 URLs,
 and excludes credentials. Full signed events are stored privately in
 `manifest-history.db`; responses expose neither the event body nor local paths.
-Downloaded artifact availability and switching to historical versions are not
-provided by these history methods.
+These history methods do not switch installed versions. `cached:boolean`
+reports whether all of the
+manifest's code files exist in the local artifact cache; cached bytes are
+hash-verified again before installation, and a corrupt cache is never executed.
+
+`napplet.install` with `event_id` installs that exact authentic publication and
+pins it, including an older event at a mutable address. The ID must be 64
+lowercase hex characters. `napplet.select` requires an existing installation
+and moves its selection to that exact event. Both verify the event's author,
+kind and identifier against `address`; a mismatch yields `Conflict`, a missing
+event `Not found`, and an invalid manifest `Unavailable`. Neither silently
+substitutes the latest publication. Snapshots keep their own event identities
+and must be installed separately from mutable napplets; lineage cannot authorize
+replacement. A snapshot address's identifier must equal the selected event ID.
+
+Choosing a different event resets saved data and settings for both the previous
+and selected artifact scopes, including metadata-only republications with the
+same artifact hash. No older saves are restored. The switch returns `Busy` if
+any window of that napplet is open; close it with `napplet.stop` first. Selecting
+the same established pin is a no-op, with `data_reset:false`. Pinning an existing
+unheld selection reports `unchanged` and preserves data. A pinned installation
+still advertises updates, and an explicit `napplet.update` or latest install can
+advance the pin. Background discovery and publication timestamps cannot move it.
+
+Code downloads are retained in a separate `artifact-cache/`, including code
+from installations made before this cache when their files are replaced.
+Archived signed events plus verified cached artifacts allow offline selection.
+An uncached version still requires available Blossom blobs. Uninstall removes
+the active installation and its saved data, while signed history and cached code
+remain available for reinstallation. There is no automatic cache pruning yet.
+
+The mutation journal commits the selected record before deleting saved data.
+A failed download or uncommitted mutation preserves the previous installation
+and its data. A failure after commitment leaves the journal pending and returns
+`Unavailable`; launch returns `Busy` until a daemon restart finishes recovery.
+Inspect the installed record to determine the selected event after such a
+failure. Recovery retries data reset before permitting execution. Permission
+rules retain the existing address-based policy.
 
 `napplet.icon` returns the verified icon of the napplet at a canonical address (the installed record, else the catalog entry, else the newest stored manifest). The icon is fetched by its manifest hash from the user's, the manifest's and the author's Blossom servers. The source must match the hash, decode as the declared `image/png`, `image/jpeg` or `image/webp`, be at most 1 MiB and at most 1024×1024 pixels; it is then re-encoded as PNG and cached, so a later call reads the cache. `sha256` is the manifest's icon hash (never a URL), `mime` is always `image/png`, `width` and `height` are the PNG's size, and `data` is its standard base64. An unknown address or a napplet without a usable icon tag yields `Not found`; a fetch, verify or decode failure yields `Unavailable`. Neither error carries a URL or path. No event announces a cached icon: the service caches an installed napplet's icon in the background, and clients call `napplet.icon` after `napplet.installed` or `napplet.updated`, which fills the cache if needed.
 
@@ -137,6 +176,9 @@ alongside EOSE before committing its catalog snapshot.
 Every descriptor (in `napplet.discover`, `napplet.installed` and
 `napplet.detail`) also carries the manifest fields below. Every list is an
 array, `[]` when empty; every field is present.
+
+`pinned:boolean` is true for an explicit installed selection or an immutable
+snapshot. The discovered mutable manifest itself has no installation policy.
 
 - `kind:integer`: the manifest kind, `5129`, `15129`, `35129` or `35130`.
 - `schema:"nip5d"|"legacy"|"napp"`: `nip5d` is the current NIP-5D napplet
@@ -188,6 +230,10 @@ A notification has no `id`. `params` always holds `type` and `time` (an RFC3339 
 | `settings.changed` | `fields:string[]` | settings changed through `settings.set`, `settings.clear` or `settings.reload`; it names the changed fields only, never their values, so read them with `settings.get` |
 | `sync.completed` | `result` (an `InstallSync` result category), `ok:boolean`, `napplets:integer` | an installed-list sync pass ended |
 | `events.overflow` | `dropped:integer` | always delivered, see below |
+
+Explicit selections also emit the installed/updated events with optional
+`pinned:boolean`, `data_reset:boolean`, and `outcome` (`selected` or `unchanged`
+for an existing installation). Metadata-only pin changes preserve saved data.
 
 Events arrive in the order they happened, and their times never decrease. No event carries a path, relay URL, key, secret or raw error. Each subscriber has a queue of 256 events. When a client reads too slowly and its queue fills, its further events are dropped and counted until the queued ones have been written; it then receives one `events.overflow` notification with the number dropped, and the stream goes on. After an overflow a client should re-read the state it follows with `napplet.installed`, `napplet.windows`, `signer.status`, `settings.get` and `service.diagnostics`. Each notification has the 30-second write deadline; a client that stops reading for longer is disconnected. The subscription ends when the client closes the connection, a write fails or the service shuts down; the server then closes the connection without a final notice. A subscription never delays shutdown.
 
@@ -264,7 +310,8 @@ Installations put it on `PATH` as `kwak` (the helper links `~/.local/bin/kwak`);
 | `discover [--query TEXT] [--refresh] [--offset N] [--limit N] [--archetype NAME] [--intent ID] [--domain NAME] [--compatible] [--kind N]` | `napplet.discover` (a filter is sent only when given; `--compatible=false` sends `false`; the values are checked with the daemon's rules before dialing) |
 | `installed [--offset N] [--limit N]` | `napplet.installed` |
 | `windows` | `napplet.windows` |
-| `install ADDRESS` | `napplet.install` (an `naddr`'s usable relay hints are sent as `relays`) |
+| `install ADDRESS [--event EVENT_ID]` | `napplet.install` (usable relay hints are sent as `relays`; `--event` becomes `event_id`) |
+| `select ADDRESS EVENT_ID` | `napplet.select` |
 | `update ADDRESS` | `napplet.update` |
 | `updates [ADDRESS]` | `napplet.updates.check` |
 | `detail ADDRESS` | `napplet.detail` |

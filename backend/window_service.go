@@ -78,6 +78,9 @@ func ServiceLaunch(ctx context.Context, address string) (ServiceLaunchResult, er
 	// different window opened by the next daemon process.
 	ci, err := launchWithInstance(ctx, installed, randomID())
 	if err != nil {
+		if errors.Is(err, errBusy) {
+			return ServiceLaunchResult{}, ErrServiceBusy
+		}
 		if errors.Is(err, ErrServiceSessionUnavailable) {
 			return ServiceLaunchResult{}, err
 		}

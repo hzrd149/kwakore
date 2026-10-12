@@ -39,10 +39,12 @@ func stubInstallSync(t *testing.T, id string, relays ...string) {
 	prevID, prevRelays, prevFetch := installSyncID, installSyncRelays, fetchSyncedPin
 	prevInstall, prevService, prevPin, prevRemove := syncInstallNapp, syncServiceInstall, installSyncPin, installSyncRemove
 	prevEvent := fetchInstallSyncEvent
+	prevSelection := installSyncSelection
 	t.Cleanup(func() {
 		installSyncID, installSyncRelays, fetchSyncedPin = prevID, prevRelays, prevFetch
 		syncInstallNapp, syncServiceInstall, installSyncPin, installSyncRemove = prevInstall, prevService, prevPin, prevRemove
 		fetchInstallSyncEvent = prevEvent
+		installSyncSelection = prevSelection
 		setInstallSyncLastPublished("")
 	})
 	installSyncID = func() string { return id }
@@ -121,7 +123,7 @@ func TestSyncListEncoding(t *testing.T) {
 		many[i] = entry(fmt.Sprintf("35129:%s:n%d", pk, i), hexID('c'))
 	}
 	for name, body := range map[string]string{
-		"v2":              `{"v":2,"napplets":[]}`,
+		"v3":              `{"v":3,"napplets":[]}`,
 		"no list":         `{"v":1}`,
 		"null list":       `{"v":1,"napplets":null}`,
 		"non-canonical":   `{"v":1,"napplets":[` + entry("35129:"+strings.ToUpper(pk)+":a", hexID('a')) + `]}`,
