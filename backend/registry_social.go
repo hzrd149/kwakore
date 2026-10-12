@@ -67,6 +67,8 @@ type socialTarget struct {
 	// VersionIDs are the lowercase hex ids of the newest archived manifests
 	// of the address, then the installed one; a snapshot's is its own id.
 	VersionIDs []string
+	// Installed is the installed record's event id for the address, or "".
+	Installed string
 }
 
 // newSocialTarget parses a canonical address and collects its version ids
@@ -95,7 +97,11 @@ func newSocialTarget(address string) (socialTarget, error) {
 	}
 	stateMu.Lock()
 	for _, n := range state.InstalledNapps {
-		if n.Address() == address && hex64.MatchString(n.EventID) && !slices.Contains(t.VersionIDs, n.EventID) {
+		if n.Address() != address || !hex64.MatchString(n.EventID) {
+			continue
+		}
+		t.Installed = n.EventID
+		if !slices.Contains(t.VersionIDs, n.EventID) {
 			t.VersionIDs = append(t.VersionIDs, n.EventID)
 		}
 	}
