@@ -10,15 +10,16 @@ import (
 	"unicode"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 )
 
 // Social actions: voting on a napplet, reacting to it with an emoji,
-// commenting on it (or replying to a comment) and deleting one's own
-// reaction or comment. Each signs one event with the service signer,
-// publishes it to the user's write relays plus the napplet author's inbox,
-// and applies the change to the local social data at once, so
-// napplet.social shows it without a refresh. Reaching no relay is not an
-// error: the event stays in the local store and the result says
+// commenting on it (or replying to a comment), sharing it in a kind 1 note
+// and deleting one's own reaction, comment or share. Each signs one event
+// with the service signer, publishes it to the user's write relays plus the
+// napplet author's inbox, and applies the change to the local social data
+// at once, so napplet.social shows it without a refresh. Reaching no relay
+// is not an error: the event stays in the local store and the result says
 // published 0.
 //
 // No relay URL or raw error ever leaves this file: publishSigned's
@@ -37,8 +38,8 @@ var (
 	// never has two prompts out and votes never race each other.
 	socialActions = make(chan struct{}, 1)
 	// socialDeletableKinds are the kinds a client may delete through
-	// napplet.delete. Phase 3 appends kind 1 together with socialTagNames.
-	socialDeletableKinds = []nostr.Kind{nostr.KindReaction, nostr.KindComment}
+	// napplet.delete: reactions, comments and shared notes.
+	socialDeletableKinds = []nostr.Kind{nostr.KindReaction, nostr.KindComment, nostr.KindTextNote}
 )
 
 const (
@@ -46,6 +47,14 @@ const (
 	socialVoteDeleteLimit = 10
 	// socialInboxRelays caps the inbox relays taken from one author's list.
 	socialInboxRelays = 4
+	// socialShareContentMax caps a share's text in bytes. It leaves room for
+	// the blank line and the longest nostr: URI (two 255-byte TLV values plus
+	// the key and the kind), so a share stays within the 8 KiB every reader
+	// accepts.
+	socialShareContentMax = socialMaxContent - 1024
+	// socialNIP19Value is the most bytes one NIP-19 TLV value can hold: its
+	// length is a single byte.
+	socialNIP19Value = 255
 )
 
 // socialPublishRelays is where a social action publishes: the user's write
@@ -210,6 +219,58 @@ func socialDeletionEvent(targets []nostr.Event) nostr.Event {
 		tags = append(tags, nostr.Tag{"k", socialKindTag(kind)})
 	}
 	return nostr.Event{Kind: nostr.KindDeletion, CreatedAt: nostr.Now(), Tags: tags, Content: ""}
+}
+
+// socialShareEntity is the canonical NIP-19 entity of t for a share's
+// nostr: URI: an naddr, or an nevent for a snapshot (without a kind, which
+// the pinned encoder cannot write and NIP-19 makes optional). hint, when
+// set, is its one relay; it only ever goes inside the signed event. ok is
+// false when t cannot be encoded, such as a d tag over 255 bytes.
+func socialShareEntity(t socialTarget, hint string) (string, bool) {
+	var relays []string
+	if hint != "" {
+		relays = []string{hint}
+	}
+	if t.Snapshot {
+		if len(t.VersionIDs) == 0 {
+			return "", false
+		}
+		id, err := nostr.IDFromHex(t.VersionIDs[0])
+		if err != nil {
+			return "", false
+		}
+		return nip19.EncodeNevent(id, relays, t.Author), true
+	}
+	ptr, err := ParseCanonicalServiceAddress(t.Address)
+	if err != nil || len(ptr.Identifier) > socialNIP19Value {
+		return "", false
+	}
+	return nip19.EncodeNaddr(t.Author, t.Kind, ptr.Identifier, relays), true
+}
+
+// socialShareEvent is a NIP-18 quote note sharing t: the text without its
+// trailing whitespace, a blank line and the nostr: URI (the bare URI when
+// the text is blank). It quotes t with "q" (a snapshot's positional id,
+// relay and author), tags the author with "p" and names the address with
+// "a" except for a snapshot.
+func socialShareEvent(t socialTarget, hint, entity, content string, at nostr.Timestamp) nostr.Event {
+	text := strings.TrimRightFunc(content, unicode.IsSpace)
+	body := "nostr:" + entity
+	if strings.TrimSpace(text) != "" {
+		body = text + "\n\nnostr:" + entity
+	}
+	author := t.Author.Hex()
+	var tags nostr.Tags
+	if t.Snapshot {
+		tags = nostr.Tags{{"q", t.VersionIDs[0], hint, author}, {"p", author}}
+	} else {
+		q := nostr.Tag{"q", t.Address}
+		if hint != "" {
+			q = append(q, hint)
+		}
+		tags = nostr.Tags{q, {"p", author}, {"a", t.Address}}
+	}
+	return nostr.Event{Kind: nostr.KindTextNote, CreatedAt: at, Tags: tags, Content: body}
 }
 
 // ─── lookups ────────────────────────────────────────────────────────────
@@ -455,10 +516,47 @@ func ServiceSocialComment(ctx context.Context, address, content, parentID string
 	return ServiceSocialPublishResult{Address: address, Outcome: "published", EventID: signed.ID.Hex(), Published: published, Failed: failed}, nil
 }
 
-// ServiceSocialDelete withdraws one of the user's own live reactions or
-// comments on a napplet with a NIP-09 kind 5, and drops it locally while
-// keeping the kind 5 as its tombstone. An unknown id, someone else's event
-// and one linked to another napplet are the same not found.
+// ServiceSocialShare shares a napplet in a NIP-18 quote note: the text is
+// published as given except for trailing whitespace, followed by the
+// napplet's nostr: URI. It needs no known version, since the note names the
+// address. The result never echoes the text or the URI.
+func ServiceSocialShare(ctx context.Context, address, content string) (ServiceSocialPublishResult, error) {
+	t, err := newSocialTarget(address)
+	if err != nil {
+		return ServiceSocialPublishResult{}, err
+	}
+	if len(content) > socialShareContentMax {
+		return ServiceSocialPublishResult{}, ErrServiceInvalidSocial
+	}
+	if _, ok := socialShareEntity(t, ""); !ok {
+		return ServiceSocialPublishResult{}, ErrServiceInvalidSocial
+	}
+	k, pk, release, err := socialAction(ctx)
+	if err != nil {
+		return ServiceSocialPublishResult{}, err
+	}
+	defer release()
+
+	targets, hint := socialPublishRelays(ctx, t, nostr.ZeroPK)
+	if len(hint) > socialNIP19Value {
+		hint = ""
+	}
+	entity, ok := socialShareEntity(t, hint)
+	if !ok {
+		return ServiceSocialPublishResult{}, ErrServiceInvalidSocial
+	}
+	signed, published, failed, err := socialSignPublish(ctx, k, pk, socialShareEvent(t, hint, entity, content, nostr.Now()), targets)
+	if err != nil {
+		return ServiceSocialPublishResult{}, err
+	}
+	socialGeneration.Add(1)
+	return ServiceSocialPublishResult{Address: address, Outcome: "published", EventID: signed.ID.Hex(), Published: published, Failed: failed}, nil
+}
+
+// ServiceSocialDelete withdraws one of the user's own live reactions,
+// comments or shared notes on a napplet with a NIP-09 kind 5, and drops it
+// locally while keeping the kind 5 as its tombstone. An unknown id, someone
+// else's event and one linked to another napplet are the same not found.
 func ServiceSocialDelete(ctx context.Context, address, eventID string) (ServiceSocialDeleteResult, error) {
 	t, err := newSocialTarget(address)
 	if err != nil {
@@ -512,8 +610,8 @@ type ServiceSocialVoteResult struct {
 	Failed    int      `json:"failed"`
 }
 
-// ServiceSocialPublishResult is napplet.react's and napplet.comment's
-// result.
+// ServiceSocialPublishResult is napplet.react's, napplet.comment's and
+// napplet.share's result.
 type ServiceSocialPublishResult struct {
 	Address   string `json:"address"`
 	Outcome   string `json:"outcome"`
