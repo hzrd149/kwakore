@@ -500,7 +500,7 @@ func TestCLIContractCatalog(t *testing.T) {
 		{"updates"}, {"detail", address}, {"icon", address}, {"events"},
 		{"versions", address}, {"snapshots", address},
 		{"select", address, strings.Repeat("e", 64)},
-		{"social", address}, {"reactions", address}, {"comments", address},
+		{"social", address}, {"reactions", address}, {"comments", address}, {"mentions", address}, {"share", address},
 		{"vote", address, "up"}, {"react", address, "🔥"}, {"comment", address, "hi"},
 		{"unpublish", address, strings.Repeat("e", 64)},
 	}
@@ -533,6 +533,8 @@ func TestCLISocialCommands(t *testing.T) {
 			`{"address":"` + address + `","refresh":true,"categories":["reactions","comments"]}`},
 		{[]string{"social", address, "--only", "comments"}, "napplet.social",
 			`{"address":"` + address + `","refresh":false,"categories":["comments"]}`},
+		{[]string{"social", address, "--only", "mentions"}, "napplet.social",
+			`{"address":"` + address + `","refresh":false,"categories":["mentions"]}`},
 		{[]string{"reactions", address}, "napplet.reactions", `{"address":"` + address + `","limit":100,"offset":0}`},
 		{[]string{"reactions", address, "--event", id, "--offset", "2", "--limit", "5"}, "napplet.reactions",
 			`{"address":"` + address + `","event_id":"` + id + `","limit":5,"offset":2}`},
@@ -546,7 +548,7 @@ func TestCLISocialCommands(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"social"}, {"social", "bad"}, {"social", address, "extra"},
-		{"social", address, "--only", ""}, {"social", address, "--only", "mentions"},
+		{"social", address, "--only", ""}, {"social", address, "--only", "zaps"},
 		{"social", address, "--only", "reactions,reactions"}, {"social", address, "--only", "reactions,"},
 		{"social", address, "--refresh", "true"}, {"social", address, "--event", id},
 		{"reactions"}, {"reactions", address, "--event", strings.ToUpper(id)},
@@ -570,7 +572,7 @@ func TestCLISocialCommands(t *testing.T) {
 			t.Fatalf("%s deadline %v", method, got)
 		}
 	}
-	for _, topic := range []string{"social", "reactions", "comments"} {
+	for _, topic := range []string{"social", "reactions", "comments", "mentions"} {
 		if text, ok := helpTopic([]string{"help", topic}); !ok || !strings.Contains(text, "Usage: kwak "+topic+" ADDRESS") {
 			t.Fatalf("missing help for %s", topic)
 		}
@@ -1747,6 +1749,66 @@ func TestCLISocialActionCommands(t *testing.T) {
 		if !strings.Contains(cliHelp, "\n  "+topic+" ADDRESS") {
 			t.Fatalf("top-level help lacks %s", topic)
 		}
+	}
+}
+
+func TestCLIMentionsAndShareCommands(t *testing.T) {
+	address := "35129:" + strings.Repeat("a", 64) + ":app"
+	addr := `"address":"` + address + `"`
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		args   []string
+		method string
+		params string
+	}{
+		{[]string{"mentions", address}, "napplet.mentions", `{` + addr + `,"limit":100,"offset":0}`},
+		{[]string{"mentions", address, "--offset", "2", "--limit", "5"}, "napplet.mentions", `{` + addr + `,"limit":5,"offset":2}`},
+		{[]string{"share", address}, "napplet.share", `{` + addr + `}`},
+		{[]string{"share", address, "Try this"}, "napplet.share", `{` + addr + `,"content":"Try this"}`},
+		// TEXT is never read as a flag
+		{[]string{"share", address, "--not-a-flag"}, "napplet.share", `{` + addr + `,"content":"--not-a-flag"}`},
+		{[]string{"social", address, "--only", "reactions,comments,mentions"}, "napplet.social",
+			`{` + addr + `,"refresh":false,"categories":["reactions","comments","mentions"]}`},
+	} {
+		method, params, _, err := command(tc.args)
+		if err != nil || method != tc.method || string(params) != tc.params {
+			t.Fatalf("%v: %s %s %v", tc.args, method, params, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"mentions"}, {"mentions", "bad"}, {"mentions", address, "extra"},
+		{"mentions", address, "--event", id}, {"mentions", address, "--parent", id},
+		{"mentions", address, "--limit", "0"}, {"mentions", address, "--limit", "501"}, {"mentions", address, "--offset", "-1"},
+		{"share"}, {"share", "bad"}, {"share", address, ""}, {"share", address, "  "}, {"share", address, "hi", "extra"},
+		{"social", address, "--only", "zaps"}, {"social", address, "--only", "mentions,mentions"},
+	} {
+		_, _, _, err := command(args)
+		var input inputFailure
+		var addrErr addressFailure
+		if err == nil || (!errors.As(err, &input) && !errors.As(err, &addrErr)) {
+			t.Fatalf("%v: %v, want a refusal before dialing", args, err)
+		}
+	}
+	if got := commandDeadline("napplet.mentions", 0); got != 30*time.Second {
+		t.Fatalf("mentions deadline %v", got)
+	}
+	if got := commandDeadline("napplet.share", 0); got != 75*time.Second {
+		t.Fatalf("share deadline %v", got)
+	}
+	if got := unavailableReason("napplet.share"); got != controlprotocol.ReasonSignerUnavailable {
+		t.Fatalf("share unavailable reason %q", got)
+	}
+	for _, topic := range []string{"mentions", "share"} {
+		text, ok := helpTopic([]string{"help", topic})
+		if !ok || !strings.Contains(text, "Usage: kwak "+topic+" ADDRESS") {
+			t.Fatalf("missing help for %s", topic)
+		}
+		if !strings.Contains(cliHelp, "\n  "+topic+" ADDRESS") {
+			t.Fatalf("top-level help lacks %s", topic)
+		}
+	}
+	if text, _ := helpTopic([]string{"help", "share"}); !strings.Contains(text, "signer") {
+		t.Fatal("share help does not mention the signer")
 	}
 }
 

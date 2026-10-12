@@ -34,17 +34,19 @@ Napplets:
                                  Browse observed manifest versions
   snapshots ADDRESS [--refresh] [--offset N] [--limit N]
                                  Browse author snapshots and derivatives
-  social ADDRESS [--refresh] [--only reactions,comments]
-                                 Show reactions and comments
+  social ADDRESS [--refresh] [--only reactions,comments,mentions]
+                                 Show reactions, comments and mentions
   reactions ADDRESS [--event ID] List reactions
   comments ADDRESS [--parent ID] List comments or replies
+  mentions ADDRESS               List notes that mention a napplet
   vote ADDRESS up|down|none [--event ID]
                                  Vote on a napplet
   react ADDRESS EMOJI [--url URL] [--event ID]
                                  React to a napplet with an emoji
   comment ADDRESS TEXT [--reply ID]
                                  Comment on a napplet or reply to a comment
-  unpublish ADDRESS EVENT_ID     Delete your own reaction or comment
+  unpublish ADDRESS EVENT_ID     Delete your own reaction, comment or share
+  share ADDRESS [TEXT]           Share a napplet in a note
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
@@ -151,16 +153,17 @@ Same-author snapshots and other-author derivatives are labeled separately.
 Lineage is provenance; snapshots do not replace the latest mutable version.
 Example: kwak snapshots nostr:naddr1... --refresh
 `,
-	"social": `Show a napplet's reactions and comments.
+	"social": `Show a napplet's reactions, comments and mentions.
 
-Usage: kwak social ADDRESS [--refresh] [--only reactions,comments]
+Usage: kwak social ADDRESS [--refresh] [--only reactions,comments,mentions]
   --refresh    Ask relays first: the author's, discovery and your read relays
-  --only LIST  Refresh only these categories (reactions, comments)
+  --only LIST  Refresh only these categories (reactions, comments, mentions)
 Without --refresh, reads local data only. A category is asked at most once
 per 30 seconds. Votes are each person's latest +, empty (both up) or -
-reaction; other reactions are emoji, counted once per person. Works for any
-napplet, installed or not. This command only reads; kwak vote, react,
-comment and unpublish publish.
+reaction; other reactions are emoji, counted once per person. Mentions are
+notes that name or quote the napplet. Works for any napplet, installed or
+not. This command only reads; kwak vote, react, comment, share and unpublish
+publish.
 Example: kwak social nostr:naddr1... --refresh
 `,
 	"reactions": `List a napplet's reactions, newest first.
@@ -181,6 +184,16 @@ Usage: kwak comments ADDRESS [--parent ID] [--offset N] [--limit N]
 Without --parent, lists top-level comments and replies whose parent is not
 held. Reads local data only; kwak social ADDRESS --refresh fetches new ones.
 Example: kwak comments nostr:naddr1... --parent COMMENT_ID
+`,
+	"mentions": `List the notes that mention a napplet, newest first.
+
+Usage: kwak mentions ADDRESS [--offset N] [--limit N]
+  --offset N   Start at note N (default 0)
+  --limit N    Return 1–500 notes (default 100)
+quote is true for a note that quotes the napplet (a NIP-18 q tag) and false
+for one that only names it. Reads local data only; kwak social ADDRESS
+--refresh fetches new ones.
+Example: kwak mentions nostr:naddr1... --limit 20
 `,
 	"vote": `Vote on a napplet, or withdraw your vote.
 
@@ -210,14 +223,24 @@ TEXT is published as given, up to 8 KiB. Needs a signer (kwak signer).
 published: 0 means no relay took the event; it is kept locally.
 Example: kwak comment nostr:naddr1... "Works great" --reply COMMENT_ID
 `,
-	"unpublish": `Delete your own reaction or comment on a napplet.
+	"unpublish": `Delete your own reaction, comment or share of a napplet.
 
 Usage: kwak unpublish ADDRESS EVENT_ID
-EVENT_ID is one of your reactions or comments on this napplet (64 hex event
-ID). Publishes a NIP-09 deletion and removes the event locally. Needs a
-signer (kwak signer). published: 0 means no relay took the deletion; it is
-kept locally.
+EVENT_ID is one of your reactions, comments or shares of this napplet (64
+hex event ID). Publishes a NIP-09 deletion and removes the event locally.
+Needs a signer (kwak signer). published: 0 means no relay took the deletion;
+it is kept locally.
 Example: kwak unpublish nostr:naddr1... EVENT_ID
+`,
+	"share": `Share a napplet in a note.
+
+Usage: kwak share ADDRESS [TEXT]
+Publishes a note with TEXT, if given, followed by the napplet's nostr: link,
+and tags the napplet's author. TEXT is published as given, up to 7 KiB;
+leave it out to share the link alone. Needs a signer (kwak signer).
+published: 0 means no relay took the note; it is kept locally. kwak unpublish
+ADDRESS EVENT_ID withdraws it.
+Example: kwak share nostr:naddr1... "Try this napplet"
 `,
 	"windows": `List active napplet windows.
 

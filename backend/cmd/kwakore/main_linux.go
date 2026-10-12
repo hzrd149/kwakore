@@ -183,7 +183,7 @@ func commandDeadline(method string, override time.Duration) time.Duration {
 	case "napplet.social":
 		// the daemon bounds a refresh at 60s
 		return 75 * time.Second
-	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share":
 		// the daemon bounds a social action at 60s
 		return 75 * time.Second
 	}
@@ -408,9 +408,9 @@ func parseUnavailableData(raw json.RawMessage) (controlprotocol.SessionUnavailab
 	return data, true
 }
 
-// socialActionCommand maps the vote, react, comment and unpublish words
-// onto their methods. Positional arguments come first, then flags; ids are
-// 64 lowercase hex.
+// socialActionCommand maps the vote, react, comment, unpublish and share
+// words onto their methods. Positional arguments come first, then flags; ids
+// are 64 lowercase hex. A share's TEXT is taken verbatim, never as a flag.
 func socialActionCommand(args []string) (string, json.RawMessage, error) {
 	addr, err := commandAddress(args[1], false)
 	if err != nil {
@@ -432,6 +432,23 @@ func socialActionCommand(args []string) (string, json.RawMessage, error) {
 			EventID string `json:"event_id"`
 		}{addr.Canonical, args[2]})
 		return "napplet.delete", params, nil
+	}
+	if args[0] == "share" {
+		if len(args) != 2 && len(args) != 3 {
+			return "", nil, inputFailure("usage: kwak share ADDRESS [TEXT]")
+		}
+		content := ""
+		if len(args) == 3 {
+			if strings.TrimSpace(args[2]) == "" {
+				return "", nil, inputFailure("share text is empty; leave it out to share the link alone")
+			}
+			content = args[2]
+		}
+		params, _ := json.Marshal(struct {
+			Address string `json:"address"`
+			Content string `json:"content,omitempty"`
+		}{addr.Canonical, content})
+		return "napplet.share", params, nil
 	}
 	if len(args) < 3 {
 		return "", nil, inputFailure("invalid " + args[0] + " parameters")
@@ -496,7 +513,7 @@ func unavailableReason(method string) string {
 	switch method {
 	case "napplet.launch", "napplet.try":
 		return controlprotocol.ReasonSessionUnavailable
-	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share":
 		return controlprotocol.ReasonSignerUnavailable
 	}
 	return ""
@@ -688,7 +705,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		flags.Visit(func(f *flag.Flag) { set = set || f.Name == "only" })
 		if set {
 			for _, name := range strings.Split(*only, ",") {
-				if (name != "reactions" && name != "comments") || slices.Contains(categories, name) {
+				if (name != "reactions" && name != "comments" && name != "mentions") || slices.Contains(categories, name) {
 					return "", nil, "", inputFailure("invalid social categories")
 				}
 				categories = append(categories, name)
@@ -701,18 +718,24 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		}{addr.Canonical, *refresh, categories})
 		return "napplet.social", params, socketPath, nil
 	}
-	if len(args) >= 2 && (args[0] == "reactions" || args[0] == "comments") {
+	if len(args) >= 2 && (args[0] == "reactions" || args[0] == "comments" || args[0] == "mentions") {
 		addr, err := commandAddress(args[1], false)
 		if err != nil {
 			return "", nil, "", err
 		}
 		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
-		idFlag, idField := "event", "event_id"
-		if args[0] == "comments" {
+		// mentions has no id flag, so --event and --parent fail to parse
+		idFlag, idField := "", ""
+		if args[0] == "reactions" {
+			idFlag, idField = "event", "event_id"
+		} else if args[0] == "comments" {
 			idFlag, idField = "parent", "parent_id"
 		}
-		id := flags.String(idFlag, "", "event id")
+		id := new(string)
+		if idFlag != "" {
+			id = flags.String(idFlag, "", "event id")
+		}
 		offset := flags.Int("offset", 0, "page offset")
 		limit := flags.Int("limit", 100, "page size")
 		if flags.Parse(args[2:]) != nil || len(flags.Args()) != 0 || *offset < 0 || *limit < 1 || *limit > 500 {
@@ -731,7 +754,7 @@ func command(args []string) (string, json.RawMessage, string, error) {
 		params, _ := json.Marshal(fields)
 		return "napplet." + args[0], params, socketPath, nil
 	}
-	if len(args) >= 2 && (args[0] == "vote" || args[0] == "react" || args[0] == "comment" || args[0] == "unpublish") {
+	if len(args) >= 2 && (args[0] == "vote" || args[0] == "react" || args[0] == "comment" || args[0] == "unpublish" || args[0] == "share") {
 		method, params, err := socialActionCommand(args)
 		if err != nil {
 			return "", nil, "", err

@@ -92,7 +92,7 @@ func TestRPCSocialUnknownAddress(t *testing.T) {
 			t.Errorf("%s = %s, want %s", field, summary[field], value)
 		}
 	}
-	for _, method := range []string{"napplet.reactions", "napplet.comments"} {
+	for _, method := range []string{"napplet.reactions", "napplet.comments", "napplet.mentions"} {
 		result, rpcErr, _ := rpcCall(t, reader, conn, method, `{"address":"`+address+`"}`)
 		if rpcErr != nil || string(result) != `{"items":[],"total":0,"next_offset":null}` {
 			t.Fatalf("%s: %s %+v", method, result, rpcErr)

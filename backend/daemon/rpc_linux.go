@@ -224,7 +224,7 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(historyErr)
 		}
 		return result, nil
-	case "napplet.social", "napplet.reactions", "napplet.comments":
+	case "napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions":
 		p, err := decodeSocialParams(params, method)
 		if err != nil {
 			return nil, err
@@ -250,14 +250,16 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			result, socialErr = backend.ServiceSocial(workCtx, p.address, p.refresh, p.categories)
 		} else if method == "napplet.reactions" {
 			result, socialErr = backend.ServiceReactions(workCtx, p.address, p.eventID, p.offset, p.limit)
-		} else {
+		} else if method == "napplet.comments" {
 			result, socialErr = backend.ServiceComments(workCtx, p.address, p.eventID, p.offset, p.limit)
+		} else {
+			result, socialErr = backend.ServiceMentions(workCtx, p.address, p.offset, p.limit)
 		}
 		if socialErr != nil {
 			return nil, mutationError(socialErr)
 		}
 		return result, nil
-	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete":
+	case "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share":
 		p, err := decodeSocialActionParams(params, method)
 		if err != nil {
 			return nil, err
@@ -283,8 +285,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			result, actionErr = backend.ServiceSocialReact(workCtx, p.address, p.emoji, p.emojiURL, p.eventID)
 		} else if method == "napplet.comment" {
 			result, actionErr = backend.ServiceSocialComment(workCtx, p.address, p.content, p.eventID)
-		} else {
+		} else if method == "napplet.delete" {
 			result, actionErr = backend.ServiceSocialDelete(workCtx, p.address, p.eventID)
+		} else {
+			result, actionErr = backend.ServiceSocialShare(workCtx, p.address, p.content)
 		}
 		if actionErr != nil {
 			return nil, mutationError(actionErr)
@@ -877,8 +881,8 @@ func decodeHistoryParams(params json.RawMessage) (string, bool, int, int, *contr
 	return address, refresh, offset, limit, err
 }
 
-// socialParams are the params of napplet.social, napplet.reactions and
-// napplet.comments; eventID is event_id or parent_id.
+// socialParams are the params of napplet.social, napplet.reactions,
+// napplet.comments and napplet.mentions; eventID is event_id or parent_id.
 type socialParams struct {
 	address    string
 	refresh    bool
@@ -889,19 +893,24 @@ type socialParams struct {
 }
 
 // decodeSocialParams reads the strict params of one social method: an
-// address, then refresh and categories for napplet.social, or an optional
-// event_id (reactions) or parent_id (comments) and a page for the reads.
+// address, then refresh and categories for napplet.social, or a page for
+// the reads, with an optional event_id (reactions) or parent_id (comments);
+// napplet.mentions takes no id.
 func decodeSocialParams(params json.RawMessage, method string) (socialParams, *controlprotocol.Error) {
 	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
+	paged := method != "napplet.social"
 	idField := ""
-	allowed := []string{"address", "refresh", "categories"}
 	if method == "napplet.reactions" {
 		idField = "event_id"
 	} else if method == "napplet.comments" {
 		idField = "parent_id"
 	}
-	if idField != "" {
-		allowed = []string{"address", idField, "offset", "limit"}
+	allowed := []string{"address", "refresh", "categories"}
+	if paged {
+		allowed = []string{"address", "offset", "limit"}
+		if idField != "" {
+			allowed = append(allowed, idField)
+		}
 	}
 	if err := controlprotocol.ValidateNamedParams(params, allowed...); err != nil {
 		return socialParams{}, err
@@ -915,8 +924,8 @@ func decodeSocialParams(params json.RawMessage, method string) (socialParams, *c
 		return socialParams{}, err
 	}
 	p := socialParams{address: address, limit: 100}
-	if idField != "" {
-		if raw, ok := fields[idField]; ok {
+	if paged {
+		if raw, ok := fields[idField]; idField != "" && ok {
 			if p.eventID, err = eventIDField(raw); err != nil {
 				return socialParams{}, err
 			}
@@ -945,15 +954,17 @@ func decodeSocialParams(params json.RawMessage, method string) (socialParams, *c
 }
 
 // socialActionParams are the params of napplet.vote, napplet.react,
-// napplet.comment and napplet.delete. eventID is the version (vote, react),
-// the parent comment (comment) or the event to delete.
+// napplet.comment, napplet.delete and napplet.share. eventID is the version
+// (vote, react), the parent comment (comment) or the event to delete;
+// content is a comment's or a share's text.
 type socialActionParams struct {
 	address, vote, emoji, emojiURL, content, eventID string
 }
 
 // decodeSocialActionParams reads one social action's params strictly: only
-// that method's fields, required strings present and never null, ids as 64
-// lowercase hex. The backend enforces the content rules.
+// that method's fields, required strings present and never null, optional
+// strings never null either, ids as 64 lowercase hex. The backend enforces
+// the content rules.
 func decodeSocialActionParams(params json.RawMessage, method string) (socialActionParams, *controlprotocol.Error) {
 	invalid := controlprotocol.FixedError(controlprotocol.InvalidParams)
 	idField := "event_id"
@@ -964,8 +975,10 @@ func decodeSocialActionParams(params json.RawMessage, method string) (socialActi
 		allowed, required = []string{"address", "emoji", "emoji_url", "event_id"}, []string{"emoji"}
 	} else if method == "napplet.comment" {
 		allowed, required, idField = []string{"address", "content", "parent_id"}, []string{"content"}, "parent_id"
-	} else {
+	} else if method == "napplet.delete" {
 		allowed, required = []string{"address", "event_id"}, []string{"event_id"}
+	} else {
+		allowed = []string{"address", "content"}
 	}
 	if err := controlprotocol.ValidateNamedParams(params, allowed...); err != nil {
 		return socialActionParams{}, err
