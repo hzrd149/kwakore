@@ -41,7 +41,11 @@ Cleared at v0.2 close. The full log is in PROJECT.md Key Decisions; per-phase de
 
 ### Pending Todos
 
-None yet.
+Left over from the napplet versioning work (`903801e`, `e3aa45c`; the draft plan was removed 2026-10-12):
+
+- Re-pin NIP-5D deliberately from `24711d9c` to PR #2303 head `020cb8b33a9e4c6b8ca4b2f9d0ed0a67843b68f7` (one direct artifact `x` hash, non-empty plain-text content) through `spec/pinned/` and `research/SPEC-PINS.md`, and review `spec/CONFORMANCE.md` against it, including the legacy aggregate-manifest policy
+- Explicit pruning controls for the cache of downloaded historical napplet code; pruning must protect selected versions and running instances and never discard manifest history
+- Further pin-policy controls, such as unpinning
 
 ### Blockers/Concerns
 
