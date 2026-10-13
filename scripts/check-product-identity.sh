@@ -22,7 +22,7 @@
 # scanned or rewritten): the runtime sources plus Nix, CI, the user and
 # contributor docs and the spec audit. Both modes must pass. The full list of
 # reviewed matches and renamed paths is recorded in
-# .planning/phases/09-linux-packaging-rename-and-cleanup/09-RENAME-INVENTORY.md.
+# the v0.2 phase 09 rename inventory (in git history).
 #
 # Each match is checked case-insensitively, in file contents and in tracked
 # path names. A line passes only when its file has an allowlist entry whose

@@ -11,7 +11,7 @@
 - Timeline: 2026-10-06 → 2026-10-07 (2 days), 266 commits
 - Code (excluding `.planning/`): 286 files changed, +22,126 / -25,385
 - Audit: tech_debt, 23/23 requirements, 4/4 phases, 8/8 integration seams and flows ([v0.2-MILESTONE-AUDIT.md](milestones/v0.2-MILESTONE-AUDIT.md))
-- Archive: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md), [v0.2-REQUIREMENTS.md](milestones/v0.2-REQUIREMENTS.md), `milestones/v0.2-phases/`
+- Archive: [v0.2-ROADMAP.md](milestones/v0.2-ROADMAP.md), [v0.2-REQUIREMENTS.md](milestones/v0.2-REQUIREMENTS.md)
 
 **Key accomplishments:**
 
@@ -40,7 +40,7 @@ Known verification overrides: 1 newly acknowledged, 12 carried forward from a pr
 
 - Timeline: 2026-10-02 → 2026-10-06 (5 days), 356 commits
 - Code (excluding `.planning/`): 249 files changed, +46,014 / -2,560
-- Archive: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md), [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md), `milestones/v0.1-phases/`
+- Archive: [v0.1-ROADMAP.md](milestones/v0.1-ROADMAP.md), [v0.1-REQUIREMENTS.md](milestones/v0.1-REQUIREMENTS.md)
 
 **Key accomplishments:**
 
@@ -59,6 +59,6 @@ The milestone was closed with 24 of 61 requirements unmet (Phases 6-8 not starte
 - **Phase 7 (backlog 999.11):** RES-01..04, UPLD-01, MDIA-01..03 (NAP-RESOURCE PR #80, Blossom consent and quotas, upload MIME allowlist, proxied and verified media)
 - **Phase 8 (backlog 999.12):** MISC-01..05 (notifications, config shapes, identity.changed, common replies, trusted identity in prompts), SPEC-02 (full checklist close-out), SPEC-04 (`NAPPLETS.md` matches code)
 
-Known verification overrides: 12 newly acknowledged, 0 carried forward from a prior close (see STATE.md Deferred Items). The two partial UATs (04, 05) defer Windows, macOS and Android fixture runs. SEED-001 and SEED-002 stay dormant.
+Known verification overrides: 12 newly acknowledged, 0 carried forward from a prior close (see STATE.md Deferred Items). The two partial UATs (04, 05) defer Windows, macOS and Android fixture runs. SEED-002 stays dormant (SEED-001 was delivered by the napplet social quick tasks).
 
 ---

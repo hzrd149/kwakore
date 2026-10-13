@@ -2,7 +2,7 @@
 
 **Domain:** Nostr napplet runtime (NIP-5D host), with a vendored `@napplet/shim` prelude and Go NAP handlers
 **Researched:** 2026-10-02
-**Scope:** This file covers only the napplet reference stack (`@napplet/shim`, `@napplet/nap`, `@napplet/core`, `@napplet/conformance`). Verdana's own stack is in `.planning/codebase/STACK.md` and is not repeated here.
+**Scope:** This file covers only the napplet reference stack (`@napplet/shim`, `@napplet/nap`, `@napplet/core`, `@napplet/conformance`).
 **Overall confidence:** HIGH. Every version, hash and wire claim below comes from the pinned napplet/web checkout (`956135b`), the npm registry tarballs, byte-level diffs against Verdana's vendored file, or the pinned naps checkouts. None of it comes from training data.
 
 > **Confidence labels.** The GSD `classify-confidence` seam rates web providers LOW. These findings rest on primary artifacts instead: git objects at pinned SHAs, npm tarballs with checked integrity, and diffs I ran myself. They are labelled HIGH where an artifact was checked directly and MEDIUM where they depend on reading Verdana code that I did not test.
