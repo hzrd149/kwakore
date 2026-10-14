@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
@@ -95,26 +100,260 @@ func TestDirectFilterCapsRelays(t *testing.T) {
 	}
 }
 
+// publicOnly is a relayCheck for tests: it turns away what napExplicitRelay
+// would (localhost, loopback and private IP literals, and .lan hosts stand
+// in for a hostname that resolves privately) without ever resolving DNS.
+func publicOnly(_ context.Context, raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
+		return "", errors.New("invalid relay url")
+	}
+	host := u.Hostname()
+	if host == "localhost" || strings.HasSuffix(host, ".lan") {
+		return "", errors.New("relay not allowed")
+	}
+	if ip, err := netip.ParseAddr(host); err == nil && (ip.IsLoopback() || ip.IsPrivate()) {
+		return "", errors.New("relay not allowed")
+	}
+	return nostr.NormalizeURL(raw), nil
+}
+
+// relaysOf is where directed filters go, in order, and the authors each one
+// asks for.
+func relaysOf(dfs []nostr.DirectedFilter) ([]string, map[string]nostr.Filter) {
+	urls := []string{}
+	byRelay := map[string]nostr.Filter{}
+	for _, df := range dfs {
+		urls = append(urls, df.Relay)
+		byRelay[df.Relay] = df.Filter
+	}
+	return urls, byRelay
+}
+
+func TestOutboxDirectedRoutesByRelayLists(t *testing.T) {
+	alice, bob, carol, dave, self := nostr.Generate().Public(), nostr.Generate().Public(),
+		nostr.Generate().Public(), nostr.Generate().Public(), nostr.Generate().Public()
+	rt := relayRouting{
+		lists: fakeLists(map[nostr.PubKey]fakeList{
+			alice: {write: []string{"wss://a1.example.com", "wss://a2.example.com", "wss://a3.example.com", "wss://a4.example.com"}},
+			carol: {read: []string{"wss://carol-in.example.com"}},
+			dave:  {write: []string{"wss://dave.example.com"}},
+			// bob has no relay list
+		}),
+		check:    publicOnly,
+		fallback: []string{"wss://fb.example.com"},
+	}
+	ctx := context.Background()
+	defaults := []string{"wss://relay.damus.io", "wss://nos.lol"}
+	noDefaults := func(urls []string) {
+		t.Helper()
+		for _, u := range urls {
+			if slices.Contains(defaults, u) {
+				t.Errorf("asked the sdk default %s", u)
+			}
+		}
+	}
+
+	// alice on her first three write relays, bob (no list) on the fallback
+	urls, by := relaysOf(outboxDirected(ctx, rt, nostr.Filter{Authors: []nostr.PubKey{alice, bob}, Kinds: []nostr.Kind{1}}, nil, nil))
+	noDefaults(urls)
+	sorted := slices.Sorted(slices.Values(urls))
+	if want := []string{"wss://a1.example.com", "wss://a2.example.com", "wss://a3.example.com", "wss://fb.example.com"}; !slices.Equal(sorted, want) {
+		t.Fatalf("authors: directed to %v, want %v", sorted, want)
+	}
+	for _, u := range []string{"wss://a1.example.com", "wss://a2.example.com", "wss://a3.example.com"} {
+		if !slices.Equal(by[u].Authors, []nostr.PubKey{alice}) {
+			t.Errorf("%s asks for %v, want alice", u, by[u].Authors)
+		}
+	}
+	if !slices.Equal(by["wss://fb.example.com"].Authors, []nostr.PubKey{bob}) {
+		t.Errorf("the fallback asks for %v, want bob", by["wss://fb.example.com"].Authors)
+	}
+
+	// a tagged person is reached on their read relays, with the whole filter
+	pf := nostr.Filter{Kinds: []nostr.Kind{4}, Tags: nostr.TagMap{"p": {carol.Hex()}}}
+	urls, by = relaysOf(outboxDirected(ctx, rt, pf, nil, nil))
+	if !slices.Equal(urls, []string{"wss://carol-in.example.com"}) || len(by[urls[0]].Tags["p"]) != 1 {
+		t.Errorf("#p carol: directed to %v", urls)
+	}
+	// a tagged person with no list is looked for on the fallback
+	urls, _ = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Tags: nostr.TagMap{"p": {bob.Hex()}}}, nil, nil))
+	if !slices.Equal(urls, []string{"wss://fb.example.com"}) {
+		t.Errorf("#p bob: directed to %v, want the fallback", urls)
+	}
+
+	// a filter naming nobody goes to the fallback, all of it, even when the
+	// user's own read list holds only one of those relays
+	both := rt
+	both.self = self
+	both.lists = fakeLists(map[nostr.PubKey]fakeList{self: {read: []string{"wss://fb.example.com"}}})
+	both.fallback = []string{"wss://fb.example.com", "wss://fb2.example.com"}
+	urls, _ = relaysOf(outboxDirected(ctx, both, nostr.Filter{Kinds: []nostr.Kind{1}}, nil, nil))
+	if !slices.Equal(urls, both.fallback) {
+		t.Errorf("nobody named: directed to %v, want %v", urls, both.fallback)
+	}
+
+	// hint authors count only when the filter names no authors, and their
+	// relays get the whole filter
+	urls, _ = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Authors: []nostr.PubKey{alice}}, []nostr.PubKey{dave}, nil))
+	if slices.Contains(urls, "wss://dave.example.com") {
+		t.Errorf("a hint author was asked beside the filter's authors: %v", urls)
+	}
+	urls, by = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Kinds: []nostr.Kind{1}}, []nostr.PubKey{dave}, nil))
+	if !slices.Equal(urls, []string{"wss://dave.example.com"}) || len(by[urls[0]].Authors) != 0 {
+		t.Errorf("hint author: directed to %v", urls)
+	}
+	// a hint author with no list adds the fallback
+	urls, _ = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Kinds: []nostr.Kind{1}}, []nostr.PubKey{dave, bob}, nil))
+	if !slices.Equal(urls, []string{"wss://dave.example.com", "wss://fb.example.com"}) {
+		t.Errorf("hint authors with one missing: directed to %v", urls)
+	}
+}
+
+func TestOutboxReadsDropPrivateRelays(t *testing.T) {
+	mallory, self := nostr.Generate().Public(), nostr.Generate().Public()
+	rt := relayRouting{
+		lists: fakeLists(map[nostr.PubKey]fakeList{
+			mallory: {
+				write: []string{"wss://pub.example.com", "ws://127.0.0.1:7777", "wss://relay.lan"},
+				read:  []string{"ws://127.0.0.1:4848"},
+			},
+			self: {write: []string{"wss://home.lan"}},
+		}),
+		check:    publicOnly,
+		self:     self,
+		fallback: []string{"wss://fb.example.com"},
+	}
+	ctx := context.Background()
+	private := func(urls []string) bool {
+		return slices.ContainsFunc(urls, func(u string) bool {
+			return strings.Contains(u, "127.0.0.1") || strings.Contains(u, ".lan")
+		})
+	}
+
+	urls, _ := relaysOf(outboxDirected(ctx, rt, nostr.Filter{Authors: []nostr.PubKey{mallory}}, nil, nil))
+	if !slices.Equal(urls, []string{"wss://pub.example.com"}) {
+		t.Errorf("mallory's outbox: directed to %v", urls)
+	}
+	urls, _ = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Tags: nostr.TagMap{"p": {mallory.Hex()}}}, nil, nil))
+	if !slices.Equal(urls, []string{"wss://fb.example.com"}) {
+		t.Errorf("mallory's private inbox: directed to %v, want the fallback", urls)
+	}
+	// the user's own list is their choice
+	urls, _ = relaysOf(outboxDirected(ctx, rt, nostr.Filter{Authors: []nostr.PubKey{self}}, nil, nil))
+	if !slices.Equal(urls, []string{"wss://home.lan"}) {
+		t.Errorf("own outbox: directed to %v", urls)
+	}
+
+	relays := outboxEventRelays(ctx, rt, []nostr.PubKey{mallory}, nil)
+	if !slices.Contains(relays, "wss://pub.example.com") || !slices.Contains(relays, "wss://fb.example.com") || private(relays) {
+		t.Errorf("getEvent relays: %v", relays)
+	}
+
+	plan := outboxPlan(ctx, rt, []nostr.PubKey{mallory}, "read")
+	if plan.Source != "fallback" || !slices.Equal(plan.MissingAuthors, []string{mallory.Hex()}) || private(plan.Relays) {
+		t.Errorf("read plan: %+v", plan)
+	}
+
+	// the daemon's own check, on IP literals so no DNS is needed
+	real := relayRouting{
+		lists: fakeLists(map[nostr.PubKey]fakeList{
+			mallory: {write: []string{"ws://127.0.0.1:7777", "wss://1.1.1.1", "ws://192.168.1.2"}},
+		}),
+		check:    napExplicitRelay,
+		fallback: []string{"wss://fb.example.com"},
+	}
+	urls, _ = relaysOf(outboxDirected(ctx, real, nostr.Filter{Authors: []nostr.PubKey{mallory}}, nil, nil))
+	if !slices.Equal(urls, []string{"wss://1.1.1.1"}) {
+		t.Errorf("napExplicitRelay: directed to %v", urls)
+	}
+}
+
 func TestOutboxPlan(t *testing.T) {
 	a, b := nostr.Generate().Public(), nostr.Generate().Public()
-	lists := fakeLists(map[nostr.PubKey]fakeList{
-		a: {write: []string{"wss://w.example.com"}, read: []string{"wss://r.example.com"}},
-	})
+	rt := relayRouting{
+		lists: fakeLists(map[nostr.PubKey]fakeList{
+			a: {
+				write: []string{"wss://w1.example.com", "wss://w2.example.com", "wss://w3.example.com", "wss://w4.example.com", "wss://w5.example.com"},
+				read:  []string{"wss://r.example.com"},
+			},
+		}),
+		check:    publicOnly,
+		fallback: []string{"wss://fallback.example.com/"},
+	}
 	ctx := context.Background()
-	fallback := []string{"wss://fallback.example.com"}
+	three := []string{"wss://w1.example.com", "wss://w2.example.com", "wss://w3.example.com"}
 
-	plan := outboxPlan(ctx, lists, []nostr.PubKey{a, b}, "write", fallback)
-	if plan.Source != "nip65" || !slices.Equal(plan.Relays, []string{"wss://w.example.com"}) ||
-		!slices.Equal(plan.MissingAuthors, []string{b.Hex()}) {
+	plan := outboxPlan(ctx, rt, []nostr.PubKey{a}, "write")
+	if plan.Source != "nip65" || !slices.Equal(plan.Relays, three) || plan.MissingAuthors != nil {
 		t.Errorf("write plan: %+v", plan)
 	}
-	plan = outboxPlan(ctx, lists, []nostr.PubKey{a}, "read", fallback)
+	plan = outboxPlan(ctx, rt, []nostr.PubKey{a, b}, "write")
+	if plan.Source != "nip65" || !slices.Equal(plan.Relays, append(slices.Clone(three), "wss://fallback.example.com")) ||
+		!slices.Equal(plan.MissingAuthors, []string{b.Hex()}) {
+		t.Errorf("partial plan: %+v", plan)
+	}
+	plan = outboxPlan(ctx, rt, []nostr.PubKey{a}, "read")
 	if !slices.Equal(plan.Relays, []string{"wss://r.example.com"}) {
 		t.Errorf("read plan: %+v", plan)
 	}
-	plan = outboxPlan(ctx, lists, []nostr.PubKey{b}, "write", fallback)
-	if plan.Source != "fallback" || !slices.Equal(plan.Relays, fallback) {
+	plan = outboxPlan(ctx, rt, []nostr.PubKey{b}, "write")
+	if plan.Source != "fallback" || !slices.Equal(plan.Relays, []string{"wss://fallback.example.com"}) {
 		t.Errorf("fallback plan: %+v", plan)
+	}
+
+	// past the author cap nobody is looked up, even one with a list
+	var many []nostr.PubKey
+	for range outboxMaxAuthors {
+		many = append(many, nostr.Generate().Public())
+	}
+	plan = outboxPlan(ctx, rt, append(many, a), "write")
+	if !slices.Contains(plan.MissingAuthors, a.Hex()) || slices.Contains(plan.Relays, "wss://w1.example.com") {
+		t.Errorf("an author past the cap was looked up: %+v", plan.Relays)
+	}
+	if plan.Relays == nil {
+		t.Error("nil relays")
+	}
+}
+
+// Every recipient's relay list is looked up at once: a lookup that only
+// answers once all three are asked fails a sequential fan-out.
+func TestOutboxFanoutLooksUpInboxesConcurrently(t *testing.T) {
+	user := nostr.Generate().Public()
+	recipients := []nostr.PubKey{nostr.Generate().Public(), nostr.Generate().Public(), nostr.Generate().Public()}
+	inbox := map[nostr.PubKey]string{
+		recipients[0]: "wss://in1.example.com",
+		recipients[1]: "wss://in2.example.com",
+		recipients[2]: "wss://in3.example.com",
+	}
+	var asked atomic.Int32
+	all := make(chan struct{})
+	var once sync.Once
+	lists := func(ctx context.Context, pk nostr.PubKey) ([]string, []string, bool) {
+		if asked.Add(1) == int32(len(recipients)) {
+			once.Do(func() { close(all) })
+		}
+		select {
+		case <-all:
+			return nil, []string{inbox[pk]}, true
+		case <-ctx.Done():
+			return nil, nil, false
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	targets, inboxes, err := outboxFanout(ctx, lists, publicOnly, user, false, recipients, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"wss://in1.example.com", "wss://in2.example.com", "wss://in3.example.com"}; !slices.Equal(targets, want) {
+		t.Errorf("targets %v, want %v", targets, want)
+	}
+	for _, pk := range recipients {
+		if !slices.Equal(inboxes[pk], []string{inbox[pk]}) {
+			t.Errorf("inboxes[%s] = %v", pk.Hex(), inboxes[pk])
+		}
 	}
 }
 
