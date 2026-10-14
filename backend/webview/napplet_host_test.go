@@ -83,6 +83,7 @@ const makeFrame = () => {
     listeners: {},
     removed: false,
     srcdoc: undefined,
+    focus() { document.activeElement = this; log.push("focus#" + this.n) },
     setAttribute(k, v) { this.attrs[k] = String(v) },
     addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn) },
     remove() { this.removed = true; log.push("remove#" + this.n) },
@@ -112,6 +113,26 @@ const fireLoad = f => { for (const fn of f.listeners.load || []) fn({}) }
 const count = method => rpcs.filter(r => r.method === method).length
 const live = () => appended.filter(f => !f.removed)
 `
+
+func TestNappletHostFocusesLoadedFrame(t *testing.T) {
+	var got struct{ Before, Loaded, Stale bool }
+	runHost(t, `handlers["nap.boot"] = () => ({srcdoc:"<p>napplet</p>"})`, `
+await flush()
+const first = live()[0]
+const before = document.activeElement === first
+fireLoad(first)
+const loaded = document.activeElement === first
+window.__nap_reload()
+await flush()
+const second = live()[0]
+fireLoad(second)
+fireLoad(first)
+return {Before:before, Loaded:loaded, Stale:document.activeElement === second}
+`, &got)
+	if got.Before || !got.Loaded || !got.Stale {
+		t.Fatalf("iframe focus before load / after load / after stale load = %+v", got)
+	}
+}
 
 // runHost runs setup, then the embedded host page, then steps (the body of an
 // async function whose return value is printed as JSON), and decodes it.

@@ -710,8 +710,11 @@
     let loads = 0
     f.addEventListener("load", () => {
       if (frame !== f) return
-      if (++loads === 1) enqueue(() => rpc("nap.loaded"), true).catch(() => {})
-      else replaced(f)
+      if (++loads === 1) {
+        // Hand keyboard input to the sandbox once its document is ready.
+        f.focus()
+        enqueue(() => rpc("nap.loaded"), true).catch(() => {})
+      } else replaced(f)
     })
     f.srcdoc = doc.srcdoc
     frame = f

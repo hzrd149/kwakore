@@ -467,6 +467,13 @@ func TestWebKitNappletBoots(t *testing.T) {
 	if !f.waitFor(left(), func() bool { return f.count("rpc:nap.loaded") > 0 }) {
 		t.Fatalf("the host page never reported the frame's load: %v", f.log())
 	}
+	f.send(wireMsg{T: "eval", Code: `window.__kwakoreNappletRPC("nap.msg", JSON.stringify(JSON.stringify({type:"storage.set",scope:"test",key:"report",value:JSON.stringify({focused:document.activeElement === document.querySelector("iframe")})})))`})
+	if !f.waitFor(left(), func() bool { _, ok := f.stored("test", "report"); return ok }) {
+		t.Fatal("the startup focus report never arrived")
+	}
+	if report, _ := f.stored("test", "report"); !strings.Contains(report, `"focused":true`) {
+		t.Fatalf("the loaded napplet iframe did not receive focus: %s", report)
+	}
 
 	// a quiet napplet stays in its first session
 	time.Sleep(3 * time.Second)
