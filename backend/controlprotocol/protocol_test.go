@@ -65,7 +65,7 @@ func TestProtocolDocsMethods(t *testing.T) {
 		for _, expr := range clause.List {
 			if literal, ok := expr.(*ast.BasicLit); ok && literal.Kind == token.STRING {
 				name, _ := strconv.Unquote(literal.Value)
-				for _, prefix := range []string{"service.", "settings.", "napplet.", "signer.", "events."} {
+				for _, prefix := range []string{"service.", "settings.", "napplet.", "signer.", "events.", "runtime."} {
 					if strings.HasPrefix(name, prefix) {
 						routed = append(routed, name)
 					}

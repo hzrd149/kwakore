@@ -210,9 +210,10 @@ func (f napFailShape) code(generic string) string {
 // napRoute is one request type: its handler, its gate, its failure shape,
 // and its bounds.
 type napRoute struct {
-	h    napHandler
-	gate napGate
-	fail napFailShape
+	extension bool
+	h         napHandler
+	gate      napGate
+	fail      napFailShape
 	// maxRaw caps the envelope's bytes for this type; 0 means
 	// napDefaultMaxRaw (D-09, nap_limits.go)
 	maxRaw int
@@ -482,6 +483,10 @@ func validateRoute(typ string, r napRoute) error {
 // its route's shape. Types that are never answered, and requests without an
 // id where the answer needs one, get nothing.
 func (c *napCall) failWith(code string) {
+	if c.route != nil && c.route.extension {
+		c.reply(map[string]any{"error": extensionFailure(code)})
+		return
+	}
 	// a failure is an answer too: it claims the call even when its shape
 	// sends nothing, and never follows a real answer
 	if !c.answered.CompareAndSwap(false, true) {

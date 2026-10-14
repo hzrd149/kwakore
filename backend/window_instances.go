@@ -28,6 +28,7 @@ import (
 // this platform: the backend only ever talks to it through its Transport.
 
 type Instance struct {
+	builtin *builtinRegistry
 	// instance is what the napp sees as window.napp.instance: a serial,
 	// unique per window.
 	instance string
@@ -163,7 +164,7 @@ func addInstance(ci *Instance) {
 	// the sink never blocks or calls the host, so this is safe under
 	// reclaimMu
 	if serviceWindowListed(ci) {
-		emitServiceEvent(ServiceEvent{Type: EventWindowOpened, WindowID: ci.ID(), Address: ci.napp.Address(), Name: serviceDisplayText(ci.napp.Label(), 256)})
+		emitServiceEvent(ServiceEvent{Type: EventWindowOpened, WindowID: ci.ID(), Address: ci.serviceAddress(), Name: serviceDisplayText(ci.napp.Label(), 256)})
 	}
 }
 
@@ -594,7 +595,7 @@ func WindowClosed(instance string) {
 		}
 		instancesMu.Unlock()
 		if serviceWindowListed(ci) {
-			emitServiceEvent(ServiceEvent{Type: EventWindowClosed, WindowID: ci.ID(), Address: ci.napp.Address()})
+			emitServiceEvent(ServiceEvent{Type: EventWindowClosed, WindowID: ci.ID(), Address: ci.serviceAddress()})
 		}
 		ci.goneOnce.Do(func() { close(ci.gone) })
 		failed := ci.failedClosed.Load()

@@ -107,7 +107,7 @@ globalThis.document = {
 }
 
 const flush = async (n = 3) => { for (let i = 0; i < n; i++) await new Promise(r => setTimeout(r, 0)) }
-const fireMessage = (source, data) => { for (const fn of listeners.message || []) fn({ source, data }) }
+const fireMessage = (source, data, ports = []) => { for (const fn of listeners.message || []) fn({ source, data, ports }) }
 const fireLoad = f => { for (const fn of f.listeners.load || []) fn({}) }
 const count = method => rpcs.filter(r => r.method === method).length
 const live = () => appended.filter(f => !f.removed)
@@ -1540,5 +1540,110 @@ return [
 	}
 	if got[2].Reached != 1 || len(got[2].Posted) != 0 {
 		t.Errorf("an envelope within the bounds: reached %d, posted %s", got[2].Reached, got[2].Posted)
+	}
+}
+
+func TestCustomFailureUsesPrivateMetadata(t *testing.T) {
+	var got struct {
+		Posted []map[string]any
+		Calls  int
+	}
+	runHost(t, `handlers["nap.boot"] = () => ({srcdoc:"custom",extensions:{"example.request":{maxBytes:256}}})`, `
+await flush()
+const f=frames[0]
+const port={posted:[],postMessage(env){this.posted.push(env)},start(){},close(){}}
+fireMessage(f.contentWindow,{type:"__kwakore.document"},[port])
+port.onmessage({data:{type:"example.request",id:"x",value:"z".repeat(300)}})
+await flush()
+return {Posted:port.posted,Calls:count("nap.msg")}
+`, &got)
+	if got.Calls != 0 || len(got.Posted) != 1 {
+		t.Fatal(got)
+	}
+	e, ok := got.Posted[0]["error"].(map[string]any)
+	if !ok || e["code"] != float64(-32002) || got.Posted[0]["type"] != "example.request.result" {
+		t.Fatal(got)
+	}
+}
+
+func TestCustomPortIsolationAndReload(t *testing.T) {
+	var got struct {
+		Calls   int
+		Window  []map[string]any
+		Private []map[string]any
+		Closed  bool
+	}
+	runHost(t, `handlers["nap.boot"] = () => ({srcdoc:"custom",extensions:{"example.request":{maxBytes:4096}}})`, `
+await flush()
+const f=frames[0]
+const port={posted:[],closed:false,postMessage(env){this.posted.push(env)},start(){},close(){this.closed=true}}
+fireMessage(f.contentWindow,{type:"__kwakore.document"},[port])
+fireMessage(f.contentWindow,{type:"example.request",id:"forged"})
+await flush()
+if(count("nap.msg")) throw new Error("window forged a private request")
+port.onmessage({data:{type:"example.request",id:"allowed"}})
+await flush()
+window.__nap_push(gen,JSON.stringify({type:"example.request.result",id:"allowed",result:"private"}))
+const calls=count("nap.msg")
+fireLoad(f); fireLoad(f)
+await flush()
+port.onmessage({data:{type:"example.request",id:"late"}})
+window.__nap_push(gen-1,JSON.stringify({type:"example.request.result",id:"late",result:"late-secret"}))
+await flush()
+return {Calls:count("nap.msg"),Window:f.contentWindow.posted,Private:port.posted,Closed:port.closed}
+`, &got)
+	if got.Calls != 1 || len(got.Window) != 0 || len(got.Private) != 1 || got.Private[0]["result"] != "private" || !got.Closed {
+		t.Fatal(got)
+	}
+}
+
+func TestCustomBindingEndsWithDocument(t *testing.T) {
+	node := needNode(t)
+	script := `const vm=require('vm');
+const ports=[];let observer;
+const root={};const document={documentElement:root};
+const context=vm.createContext({window:{napplet:{}},document,setTimeout,clearTimeout,MessageChannel:class{constructor(){this.port1={postMessage(data){ports.push(data)}};this.port2={};context.port=this.port1}},MutationObserver:class{constructor(fn){observer=fn}observe(){}disconnect(){}}});
+vm.runInContext(` + strconv.Quote("(()=>{"+extensionPrelude+"window.napplet.example={call(){return napExtension.call('example.request',{})}};})();") + `,context);
+(async()=>{
+ const call=context.window.napplet.example.call().then(value=>({leaked:value}),error=>({reason:error.reason}));
+ document.documentElement={};observer();
+ const result=await call;
+ context.port.onmessage({data:{type:'example.request.result',id:'custom-1',result:'secret'}});
+ const later=await context.window.napplet.example.call().catch(error=>error.reason);
+ console.log(JSON.stringify({result,later,requests:ports.filter(p=>p.type==='example.request').length,global:typeof context.window.napExtension}));
+})().catch(error=>{console.error(error);process.exitCode=1});`
+	cmd := exec.Command(node, "-e", script)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err, string(raw))
+	}
+	var got struct {
+		Result struct {
+			Reason string
+			Leaked string
+		}
+		Later    string
+		Requests int
+		Global   string
+	}
+	if json.Unmarshal(raw, &got) != nil || got.Result.Reason != "document-ended" || got.Result.Leaked != "" || got.Later != "document-ended" || got.Requests != 1 || got.Global != "undefined" {
+		t.Fatal(string(raw))
+	}
+}
+
+func TestCustomQueuedCallCannotReachNextDocument(t *testing.T) {
+	var got struct{ Calls int }
+	runHost(t, `handlers["nap.boot"] = () => ({srcdoc:"custom",extensions:{"example.request":{maxBytes:4096}}})`, `
+await flush()
+const f=frames[0]
+const port={postMessage(){},start(){},close(){}}
+fireMessage(f.contentWindow,{type:"__kwakore.document"},[port])
+port.onmessage({data:{type:"example.request",id:"queued"}})
+port.onmessage({data:{type:"__kwakore.extension.replaced"}})
+await flush()
+return {Calls:count("nap.msg")}
+`, &got)
+	if got.Calls != 0 {
+		t.Fatal("stale queued private call was forwarded", got)
 	}
 }

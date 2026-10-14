@@ -102,6 +102,21 @@ const DocumentMarker = "__kwakore.document"
 // preamble, and its <html> attributes are merged onto this <html>. Nothing
 // the napplet writes can come before the CSP or the shim.
 func NappletSrcdoc(html []byte, domains []string) (string, error) {
+	return NappletSrcdocWithPreludes(html, domains, nil)
+}
+
+// NappletSrcdocWithPreludes adds native-approved bindings after the marker.
+func NappletSrcdocWithPreludes(html []byte, domains []string, preludes []string) (string, error) {
+	custom := ""
+	for _, code := range preludes {
+		if !utf8.ValidString(code) {
+			return "", errors.New("extension prelude is not valid UTF-8")
+		}
+		if strings.Contains(strings.ToLower(code), "</script") || strings.Contains(code, "<!--") || strings.Contains(code, "<script") {
+			return "", errors.New("extension prelude contains unsafe inline script markup")
+		}
+		custom += "\n;(function(){\n" + code + "\n})();"
+	}
 	if !utf8.Valid(html) {
 		return "", errors.New("napplet document is not valid UTF-8")
 	}
@@ -123,13 +138,18 @@ func NappletSrcdoc(html []byte, domains []string) (string, error) {
 		gamepad = gamepadPrelude
 	}
 
+	extensionSetup, markerSuffix := "", ""
+	if len(preludes) > 0 {
+		extensionSetup = extensionPrelude
+		markerSuffix = ", [extensionChannel.port2]"
+	}
 	return "<!doctype html><html><head>" +
 		`<meta http-equiv="Content-Security-Policy" content="` + nappletCSP + `">` +
 		"<script>(function(){" + prelude +
 		"\n;NappletShimPrelude.install(" + string(domainsJSON) + ")" +
-		catalog +
-		"\n;parent.postMessage({type:" + strconv.Quote(DocumentMarker) + `},"*")` +
-		gamepad +
+		catalog + extensionSetup +
+		"\n;parent.postMessage({type:" + strconv.Quote(DocumentMarker) + `},"*"` + markerSuffix + ")" +
+		gamepad + custom +
 		"\n})()</script>" +
 		"</head>" + doc, nil
 }

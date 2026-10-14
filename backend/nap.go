@@ -449,7 +449,7 @@ func (ci *Instance) napEnqueue(params string) {
 	if !ok {
 		return
 	}
-	route := napRoutes[head.typ]
+	route := ci.napRouteFor(head.typ)
 	if route == nil {
 		// unknown types are dropped silently, never answered (NIP-5D)
 		napSampled().Debug().Str("type", head.typ).Str("napplet", ci.napp.ID).Msg("ignoring unknown NAP message")
@@ -550,7 +550,7 @@ func (ci *Instance) napDispatch(c *napCall) {
 	// napEnqueue found the route; a call made by hand (tests) looks it up
 	route := c.route
 	if route == nil {
-		route = napRoutes[c.Type]
+		route = ci.napRouteFor(c.Type)
 	}
 	if route == nil {
 		// unknown types are dropped silently, never answered
@@ -711,6 +711,9 @@ func (ci *Instance) napClosed() {
 // nappletBoot answers nap.boot: the napplet's verified HTML, wrapped for the
 // sandboxed frame.
 func nappletBoot(ci *Instance) (any, error) {
+	if ci.builtin != nil {
+		return ci.builtinBoot()
+	}
 	html, err := nappletDocumentForInstance(ci)
 	if err != nil {
 		log.Error().Err(err).Str("napplet", ci.napp.ID).Msg("napplet will not boot")

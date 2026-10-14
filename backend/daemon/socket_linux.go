@@ -392,7 +392,14 @@ func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch, str
 		if err != nil {
 			return
 		}
-		response := controlprotocol.ProcessFrame(line, dispatch)
+		response := controlprotocol.ProcessFrame(line, func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
+			// Registration takes over exactly one connection. A batch cannot
+			// assign multiple native owners or replace an attached transport.
+			if method == "runtime.builtin.open" && bytes.HasPrefix(bytes.TrimSpace(line), []byte("[")) {
+				return nil, controlprotocol.FixedError(controlprotocol.InvalidRequest)
+			}
+			return dispatch(method, params)
+		})
 		if response != nil {
 			if err := writeResponse(conn, response); err != nil {
 				return

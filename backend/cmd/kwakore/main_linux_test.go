@@ -528,6 +528,8 @@ func TestCLIContractCatalog(t *testing.T) {
 		methods = append(methods, method)
 	}
 	catalog := controlprotocol.MethodNames()
+	// Native registration takes over a broker stream; the unary CLI cannot host it.
+	catalog = slices.DeleteFunc(catalog, func(method string) bool { return method == "runtime.builtin.open" })
 	slices.Sort(methods)
 	slices.Sort(catalog)
 	if !slices.Equal(methods, catalog) {

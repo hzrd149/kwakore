@@ -672,3 +672,121 @@ client sends its first wire frame, so a buffered reader can safely consume
 only the reply. Clients must preserve any buffered incoming bytes when
 handing the connection to their window reader. The host exchanges `nap.boot`
 and `nap.start` as usual; startup must reach `nap.start` within 12 seconds.
+
+### Native built-in windows
+
+`runtime.builtin.open` is a native administrative, attached-stream operation.
+It must be a single control request, never a batch member.
+It is never exposed through NAP, manifest permissions, or a unary iframe control
+adapter. Such adapters must exclude it, `events.subscribe`, and attached launches.
+Same-user socket authorization does not authenticate a particular application
+binary. Built-in keys identify storage; they grant no protection from other
+native code running as that user.
+
+Parameters are a `backend.BuiltinDefinition` object: `key`, `html`, `sha256`
+(lowercase SHA-256 of the exact UTF-8 HTML), `name`, optional `width`/`height`,
+`domains`, and `extensions`. Its encoded size is capped at 900 KiB and the entire
+control request must fit the existing 1 MiB limit. No definitions are persisted.
+Every launch supplies the approved bytes again; reloads use those retained bytes.
+
+V1 standard domains are `gamepad`, `theme`, and `storage`, requested explicitly.
+Other stock routes are unavailable to built-ins. Shared storage lives separately
+in `builtin-storage/`, keyed by the native stable key and independent of HTML
+versions. Instance storage additionally uses a random per-launch namespace.
+Built-ins have no fabricated Nostr author/manifest and no trial installation.
+Their entries in `napplet.windows` and window events carry an empty address;
+`napplet.stop` accepts their opaque window IDs as usual.
+
+Each extension is `{name,version,prelude,routes}`. Names are lowercase ASCII
+letters/digits, begin with a letter, and are at most 32 bytes. Stock and internal
+names are reserved. Preludes are trusted native code, valid UTF-8, capped at
+128 KiB, with inline-script termination/HTML script markup rejected. They run
+in function scope after the stock shim and document marker, before user HTML.
+They install their own `window.napplet.<name>` binding using the lexical helper
+`napExtension.call(type, fields, deadlineMS?)`. The helper supplies opaque IDs,
+returns the response's `result`, and rejects with its structured `error`.
+For example:
+
+```js
+window.napplet.example = {
+  call(method) { return napExtension.call("example.request", {method}, 6000) }
+};
+```
+
+The trusted preamble transfers a document-owned message port alongside its first
+document marker. Only this port carries custom envelopes and private results;
+custom types posted as ordinary window messages are dropped. The helper keeps
+the port private and refuses calls/results after its document root is replaced.
+A document observer signals replacement to the trusted host, cancelling the
+session. This protects private results from the existing ordinary-NAP residual
+where some replacement documents execute before a detectable load event.
+Neither the helper nor the port is a window global. Standard domains keep their
+existing transport. Runtime route authorization still resides in the daemon.
+
+Each route declares `type`, `max_request_bytes`, `max_response_bytes`,
+`concurrency`, `requests_per_second`, and `deadline_ms`. Request types must start
+with their domain followed by a dot; responses are exactly `<type>.result`.
+Request limits are 256–262144 bytes; response limits are 2048–262144 bytes
+(to leave room for bounded runtime failures). Types are at most 128 bytes.
+Concurrency is 1–32; rate is 1–100
+requests/second (burst equals the rate); deadlines are 1–120000 milliseconds.
+At most 16 domains with 32 routes each may be registered. Existing window-wide
+NAP limits still apply. Only unary calls are supported, with mandatory bounded
+string/number `id`; no custom subscriptions, unsolicited pushes, or eval writer.
+
+Success returns the normal attached launch descriptor with an empty address.
+The native owner starts the stock `napplet` child and proxies ordinary wire
+frames. After the first child frame activates the carrier, the daemon sends:
+
+```json
+{"t":"extension.request","request_id":"ext-1","extension":{"instance":"opaque-window-id","generation":1,"domain":"example","envelope":{"type":"example.request","id":"ui-1","method":"hello"}}}
+```
+
+The native owner responds with:
+
+```json
+{"t":"extension.response","request_id":"ext-1","envelope":{"type":"example.request.result","id":"ui-1","result":{"hello":"world"}}}
+```
+
+Only `type`, `id`, and exactly one of `result` or `error` are accepted in a response.
+An error is `{code:integer,message:string,reason?:string,data?:any}`. Runtime
+failures use message `Custom request failed` and codes -32000 (internal error),
+-32001 (invalid response/request), -32002 (size), -32003 (rate/concurrency), and
+-32004 (deadline). Stock failures retain their existing string contracts.
+Public handler messages are bounded to 1024 bytes and reasons to 128 bytes.
+
+Reset, close, or deadline sends `{"t":"extension.cancel","request_id":"ext-1"}`.
+Disconnect closes the owning window. Replies are checked against that
+connection's pending request and delivered through the generation-checked NAP
+path. Duplicate pending NAP IDs for the same route/generation are dropped;
+late, duplicate or unknown native replies are dropped. A reply cannot select a
+target window or generation. Each carrier holds at most 64 pending requests; each built-in also bounds active
+handlers to 64, including handlers that have not yet honored cancellation.
+
+Use `builtinhost.Run` for the stock proxy, which serializes socket writes,
+intercepts private frames, and rejects broker frames from the child. It invokes
+handlers concurrently, propagates cancellation, recovers panics, and never
+retries or reconnects. Handlers must check cancellation before executing queued
+mutations. Cancellation does not roll back committed work; a lost response is
+an unknown outcome, not permission to replay it. Embedded hosts can instead
+call `backend.OpenBuiltin(ctx, definition, handler)` directly.
+`builtinhost.RunConnection` takes ownership of an existing authenticated native
+connection, including a connection inherited into a sandboxed process. The
+helper closes that connection when the window ends.
+
+A runnable native-host example is in `backend/examples/builtin`. Its private
+`example` domain coexists with gamepad/theme/storage without application-specific
+code in the daemon.
+
+To run the example against a running daemon, place the stock `napplet` and its
+`libwebview.so` together in an installed bundle, then from `backend/` run:
+
+```sh
+go run ./examples/builtin -child /absolute/path/to/bundle/napplet
+```
+
+Use `-socket /absolute/path/to/daemon.sock` to override the default
+`$XDG_RUNTIME_DIR/kwakore/daemon.sock`. Launch under the application's inherited
+display and session environment. The example performs no external networking.
+Physical Steam Deck focus/controller behavior and consuming applications'
+Flatpak packaging still need acceptance testing on those systems.

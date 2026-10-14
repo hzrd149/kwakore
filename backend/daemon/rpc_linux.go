@@ -405,6 +405,30 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 			return nil, mutationError(mutationErr)
 		}
 		return result, nil
+	case "runtime.builtin.open":
+		stream, ok := ctx.Value(connStreamKey{}).(*connStream)
+		if !ok {
+			return nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+		var definition backend.BuiltinDefinition
+		decoder := json.NewDecoder(bytes.NewReader(params))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&definition) != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+		done, beginErr := s.Begin()
+		if beginErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.Closing)
+		}
+		defer done()
+		transport := &socketTransport{broker: true}
+		launchCtx := backend.WithAttachedWindow(ctx, transport)
+		ci, launchErr := backend.OpenBuiltin(launchCtx, definition, transport.extensionCall)
+		if launchErr != nil {
+			return nil, controlprotocol.FixedError(controlprotocol.InvalidParams)
+		}
+		stream.attached = transport
+		return backend.BuiltinAttachedResult(launchCtx, ci.ID()), nil
 	case "napplet.launch":
 		params, ctx, err := attachedParams(ctx, params, false)
 		if err != nil {

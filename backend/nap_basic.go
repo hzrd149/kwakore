@@ -85,6 +85,9 @@ var errNappletQuota = errors.New(napQuotaExceeded)
 // internal-error rather than falling back to a key some other version or
 // window shares (KEY-01). ok is false once the call has been answered.
 func (c *napCall) storeFile(scope string) (string, bool) {
+	if c.ci.builtin != nil {
+		return c.ci.builtinStorageFile(scope), true
+	}
 	key, err := nappletStorageKey(c.ci.napp, scope, c.ci.storageInstance)
 	var file string
 	if err == nil {

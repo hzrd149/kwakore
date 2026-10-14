@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -49,6 +51,9 @@ func attachedParams(ctx context.Context, params json.RawMessage, trial bool) (js
 // socketTransport holds all outbound frames until the peer sends its first
 // wire frame. This makes buffered reads of the launch acknowledgement safe.
 type socketTransport struct {
+	broker   bool
+	serial   uint64
+	pending  map[string]chan json.RawMessage
 	mu       sync.Mutex
 	conn     *net.UnixConn
 	instance string
@@ -100,6 +105,10 @@ func (t *socketTransport) finish() {
 		t.mu.Lock()
 		t.finished = true
 		t.queue = nil
+		for id, ch := range t.pending {
+			close(ch)
+			delete(t.pending, id)
+		}
 		conn, instance := t.conn, t.instance
 		t.mu.Unlock()
 		if conn != nil {
@@ -140,6 +149,19 @@ func (t *socketTransport) run(conn *net.UnixConn, reader *bufio.Reader) {
 		if json.Unmarshal(scanner.Bytes(), &msg) != nil {
 			continue
 		}
+		if msg.T == "extension.response" {
+			t.mu.Lock()
+			ch := t.pending[msg.RequestID]
+			delete(t.pending, msg.RequestID)
+			t.mu.Unlock()
+			if ch != nil {
+				ch <- msg.Envelope
+			}
+			continue
+		}
+		if msg.T == "extension.request" || msg.T == "extension.cancel" {
+			continue
+		}
 		backend.HandleMessage(t.instance, msg)
 		if msg.T == "windowFailed" {
 			break
@@ -149,4 +171,45 @@ func (t *socketTransport) run(conn *net.UnixConn, reader *bufio.Reader) {
 		}
 	}
 	t.finish()
+}
+
+// extensionCall uses a namespace independent of window and NAP correlators.
+func (t *socketTransport) extensionCall(ctx context.Context, req backend.ExtensionRequest) (json.RawMessage, error) {
+	t.mu.Lock()
+	if t.finished || !t.broker || req.Instance != t.instance {
+		t.mu.Unlock()
+		return nil, errors.New("extension owner unavailable")
+	}
+	if len(t.pending) >= 64 {
+		t.mu.Unlock()
+		return nil, errors.New("extension owner busy")
+	}
+	if t.pending == nil {
+		t.pending = map[string]chan json.RawMessage{}
+	}
+	t.serial++
+	id := "ext-" + strconv.FormatUint(t.serial, 10)
+	ch := make(chan json.RawMessage, 1)
+	t.pending[id] = ch
+	t.mu.Unlock()
+	if ctx.Err() != nil {
+		t.mu.Lock()
+		delete(t.pending, id)
+		t.mu.Unlock()
+		return nil, ctx.Err()
+	}
+	t.Send(backend.WireMsg{T: "extension.request", RequestID: id, Extension: &req})
+	select {
+	case raw, ok := <-ch:
+		if !ok {
+			return nil, errors.New("extension owner disconnected")
+		}
+		return raw, nil
+	case <-ctx.Done():
+		t.mu.Lock()
+		delete(t.pending, id)
+		t.mu.Unlock()
+		t.Send(backend.WireMsg{T: "extension.cancel", RequestID: id})
+		return nil, ctx.Err()
+	}
 }

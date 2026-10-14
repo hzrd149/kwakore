@@ -140,6 +140,8 @@
   // nap.start answered for the next one: only pushes for this session reach
   // the frame.
   let session = null
+  let extensionPort = null
+  const closeExtensionPort = () => { if (extensionPort) extensionPort.close(); extensionPort = null }
 
   // ── Go -> napplet ───────────────────────────────────────────────
   // Envelopes come back as plain JSON. A resource result carries its bytes as
@@ -177,6 +179,10 @@
         // A daemon push may already be in flight when this window loses
         // focus. Never let it restore live values in an inactive frame.
         gamepadDeliver(env)
+        continue
+      }
+      if (env.type.endsWith(".result") && own(extensionShapes, env.type.slice(0, -7))) {
+        if (extensionPort) extensionPort.postMessage(env)
         continue
       }
       // the napplet's origin is opaque, so "*" is the only target that reaches
@@ -318,7 +324,20 @@
     const data = event.data
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
     if (data.type === DOCUMENT_MARKER) {
-      if (++markers >= 2) replaced(frame)
+      if (++markers >= 2) { replaced(frame); return }
+      if (Object.keys(extensionShapes).length) {
+        const port = event.ports && event.ports[0]
+        if (!port) { replaced(frame); return }
+        const from = frame
+        extensionPort = port
+        port.onmessage = event => {
+          if (frame !== from) return
+          const data = event.data
+          if (data && data.type === "__kwakore.extension.replaced") { replaced(from); return }
+          if (data && typeof data.type === "string" && own(extensionShapes, data.type)) forwardEnvelope(from, data)
+        }
+        port.start()
+      }
       return
     }
     if (data.type === "__kwakore.gamepad.policy") {
@@ -339,17 +358,25 @@
       }
       return
     }
+    // Private types are accepted only on the port installed by the first
+    // trusted document marker, never through forgeable window messages.
+    if (own(extensionShapes, data.type)) return
+    forwardEnvelope(frame, data)
+  })
+
+  const forwardEnvelope = (from, data) => {
     // the frame this envelope came from: Go's reply or a refusal is its
     // answer and goes to it only, never to a document that replaced it in
     // the meantime
-    const from = frame
     // one at a time: the desktop binding runs every call on its own thread,
     // so two calls in flight can reach Go in either order, and NAP needs the
     // order kept: nap.start goes ahead of a new document's first envelope,
     // and a subscribe goes ahead of its close. Go only queues the envelope
     // before answering, so the wait is short.
     enqueue(async () => {
+      if (frame !== from) return null
       const encoded = await dehydrate(data)
+      if (frame !== from) return null
       let json
       try {
         json = JSON.stringify(encoded)
@@ -357,7 +384,7 @@
         throw napError((err && err.message) || "unencodable NAP envelope", "invalid-request")
       }
       if (typeof json !== "string") throw napError("unencodable NAP envelope", "invalid-request")
-      const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
+      const limit = own(extensionShapes, data.type) ? extensionShapes[data.type].maxBytes : (data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE)
       if (utf8Length(json) > limit || wireBytes(json) > MAX_WIRE_BYTES) {
         throw napError("NAP envelope is too large", "too-large")
       }
@@ -368,7 +395,7 @@
       console.error("[napplet-host]", err)
       if (frame === from) refuse(data, err)
     })
-  })
+  }
 
   // ── failure shapes ──────────────────────────────────────────────
   // One entry per NAP request type, mirroring Go's route table
@@ -499,7 +526,13 @@
   // failing with code, or null when Go would send nothing: an unknown type
   // (NIP-5D), a reply-less type (its id may name another request), an id Go
   // would not echo, or a request without the correlator its answer needs (A16).
+  let extensionShapes = Object.create(null)
   const failureFor = (data, code) => {
+    if (own(extensionShapes, data.type)) {
+      if (!validId(data.id)) return null
+      const codes = {"invalid-request":-32001,"too-large":-32002,"rate-limited":-32003,"timeout":-32004}
+      return {type:data.type+".result",id:data.id,error:{code:codes[code] || -32000,message:"Custom request failed",reason:code}}
+    }
     const entry = own(FAIL_SHAPES, data.type) ? FAIL_SHAPES[data.type] : null
     if (!entry || entry.kind === "none") return null
     // Go drops a request whose id it would not echo, whatever its type
@@ -643,6 +676,7 @@
     if (!doc || typeof doc.srcdoc !== "string") return
 
     gamepadStop()
+    closeExtensionPort()
     if (frame) frame.remove()
     frame = null
     session = null
@@ -661,6 +695,7 @@
     }
     session = started.gen
 
+    extensionShapes = doc.extensions || Object.create(null)
     const f = document.createElement("iframe")
     // allow-scripts and nothing else: never allow-same-origin
     f.setAttribute("sandbox", "allow-scripts")
@@ -726,6 +761,7 @@
   const replaced = f => {
     if (frame !== f) return
     f.remove()
+    closeExtensionPort()
     gamepadStop()
     frame = null
     session = null

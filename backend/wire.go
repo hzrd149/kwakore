@@ -40,13 +40,16 @@ const MaxInboundWireMsg = 24<<20 + 1<<20
 //	                                 notice for it. Napplet windows only:
 //	                                 from any other window it is dropped
 type WireMsg struct {
-	T      string          `json:"t"`
-	ID     int             `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params string          `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  string          `json:"error,omitempty"`
-	Code   string          `json:"code,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
+	Extension *ExtensionRequest `json:"extension,omitempty"`
+	Envelope  json.RawMessage   `json:"envelope,omitempty"`
+	T         string            `json:"t"`
+	ID        int               `json:"id,omitempty"`
+	Method    string            `json:"method,omitempty"`
+	Params    string            `json:"params,omitempty"`
+	Result    json.RawMessage   `json:"result,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Code      string            `json:"code,omitempty"`
 
 	// Idx is the index of the handler registered by registerAction() that
 	// should answer an action dispatch. Absent when the napp registered the

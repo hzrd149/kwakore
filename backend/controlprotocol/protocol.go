@@ -24,7 +24,7 @@ func MethodNames() []string {
 		"napplet.updates.check", "napplet.detail", "napplet.icon", "napplet.versions", "napplet.snapshots", "napplet.select",
 		"napplet.social", "napplet.reactions", "napplet.comments", "napplet.mentions", "napplet.zaps", "napplet.vote", "napplet.react", "napplet.comment", "napplet.delete", "napplet.share", "napplet.zap",
 		"napplet.permissions.get", "napplet.permissions.set", "napplet.permissions.clear",
-		"events.subscribe",
+		"events.subscribe", "runtime.builtin.open",
 	}
 }
 

@@ -166,3 +166,16 @@ func TestLoopbackPagePolicies(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomPreludeMarkerAndMarkup(t *testing.T) {
+	code := "window.napplet.example={};parent.postMessage({type:'example.request',id:'eager'},'*');"
+	doc, err := NappletSrcdocWithPreludes([]byte("<p>page</p>"), []string{"theme"}, []string{code})
+	if err != nil || strings.Index(doc, DocumentMarker) > strings.Index(doc, code) {
+		t.Fatal("marker must precede custom code", err)
+	}
+	for _, bad := range []string{"</script>", "</SCRIPT>", "<!--", string([]byte{0xff})} {
+		if _, err := NappletSrcdocWithPreludes(nil, nil, []string{bad}); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}

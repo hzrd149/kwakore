@@ -37,7 +37,11 @@ func ServiceWindows() []ServiceWindow {
 		if !serviceWindowListed(ci) {
 			continue
 		}
-		out = append(out, ServiceWindow{WindowID: ci.ID(), Address: ci.napp.Address(), Name: ci.napp.Label()})
+		address := ci.napp.Address()
+		if ci.builtin != nil {
+			address = ""
+		}
+		out = append(out, ServiceWindow{WindowID: ci.ID(), Address: address, Name: ci.napp.Label()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].WindowID < out[j].WindowID })
 	return out
