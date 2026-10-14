@@ -685,8 +685,9 @@ native code running as that user.
 
 Parameters are a `backend.BuiltinDefinition` object: `key`, `html`, `sha256`
 (lowercase SHA-256 of the exact UTF-8 HTML), `name`, optional `width`/`height`,
-`domains`, and `extensions`. Its encoded size is capped at 900 KiB and the entire
-control request must fit the existing 1 MiB limit. No definitions are persisted.
+`domains`, `extensions`, and optional `permissions`. Its encoded size is capped
+at 900 KiB and the entire control request must fit the existing 1 MiB limit.
+No definitions are persisted.
 Every launch supplies the approved bytes again; reloads use those retained bytes.
 
 V1 standard domains are `gamepad`, `theme`, `storage`, and `resource`, requested explicitly.
@@ -796,7 +797,19 @@ Flatpak packaging still need acceptance testing on those systems.
 Native built-ins may request the stock `resource` domain. HTTPS downloads use
 the same fetch permission prompts and saved rules (under the stable built-in
 identity), public-address/redirect checks, MIME policy and byte limits as other
-napplets. Built-in status does not automatically grant remote fetch access.
+napplets. Native registration may explicitly pre-grant fetch with
+`"domains": ["resource"], "permissions": ["fetch"]`. This skips the fetch
+prompt for only that built-in instance. Reloads reapply the retained allowlist;
+each new launch must supply it again. Other built-ins (even with the same key),
+installed napplets and previews do not inherit grants. No permission rules are
+saved by this mechanism. Omitting the allowlist retains the normal prompt flow.
+
+Currently only `fetch` is supported, and it requires the `resource` domain.
+Unknown, unsupported and duplicate permissions fail registration. Future
+permissions require explicit runtime support; this is not blanket API access.
+Signer approvals and payment confirmations are separate and cannot be
+pre-granted here. Network policy, request validation, MIME checks and resource
+limits still apply.
 
 Icon references use the standard `blossom:<64 lowercase hex hash>.<ext>` scheme.
 RESOURCE first checks cached original icon bytes and verifies their content hash.

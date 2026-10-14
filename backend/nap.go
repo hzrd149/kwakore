@@ -627,6 +627,11 @@ func (ci *Instance) napStart() (int, error) {
 	napGamepads.remove(ci)
 	s.mu.Lock()
 	ci.napTeardownLocked("napplet reset")
+	if ci.builtin != nil {
+		for _, perm := range ci.builtin.definition.Permissions {
+			s.grants[perm] = true
+		}
+	}
 	s.established = true
 	gen := s.gen
 	s.mu.Unlock()

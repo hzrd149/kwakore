@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -216,6 +218,80 @@ func TestBuiltinBoundedIgnoringHandler(t *testing.T) {
 	post(t, ci, map[string]any{"type": "example.request", "id": "second"})
 	got := rec.wait(t, "example.request.result", 2)
 	if got["error"].(map[string]any)["reason"] != "rate-limited" {
+		t.Fatal(got)
+	}
+}
+
+func TestBuiltinPermissionValidation(t *testing.T) {
+	for _, permissions := range [][]Permission{{"unknown"}, {PermSign}, {PermEncrypt}, {PermDecrypt}, {PermPublish}, {PermNotify}, {PermFetch, PermFetch}, {""}} {
+		d := fakeBuiltin()
+		d.Extensions = nil
+		d.Domains = append(d.Domains, "resource")
+		d.Permissions = permissions
+		if _, err := prepareBuiltin(d, nil); err == nil {
+			t.Fatalf("accepted %v", permissions)
+		}
+	}
+	d := fakeBuiltin()
+	d.Extensions = nil
+	d.Permissions = []Permission{PermFetch}
+	if _, err := prepareBuiltin(d, nil); err == nil {
+		t.Fatal("accepted fetch without resource")
+	}
+}
+
+func TestBuiltinFetchPregrantIsolationAndReload(t *testing.T) {
+	setupNapTest(t)
+	cleanPrompts(t)
+	prev := resourceClient
+	resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\nimage")), Request: r}, nil
+	})}
+	t.Cleanup(func() { resourceClient = prev })
+	d := fakeBuiltin()
+	d.Extensions = nil
+	d.Domains = append(d.Domains, "resource")
+	d.Permissions = []Permission{PermFetch}
+	ci, rec := builtinRig(t, d, nil)
+	// Retained registration must not alias native caller-owned slices.
+	d.Permissions[0] = PermSign
+	fetch := func(ci *Instance, rec *recTransport, id string) {
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": id, "url": "https://8.8.8.8/image.png"})
+		if got := waitID(t, rec, "resource.bytes.result", id); got["mime"] != "image/png" {
+			t.Fatal(got)
+		}
+		if len(promptsFor(ci.instance)) != 0 {
+			t.Fatal("pre-grant prompted")
+		}
+	}
+	fetch(ci, rec, "initial")
+	ci.napReset()
+	ready(t, ci, rec, 2)
+	fetch(ci, rec, "reload")
+	if ci.nap.grants[PermSign] {
+		t.Fatal("undeclared permission granted")
+	}
+	d.Permissions = []Permission{PermFetch}
+	reopened, reopenedRec := builtinRig(t, d, nil)
+	fetch(reopened, reopenedRec, "reopen")
+	// Public-address policy still rejects private destinations.
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "private", "url": "https://127.0.0.1/image.png"})
+	if got := waitID(t, rec, "resource.bytes.error", "private"); got["error"] != "blocked-by-policy" {
+		t.Fatal(got)
+	}
+	d.Permissions = nil
+	other, otherRec := builtinRig(t, d, nil)
+	ordinary, ordinaryRec := openNapplet(t, "no-inherited-grant")
+	ready(t, ordinary, ordinaryRec, 1)
+	for _, target := range []*Instance{other, ordinary} {
+		post(t, target, map[string]any{"type": "resource.bytes", "id": "ask", "url": "https://8.8.8.8/image.png"})
+		p := waitPromptsFor(t, target.instance, 1)[0]
+		AnswerPrompt(p.ID, Answer{OK: false, Scope: ScopeOnce})
+	}
+	if got := waitID(t, otherRec, "resource.bytes.error", "ask"); got["error"] != "blocked-by-policy" {
+		t.Fatal(got)
+	}
+	if got := waitID(t, ordinaryRec, "resource.bytes.error", "ask"); got["error"] != "blocked-by-policy" {
 		t.Fatal(got)
 	}
 }

@@ -32,6 +32,9 @@ type BuiltinDefinition struct {
 	Height     int               `json:"height,omitempty"`
 	Domains    []string          `json:"domains"`
 	Extensions []ExtensionDomain `json:"extensions"`
+	// Permissions pre-grants explicitly supported stock permissions for this
+	// instance only. Currently fetch requires the resource domain.
+	Permissions []Permission `json:"permissions,omitempty"`
 }
 
 // ExtensionDomain installs trusted binding code into only its owning document.
@@ -116,6 +119,15 @@ func prepareBuiltin(d BuiltinDefinition, handler ExtensionHandler) (*builtinRegi
 				r.routes[typ] = route
 			}
 		}
+	}
+	permissions := map[Permission]bool{}
+	for _, perm := range d.Permissions {
+		// Keep this explicit: new APIs must never become pre-grantable just
+		// because they introduce another Permission constant or route.
+		if perm != PermFetch || !seen["resource"] || permissions[perm] {
+			return nil, fmt.Errorf("unsupported or duplicate built-in permission %q (fetch requires resource)", perm)
+		}
+		permissions[perm] = true
 	}
 	for _, domain := range d.Extensions {
 		if !extensionName.MatchString(domain.Name) || seen[domain.Name] || slices.Contains(napDomains, domain.Name) || slices.Contains([]string{"nap", "napp", "runtime", "extension", "kwakore"}, domain.Name) || domain.Version == "" || len(domain.Version) > 64 || !utf8.ValidString(domain.Version) || !utf8.ValidString(domain.Prelude) || len(domain.Prelude) > 128*1024 || len(domain.Routes) == 0 || len(domain.Routes) > 32 {
