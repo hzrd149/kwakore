@@ -585,6 +585,10 @@ func TestNapResourceAndMediaGoThroughTheirSinks(t *testing.T) {
 			t.Fatalf("a data: URL reached a sink: %v", sinks.all())
 		}
 
+		// Force a cache miss to exercise the Blossom network sink.
+		if err := os.Remove(cachedArtifactPath(hash)); err != nil {
+			t.Fatal(err)
+		}
 		post(t, ci, map[string]any{"type": "resource.bytes", "id": "blob", "url": "blossom:" + hash + ".png", "servers": []string{"https://8.8.4.4"}})
 		if got := waitID(t, rec, "resource.bytes.result", "blob"); got["mime"] != "image/png" {
 			t.Fatalf("blossom: %v", got)

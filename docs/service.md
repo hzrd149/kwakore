@@ -693,9 +693,12 @@ shell's. `systemctl --user show-environment` shows it.
 | Service lock | `~/.local/share/kwakore/daemon.lock` | exists while or after a daemon ran; not proof one is running |
 | Control socket | `/run/user/UID/kwakore/daemon.sock` | `$XDG_RUNTIME_DIR/kwakore/daemon.sock`; directory `0700`, socket `0600` |
 | Desktop entries | `~/.local/share/applications/kwakore-napplet-<hash>.desktop` | `$XDG_DATA_HOME/applications/` |
+| Shared Blossom cache | `~/.local/share/kwakore/blossom-cache/<sha256>` | original installed files, icons and fetched NAP-RESOURCE blobs; hash verified on reuse, owner-only `0600` in a `0700` directory; retained across uninstall |
 | Napplet icons | `~/.local/share/kwakore/icons/<sha256>.png` | verified, re-encoded PNG, owner-only `0600` in a `0700` directory; pruned when no installed napplet uses it |
 | User units (helper) | `~/.config/systemd/user/kwakore.{socket,service}` | `$XDG_CONFIG_HOME/systemd/user/`, or `$XDG_RUNTIME_DIR/systemd/user/` with `--runtime-units` |
 | Program files (helper) | `~/.local/lib/kwakore/current/` and `~/.local/bin/kwak` | `--prefix DIR` |
+
+Existing artifact-cache files and original icon blobs are reused and copied into the shared Blossom cache on access. Desktop PNGs remain derived icon files. HTTPS resource requests still require permission and fetch their URL; their returned bytes are retained by hash for subsequent Blossom requests. The shared cache currently has no automatic eviction.
 
 An unset or empty XDG variable uses its default. A nonempty `XDG_CONFIG_HOME`
 or `XDG_DATA_HOME` must be absolute; a relative value is an error.

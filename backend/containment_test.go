@@ -187,7 +187,7 @@ func TestHostileDTagInstallStaysInsideDataDir(t *testing.T) {
 
 	// d="/../x" used to land in napps/x; a failed install then removed that
 	// Clear retained code so this exercises missing remote files, not offline install.
-	if err := os.RemoveAll(filepath.Join(dataDir, "artifact-cache")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dataDir, "blossom-cache")); err != nil {
 		t.Fatal(err)
 	}
 	r.missing.Store(true)
@@ -478,7 +478,7 @@ func TestHostileDTagStaysInsideDataDir(t *testing.T) {
 				r.assertContained(t, "uninstall")
 
 				// failed install: nobody serves the file
-				if err := os.RemoveAll(filepath.Join(dataDir, "artifact-cache")); err != nil {
+				if err := os.RemoveAll(filepath.Join(dataDir, "blossom-cache")); err != nil {
 					t.Fatal(err)
 				}
 				r.missing.Store(true)

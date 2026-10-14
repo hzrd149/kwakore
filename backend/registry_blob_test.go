@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -128,6 +129,7 @@ func TestBlobDownloadRefusesPrivateHosts(t *testing.T) {
 }
 
 func TestBlobDownloadTrustsUserServers(t *testing.T) {
+	newReclaimRig(t)
 	blob := []byte("a blob on the user's own LAN server")
 	srv := newCountingBlobServer(t, serveBlob(blob))
 	// the trailing slash and the manifest's own copy of the url are both
@@ -161,6 +163,10 @@ func TestBlobDownloadTrustsUserServers(t *testing.T) {
 	}
 	if trusted[srv.URL] {
 		t.Error("a server the user did not list is trusted")
+	}
+	// Force a miss so the assertion exercises the network policy.
+	if err := os.Remove(cachedArtifactPath(blobHash(blob))); err != nil {
+		t.Fatal(err)
 	}
 	before := srv.hits.Load()
 	if _, err := downloadBlob(t.Context(), []string{srv.URL}, blobHash(blob)); !errors.Is(err, netguard.ErrPrivateAddress) {

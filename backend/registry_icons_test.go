@@ -300,7 +300,7 @@ func TestPruneNappletIcons(t *testing.T) {
 	if _, err := ServiceUninstall(t.Context(), eventAddress(a)); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{shaB + ".blob", shaB + ".png", "notes.txt"}
+	want := []string{shaB + ".png", "notes.txt"}
 	slices.Sort(want)
 	if got := iconFiles(t); !slices.Equal(got, want) {
 		t.Fatalf("icon files %v, want %v", got, want)

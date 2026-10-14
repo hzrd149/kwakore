@@ -76,6 +76,37 @@ func TestBuiltinResourceCachedIconAndConsent(t *testing.T) {
 	}
 }
 
+func TestResourceSharedBlossomCache(t *testing.T) {
+	setupNapTest(t)
+	d := fakeBuiltin()
+	d.Domains = append(d.Domains, "resource")
+	ci, rec := builtinRig(t, d, func(context.Context, ExtensionRequest) (json.RawMessage, error) { return nil, nil })
+	ci.nap.mu.Lock()
+	ci.nap.grants[PermFetch] = true
+	ci.nap.mu.Unlock()
+	data := testPNG(t, 4, 2)
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	old := resourceClient.Transport
+	var hits atomic.Int32
+	resourceClient.Transport = builtinResourceTransport(func(*http.Request) (*http.Response, error) {
+		hits.Add(1)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data)), Header: http.Header{}}, nil
+	})
+	t.Cleanup(func() { resourceClient.Transport = old })
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "https", "url": "https://8.8.8.8/image.png"})
+	rec.wait(t, "resource.bytes.result", 1)
+	ci.nap.mu.Lock()
+	ci.nap.grants[PermFetch] = false
+	ci.nap.mu.Unlock()
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "cached", "url": "blossom:" + hash + ".png"})
+	rec.wait(t, "resource.bytes.result", 2)
+	got, err := downloadBlob(t.Context(), nil, hash)
+	if err != nil || !bytes.Equal(got, data) || hits.Load() != 1 {
+		t.Fatalf("shared bytes: %v, requests %d", err, hits.Load())
+	}
+}
+
 func TestBuiltinResourceBUD10ServerHints(t *testing.T) {
 	setupNapTest(t)
 	d := fakeBuiltin()

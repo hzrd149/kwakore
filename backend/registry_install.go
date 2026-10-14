@@ -1150,6 +1150,9 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 // downloadBlobMax is downloadBlob with its own byte limit, enforced while
 // the body is read: a server sending more is cut off and skipped.
 func downloadBlobMax(ctx context.Context, servers []string, sha string, limit int64) ([]byte, error) {
+	if data := readCachedBlossom(sha, limit); data != nil {
+		return data, nil
+	}
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	trusted := userBlobServers()
 	var lastErr error = errors.New("no servers")
@@ -1164,6 +1167,7 @@ func downloadBlobMax(ctx context.Context, servers []string, sha string, limit in
 			lastErr = err
 			continue
 		}
+		retainBlossom(sha, data)
 		log.Debug().Str("server", srv).Msg("blob downloaded and verified")
 		return data, nil
 	}

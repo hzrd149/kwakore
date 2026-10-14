@@ -330,7 +330,12 @@ func fetchResource(ctx context.Context, c *napCall, raw string, servers []string
 	if !c.allowFetch() {
 		return resourceResult{}, rerr("blocked-by-policy", "the user did not allow fetching")
 	}
-	return c.fetch(ctx, u.String())
+	res, err := c.fetch(ctx, u.String())
+	if err == nil {
+		sum := sha256.Sum256(res.data)
+		retainBlossom(hex.EncodeToString(sum[:]), res.data)
+	}
+	return res, err
 }
 
 // allowFetch asks, once per session, if the napplet may have the launcher
@@ -426,9 +431,8 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 	if uri.Size > resourceMaxBytes {
 		return resourceResult{}, rerr("too-large", "")
 	}
-	// Local original icon blobs retain Blossom's content-address semantics.
-	// A re-encoded desktop PNG is usable only if its bytes still hash right.
-	if data, err := readCachedOriginalIcon(sha); err == nil {
+	// Reuse original bytes shared by installed files, icons and resources.
+	if data := readCachedBlossom(sha, resourceMaxBytes); data != nil {
 		if uri.Size > 0 && int64(len(data)) != uri.Size {
 			return resourceResult{}, rerr("decode-failed", "size mismatch")
 		}
@@ -470,6 +474,7 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 				lastErr = rerr("decode-failed", "hash mismatch")
 				continue
 			}
+			retainBlossom(sha, res.data)
 			return res, true
 		}
 		return resourceResult{}, false

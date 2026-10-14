@@ -3,18 +3,14 @@ package backend
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"kwakore/backend/fileutil"
@@ -24,8 +20,9 @@ import (
 // is fetched by its manifest hash from the user's, the manifest's and the
 // author's Blossom servers (Napp.BlossomServers), accepted only when it
 // matches the hash and decodes as the declared png, jpeg or webp, and kept
-// only as a PNG Go decoded and re-encoded itself: <dataDir>/icons/<sha>.png,
-// owner-only. The source is at most nappletIconMaxBytes, enforced during the
+// as a PNG Go decoded and re-encoded itself: <dataDir>/icons/<sha>.png,
+// owner-only. Original bytes also live in the shared Blossom cache.
+// The source is at most nappletIconMaxBytes, enforced during the
 // download, and at most nappletIconMaxSide on each side, checked before the
 // full decode. Nothing about where an icon came from is kept, and an icon
 // that cannot be had never stands in the way of a napplet: desktop entries
@@ -151,11 +148,7 @@ func cacheNappletIcon(ctx context.Context, n Napp) (string, error) {
 	if err := fileutil.TightenDir(dir); err != nil {
 		return "", fmt.Errorf("icon directory: %w", err)
 	}
-	// Preserve verified source bytes for NAP-RESOURCE's BUD-10 Blossom refs.
-	// The desktop PNG may have different bytes and therefore a different hash.
-	if err := fileutil.WriteFileAtomic(strings.TrimSuffix(path, ".png")+".blob", data, 0o600); err != nil {
-		return "", fmt.Errorf("icon source write: %w", err)
-	}
+	retainBlossom(n.IconSha, data)
 	if err := fileutil.WriteFileAtomic(path, out.Bytes(), 0o600); err != nil {
 		return "", fmt.Errorf("icon write: %w", err)
 	}
@@ -287,33 +280,10 @@ func ServiceIcon(ctx context.Context, address string) (ServiceIconResult, error)
 	}, nil
 }
 
-// readCachedOriginalIcon accepts only bounded, regular files whose bytes match
-// the requested content hash. Old PNG-only cache entries can be reused only
-// when re-encoding happened to preserve that hash; otherwise RESOURCE fetches
-// the original through the ordinary permission-controlled Blossom path.
+// readCachedOriginalIcon reads the verified source from the shared cache.
 func readCachedOriginalIcon(sha string) ([]byte, error) {
-	path, err := nappletIconPath(sha)
-	if err != nil {
-		return nil, err
-	}
-	for _, candidate := range []string{strings.TrimSuffix(path, ".png") + ".blob", path} {
-		info, err := os.Lstat(candidate)
-		if err != nil || !info.Mode().IsRegular() || info.Size() > nappletIconMaxBytes {
-			continue
-		}
-		file, err := os.Open(candidate)
-		if err != nil {
-			continue
-		}
-		data, err := io.ReadAll(io.LimitReader(file, nappletIconMaxBytes+1))
-		file.Close()
-		if err != nil || len(data) > nappletIconMaxBytes {
-			continue
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) == sha {
-			return data, nil
-		}
+	if data := readCachedBlossom(sha, nappletIconMaxBytes); data != nil {
+		return data, nil
 	}
 	return nil, errors.New("original icon blob not cached")
 }
