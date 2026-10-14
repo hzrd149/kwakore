@@ -325,6 +325,7 @@ EOF
   meta = {
     description = "Linux service that runs Nostr napplets in a sandboxed webview";
     homepage = "https://github.com/hzrd149/kwakore";
+    license = lib.licenses.mit;
     mainProgram = "kwak";
     platforms = [
       "x86_64-linux"
