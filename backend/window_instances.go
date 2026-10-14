@@ -869,7 +869,14 @@ func launchWindow(ctx context.Context, napp Napp, requestedInstance string, prev
 		StorageJSON: storageSeed(napp),
 	}
 	var transport Transport
-	if contextual, ok := host.(ContextWindowHost); ok {
+	if attached, ok := ctx.Value(attachedLaunchKey{}).(*attachedLaunch); ok {
+		attached.window = &AttachedWindow{spec.NappID, spec.Name, spec.Instance, spec.Width, spec.Height, spec.Format, spec.Theme, spec.ThemeVars}
+		transport = attached.transport
+		if binder, ok := transport.(interface{ BindWindow(string) }); ok {
+			binder.BindWindow(spec.Instance)
+		}
+		AttachServiceWindowTransport(spec.Instance, transport)
+	} else if contextual, ok := host.(ContextWindowHost); ok {
 		transport, err = contextual.OpenWindowContext(ctx, spec)
 	} else {
 		transport, err = host.OpenWindow(spec)

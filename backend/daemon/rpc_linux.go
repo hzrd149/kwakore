@@ -406,6 +406,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		return result, nil
 	case "napplet.launch":
+		params, ctx, err := attachedParams(ctx, params, false)
+		if err != nil {
+			return nil, err
+		}
 		address, err := decodeAddressParams(params)
 		if err != nil {
 			return nil, err
@@ -427,6 +431,10 @@ func (s *Service) dispatchRPCContext(ctx context.Context, method string, params 
 		}
 		return result, nil
 	case "napplet.try":
+		params, ctx, err := attachedParams(ctx, params, true)
+		if err != nil {
+			return nil, err
+		}
 		address, relays, err := decodeInstallParams(params)
 		if err != nil {
 			return nil, err

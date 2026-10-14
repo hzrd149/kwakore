@@ -58,6 +58,12 @@ func run(args []string) error {
 		}
 		return runTUI(socketOverride, timeoutOverride)
 	}
+	if len(args) > 0 && args[0] == "run" {
+		if socketOverride != "" || jsonOutput {
+			return inputFailure("run uses the standard user socket and does not support --json")
+		}
+		return runAttached(args, timeoutOverride)
+	}
 	method, params, _, err := command(args)
 	var lookup snapshotLookup
 	if errors.As(err, &lookup) {

@@ -24,6 +24,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
+	"golang.org/x/sys/unix"
 	"kwakore/backend"
 	"kwakore/backend/controlprotocol"
 	"kwakore/backend/linuxhost"
@@ -1335,4 +1336,128 @@ func TestRPCUninstallPartialCleanupWire(t *testing.T) {
 	if strings.Contains(raw, "private") || strings.Contains(raw, "/home/user/secret") {
 		t.Fatalf("internal text leaked: %s", raw)
 	}
+}
+
+func TestRPCAttachedLaunch(t *testing.T) {
+	paths := daemonPaths(t)
+	key := nostr.MustSecretKeyFromHex(strings.Repeat("0", 63) + "1")
+	napp := backend.Napp{D: "window", Name: "Window", Format: backend.FormatNapplet,
+		Kind: backend.KindNapplet, Author: key.Public(), ArtifactHash: strings.Repeat("a", 64)}
+	napp.ID = napp.Address()
+	if err := os.MkdirAll(paths.DataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := json.Marshal(backend.AppState{InstalledNapps: map[string]backend.Napp{napp.ID: napp}})
+	if err := os.WriteFile(filepath.Join(paths.DataDir, "state.json"), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(napp.ID))
+	dir := filepath.Join(paths.DataDir, "napps", hex.EncodeToString(sum[:]))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>ready</p>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	service, err := Open(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Close)
+	reader, conn := attachedSocketPair(t, service)
+	result, rpcErr, _ := rpcCall(t, reader, conn, "napplet.launch", `{"address":"`+napp.Address()+`","attach":true}`)
+	var reply backend.ServiceLaunchResult
+	if rpcErr != nil || json.Unmarshal(result, &reply) != nil || reply.Outcome != "attached" || reply.Window == nil || reply.Window.Instance != reply.WindowID {
+		t.Fatalf("attached reply: %s %v", result, rpcErr)
+	}
+	if len(backend.ServiceWindows()) != 1 {
+		t.Fatal("attached window missing")
+	}
+	// No wire output may precede the first client frame.
+	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+	if _, err := reader.Peek(1); err == nil {
+		t.Fatal("premature wire output")
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte(`{"t":"rpc","id":1,"method":"nap.start"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg backend.WireMsg
+		if json.Unmarshal(line, &msg) != nil {
+			t.Fatalf("bad wire: %s", line)
+		}
+		if msg.ID == 1 {
+			if msg.T != "resp" {
+				t.Fatalf("start response: %s", line)
+			}
+			break
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { _, err := backend.ServiceStop(ctx, reply.WindowID); stopped <- err }()
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg backend.WireMsg
+		_ = json.Unmarshal(line, &msg)
+		if msg.T == "close" {
+			break
+		}
+	}
+	_ = conn.Close()
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.ServiceWindows()) != 0 {
+		t.Fatal("closed window retained")
+	}
+	reader, conn = attachedSocketPair(t, service)
+	_, rpcErr, _ = rpcCall(t, reader, conn, "napplet.launch", `{"address":"`+napp.Address()+`","attach":true}`)
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	_ = conn.Close()
+	deadline := time.Now().Add(time.Second)
+	for len(backend.ServiceWindows()) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(backend.ServiceWindows()) != 0 {
+		t.Fatal("peer EOF retained window")
+	}
+}
+
+func attachedSocketPair(t *testing.T, service *Service) (*bufio.Reader, *net.UnixConn) {
+	t.Helper()
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sockets := make([]*net.UnixConn, 2)
+	for i, fd := range fds {
+		file := os.NewFile(uintptr(fd), "attached-test")
+		conn, err := net.FileConn(file)
+		_ = file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sockets[i] = conn.(*net.UnixConn)
+		t.Cleanup(func() { _ = conn.Close() })
+	}
+	stream := &connStream{}
+	ctx := context.WithValue(context.Background(), connStreamKey{}, stream)
+	go handleSocketConn(sockets[0], func(method string, params json.RawMessage) (any, *controlprotocol.Error) {
+		return service.dispatchRPCContext(ctx, method, params)
+	}, stream, nil)
+	_ = sockets[1].SetDeadline(time.Now().Add(5 * time.Second))
+	return bufio.NewReader(sockets[1]), sockets[1]
 }

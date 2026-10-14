@@ -1127,3 +1127,20 @@ and needs operator action.
   [manual](#removing-kwakore).
 - Nothing is migrated from Verdana: there are no compatibility names for its
   binary, socket, units, data or desktop entries.
+
+### Run a window in the caller's process
+
+`kwak run ADDRESS` accepts the same canonical address or `naddr` as
+`kwak launch`. It prepares an attached launch through the standard user
+socket, verifies the sibling `kwaklet` and `libwebview.so`, and replaces
+itself with the window program. The window inherits the caller's display
+and environment, including Steam's overlay variables. No relay process
+remains: closing the window ends the command, and a caller can terminate
+its own window process directly. `kwak windows`, window events, and
+`kwak stop` also work for these windows. Daemon shutdown closes their
+transport and ends the windows.
+
+Attached clients are authenticated as the same user through `SO_PEERCRED`.
+They choose their window program; instance token binding, storage, signer
+operations, and permission prompts remain in the daemon. Native desktop
+entries can continue using `launch-token` unchanged.

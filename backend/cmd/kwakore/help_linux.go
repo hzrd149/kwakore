@@ -54,6 +54,7 @@ Napplets:
   icon ADDRESS [--out FILE]      Save a napplet's verified icon as PNG
   uninstall --yes ADDRESS        Remove an installed napplet
   launch ADDRESS                 Open a napplet window
+  run ADDRESS                    Become a napplet window on this display
   try ADDRESS                    Open a napplet without installing it
   stop WINDOW_ID                 Close a window
   permissions get ADDRESS        Show saved permission rules
@@ -429,6 +430,12 @@ downloaded and verified into memory and nothing is installed; the data it
 saves is dropped when the window closes unless you install it meanwhile.
 A graphical session is required. The result includes a WINDOW_ID for stop.
 Example: kwak try nostr:naddr1...
+`,
+	"run": `Run a napplet window in this process.
+
+Usage: kwak run ADDRESS
+
+Uses the caller's display and environment. Requires the standard user socket.
 `,
 	"launch-token": `Open a napplet from a generated desktop entry.
 

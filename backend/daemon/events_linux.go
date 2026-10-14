@@ -140,8 +140,9 @@ func (h *eventHub) next(ctx context.Context, done <-chan struct{}, sub *eventSub
 // connStream is a connection's subscription, set by events.subscribe and
 // read by the connection handler once the frame's response is written.
 type connStream struct {
-	mu  sync.Mutex
-	sub *eventSub
+	mu       sync.Mutex
+	sub      *eventSub
+	attached *socketTransport
 }
 
 func (c *connStream) subscription() *eventSub {

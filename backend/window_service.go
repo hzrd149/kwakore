@@ -12,9 +12,10 @@ import (
 var ErrServiceSessionUnavailable = errors.New("graphical session unavailable")
 
 type ServiceLaunchResult struct {
-	Address  string `json:"address"`
-	WindowID string `json:"window_id"`
-	Outcome  string `json:"outcome"`
+	Address  string          `json:"address"`
+	WindowID string          `json:"window_id"`
+	Outcome  string          `json:"outcome"`
+	Window   *AttachedWindow `json:"window,omitempty"`
 }
 
 type ServiceStopResult struct {
@@ -89,7 +90,7 @@ func ServiceLaunch(ctx context.Context, address string) (ServiceLaunchResult, er
 		}
 		return ServiceLaunchResult{}, ErrServiceUnavailable
 	}
-	return ServiceLaunchResult{Address: address, WindowID: ci.ID(), Outcome: "opened"}, nil
+	return serviceLaunchResult(ctx, address, ci.ID()), nil
 }
 
 // ServiceTry opens the napplet at a canonical address without installing it.
@@ -143,7 +144,7 @@ func ServiceTry(ctx context.Context, address string, relays []string, launchLock
 		}
 		return ServiceLaunchResult{}, serviceMutationError(ctx, err)
 	}
-	return ServiceLaunchResult{Address: address, WindowID: ci.ID(), Outcome: "opened"}, nil
+	return serviceLaunchResult(ctx, address, ci.ID()), nil
 }
 
 // ServiceStop confirms WindowClosed for precisely the instance selected here.
@@ -166,4 +167,34 @@ func ServiceStop(ctx context.Context, windowID string) (ServiceStopResult, error
 	case <-ctx.Done():
 		return ServiceStopResult{}, ErrServiceTimeout
 	}
+}
+
+// AttachedWindow is the environment seed for a caller-owned window.
+type AttachedWindow struct {
+	NappID    string `json:"napp_id"`
+	Name      string `json:"name"`
+	Instance  string `json:"instance_id"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Format    string `json:"format"`
+	Theme     string `json:"theme"`
+	ThemeVars string `json:"theme_vars"`
+}
+type attachedLaunchKey struct{}
+type attachedLaunch struct {
+	transport Transport
+	window    *AttachedWindow
+}
+
+// WithAttachedWindow prepares a service launch using a caller-owned transport.
+func WithAttachedWindow(ctx context.Context, transport Transport) context.Context {
+	return context.WithValue(ctx, attachedLaunchKey{}, &attachedLaunch{transport: transport})
+}
+func serviceLaunchResult(ctx context.Context, address, instance string) ServiceLaunchResult {
+	result := ServiceLaunchResult{Address: address, WindowID: instance, Outcome: "opened"}
+	if attached, ok := ctx.Value(attachedLaunchKey{}).(*attachedLaunch); ok {
+		result.Outcome = "attached"
+		result.Window = attached.window
+	}
+	return result
 }

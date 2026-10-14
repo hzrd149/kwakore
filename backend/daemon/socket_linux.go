@@ -377,6 +377,11 @@ func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch, str
 		return
 	}
 	reader := bufio.NewReader(conn)
+	defer func() {
+		if stream != nil && stream.attached != nil {
+			stream.attached.finish()
+		}
+	}()
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		line, err := readFrame(reader)
@@ -392,6 +397,13 @@ func handleSocketConn(conn *net.UnixConn, dispatch controlprotocol.Dispatch, str
 			if err := writeResponse(conn, response); err != nil {
 				return
 			}
+		}
+		if stream != nil && stream.attached != nil && stream.attached.instance != "" {
+			if response == nil {
+				return
+			}
+			stream.attached.run(conn, reader)
+			return
 		}
 		if stream != nil && streamEvents != nil {
 			if sub := stream.subscription(); sub != nil {

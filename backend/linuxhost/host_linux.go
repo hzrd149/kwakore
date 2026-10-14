@@ -30,6 +30,7 @@ import (
 	"kwakore/backend/fileutil"
 	"kwakore/backend/media"
 	"kwakore/backend/netguard"
+	"kwakore/backend/windowprogram"
 )
 
 const readyTimeout = 10 * time.Second
@@ -184,34 +185,11 @@ const maxWindowTitleRunes = 256
 // windowTitleText reduces an author's napplet name to one title line:
 // invalid UTF-8 is replaced, control and format runes (NUL among them)
 // become spaces, whitespace collapses, and the result is capped in runes.
-func windowTitleText(name string) string {
-	name = strings.ToValidUTF8(name, "\uFFFD")
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
-			return ' '
-		}
-		return r
-	}, name)
-	name = strings.Join(strings.Fields(name), " ")
-	if utf8.RuneCountInString(name) > maxWindowTitleRunes {
-		name = strings.TrimSpace(string([]rune(name)[:maxWindowTitleRunes]))
-	}
-	return name
-}
+func windowTitleText(name string) string { return windowprogram.WindowTitleText(name) }
 
 // DefaultProgramPath is relative to the daemon executable, not cwd or PATH.
 // Phase 9 packages this sibling and its adjacent libwebview.so together.
-func DefaultProgramPath() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(exe), "kwaklet")
-}
+func DefaultProgramPath() string { return windowprogram.DefaultProgramPath() }
 
 func (h *Host) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
@@ -556,48 +534,7 @@ func logChildStderr(logger zerolog.Logger, instance string, r io.Reader, done ch
 // checkProgram rejects symlinks, shared-writable path components (other than
 // sticky directories) and files not owned by this user or root. The child
 // independently checks the library.
-func checkProgram(program string) error {
-	if !filepath.IsAbs(program) || filepath.Clean(program) != program {
-		return errors.New("window program path")
-	}
-	for _, path := range []string{program, filepath.Join(filepath.Dir(program), "libwebview.so")} {
-		current := string(filepath.Separator)
-		parts := strings.Split(strings.TrimPrefix(path, current), current)
-		for i, part := range parts {
-			if part == "" {
-				return errors.New("empty path component")
-			}
-			current = filepath.Join(current, part)
-			info, err := os.Lstat(current)
-			if err != nil || info.Mode()&os.ModeSymlink != 0 {
-				return errors.New("unsafe window program path")
-			}
-			// A shared-writable directory is accepted only with the sticky
-			// bit, as on the root-owned 1775 /nix/store: others can add
-			// entries there but cannot rename or remove the entry below it,
-			// and that entry must itself pass the owner check.
-			sharedSticky := info.IsDir() && info.Mode()&os.ModeSticky != 0 && i < len(parts)-1
-			if info.Mode().Perm()&0022 != 0 && !sharedSticky {
-				return errors.New("unsafe window program path")
-			}
-			owner, ok := info.Sys().(*syscall.Stat_t)
-			if !ok || (owner.Uid != 0 && owner.Uid != uint32(os.Geteuid())) {
-				return errors.New("unsafe window program owner")
-			}
-			if i == len(parts)-1 {
-				if !info.Mode().IsRegular() {
-					return errors.New("window program is not regular")
-				}
-				if path == program && info.Mode().Perm()&0111 == 0 {
-					return errors.New("window program is not executable")
-				}
-			} else if !info.IsDir() {
-				return errors.New("window program parent is not a directory")
-			}
-		}
-	}
-	return nil
-}
+func checkProgram(program string) error { return windowprogram.CheckProgram(program) }
 
 func (*Host) OpenDiscovery(string) {}
 func (*Host) StateChanged()        {}

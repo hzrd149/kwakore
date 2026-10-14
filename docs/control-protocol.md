@@ -655,3 +655,20 @@ The CLI validates permission and signer response fields and the matching request
 `kwak events` checks each `--type` against the event table before dialing and sends no `params` without one. Only the acknowledgement has the default 30-second wait; after it the CLI waits for events indefinitely. Each notification must have exactly `jsonrpc:"2.0"`, `method:"event"` and a `params` object with a string `type` and `time`, and no `id`; anything else ends it with `invalid daemon response`. By default it prints one line per event: the time, the type and the other fields as sorted `key=value` pairs, nested values as compact JSON. With `--json` it prints each `params` object on its own line. When the daemon closes the stream it exits 1 (`Unavailable` with `--json`); with `--timeout` it exits 0 once that time has passed after the acknowledgement.
 
 Native desktop entries run `kwak launch-token TOKEN` with `Terminal=true`, so the CLI's readable error (`Error: Unavailable` with a graphical-session hint) appears in that terminal. With `--json`, the equivalent error is `{"error":{"code":1004,"message":"Unavailable","data":{"reason":"session_unavailable"}}}` for a daemon without `DISPLAY` or `WAYLAND_DISPLAY`. The [service guide](service.md#native-desktop-entries) covers the entries, signer examples, error examples and journal diagnostics.
+
+### Attached windows
+
+`napplet.launch` and `napplet.try` accept optional `attach: boolean` (default
+`false`). With `true`, the daemon prepares the instance without starting a
+window process. The result has `outcome: "attached"`, `address`, `window_id`,
+and a `window` object containing `napp_id`, `name`, `instance_id`, `width`,
+`height`, `format`, `theme`, and `theme_vars`. The instance ID equals
+`window_id`. These values seed the window program's `KWAKORE_*` environment.
+
+As with `events.subscribe`, a successful attached reply takes over the
+connection: subsequent frames are newline-delimited window wire messages,
+not JSON-RPC control requests. The daemon sends no window frames until the
+client sends its first wire frame, so a buffered reader can safely consume
+only the reply. Clients must preserve any buffered incoming bytes when
+handing the connection to their window reader. The host exchanges `nap.boot`
+and `nap.start` as usual; startup must reach `nap.start` within 12 seconds.
