@@ -3,14 +3,18 @@ package backend
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"kwakore/backend/fileutil"
@@ -42,7 +46,7 @@ var (
 	prefetchNappletIcons = func() bool { return serviceConfig != nil }
 
 	errNoNappletIcon = errors.New("napplet has no usable icon")
-	cachedIconName   = regexp.MustCompile(`^[0-9a-f]{64}\.png$`)
+	cachedIconName   = regexp.MustCompile(`^[0-9a-f]{64}\.(png|blob)$`)
 )
 
 // nappletIconDir is where verified icons are cached.
@@ -147,6 +151,11 @@ func cacheNappletIcon(ctx context.Context, n Napp) (string, error) {
 	if err := fileutil.TightenDir(dir); err != nil {
 		return "", fmt.Errorf("icon directory: %w", err)
 	}
+	// Preserve verified source bytes for NAP-RESOURCE's blossom:sha256 refs.
+	// The desktop PNG may have different bytes and therefore a different hash.
+	if err := fileutil.WriteFileAtomic(strings.TrimSuffix(path, ".png")+".blob", data, 0o600); err != nil {
+		return "", fmt.Errorf("icon source write: %w", err)
+	}
 	if err := fileutil.WriteFileAtomic(path, out.Bytes(), 0o600); err != nil {
 		return "", fmt.Errorf("icon write: %w", err)
 	}
@@ -154,7 +163,7 @@ func cacheNappletIcon(ctx context.Context, n Napp) (string, error) {
 }
 
 // pruneNappletIcons removes every cached icon no installed napplet uses.
-// Only <64 hex>.png names are touched; a missing directory is fine.
+// Only <64 hex>.png and .blob names are touched; a missing directory is fine.
 // Failures are logged and never returned into an uninstall's result.
 func pruneNappletIcons() {
 	dir, err := nappletIconDir()
@@ -166,6 +175,7 @@ func pruneNappletIcons() {
 	for _, n := range state.InstalledNapps {
 		if n.IsNapplet() && hex64.MatchString(n.IconSha) {
 			used[n.IconSha+".png"] = true
+			used[n.IconSha+".blob"] = true
 		}
 	}
 	stateMu.Unlock()
@@ -275,4 +285,35 @@ func ServiceIcon(ctx context.Context, address string) (ServiceIconResult, error)
 		Height: h,
 		Data:   base64.StdEncoding.EncodeToString(data),
 	}, nil
+}
+
+// readCachedOriginalIcon accepts only bounded, regular files whose bytes match
+// the requested content hash. Old PNG-only cache entries can be reused only
+// when re-encoding happened to preserve that hash; otherwise RESOURCE fetches
+// the original through the ordinary permission-controlled Blossom path.
+func readCachedOriginalIcon(sha string) ([]byte, error) {
+	path, err := nappletIconPath(sha)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range []string{strings.TrimSuffix(path, ".png") + ".blob", path} {
+		info, err := os.Lstat(candidate)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > nappletIconMaxBytes {
+			continue
+		}
+		file, err := os.Open(candidate)
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(file, nappletIconMaxBytes+1))
+		file.Close()
+		if err != nil || len(data) > nappletIconMaxBytes {
+			continue
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) == sha {
+			return data, nil
+		}
+	}
+	return nil, errors.New("original icon blob not cached")
 }

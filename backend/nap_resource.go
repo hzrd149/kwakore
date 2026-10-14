@@ -93,7 +93,6 @@ func napResourceInfo(c *napCall) {
 			{"scheme": "https", "enabled": true},
 			{"scheme": "blossom", "enabled": true},
 			{"scheme": "nostr", "enabled": true},
-			{"scheme": "kwakore-icon", "enabled": true},
 			{"scheme": "http", "enabled": false},
 		},
 		"maxBytes":   resourceMaxBytes,
@@ -308,20 +307,6 @@ func resourceErrFields(err error) map[string]any {
 func fetchResource(ctx context.Context, c *napCall, raw string, servers []string) (resourceResult, error) {
 	raw = strings.TrimSpace(raw)
 	switch {
-	case strings.HasPrefix(raw, "kwakore-icon:"):
-		// Cached verified PNGs only: no filesystem paths or network fallback.
-		sha := strings.TrimPrefix(raw, "kwakore-icon:")
-		if !hex64.MatchString(sha) {
-			return resourceResult{}, rerr("invalid-request", "invalid icon hash")
-		}
-		data, _, _, err := readCachedNappletIcon(sha)
-		if err != nil {
-			return resourceResult{}, rerr("not-found", "cached icon unavailable")
-		}
-		if len(data) > resourceMaxBytes {
-			return resourceResult{}, rerr("too-large", "")
-		}
-		return resourceResult{data: data, mime: "image/png"}, nil
 	case strings.HasPrefix(raw, "data:"):
 		return decodeDataURL(raw)
 	case strings.HasPrefix(raw, "blossom:"):
@@ -436,6 +421,19 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 	sha, _, _ = strings.Cut(sha, ".")
 	if !hex64.MatchString(sha) {
 		return resourceResult{}, rerr("invalid-request", "not a sha256 blob reference")
+	}
+	// Local original icon blobs retain Blossom's content-address semantics.
+	// A re-encoded desktop PNG is usable only if its bytes still hash right.
+	if data, err := readCachedOriginalIcon(sha); err == nil {
+		mime, err := sniffResource(data, "")
+		if err == nil {
+			return resourceResult{data: data, mime: mime}, nil
+		}
+	}
+	// Native administrative built-ins must not inherit the historical
+	// no-consent Blossom exception used by ordinary napplets.
+	if c.ci.builtin != nil && !c.allowFetch() {
+		return resourceResult{}, rerr("blocked-by-policy", "the user did not allow fetching")
 	}
 	var lastErr error = rerr("not-found", "")
 	for _, srv := range blossomServers(ctx, hinted, c.ci.napp) {

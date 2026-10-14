@@ -798,9 +798,12 @@ the same fetch permission prompts and saved rules (under the stable built-in
 identity), public-address/redirect checks, MIME policy and byte limits as other
 napplets. Built-in status does not automatically grant remote fetch access.
 
-`resource.info` advertises `kwakore-icon`. A reference
-`kwakore-icon:<64 lowercase hex hash>` resolves a regular, validated PNG in the
-napplet icon cache. It accepts no filesystem paths, does not download a cache
-miss, and needs no remote-fetch consent. Missing entries report `not-found`;
-malformed references report `invalid-request`. Use descriptor icon hashes to
-construct references; icon bytes stay out of custom-domain JSON results.
+Icon references use the standard `blossom:sha256:<64 lowercase hex hash>` scheme.
+RESOURCE first checks cached original icon bytes and verifies their content hash.
+The icon cache preserves originals as `<hash>.blob` alongside the desktop PNG.
+A re-encoded PNG can be reused only if it still matches the original hash.
+A cache miss uses Blossom's normal server resolution and hash verification;
+for native built-ins this requires the fetch grant before any remote lookup.
+The existing ordinary-napplet Blossom consent exception remains unchanged.
+Invalid hashes fail before cache access or network activity. Both original and
+PNG icon cache entries are pruned when no installed napplet references them.

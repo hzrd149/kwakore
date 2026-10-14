@@ -150,6 +150,10 @@ func TestCacheNappletIconWebP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	original, err := readCachedOriginalIcon(sha)
+	if err != nil || !bytes.Equal(original, testWebP(t)) {
+		t.Fatalf("original WebP cache: %v", err)
+	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || format != "png" || cfg.Width != 2 || cfg.Height != 2 {
 		t.Fatalf("webp icon cached as %s %dx%d %v", format, cfg.Width, cfg.Height, err)
@@ -296,7 +300,7 @@ func TestPruneNappletIcons(t *testing.T) {
 	if _, err := ServiceUninstall(t.Context(), eventAddress(a)); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{shaB + ".png", "notes.txt"}
+	want := []string{shaB + ".blob", shaB + ".png", "notes.txt"}
 	slices.Sort(want)
 	if got := iconFiles(t); !slices.Equal(got, want) {
 		t.Fatalf("icon files %v, want %v", got, want)
