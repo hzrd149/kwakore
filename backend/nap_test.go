@@ -2250,7 +2250,7 @@ func TestResourceFetchesVerifiedAssetPackFromNappletServer(t *testing.T) {
 	ci, rec := openNapplet(t, "asset-pack")
 	ci.napp.Servers = []string{"https://blossom.napplet.soy"}
 	ready(t, ci, rec, 1)
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "pack", "url": "blossom:sha256:" + hash})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "pack", "url": "blossom:" + hash + ".png"})
 	got := waitID(t, rec, "resource.bytes.result", "pack")
 	if !fetched || got["mime"] != "application/octet-stream" {
 		t.Fatalf("asset pack fetch: fetched=%v result=%v", fetched, got)

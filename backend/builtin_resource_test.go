@@ -1,13 +1,16 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,19 +42,19 @@ func TestBuiltinResourceCachedIconAndConsent(t *testing.T) {
 		return nil, rerr("network-error", "test forbids fetching")
 	})
 	t.Cleanup(func() { resourceClient.Transport = old })
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "icon", "url": "blossom:sha256:" + sha})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "icon", "url": "blossom:" + sha + ".png?xs=cdn.example.com&as=" + strings.Repeat("d", 64) + "&sz=" + strconv.Itoa(len(data))})
 	result := rec.wait(t, "resource.bytes.result", 1)
 	if result["mime"] != "image/png" || result["blob"] == nil {
 		t.Fatal(result)
 	}
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "invalid", "url": "blossom:sha256:../../etc/passwd"})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "invalid", "url": "blossom:../../etc/passwd"})
 	if rec.wait(t, "resource.bytes.error", 1)["error"] != "invalid-request" {
 		t.Fatal("icon path accepted")
 	}
 	ci.nap.mu.Lock()
 	ci.nap.grants[PermFetch] = false
 	ci.nap.mu.Unlock()
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "missing", "url": "blossom:sha256:" + strings.Repeat("b", 64)})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "missing", "url": "blossom:" + strings.Repeat("b", 64) + ".png"})
 	if rec.wait(t, "resource.bytes.error", 2)["error"] != "blocked-by-policy" {
 		t.Fatal("cache miss bypassed fetch consent")
 	}
@@ -60,7 +63,7 @@ func TestBuiltinResourceCachedIconAndConsent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, strings.Repeat("c", 64)+".png"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "mismatched", "url": "blossom:sha256:" + strings.Repeat("c", 64)})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "mismatched", "url": "blossom:" + strings.Repeat("c", 64) + ".png"})
 	if rec.wait(t, "resource.bytes.error", 3)["error"] != "blocked-by-policy" {
 		t.Fatal("mismatched cached bytes accepted")
 	}
@@ -70,5 +73,34 @@ func TestBuiltinResourceCachedIconAndConsent(t *testing.T) {
 	}
 	if network.Load() != 0 {
 		t.Fatal("RESOURCE fetched without permission")
+	}
+}
+
+func TestBuiltinResourceBUD10ServerHints(t *testing.T) {
+	setupNapTest(t)
+	d := fakeBuiltin()
+	d.Domains = append(d.Domains, "resource")
+	ci, rec := builtinRig(t, d, func(context.Context, ExtensionRequest) (json.RawMessage, error) { return nil, nil })
+	ci.nap.mu.Lock()
+	ci.nap.grants[PermFetch] = true
+	ci.nap.mu.Unlock()
+	data := testPNG(t, 3, 2)
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	old := resourceClient.Transport
+	var hosts []string
+	resourceClient.Transport = builtinResourceTransport(func(r *http.Request) (*http.Response, error) {
+		hosts = append(hosts, r.URL.Host)
+		payload := data
+		if len(hosts) == 1 {
+			payload = testPNG(t, 2, 3)
+		} // First server cannot substitute a different blob.
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(payload)), Header: http.Header{"Content-Type": []string{"image/png"}}}, nil
+	})
+	t.Cleanup(func() { resourceClient.Transport = old })
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "hints", "url": "blossom:" + hash + ".png?xs=8.8.8.8&xs=8.8.4.4&as=" + strings.Repeat("a", 64) + "&sz=" + strconv.Itoa(len(data))})
+	result := rec.wait(t, "resource.bytes.result", 1)
+	if result["blob"] == nil || len(hosts) != 2 || hosts[0] != "8.8.8.8" || hosts[1] != "8.8.4.4" {
+		t.Fatalf("BUD-10 server resolution: %v %#v", hosts, result)
 	}
 }

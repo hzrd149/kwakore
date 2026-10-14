@@ -585,7 +585,7 @@ func TestNapResourceAndMediaGoThroughTheirSinks(t *testing.T) {
 			t.Fatalf("a data: URL reached a sink: %v", sinks.all())
 		}
 
-		post(t, ci, map[string]any{"type": "resource.bytes", "id": "blob", "url": "blossom:sha256:" + hash, "servers": []string{"https://8.8.4.4"}})
+		post(t, ci, map[string]any{"type": "resource.bytes", "id": "blob", "url": "blossom:" + hash + ".png", "servers": []string{"https://8.8.4.4"}})
 		if got := waitID(t, rec, "resource.bytes.result", "blob"); got["mime"] != "image/png" {
 			t.Fatalf("blossom: %v", got)
 		}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"fiatjaf.com/nostr"
 	"kwakore/backend/netguard"
 )
 
@@ -310,7 +311,7 @@ func fetchResource(ctx context.Context, c *napCall, raw string, servers []string
 	case strings.HasPrefix(raw, "data:"):
 		return decodeDataURL(raw)
 	case strings.HasPrefix(raw, "blossom:"):
-		return fetchBlossomResource(ctx, c, strings.TrimPrefix(raw, "blossom:"), servers)
+		return fetchBlossomResource(ctx, c, raw, servers)
 	case strings.HasPrefix(raw, "nostr:"):
 		return fetchNostrResource(ctx, strings.TrimPrefix(raw, "nostr:"))
 	}
@@ -410,21 +411,27 @@ func decodeDataURL(raw string) (resourceResult, error) {
 	return resourceResult{data: data, mime: mime}, nil
 }
 
-// fetchBlossomResource gets blossom:sha256:<hex> from the servers the
+// fetchBlossomResource resolves a BUD-10 URI from the servers the
 // napplet suggested, the user's own, and the launcher's defaults, and only
 // accepts bytes that hash right.
 func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []string) (resourceResult, error) {
 	if len(hinted) > resourceMaxServers {
 		return resourceResult{}, rerr("too-large", "too many Blossom servers")
 	}
-	sha := strings.TrimPrefix(ref, "sha256:")
-	sha, _, _ = strings.Cut(sha, ".")
-	if !hex64.MatchString(sha) {
-		return resourceResult{}, rerr("invalid-request", "not a sha256 blob reference")
+	uri, err := parseBlossomURI(ref)
+	if err != nil {
+		return resourceResult{}, err
+	}
+	sha := uri.Hash
+	if uri.Size > resourceMaxBytes {
+		return resourceResult{}, rerr("too-large", "")
 	}
 	// Local original icon blobs retain Blossom's content-address semantics.
 	// A re-encoded desktop PNG is usable only if its bytes still hash right.
 	if data, err := readCachedOriginalIcon(sha); err == nil {
+		if uri.Size > 0 && int64(len(data)) != uri.Size {
+			return resourceResult{}, rerr("decode-failed", "size mismatch")
+		}
 		mime, err := sniffResource(data, "")
 		if err == nil {
 			return resourceResult{data: data, mime: mime}, nil
@@ -436,18 +443,56 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 		return resourceResult{}, rerr("blocked-by-policy", "the user did not allow fetching")
 	}
 	var lastErr error = rerr("not-found", "")
-	for _, srv := range blossomServers(ctx, hinted, c.ci.napp) {
-		res, err := c.fetchBlossom(ctx, srv+"/"+sha)
-		if err != nil {
-			lastErr = err
-			continue
+	seen := map[string]bool{}
+	try := func(servers []string) (resourceResult, bool) {
+		for _, server := range servers {
+			u, err := url.Parse(server)
+			// RESOURCE's existing network policy permits HTTPS only.
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+				continue
+			}
+			target := "https://" + u.Host + "/" + sha
+			if seen[target] {
+				continue
+			}
+			seen[target] = true
+			res, err := c.fetchBlossom(ctx, target)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if uri.Size > 0 && int64(len(res.data)) != uri.Size {
+				lastErr = rerr("decode-failed", "size mismatch")
+				continue
+			}
+			sum := sha256.Sum256(res.data)
+			if hex.EncodeToString(sum[:]) != sha {
+				lastErr = rerr("decode-failed", "hash mismatch")
+				continue
+			}
+			return res, true
 		}
-		sum := sha256.Sum256(res.data)
-		if hex.EncodeToString(sum[:]) != sha {
-			lastErr = rerr("decode-failed", "hash mismatch")
-			continue
+		return resourceResult{}, false
+	}
+	if res, ok := try(append(append([]string{}, uri.Servers...), hinted...)); ok {
+		return res, nil
+	}
+	// BUD-10 resolution order: explicit servers, BUD-03 author lists, defaults.
+	if sys != nil {
+		for _, author := range uri.Authors {
+			pk, _ := nostr.PubKeyFromHex(author)
+			lctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			var servers []string
+			for _, server := range sys.FetchBlossomServerList(lctx, pk).Items {
+				servers = append(servers, string(server))
+			}
+			cancel()
+			if res, ok := try(servers); ok {
+				return res, nil
+			}
 		}
-		log.Debug().Str("server", srv).Str("sha256", sha).Msg("napplet resource downloaded and verified")
+	}
+	if res, ok := try(blossomServers(ctx, nil, c.ci.napp)); ok {
 		return res, nil
 	}
 	return resourceResult{}, lastErr

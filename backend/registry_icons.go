@@ -151,7 +151,7 @@ func cacheNappletIcon(ctx context.Context, n Napp) (string, error) {
 	if err := fileutil.TightenDir(dir); err != nil {
 		return "", fmt.Errorf("icon directory: %w", err)
 	}
-	// Preserve verified source bytes for NAP-RESOURCE's blossom:sha256 refs.
+	// Preserve verified source bytes for NAP-RESOURCE's BUD-10 Blossom refs.
 	// The desktop PNG may have different bytes and therefore a different hash.
 	if err := fileutil.WriteFileAtomic(strings.TrimSuffix(path, ".png")+".blob", data, 0o600); err != nil {
 		return "", fmt.Errorf("icon source write: %w", err)

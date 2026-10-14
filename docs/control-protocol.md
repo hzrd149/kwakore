@@ -798,7 +798,7 @@ the same fetch permission prompts and saved rules (under the stable built-in
 identity), public-address/redirect checks, MIME policy and byte limits as other
 napplets. Built-in status does not automatically grant remote fetch access.
 
-Icon references use the standard `blossom:sha256:<64 lowercase hex hash>` scheme.
+Icon references use the standard `blossom:<64 lowercase hex hash>.<ext>` scheme.
 RESOURCE first checks cached original icon bytes and verifies their content hash.
 The icon cache preserves originals as `<hash>.blob` alongside the desktop PNG.
 A re-encoded PNG can be reused only if it still matches the original hash.
@@ -807,3 +807,11 @@ for native built-ins this requires the fetch grant before any remote lookup.
 The existing ordinary-napplet Blossom consent exception remains unchanged.
 Invalid hashes fail before cache access or network activity. Both original and
 PNG icon cache entries are pruned when no installed napplet references them.
+
+Blossom references follow [BUD-10](https://github.com/hzrd149/blossom/blob/master/buds/10.md):
+`blossom:<hash>.<ext>` with an explicit extension (`.bin` when unknown), repeated
+`xs` server and `as` author hints, and an optional positive `sz` size hint.
+The store includes the manifest publisher as an author hint. RESOURCE parses
+hints before resolution, tries explicit servers before BUD-03 author lists and
+fallback servers, and verifies content hash and advertised size. Kwakore retains
+its HTTPS-only network policy; HTTP fallback is not enabled.
