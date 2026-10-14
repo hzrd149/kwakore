@@ -85,39 +85,48 @@ func napExplicitRelay(ctx context.Context, raw string) (string, error) {
 	return nostr.NormalizeURL(u.String()), nil
 }
 
-// napRelaysFor is where a filter is asked: the authors' outboxes, the
-// tagged people's inboxes, and the user's own read relays, falling back to
-// the launcher's relays.
-func napRelaysFor(ctx context.Context, f nostr.Filter) []string {
+// napRelaysFor is where a filter is asked, from the people's kind 10002
+// lists: two write relays of each of the first 12 authors, two read relays
+// of each of the first 12 tagged people, then the user's own read relays.
+// Relays from someone else's list must pass the public-host check; the
+// user's own are their choice. Anyone named without a usable list, or a
+// filter that found nowhere to go, adds the fallback relays (the sdk used to
+// stand in hardcoded third-party relays for such people).
+func napRelaysFor(ctx context.Context, rt relayRouting, f nostr.Filter) []string {
 	urls := []string{}
-	add := func(list ...string) {
-		for _, u := range list {
+	missing := false
+	add := func(pks []nostr.PubKey, found map[nostr.PubKey][]string) {
+		for _, pk := range pks {
+			if len(found[pk]) == 0 {
+				missing = true
+			}
+			for _, u := range found[pk] {
+				urls = nostr.AppendUnique(urls, u)
+			}
+		}
+	}
+	authors := f.Authors
+	if len(authors) > 12 {
+		authors = authors[:12]
+	}
+	add(authors, rt.lookup(ctx, authors, "write", 2))
+	var tagged []nostr.PubKey
+	for _, p := range f.Tags["p"] {
+		if pk, err := nostr.PubKeyFromHex(p); err == nil && len(tagged) < 12 {
+			tagged = append(tagged, pk)
+		}
+	}
+	add(tagged, rt.lookup(ctx, tagged, "read", 2))
+	if rt.self != nostr.ZeroPK {
+		_, read, _ := rt.lists(ctx, rt.self)
+		for _, u := range normalizedUnique(read) {
 			urls = nostr.AppendUnique(urls, u)
 		}
 	}
-	for i, pk := range f.Authors {
-		if i >= 12 {
-			break
+	if missing || len(urls) == 0 {
+		for _, u := range normalizedUnique(rt.fallback) {
+			urls = nostr.AppendUnique(urls, u)
 		}
-		add(sys.FetchOutboxRelays(ctx, pk, 2)...)
-	}
-	if ps, ok := f.Tags["p"]; ok {
-		for i, p := range ps {
-			if i >= 12 {
-				break
-			}
-			if pk, err := nostr.PubKeyFromHex(p); err == nil {
-				add(sys.FetchInboxRelays(ctx, pk, 2)...)
-			}
-		}
-	}
-	if pk, ok := currentUser(); ok {
-		if _, read, found := nip65Lists(ctx, pk); found {
-			add(read...)
-		}
-	}
-	if len(urls) == 0 {
-		add(outboxFallback()...)
 	}
 	return urls
 }
@@ -270,7 +279,7 @@ func napRelayPump(ctx context.Context, c *napCall, subID string, filters []nostr
 		relays := explicit
 		if relays == nil {
 			rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			relays = napRelaysFor(rctx, f)
+			relays = napRelaysFor(rctx, liveRelayRouting(), f)
 			cancel()
 		}
 		safeGo(c, "relay pump", func() {
@@ -386,7 +395,7 @@ func napRelayQuery(c *napCall) {
 			}
 			relays := explicit
 			if relays == nil {
-				relays = napRelaysFor(ctx, f)
+				relays = napRelaysFor(ctx, liveRelayRouting(), f)
 			}
 			for re := range fetchRelays(ctx, relays, f, "napplet-query").Events() {
 				add(re.Event)

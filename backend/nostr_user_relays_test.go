@@ -178,7 +178,7 @@ func TestOutboxDirectedFallsBackToUserRelays(t *testing.T) {
 	applyUserRelayEvent(relayList(t, sk, nostr.Now(), nostr.Tag{"r", "wss://out.example.com", "write"}))
 
 	var got []string
-	for _, df := range outboxDirected(context.Background(), nostr.Filter{Kinds: []nostr.Kind{1}}, nil, nil) {
+	for _, df := range outboxDirected(context.Background(), liveRelayRouting(), nostr.Filter{Kinds: []nostr.Kind{1}}, nil, nil) {
 		got = append(got, df.Relay)
 	}
 	if !slices.Equal(got, []string{"wss://out.example.com"}) {
@@ -188,11 +188,52 @@ func TestOutboxDirectedFallsBackToUserRelays(t *testing.T) {
 	stopUserRelays()
 	userKeyer = nil // signed out: no list to look up either
 	got = nil
-	for _, df := range outboxDirected(context.Background(), nostr.Filter{Kinds: []nostr.Kind{1}}, nil, nil) {
+	for _, df := range outboxDirected(context.Background(), liveRelayRouting(), nostr.Filter{Kinds: []nostr.Kind{1}}, nil, nil) {
 		got = append(got, df.Relay)
 	}
 	if !slices.Equal(got, []string{"wss://apps.example.com"}) {
 		t.Fatalf("signed out, directed to %v, want the Settings relays", got)
+	}
+}
+
+// After a restart the sdk's relay-hint database is empty, so an author whose
+// kind 10002 sits only in the local store must still be read on that list's
+// write relays, not on the sdk's hardcoded defaults.
+func TestOutboxDirectedUsesStoredRelayList(t *testing.T) {
+	withSystem(t)
+	// an empty relay-list relay of our own, so nothing dials out
+	store := &slicestore.SliceStore{}
+	store.Init()
+	r := khatru.NewRelay()
+	r.UseEventstore(store, 100)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	sys.RelayListRelays = sdk.NewRelayStream("ws" + strings.TrimPrefix(srv.URL, "http"))
+
+	alice := nostr.Generate()
+	list := relayList(t, alice, nostr.Now(),
+		nostr.Tag{"r", "wss://1.1.1.1", "write"},
+		nostr.Tag{"r", "wss://8.8.8.8", "write"},
+		nostr.Tag{"r", "wss://9.9.9.9", "write"},
+		nostr.Tag{"r", "wss://4.4.4.4", "write"},
+	)
+	if err := sys.Store.SaveEvent(list); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f := nostr.Filter{Authors: []nostr.PubKey{alice.Public()}, Kinds: []nostr.Kind{1}}
+	var got []string
+	for _, df := range outboxDirected(ctx, liveRelayRouting(), f, nil, nil) {
+		got = append(got, df.Relay)
+		if df.Relay == "wss://relay.damus.io" || df.Relay == "wss://nos.lol" {
+			t.Errorf("asked the sdk default %s", df.Relay)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"wss://1.1.1.1", "wss://8.8.8.8", "wss://9.9.9.9"}; !slices.Equal(got, want) {
+		t.Fatalf("directed to %v, want alice's first three write relays %v", got, want)
 	}
 }
 

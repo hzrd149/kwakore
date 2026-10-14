@@ -34,7 +34,7 @@ var pinnedSnapshots = []pinnedSnapshot{
 	{"NAP-MEDIA@2b2d29e9.md", "NAP-MEDIA", "2b2d29e90c30b994bf5035a65b57e5fe7f08a9a2", "pin"},
 	{"NAP-NOTIFY@e14f5c9d.md", "NAP-NOTIFY", "e14f5c9d6a6dd2a69ccf79668c4a3c1e955e1ac9", "pin"},
 	{"NAP-CONFIG@448013e6.md", "NAP-CONFIG", "448013e6d8cb8c75dce49576b3e7c0d46d960eac", "pin"},
-	{"NAP-OUTBOX@4589a8f9.md", "NAP-OUTBOX", "4589a8f9a16d8aa29b3740e2b3b0cdca11e0976e", "pin"},
+	{"NAP-OUTBOX@8865f73d.md", "NAP-OUTBOX", "8865f73d52a4864afee145f28d26520476273927", "pin"},
 	{"NAP-UPLOAD@a7cc1746.md", "NAP-UPLOAD", "a7cc17463cbf5d9cb87884b31071bc4fc826034c", "pin"},
 	{"NAP-LINK@e2514335.md", "NAP-LINK", "e25143355f6d416bfce73b12ec814f1c795ec16a", "pin"},
 	{"NAP-COMMON@de603e20.md", "NAP-COMMON", "de603e205a9b498f252be9a5e8e6825c4648df39", "pin"},

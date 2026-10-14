@@ -3,10 +3,10 @@ spec: NAP-OUTBOX
 role: pin
 repo: https://github.com/napplet/naps
 ref: refs/pull/32/head
-commit: 4589a8f9a16d8aa29b3740e2b3b0cdca11e0976e
+commit: 8865f73d52a4864afee145f28d26520476273927
 path: naps/NAP-OUTBOX.md
-fetched: 2026-10-02
-body_sha256: 1761cd6515b125f2ab802343c19749d9da09863ce62a90a7a156714a0239d0f4
+fetched: 2026-10-14
+body_sha256: e73e285ecce707e57c39b393c6a61b1b397b312d616f6deaeca4084cc4e02893
 ---
 NAP-OUTBOX
 ==========
@@ -21,7 +21,7 @@ Outbox-Aware Relay Access
 **Depends:**
 - `relay` — wire · required — imports `RelayEventResult` for raw Nostr event returns.
 - `resource` — wire · optional — imported `RelayEventResult.sidecar.resources?` carries `ResourceSidecarEntry[]`, a type owned by the `resource` domain.
-**Web binding (NIP-5D):** `window.napplet.outbox` · `shell.supports("outbox")`
+**Web binding ([NIP-5D](https://github.com/nostr-protocol/nips/pull/2303)):** `window.napplet.outbox`; domain presence signals availability.
 
 ## Description
 
@@ -158,7 +158,7 @@ Enumerations:
 
 ## Wire Protocol
 
-`outbox.*` messages use the NIP-5D wire format (`{ "type": "domain.action", ...payload }`).
+`outbox.*` messages use the [NIP-5D](https://github.com/nostr-protocol/nips/pull/2303) wire format (`{ "type": "domain.action", ...payload }`).
 
 | Type | Direction | Payload fields |
 |------|-----------|----------------|
@@ -302,7 +302,7 @@ If the shell returns partial results because some relay lists or relay connectio
 - The shell SHOULD merge observed relay URLs into `RelayEventResult.sidecar.relayHints` after deduplication when it can disclose them.
 - The shell MAY include pre-resolved byte resources in `RelayEventResult.sidecar.resources`; NAP-RELAY's default-off sidecar privacy policy and NAP-RESOURCE's fetch policy both apply.
 - The shell SHOULD cache relay lists and refresh them according to shell policy.
-- The shell SHOULD fall back to configured relays when NIP-65 data is absent, stale, or unreachable.
+- The shell SHOULD fall back to configured relays when NIP-65 data is absent, stale, or unreachable, for read targets and for the shell-user's own write set. Fallback never substitutes for a `toInboxes` read relay.
 - The shell MAY use NIP-66 or other relay intelligence to choose among candidate relays.
 - The shell MAY enforce ACL checks for outbox read, subscribe, publish, relay override, and relay discovery operations.
 
@@ -333,3 +333,5 @@ If the shell returns partial results because some relay lists or relay connectio
 - `70515a5` - Removed `strategy`, `live`, and `outbox.eose` caller-visible controls from outbox options, messages, and examples.
 - `e575906` - Restored the `OutboxSubscription` handle definition for `event`, `closed`, and `close()` lifecycle methods.
 - `0648a60` - Replaced inferred publish routing with explicit `toOutbox`, `toInboxes`, and validated `relays` fanout.
+
+- `e46a61a` - Adopted injected-domain availability and linked the current upstream web binding.

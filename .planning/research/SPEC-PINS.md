@@ -28,7 +28,7 @@ re-pin deliberately and record the change here.
 | NAP-MEDIA | `refs/pull/10/head` | draft PR #10 | `2b2d29e90c30b994bf5035a65b57e5fe7f08a9a2` |
 | NAP-NOTIFY | `refs/pull/11/head` | draft PR #11 | `e14f5c9d6a6dd2a69ccf79668c4a3c1e955e1ac9` |
 | NAP-CONFIG | `refs/pull/14/head` | draft PR #14 | `448013e6d8cb8c75dce49576b3e7c0d46d960eac` |
-| NAP-OUTBOX | `refs/pull/32/head` | draft PR #32 | `4589a8f9a16d8aa29b3740e2b3b0cdca11e0976e` |
+| NAP-OUTBOX | `refs/pull/32/head` | draft PR #32 | `8865f73d52a4864afee145f28d26520476273927` |
 | NAP-UPLOAD | `refs/pull/33/head` | draft PR #33 | `a7cc17463cbf5d9cb87884b31071bc4fc826034c` |
 | NAP-LINK | `refs/pull/53/head` | draft PR #53 | `e25143355f6d416bfce73b12ec814f1c795ec16a` |
 | NAP-COMMON | `refs/pull/67/head` | draft PR #67 | `de603e205a9b498f252be9a5e8e6825c4648df39` |
@@ -58,3 +58,4 @@ Repo: https://github.com/napplet/web, branch `main`.
 
 - Most domains Verdana implements exist only as open draft PRs on napplet/naps. Drafts can change; the audit pins to the SHAs above.
 - `nap/src` also contains domains Verdana does not implement (`keys`, `lists`, `dm`, `count`, `fs`, `ble`, `serial`, `webrtc`, `cvm`, `ifc`); they are out of scope for this milestone.
+- NAP-OUTBOX re-pinned on 2026-10-14 from `4589a8f9a16d8aa29b3740e2b3b0cdca11e0976e` to `8865f73d52a4864afee145f28d26520476273927` (PR #32 head; quick task 261014-iw9). No MUST changed. The web binding now signals availability by domain presence, which is already how the shim and host behave. The fallback SHOULD now names read targets and the shell-user's own write set, and says fallback never substitutes for a `toInboxes` read relay.

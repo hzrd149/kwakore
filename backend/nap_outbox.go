@@ -127,17 +127,10 @@ func napOutboxGetEvent(c *napCall) {
 			}
 		}
 
-		// the author's outbox when known, the napplet's hints, the user's
+		// the napplet's hints, the author's outbox when known, the user's
 		// own relays and the launcher's: never a search across everything
-		relays := r.Options.hintRelays(ctx)
-		for _, pk := range r.Options.hintAuthors() {
-			for _, u := range sys.FetchOutboxRelays(ctx, pk, outboxRelaysPerAuthor) {
-				relays = nostr.AppendUnique(relays, u)
-			}
-		}
-		for _, u := range append(outboxFallback(), Relays()...) {
-			relays = nostr.AppendUnique(relays, nostr.NormalizeURL(u))
-		}
+		relays := outboxEventRelays(ctx, liveRelayRouting(), r.Options.hintAuthors(), r.Options.hintRelays(ctx))
+		relays = normalizedUnique(append(relays, Relays()...))
 		var q *relayQuery
 		if len(relays) > 0 {
 			q = fetchRelays(ctx, relays, f, "napplet-outbox")
@@ -158,6 +151,21 @@ func napOutboxGetEvent(c *napCall) {
 		}
 		c.reply(res)
 	})
+}
+
+// outboxEventRelays is where getEvent looks for an event on the network: the
+// napplet's validated hints, up to three usable write relays of each hinted
+// author, then the fallback relays.
+func outboxEventRelays(ctx context.Context, rt relayRouting, authors []nostr.PubKey, hints []string) []string {
+	if len(authors) > outboxMaxAuthors {
+		authors = authors[:outboxMaxAuthors]
+	}
+	relays := append([]string(nil), hints...)
+	found := rt.lookup(ctx, authors, "write", outboxRelaysPerAuthor)
+	for _, pk := range authors {
+		relays = append(relays, found[pk]...)
+	}
+	return normalizedUnique(append(relays, rt.fallback...))
 }
 
 // ─── query ───────────────────────────────────────────────────────
@@ -187,9 +195,10 @@ func outboxRoutes(ctx context.Context, filters []nostr.Filter, o outboxReadOptio
 	defer cancel()
 	hints := o.hintRelays(rctx)
 	authors := o.hintAuthors()
+	rt := liveRelayRouting()
 	var dfs []nostr.DirectedFilter
 	for _, f := range filters {
-		dfs = append(dfs, outboxDirected(rctx, f, authors, hints)...)
+		dfs = append(dfs, outboxDirected(rctx, rt, f, authors, hints)...)
 	}
 	return dfs
 }
@@ -564,6 +573,7 @@ func napOutboxResolveRelays(c *napCall) {
 	c.async(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, outboxDefaultTimeout)
 		defer cancel()
-		c.reply(map[string]any{"plan": outboxPlan(ctx, nip65Lists, authors, dir, Relays())})
+		// the plan reads use, fallback included
+		c.reply(map[string]any{"plan": outboxPlan(ctx, liveRelayRouting(), authors, dir)})
 	})
 }
