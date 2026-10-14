@@ -6,7 +6,9 @@ ref: refs/pull/80/head
 commit: fa6bcc6935aa19e7b70ab2a2c721dafca77c78e1
 path: naps/NAP-RESOURCE.md
 fetched: 2026-10-02
-body_sha256: 109f7f9107b6c1548a50faf0b7c4ad59dedee53d05249a574d5636017b7f446d
+body_sha256: 93b6fabbc3c54e75170873ba0ee432ddd303a0c439467296529b76586e4d17c9
+source_body_sha256: 109f7f9107b6c1548a50faf0b7c4ad59dedee53d05249a574d5636017b7f446d
+normalization: Blossom URI examples aligned with BUD-10
 ---
 NAP-RESOURCE
 ============
@@ -122,7 +124,7 @@ Rules:
 |--------|-------|
 | `data:` | MAY decode in the napplet shim. If sent to the runtime, it MUST be decoded and policy-checked. No network access. |
 | `https:` | Runtime fetch. Full Default Resource Policy applies. Returned `mime` is sniffed, not upstream `Content-Type`. |
-| `blossom:` | Canonical form `blossom:sha256:<hex>`. Runtime MUST verify SHA-256 before delivery. Upstream hosts use `https:` policy. |
+| `blossom:` | Canonical form `blossom:<hex>.<ext>` (use `.bin` when unknown). Runtime MUST verify SHA-256 before delivery. Upstream hosts use `https:` policy. |
 | `htree:` | Hashtree reference (`htree://...`, `nhash`, or compatible immutable form). Runtime resolves the referenced file bytes, verifies every Hashtree hash before delivery, and MUST NOT leak fragment keys to relays, storage servers, or peers. |
 | `nostr:` | NIP-19 bech32. Runtime resolves one hop and returns the referenced bytes. MUST NOT recursively follow URLs or `nostr:` references in the result. |
 

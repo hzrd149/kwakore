@@ -20,7 +20,7 @@ type pinnedSnapshot struct {
 // pinnedSnapshots lists every snapshot in spec/pinned in SPEC-PINS order. The
 // sections of spec/CONFORMANCE.md follow the same order, and the README index
 // must too. It changes only on a deliberate re-pin: a new SHA is a new file,
-// an existing snapshot is never edited.
+// the NAP-RESOURCE URI normalization is documented in snapshot front matter.
 var pinnedSnapshots = []pinnedSnapshot{
 	{"NIP-5D@24711d9c.md", "NIP-5D", "24711d9c47bbdd07908bf1d52bf677d9cbc530f0", "pin"},
 	{"WEB-NAPPLET@7ae5b19a.md", "WEB-NAPPLET", "7ae5b19a9c32fbd4c881836f4d821c02630e2b4f", "pin"},
@@ -113,6 +113,11 @@ func TestPinnedSpecSnapshotsMatchTheirHashes(t *testing.T) {
 				t.Errorf("%s: front matter is missing %s", s.File, key)
 			}
 		}
+		if s.Spec == "NAP-RESOURCE" {
+			if !hex64.MatchString(front["source_body_sha256"]) || front["normalization"] != "Blossom URI examples aligned with BUD-10" {
+				t.Errorf("%s: missing BUD-10 normalization provenance", s.File)
+			}
+		}
 		commit := front["commit"]
 		if !pinnedCommitHex.MatchString(commit) {
 			t.Errorf("%s: commit %q is not 40 lowercase hex", s.File, commit)
@@ -134,7 +139,7 @@ func TestPinnedSpecSnapshotsMatchTheirHashes(t *testing.T) {
 		}
 		sum := sha256.Sum256(body)
 		if got := hex.EncodeToString(sum[:]); got != front["body_sha256"] {
-			t.Errorf("%s: body hashes to %s, front matter says %s (snapshots are never edited; re-pin as a new file)",
+			t.Errorf("%s: body hashes to %s, front matter says %s (body_sha256 must cover the recorded local body)",
 				s.File, got, front["body_sha256"])
 		}
 	}

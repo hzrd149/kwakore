@@ -90,6 +90,9 @@ func TestBuiltinResourceBUD10ServerHints(t *testing.T) {
 	old := resourceClient.Transport
 	var hosts []string
 	resourceClient.Transport = builtinResourceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/"+hash+".png" {
+			t.Errorf("BUD-10 fetch path = %q, want hash with extension", r.URL.Path)
+		}
 		hosts = append(hosts, r.URL.Host)
 		payload := data
 		if len(hosts) == 1 {

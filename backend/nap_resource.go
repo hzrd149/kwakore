@@ -451,7 +451,7 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 				continue
 			}
-			target := "https://" + u.Host + "/" + sha
+			target := "https://" + u.Host + "/" + sha + "." + uri.Extension
 			if seen[target] {
 				continue
 			}

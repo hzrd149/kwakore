@@ -58,6 +58,11 @@ func parseBlossomURI(raw string) (blossomURI, error) {
 		if len(sizes) != 1 {
 			return invalid()
 		}
+		for _, digit := range sizes[0] {
+			if digit < '0' || digit > '9' {
+				return invalid()
+			}
+		}
 		out.Size, err = strconv.ParseInt(sizes[0], 10, 64)
 		if err != nil || out.Size <= 0 {
 			return invalid()

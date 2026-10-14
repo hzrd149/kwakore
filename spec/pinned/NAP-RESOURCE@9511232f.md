@@ -6,7 +6,9 @@ ref: nap-resource
 commit: 9511232f69313aa7953d110e35d32cc28d506f66
 path: naps/NAP-RESOURCE.md
 fetched: 2026-10-02
-body_sha256: acac746006fe29d3bdd4e214a5aa0069a99624c5c1f9402cd905d220e4cb50bd
+body_sha256: 3713a5b9a0c690a826565563fa52143dd46da9cac1996bd2db8c528fc55d4420
+source_body_sha256: acac746006fe29d3bdd4e214a5aa0069a99624c5c1f9402cd905d220e4cb50bd
+normalization: Blossom URI examples aligned with BUD-10
 ---
 NAP-RESOURCE
 ============
@@ -52,17 +54,17 @@ The web projection places `servers` in the second argument to `bytes`. Each
 `bytesMany` entry carries its own `servers`; no batch-wide server list exists:
 
 ```js
-resource.bytes("blossom:sha256:<hash>", {
+resource.bytes("blossom:<hash>.bin", {
   servers: ["https://cdn.hzrd149.com", "https://blossom.primal.net"],
 });
 
 resource.bytesMany([
   {
-    url: "blossom:sha256:<first-hash>",
+    url: "blossom:<first-hash>.bin",
     servers: ["https://cdn.hzrd149.com"],
   },
   {
-    url: "blossom:sha256:<second-hash>",
+    url: "blossom:<second-hash>.bin",
     servers: ["https://blossom.primal.net"],
   },
 ]);
@@ -103,7 +105,7 @@ Single request with location hints:
 {
   "type": "resource.bytes",
   "id": "resource-1",
-  "url": "blossom:sha256:<hash>",
+  "url": "blossom:<hash>.bin",
   "servers": ["https://cdn.hzrd149.com"]
 }
 ```
@@ -116,11 +118,11 @@ Batch request with per-resource hints:
   "id": "resource-2",
   "requests": [
     {
-      "url": "blossom:sha256:<first-hash>",
+      "url": "blossom:<first-hash>.bin",
       "servers": ["https://cdn.hzrd149.com"]
     },
     {
-      "url": "blossom:sha256:<second-hash>",
+      "url": "blossom:<second-hash>.bin",
       "servers": ["https://blossom.primal.net"]
     }
   ]
@@ -181,7 +183,7 @@ Rules:
 |--------|-------|
 | `data:` | MAY decode in the napplet shim. If sent to the runtime, it MUST be decoded and policy-checked. No network access. |
 | `https:` | Runtime fetch. Full Default Resource Policy applies. Returned `mime` is sniffed, not upstream `Content-Type`. |
-| `blossom:` | Canonical form `blossom:sha256:<hex>`. Runtime MUST verify SHA-256 before delivery. Advisory servers are request metadata, not part of the URL. Upstream hosts use `https:` policy. |
+| `blossom:` | Canonical form `blossom:<hex>.<ext>` (use `.bin` when unknown). Runtime MUST verify SHA-256 before delivery. Advisory servers may be supplied as BUD-10 `xs` URI parameters or request metadata. Upstream hosts use `https:` policy. |
 | `htree:` | Hashtree reference (`htree://...`, `nhash`, or compatible immutable form). Runtime resolves the referenced file bytes, verifies every Hashtree hash before delivery, and MUST NOT leak fragment keys to relays, storage servers, or peers. |
 | `nostr:` | NIP-19 bech32. Runtime resolves one hop and returns the referenced bytes. MUST NOT recursively follow URLs or `nostr:` references in the result. |
 
@@ -201,9 +203,9 @@ user policy.
 
 After a cache miss, a runtime MUST resolve a `blossom:` resource in this order:
 
-1. Accepted request `servers`, in supplied order.
-2. Runtime or user default servers, in configured order.
-3. Public fallback servers selected by the runtime.
+1. BUD-10 URI `xs` hints, then accepted request `servers`, in supplied order.
+2. BUD-03 server lists for URI `as` author hints.
+3. Runtime or user default servers and public fallback servers.
 
 Empty tiers are skipped.
 
@@ -276,10 +278,10 @@ NAP does not require URL canonicalization. Napplets that need deduplication
 SHOULD pass canonical URL strings.
 
 `servers` MUST NOT participate in the cache key. Requests for the same canonical
-`blossom:sha256:<hex>` URL use the same cache entry even when their hints differ.
-Napplets and projection shims MUST carry server hints in `servers`, not append
+`blossom:<hex>.bin` URL use the same cache entry even when their hints differ.
+Napplets and projection shims MAY carry server hints in `servers` or in
 [BUD-10 `xs` discovery parameters](https://github.com/hzrd149/blossom/blob/master/buds/10.md)
-to the resource URL.
+in the resource URL. Discovery hints never override runtime policy.
 
 ## Coexistence
 

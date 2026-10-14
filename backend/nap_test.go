@@ -2184,7 +2184,7 @@ func TestNapResourceBytesManyUsesTooLargeForBulkCap(t *testing.T) {
 
 func TestBlossomResourceCapsServerHints(t *testing.T) {
 	hints := make([]string, resourceMaxServers+1)
-	_, err := fetchBlossomResource(context.Background(), nil, "sha256:"+strings.Repeat("0", 64), hints)
+	_, err := fetchBlossomResource(context.Background(), nil, "blossom:"+strings.Repeat("0", 64)+".bin", hints)
 	var re *resourceErr
 	if !errors.As(err, &re) || re.code != "too-large" {
 		t.Fatalf("server hint cap: %v", err)
@@ -2236,7 +2236,7 @@ func TestResourceFetchesVerifiedAssetPackFromNappletServer(t *testing.T) {
 	pack := []byte("\x89SSRCPK\n\x01\x00\x00\x00game data")
 	sum := sha256.Sum256(pack)
 	hash := hex.EncodeToString(sum[:])
-	wantURL := "https://blossom.napplet.soy/" + hash
+	wantURL := "https://blossom.napplet.soy/" + hash + ".bin"
 	var fetched bool
 	previous := resourceClient
 	resourceClient = &http.Client{Transport: napRoundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -2250,7 +2250,7 @@ func TestResourceFetchesVerifiedAssetPackFromNappletServer(t *testing.T) {
 	ci, rec := openNapplet(t, "asset-pack")
 	ci.napp.Servers = []string{"https://blossom.napplet.soy"}
 	ready(t, ci, rec, 1)
-	post(t, ci, map[string]any{"type": "resource.bytes", "id": "pack", "url": "blossom:" + hash + ".png"})
+	post(t, ci, map[string]any{"type": "resource.bytes", "id": "pack", "url": "blossom:" + hash + ".bin"})
 	got := waitID(t, rec, "resource.bytes.result", "pack")
 	if !fetched || got["mime"] != "application/octet-stream" {
 		t.Fatalf("asset pack fetch: fetched=%v result=%v", fetched, got)
