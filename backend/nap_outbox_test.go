@@ -401,6 +401,51 @@ func TestOutboxFanout(t *testing.T) {
 	}
 }
 
+// NAP-RELAY reads route through the same relay lists and public-host rule,
+// two relays per person.
+func TestNapRelaysForUsesRelayLists(t *testing.T) {
+	a, b, p, none, self := nostr.Generate().Public(), nostr.Generate().Public(), nostr.Generate().Public(),
+		nostr.Generate().Public(), nostr.Generate().Public()
+	rt := relayRouting{
+		lists: fakeLists(map[nostr.PubKey]fakeList{
+			a: {write: []string{"wss://a1.example.com", "ws://127.0.0.1:7777", "wss://a2.example.com", "wss://a3.example.com"}},
+			b: {write: []string{"wss://b1.example.com"}},
+			p: {read: []string{"wss://p1.example.com", "wss://p2.example.com", "wss://p3.example.com"}},
+			// the user's own read relays are trusted and not capped
+			self: {read: []string{"wss://s1.example.com", "wss://home.lan", "wss://s3.example.com"}},
+		}),
+		check:    publicOnly,
+		self:     self,
+		fallback: []string{"wss://fb.example.com"},
+	}
+	ctx := context.Background()
+	defaults := []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"}
+	check := func(what string, got, want []string) {
+		t.Helper()
+		if slices.ContainsFunc(got, func(u string) bool { return slices.Contains(defaults, u) }) {
+			t.Errorf("%s: asked an sdk default: %v", what, got)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: got %v, want %v", what, got, want)
+		}
+	}
+
+	f := nostr.Filter{Authors: []nostr.PubKey{a, none}, Tags: nostr.TagMap{"p": {p.Hex()}}}
+	check("authors, tagged and self", napRelaysFor(ctx, rt, f), []string{
+		"wss://a1.example.com", "wss://a2.example.com",
+		"wss://p1.example.com", "wss://p2.example.com",
+		"wss://s1.example.com", "wss://home.lan", "wss://s3.example.com",
+		"wss://fb.example.com", // none has no list
+	})
+
+	signedOut := rt
+	signedOut.self = nostr.ZeroPK
+	check("authors in filter order", napRelaysFor(ctx, signedOut, nostr.Filter{Authors: []nostr.PubKey{b, a}}),
+		[]string{"wss://b1.example.com", "wss://a1.example.com", "wss://a2.example.com"})
+	check("nobody named, signed out", napRelaysFor(ctx, signedOut, nostr.Filter{Kinds: []nostr.Kind{1}}),
+		[]string{"wss://fb.example.com"})
+}
+
 // withSystem gives a test an sdk system on a fresh store, with no relays
 // configured, so nothing dials out.
 func withSystem(t *testing.T) {
