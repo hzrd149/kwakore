@@ -107,7 +107,7 @@ func prepareBuiltin(d BuiltinDefinition, handler ExtensionHandler) (*builtinRegi
 	r := &builtinRegistry{definition: d, routes: map[string]*napRoute{}, pending: map[string]bool{}, active: make(chan struct{}, 64)}
 	seen := map[string]bool{}
 	for _, domain := range d.Domains {
-		if seen[domain] || !slices.Contains([]string{"theme", "storage", "gamepad"}, domain) {
+		if seen[domain] || !slices.Contains([]string{"theme", "storage", "gamepad", "resource"}, domain) {
 			return nil, fmt.Errorf("unsupported or duplicate built-in domain %q", domain)
 		}
 		seen[domain] = true
@@ -124,7 +124,7 @@ func prepareBuiltin(d BuiltinDefinition, handler ExtensionHandler) (*builtinRegi
 		seen[domain.Name] = true
 		r.preludes = append(r.preludes, domain.Prelude)
 		for _, spec := range domain.Routes {
-			if len(spec.Type) > 128 || !extensionType.MatchString(spec.Type) || !strings.HasPrefix(spec.Type, domain.Name+".") || strings.HasSuffix(spec.Type, ".result") || r.routes[spec.Type] != nil || spec.MaxRequestBytes < 256 || spec.MaxRequestBytes > napDefaultMaxRaw || spec.MaxResponseBytes < 2048 || spec.MaxResponseBytes > napDefaultMaxRaw || spec.Concurrency < 1 || spec.Concurrency > 32 || spec.RequestsPerSecond < 1 || spec.RequestsPerSecond > 100 || spec.DeadlineMS < 1 || spec.DeadlineMS > 120000 {
+			if len(spec.Type) > 128 || !extensionType.MatchString(spec.Type) || !strings.HasPrefix(spec.Type, domain.Name+".") || strings.HasSuffix(spec.Type, ".result") || r.routes[spec.Type] != nil || spec.MaxRequestBytes < 256 || spec.MaxRequestBytes > napDefaultMaxRaw || spec.MaxResponseBytes < 2048 || spec.MaxResponseBytes > napDefaultMaxRaw || spec.Concurrency < 1 || spec.Concurrency > 32 || spec.RequestsPerSecond < 1 || spec.RequestsPerSecond > 100 || spec.DeadlineMS < 1 || spec.DeadlineMS > 180000 {
 				return nil, errors.New("invalid extension route bounds or type")
 			}
 			slots := make(chan struct{}, spec.Concurrency)

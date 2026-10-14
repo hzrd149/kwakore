@@ -689,7 +689,7 @@ Parameters are a `backend.BuiltinDefinition` object: `key`, `html`, `sha256`
 control request must fit the existing 1 MiB limit. No definitions are persisted.
 Every launch supplies the approved bytes again; reloads use those retained bytes.
 
-V1 standard domains are `gamepad`, `theme`, and `storage`, requested explicitly.
+V1 standard domains are `gamepad`, `theme`, `storage`, and `resource`, requested explicitly.
 Other stock routes are unavailable to built-ins. Shared storage lives separately
 in `builtin-storage/`, keyed by the native stable key and independent of HTML
 versions. Instance storage additionally uses a random per-launch namespace.
@@ -729,7 +729,7 @@ with their domain followed by a dot; responses are exactly `<type>.result`.
 Request limits are 256–262144 bytes; response limits are 2048–262144 bytes
 (to leave room for bounded runtime failures). Types are at most 128 bytes.
 Concurrency is 1–32; rate is 1–100
-requests/second (burst equals the rate); deadlines are 1–120000 milliseconds.
+requests/second (burst equals the rate); deadlines are 1–180000 milliseconds.
 At most 16 domains with 32 routes each may be registered. Existing window-wide
 NAP limits still apply. Only unary calls are supported, with mandatory bounded
 string/number `id`; no custom subscriptions, unsolicited pushes, or eval writer.
@@ -790,3 +790,17 @@ Use `-socket /absolute/path/to/daemon.sock` to override the default
 display and session environment. The example performs no external networking.
 Physical Steam Deck focus/controller behavior and consuming applications'
 Flatpak packaging still need acceptance testing on those systems.
+
+### Built-in RESOURCE access
+
+Native built-ins may request the stock `resource` domain. HTTPS downloads use
+the same fetch permission prompts and saved rules (under the stable built-in
+identity), public-address/redirect checks, MIME policy and byte limits as other
+napplets. Built-in status does not automatically grant remote fetch access.
+
+`resource.info` advertises `kwakore-icon`. A reference
+`kwakore-icon:<64 lowercase hex hash>` resolves a regular, validated PNG in the
+napplet icon cache. It accepts no filesystem paths, does not download a cache
+miss, and needs no remote-fetch consent. Missing entries report `not-found`;
+malformed references report `invalid-request`. Use descriptor icon hashes to
+construct references; icon bytes stay out of custom-domain JSON results.

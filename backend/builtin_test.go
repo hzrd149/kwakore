@@ -8,12 +8,42 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func fakeBuiltin() BuiltinDefinition {
 	html := "<h1>Native application</h1>"
 	sum := sha256.Sum256([]byte(html))
 	return BuiltinDefinition{Key: "example.app", HTML: html, SHA256: hex.EncodeToString(sum[:]), Name: "Example", Domains: []string{"theme", "storage", "gamepad"}, Extensions: []ExtensionDomain{{Name: "example", Version: "1", Prelude: "window.napplet.example = {};", Routes: []ExtensionRoute{{Type: "example.request", MaxRequestBytes: 1024, MaxResponseBytes: 2048, Concurrency: 2, RequestsPerSecond: 100, DeadlineMS: 500}}}}}
+}
+
+func TestBuiltinNativeStoreBudgets(t *testing.T) {
+	setupNapTest(t)
+	d := fakeBuiltin()
+	d.Extensions[0].Routes[0].DeadlineMS = 180000
+	d.Extensions[0].Routes[0].MaxResponseBytes = 262144
+	ci, rec := builtinRig(t, d, func(ctx context.Context, req ExtensionRequest) (json.RawMessage, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) < 175*time.Second {
+			return answerBuiltin(req, "incorrect deadline"), nil
+		}
+		return answerBuiltin(req, strings.Repeat("x", 100000)), nil
+	})
+	post(t, ci, map[string]any{"type": "example.request", "id": "large"})
+	answer := rec.wait(t, "example.request.result", 1)
+	if result, ok := answer["result"].(string); !ok || len(result) != 100000 {
+		t.Fatal("bounded large response failed")
+	}
+	for _, mutate := range []func(*BuiltinDefinition){
+		func(d *BuiltinDefinition) { d.Extensions[0].Routes[0].DeadlineMS = 180001 },
+		func(d *BuiltinDefinition) { d.Extensions[0].Routes[0].MaxResponseBytes = 262145 },
+	} {
+		invalid := fakeBuiltin()
+		mutate(&invalid)
+		if _, err := prepareBuiltin(invalid, func(context.Context, ExtensionRequest) (json.RawMessage, error) { return nil, nil }); err == nil {
+			t.Fatal("unbounded native route accepted")
+		}
+	}
 }
 func builtinRig(t *testing.T, d BuiltinDefinition, h ExtensionHandler) (*Instance, *recTransport) {
 	t.Helper()

@@ -93,6 +93,7 @@ func napResourceInfo(c *napCall) {
 			{"scheme": "https", "enabled": true},
 			{"scheme": "blossom", "enabled": true},
 			{"scheme": "nostr", "enabled": true},
+			{"scheme": "kwakore-icon", "enabled": true},
 			{"scheme": "http", "enabled": false},
 		},
 		"maxBytes":   resourceMaxBytes,
@@ -307,6 +308,20 @@ func resourceErrFields(err error) map[string]any {
 func fetchResource(ctx context.Context, c *napCall, raw string, servers []string) (resourceResult, error) {
 	raw = strings.TrimSpace(raw)
 	switch {
+	case strings.HasPrefix(raw, "kwakore-icon:"):
+		// Cached verified PNGs only: no filesystem paths or network fallback.
+		sha := strings.TrimPrefix(raw, "kwakore-icon:")
+		if !hex64.MatchString(sha) {
+			return resourceResult{}, rerr("invalid-request", "invalid icon hash")
+		}
+		data, _, _, err := readCachedNappletIcon(sha)
+		if err != nil {
+			return resourceResult{}, rerr("not-found", "cached icon unavailable")
+		}
+		if len(data) > resourceMaxBytes {
+			return resourceResult{}, rerr("too-large", "")
+		}
+		return resourceResult{data: data, mime: "image/png"}, nil
 	case strings.HasPrefix(raw, "data:"):
 		return decodeDataURL(raw)
 	case strings.HasPrefix(raw, "blossom:"):
